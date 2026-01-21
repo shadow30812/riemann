@@ -1,0 +1,3 @@
+[package]
+name="riemann_ocr_worker"
+version="0.1.0"
