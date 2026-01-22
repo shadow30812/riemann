@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "rust-core",
+    "rust-ocr-worker"
+]
+resolver = "2"
