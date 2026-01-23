@@ -588,11 +588,19 @@ class ReaderTab(QWidget):
 
         # Heuristic: Scan known widgets to find closest to center
         for idx, widget in self.page_widgets.items():
-            w_center = widget.y() + (widget.height() / 2)
-            dist = abs(w_center - viewport_center)
-            if dist < min_dist:
-                min_dist = dist
-                closest_page = idx
+            # Fix: mapTo converts the widget's local coordinates to the scroll_content's system
+            # widget.y() alone was insufficient because widgets are nested in row containers
+            try:
+                mapped_pos = widget.mapTo(self.scroll_content, QPoint(0, 0))
+                w_center = mapped_pos.y() + (widget.height() / 2)
+
+                dist = abs(w_center - viewport_center)
+                if dist < min_dist:
+                    min_dist = dist
+                    closest_page = idx
+            except RuntimeError:
+                # Widget might be deleted/detached during rapid updates
+                continue
 
         if closest_page != self.current_page_index:
             self.current_page_index = closest_page
