@@ -2,7 +2,6 @@ use once_cell::sync::OnceCell;
 use pdfium_render::prelude::*;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use riemann_ocr_worker::OcrEngine;
 use std::sync::Mutex;
 
 // --- Thread Safety Wrappers ---
@@ -53,8 +52,9 @@ impl RiemannDocument {
         py: Python,
         page_index: u16,
         scale: f32,
-        render_flags: u32,
+        dark_mode_int: u8, // Use u8 to bypass strict Python bool conversion issues
     ) -> PyResult<RenderResult> {
+        let dark_mode = dark_mode_int != 0;
         let doc_guard = self.inner.lock().unwrap();
         let page = doc_guard
             .0
@@ -62,65 +62,66 @@ impl RiemannDocument {
             .get(page_index)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
 
+        let width = (page.width().value * scale) as i32;
+        let height = (page.height().value * scale) as i32;
+
         let render_config = PdfRenderConfig::new()
-            .set_target_width((page.width().value * scale) as i32)
-            .set_target_height((page.height().value * scale) as i32);
+            .set_target_width(width)
+            .set_target_height(height)
+            .rotate_if_landscape(PdfPageRenderRotation::None, true);
 
-        let bitmap = page.render_with_config(&render_config).unwrap();
-        let mut bytes = bitmap.as_raw_bytes().to_vec();
+        let bitmap = page
+            .render_with_config(&render_config)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
-        // Alpha Blending + Inversion
-        for chunk in bytes.chunks_exact_mut(4) {
-            let a = chunk[3] as f32 / 255.0;
-            for i in 0..3 {
-                let mut c = (chunk[i] as f32 * a + 255.0 * (1.0 - a)) as u8;
-                if render_flags == 1 {
-                    c = 255 - c;
+        let mut buffer = bitmap.as_raw_bytes().to_vec();
+
+        // Invert colors if Dark Mode is active
+        if dark_mode {
+            // Pdfium typically renders BGRA. We invert RGB, keep Alpha.
+            for i in 0..buffer.len() {
+                if (i + 1) % 4 != 0 {
+                    buffer[i] = 255 - buffer[i];
                 }
-                chunk[i] = c;
             }
-            chunk[3] = 255;
         }
+
+        let data = PyBytes::new_bound(py, &buffer);
 
         Ok(RenderResult {
             width: bitmap.width() as u32,
             height: bitmap.height() as u32,
-            data: PyBytes::new(py, &bytes).into(),
+            data: data.into(),
         })
     }
 
     fn get_page_text(&self, page_index: u16) -> PyResult<String> {
         let doc_guard = self.inner.lock().unwrap();
-        let page = doc_guard
-            .0
-            .pages()
-            .get(page_index)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
-        Ok(page.text().map(|t| t.all()).unwrap_or_default())
-    }
 
-    fn get_page_text_with_ocr(&self, page_index: u16) -> PyResult<String> {
-        let doc_guard = self.inner.lock().unwrap();
-        let page = doc_guard
-            .0
-            .pages()
+        let pages = doc_guard.0.pages();
+
+        // FIX 1: Robust bounds check.
+        // We cast everything to usize to avoid type mismatch errors (u16 vs usize).
+        if (page_index as usize) >= (pages.len() as usize) {
+            return Ok(String::new());
+        }
+
+        let page = pages
             .get(page_index)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
 
-        // Render high-res for OCR (Scale 3.0)
-        let render_config =
-            PdfRenderConfig::new().set_target_width((page.width().value * 3.0) as i32);
-        let bitmap = page.render_with_config(&render_config).unwrap();
+        let text_accessor = page.text().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Text Access Error: {}", e))
+        })?;
 
-        let engine = OcrEngine::new();
-        // FIXED: Added '&' borrow for bytes
-        engine
-            .recognize_text(
-                bitmap.width() as u32,
-                bitmap.height() as u32,
-                &bitmap.as_raw_bytes(),
-            )
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+        // FIX 2: Check length before extraction to prevent FPDF empty-buffer segfaults.
+        if text_accessor.len() == 0 {
+            return Ok(String::new());
+        }
+
+        // FIX 3: Use .all() now that we have guarded against invalid pages/lengths.
+        // This is safer than manual iteration which was failing trait bounds.
+        Ok(text_accessor.all())
     }
 }
 
@@ -137,6 +138,7 @@ impl PdfEngine {
         let doc = get_pdfium()
             .load_pdf_from_file(&path, None)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+
         Ok(RiemannDocument {
             page_count: doc.pages().len() as usize,
             inner: Mutex::new(DocumentWrapper(doc)),
@@ -145,7 +147,7 @@ impl PdfEngine {
 }
 
 #[pymodule]
-fn riemann_core(_py: Python, m: &PyModule) -> PyResult<()> {
+fn riemann_core(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PdfEngine>()?;
     m.add_class::<RiemannDocument>()?;
     m.add_class::<RenderResult>()?;
