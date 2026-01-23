@@ -5,16 +5,20 @@ use pyo3::types::PyBytes;
 use std::sync::Mutex;
 
 // --- Thread Safety Wrappers ---
+
+/// Wrapper to make Pdfium thread-safe (Send + Sync).
 struct PdfiumWrapper(Pdfium);
 unsafe impl Send for PdfiumWrapper {}
 unsafe impl Sync for PdfiumWrapper {}
 
+/// Wrapper to make PdfDocument thread-safe (Send + Sync).
 struct DocumentWrapper(PdfDocument<'static>);
 unsafe impl Send for DocumentWrapper {}
 unsafe impl Sync for DocumentWrapper {}
 
 static PDFIUM: OnceCell<PdfiumWrapper> = OnceCell::new();
 
+/// Initializes and retrieves the static Pdfium instance.
 fn get_pdfium() -> &'static Pdfium {
     &PDFIUM
         .get_or_init(|| {
@@ -28,6 +32,7 @@ fn get_pdfium() -> &'static Pdfium {
         .0
 }
 
+/// Represents the result of a page render operation.
 #[pyclass]
 struct RenderResult {
     #[pyo3(get)]
@@ -38,6 +43,7 @@ struct RenderResult {
     data: Py<PyBytes>,
 }
 
+/// A thread-safe wrapper around a PDF document.
 #[pyclass]
 struct RiemannDocument {
     inner: Mutex<DocumentWrapper>,
@@ -47,15 +53,26 @@ struct RiemannDocument {
 
 #[pymethods]
 impl RiemannDocument {
+    /// Renders a specific page to a byte buffer.
+    ///
+    /// Args:
+    ///     py (Python): The Python GIL token.
+    ///     page_index (u16): The index of the page to render.
+    ///     scale (f32): The zoom scale factor.
+    ///     dark_mode_int (u8): 1 for dark mode (invert colors), 0 for standard.
+    ///
+    /// Returns:
+    ///     RenderResult: Object containing width, height, and raw RGBA bytes.
     fn render_page(
         &self,
         py: Python,
         page_index: u16,
         scale: f32,
-        dark_mode_int: u8, // Use u8 to bypass strict Python bool conversion issues
+        dark_mode_int: u8,
     ) -> PyResult<RenderResult> {
         let dark_mode = dark_mode_int != 0;
         let doc_guard = self.inner.lock().unwrap();
+
         let page = doc_guard
             .0
             .pages()
@@ -76,14 +93,15 @@ impl RiemannDocument {
 
         let mut buffer = bitmap.as_raw_bytes().to_vec();
 
-        // Invert colors if Dark Mode is active
+        // Idiomatic color inversion for Dark Mode
         if dark_mode {
-            // Pdfium typically renders BGRA. We invert RGB, keep Alpha.
-            for i in 0..buffer.len() {
-                if (i + 1) % 4 != 0 {
-                    buffer[i] = 255 - buffer[i];
-                }
-            }
+            // Pdfium typically renders BGRA. We invert B, G, R, but keep Alpha.
+            buffer.chunks_exact_mut(4).for_each(|pixel| {
+                pixel[0] = 255 - pixel[0]; // Blue
+                pixel[1] = 255 - pixel[1]; // Green
+                pixel[2] = 255 - pixel[2]; // Red
+                                           // pixel[3] is Alpha, leave it alone
+            });
         }
 
         let data = PyBytes::new_bound(py, &buffer);
@@ -95,13 +113,18 @@ impl RiemannDocument {
         })
     }
 
+    /// Extracts plain text from a specific page.
+    ///
+    /// Args:
+    ///     page_index (u16): The index of the page.
+    ///
+    /// Returns:
+    ///     String: The extracted text content.
     fn get_page_text(&self, page_index: u16) -> PyResult<String> {
         let doc_guard = self.inner.lock().unwrap();
-
         let pages = doc_guard.0.pages();
 
-        // FIX 1: Robust bounds check.
-        // We cast everything to usize to avoid type mismatch errors (u16 vs usize).
+        // Robust bounds check preventing u16 vs usize mismatch
         if (page_index as usize) >= (pages.len() as usize) {
             return Ok(String::new());
         }
@@ -114,19 +137,19 @@ impl RiemannDocument {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Text Access Error: {}", e))
         })?;
 
-        // FIX 2: Check length before extraction to prevent FPDF empty-buffer segfaults.
+        // Guard against empty buffers (FPDF segfault prevention)
         if text_accessor.len() == 0 {
             return Ok(String::new());
         }
 
-        // FIX 3: Use .all() now that we have guarded against invalid pages/lengths.
-        // This is safer than manual iteration which was failing trait bounds.
         Ok(text_accessor.all())
     }
 }
 
+/// The main entry point for the PDF Engine.
 #[pyclass]
 struct PdfEngine;
+
 #[pymethods]
 impl PdfEngine {
     #[new]
@@ -134,6 +157,14 @@ impl PdfEngine {
         get_pdfium();
         PdfEngine
     }
+
+    /// Loads a PDF document from the file system.
+    ///
+    /// Args:
+    ///     path (String): The file path to the PDF.
+    ///
+    /// Returns:
+    ///     RiemannDocument: The loaded document instance.
     fn load_document(&self, path: String) -> PyResult<RiemannDocument> {
         let doc = get_pdfium()
             .load_pdf_from_file(&path, None)
