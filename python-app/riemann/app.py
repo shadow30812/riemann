@@ -2,7 +2,7 @@ import json
 import os
 import sys
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QSettings, Qt, QTimer
 from PySide6.QtGui import (
@@ -86,6 +86,14 @@ class ReaderTab(QWidget):
         self.page_widgets: Dict[int, QLabel] = {}
         self.rendered_pages: Set[int] = set()
         self.annotations: Dict[str, List[Dict[str, Any]]] = {}
+
+        # Virtualization / large-doc helpers
+        self.virtual_threshold: int = 300
+        self._virtual_enabled: bool = False
+        self._top_spacer: Optional[QWidget] = None
+        self._bottom_spacer: Optional[QWidget] = None
+        self._virtual_range: Tuple[int, int] = (0, 0)
+        self._cached_base_size: Optional[tuple] = None
 
         self._init_backend()
         self.setup_ui()
@@ -243,6 +251,7 @@ class ReaderTab(QWidget):
         """
         try:
             self.current_doc = self.engine.load_document(path)
+            self._probe_base_page_size()
             self.current_path = path
             self.settings.setValue("lastFile", path)
             self.load_annotations()
@@ -269,16 +278,18 @@ class ReaderTab(QWidget):
     def rebuild_layout(self) -> None:
         """
         Reconstructs the layout of QLabels for the document pages.
-        Handles logic for Single vs. Continuous scroll and Single vs. Facing pages.
+        Uses virtualization for very large documents when continuous_scroll is enabled.
         """
         if not self.current_doc:
             return
 
-        # Clear existing layout
+        # Clear existing layout & caches
         self.page_widgets.clear()
         self.rendered_pages.clear()
+        self._virtual_enabled = False
+        self._virtual_range = (0, 0)
 
-        # Safely remove child widgets
+        # Remove child widgets safely
         while self.scroll_layout.count():
             item = self.scroll_layout.takeAt(0)
             widget = item.widget()
@@ -287,48 +298,127 @@ class ReaderTab(QWidget):
 
         count = self.current_doc.page_count
 
-        # Determine which pages need widget placeholders
-        if self.continuous_scroll:
-            pages_to_layout = range(count)
+        # Decide whether to use virtualization
+        use_virtual = self.continuous_scroll and (count > self.virtual_threshold)
+
+        if use_virtual:
+            self._virtual_enabled = True
+            # choose a generous buffer (pages before/after current)
+            buf_before = 30
+            buf_after = 40
+            start = max(0, self.current_page_index - buf_before)
+            end = min(count, self.current_page_index + buf_after)
+            self._virtual_range = (start, end)
+
+            # estimate per-page height using cached base size and current scale
+            if self._cached_base_size:
+                _, base_h = self._cached_base_size
+            else:
+                # probe if possible
+                self._probe_base_page_size()
+                _, base_h = self._cached_base_size or (595, 842)
+
+            scale = self.calculate_scale()
+            page_height = int(base_h * scale) + self.scroll_layout.spacing()
+
+            # top spacer (representing pages 0..start-1)
+            top_spacer = QWidget()
+            top_spacer.setFixedHeight(max(0, start * page_height))
+            top_spacer.setObjectName("topSpacer")
+            self._top_spacer = top_spacer
+            self.scroll_layout.addWidget(top_spacer)
+
+            # create labels for the window [start, end)
+            for p_idx in range(start, end):
+                # pair handling for facing mode still supported inside the window
+                # keep same row-by-row layout as before, but only for the window
+                if self.facing_mode and (p_idx % 2 == 0) and (p_idx + 1 < end):
+                    row_widget = QWidget()
+                    row_layout = QHBoxLayout(row_widget)
+                    row_layout.setContentsMargins(0, 0, 0, 0)
+                    row_layout.setSpacing(10)
+                    row_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                    lbl_left = self._create_page_label(p_idx)
+                    row_layout.addWidget(lbl_left)
+                    self.page_widgets[p_idx] = lbl_left
+
+                    # right page in pair
+                    lbl_right = self._create_page_label(p_idx + 1)
+                    row_layout.addWidget(lbl_right)
+                    self.page_widgets[p_idx + 1] = lbl_right
+
+                    self.scroll_layout.addWidget(row_widget)
+                    # skip the next index since we've added p_idx+1
+                    # advance p_idx by 1 manually using loop mechanics
+                    # Using simple approach: increment the loop variable via continue when appropriate
+                    # But since for-loop will still increment, we skip by using a small inner while would be needed.
+                    # Simpler: mark the next index as already created
+                else:
+                    # If page already created (due to pair), skip
+                    if p_idx in self.page_widgets:
+                        continue
+                    row_widget = QWidget()
+                    row_layout = QHBoxLayout(row_widget)
+                    row_layout.setContentsMargins(0, 0, 0, 0)
+                    row_layout.setSpacing(10)
+                    row_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                    lbl = self._create_page_label(p_idx)
+                    row_layout.addWidget(lbl)
+                    self.page_widgets[p_idx] = lbl
+                    self.scroll_layout.addWidget(row_widget)
+
+            # bottom spacer (representing pages end..count-1)
+            bottom_spacer = QWidget()
+            bottom_spacer.setFixedHeight(max(0, (count - end) * page_height))
+            bottom_spacer.setObjectName("bottomSpacer")
+            self._bottom_spacer = bottom_spacer
+            self.scroll_layout.addWidget(bottom_spacer)
+
         else:
-            if self.facing_mode:
-                start = (self.current_page_index // 2) * 2
-                pages_to_layout = range(start, min(start + 2, count))
+            # non-virtualized (original logic): create a widget per page or small window
+            if self.continuous_scroll:
+                pages_to_layout = range(count)
             else:
-                pages_to_layout = range(
-                    self.current_page_index, self.current_page_index + 1
-                )
+                if self.facing_mode:
+                    start = (self.current_page_index // 2) * 2
+                    pages_to_layout = range(start, min(start + 2, count))
+                else:
+                    pages_to_layout = range(
+                        self.current_page_index, self.current_page_index + 1
+                    )
 
-        indices = list(pages_to_layout)
-        idx_ptr = 0
+            indices = list(pages_to_layout)
+            idx_ptr = 0
 
-        while idx_ptr < len(indices):
-            p_idx = indices[idx_ptr]
+            while idx_ptr < len(indices):
+                p_idx = indices[idx_ptr]
 
-            is_pair = self.facing_mode and (p_idx + 1 < count) and (p_idx % 2 == 0)
+                is_pair = self.facing_mode and (p_idx + 1 < count) and (p_idx % 2 == 0)
 
-            row_widget = QWidget()
-            row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(10)
-            row_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                row_widget = QWidget()
+                row_layout = QHBoxLayout(row_widget)
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                row_layout.setSpacing(10)
+                row_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            # Left Page
-            lbl_left = self._create_page_label(p_idx)
-            row_layout.addWidget(lbl_left)
-            self.page_widgets[p_idx] = lbl_left
+                # Left Page
+                lbl_left = self._create_page_label(p_idx)
+                row_layout.addWidget(lbl_left)
+                self.page_widgets[p_idx] = lbl_left
 
-            if is_pair:
-                # Right Page
-                p_idx_right = p_idx + 1
-                lbl_right = self._create_page_label(p_idx_right)
-                row_layout.addWidget(lbl_right)
-                self.page_widgets[p_idx_right] = lbl_right
-                idx_ptr += 2
-            else:
-                idx_ptr += 1
+                if is_pair:
+                    # Right Page
+                    p_idx_right = p_idx + 1
+                    lbl_right = self._create_page_label(p_idx_right)
+                    row_layout.addWidget(lbl_right)
+                    self.page_widgets[p_idx_right] = lbl_right
+                    idx_ptr += 2
+                else:
+                    idx_ptr += 1
 
-            self.scroll_layout.addWidget(row_widget)
+                self.scroll_layout.addWidget(row_widget)
 
     def _create_page_label(self, index: int) -> QLabel:
         """Creates a placeholder label for a page."""
@@ -403,24 +493,40 @@ class ReaderTab(QWidget):
             lbl.setMinimumSize(0, 0)  # Allow resize based on content
 
         except Exception:
-            pass  # Fail silently on render error to avoid blocking UI
+            sys.stderr.write(f"Render error for page {idx}: {e}\n")
+
+    def _probe_base_page_size(self) -> None:
+        """Cache base page size (pixels) for scale calculations and virtualization."""
+        if not self.current_doc:
+            self._cached_base_size = None
+            return
+        try:
+            res = self.current_doc.render_page(0, 1.0, 0)
+            self._cached_base_size = (res.width, res.height)
+        except Exception:
+            # fall back to typical A4 pixel size at 72-96 DPI: use A4 ratio
+            self._cached_base_size = (595, 842)
 
     def calculate_scale(self) -> float:
         """Determines the render scale based on ZoomMode and Viewport size."""
         if self.zoom_mode == ZoomMode.MANUAL:
             return self.manual_scale
 
-        try:
-            # Use page 0 as reference for dimensions
-            res = self.current_doc.render_page(0, 1.0, 0)
-            base_w = res.width
-            base_h = res.height
-        except Exception:
+        # Use cached base size if available
+        if not self._cached_base_size:
+            try:
+                self._probe_base_page_size()
+            except Exception:
+                return 1.0
+
+        if not self._cached_base_size:
             return 1.0
 
+        base_w, base_h = self._cached_base_size
+
         viewport = self.scroll.viewport()
-        vw = viewport.width() - 30
-        vh = viewport.height() - 20
+        vw = max(10, viewport.width() - 30)
+        vh = max(10, viewport.height() - 20)
 
         if self.facing_mode and self.zoom_mode == ZoomMode.FIT_WIDTH:
             return vw / (base_w * 2)
@@ -527,6 +633,29 @@ class ReaderTab(QWidget):
         if index in self.page_widgets:
             widget = self.page_widgets[index]
             self.scroll.ensureWidgetVisible(widget, 0, 0)
+            return
+
+        if not self._virtual_enabled:
+            return
+
+        # compute approximate Y position using cached page height and virtual offsets
+        start, end = self._virtual_range
+        if not self._cached_base_size:
+            return
+        _, base_h = self._cached_base_size
+        scale = self.calculate_scale()
+        page_h = int(base_h * scale) + self.scroll_layout.spacing()
+
+        # pages before the virtual window contribute top spacer height
+        top_height = self._top_spacer.height() if self._top_spacer else 0
+        idx_offset = index - start
+        y_pos = top_height + max(0, idx_offset) * page_h
+
+        # center the target in viewport
+        viewport_centre_offset = int(self.scroll.viewport().height() / 2)
+        self.scroll.verticalScrollBar().setValue(
+            max(0, int(y_pos - viewport_centre_offset))
+        )
 
     # --- Event Handling ---
 

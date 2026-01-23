@@ -4,11 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-# We expose this as a Rust library
 name = "riemann_ocr_worker"
 path = "src/lib.rs"
 
 [dependencies]
-# For handling image encoding before sending to Tesseract
 image = "0.24"
 anyhow = "1.0"
+leptess = "0.14"

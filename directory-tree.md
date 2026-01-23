@@ -17,7 +17,7 @@ riemann/
 │ └── pdfium_wrapper.rs # small wrapper around pdfium-render
 ├── python-app/
 │ ├── pyproject.toml (optional) # for venv tooling, dev deps
-│ └── riemann_app/
+│ └── riemann/
 │ ├── __init__.py
 │ ├── main.py # Qt main app
 │ └── ui/ # optional: HTML/CSS/katex assets for QtWebEngine

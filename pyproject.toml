@@ -16,5 +16,3 @@ dependencies = [
 manifest-path = "rust-core/Cargo.toml"
 # This tells maturin that the python code is inside python-app/riemann
 python-source = "python-app"
-# The name of the compiled .so module
-module-name = "riemann_core"
