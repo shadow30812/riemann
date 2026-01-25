@@ -4,6 +4,9 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use std::sync::Mutex;
 
+// Import the OCR worker
+use riemann_ocr_worker::OcrEngine;
+
 // --- Thread Safety Wrappers ---
 
 /// Wrapper to make Pdfium thread-safe (Send + Sync).
@@ -143,6 +146,56 @@ impl RiemannDocument {
         }
 
         Ok(text_accessor.all())
+    }
+    
+    /// Runs OCR on the specified page and returns the recognized text.
+    ///
+    /// Args:
+    ///     page_index (u16): The page to process.
+    ///     scale (f32): Resolution multiplier (2.0 or 3.0 recommended for best OCR).
+    ///
+    /// Returns:
+    ///     String: The text extracted by Tesseract.
+    fn ocr_page(&self, page_index: u16, scale: f32) -> PyResult<String> {
+        let doc_guard = self.inner.lock().unwrap();
+
+        let page = doc_guard
+            .0
+            .pages()
+            .get(page_index)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+
+        // Render purely for OCR (no PyBytes needed)
+        let width = (page.width().value * scale) as i32;
+        let height = (page.height().value * scale) as i32;
+
+        let render_config = PdfRenderConfig::new()
+            .set_target_width(width)
+            .set_target_height(height)
+            .rotate_if_landscape(PdfPageRenderRotation::None, true);
+
+        let bitmap = page
+            .render_with_config(&render_config)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        let mut buffer = bitmap.as_raw_bytes().to_vec();
+
+        // Fix Color Format: Pdfium is BGRA, image crate expects RGBA.
+        // We must swap B and R channels so Tesseract gets the correct grayscale luminosity.
+        buffer.chunks_exact_mut(4).for_each(|pixel| {
+            let blue = pixel[0];
+            let red = pixel[2];
+            pixel[0] = red;
+            pixel[2] = blue;
+        });
+
+        // Invoke the Worker
+        let engine = OcrEngine::new();
+        let text = engine
+            .recognize_text(bitmap.width() as u32, bitmap.height() as u32, &buffer)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        Ok(text)
     }
 }
 

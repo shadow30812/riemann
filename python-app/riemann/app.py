@@ -2,7 +2,7 @@ import json
 import os
 import sys
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QSettings, Qt, QTimer
 from PySide6.QtGui import (
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QPushButton,
     QScrollArea,
@@ -156,8 +157,14 @@ class ReaderTab(QWidget):
         self.btn_prev.setToolTip("Previous Page (Left Arrow)")
         self.btn_prev.clicked.connect(self.prev_view)
 
-        self.lbl_page = QLabel("0 / 0")
-        self.lbl_page.setToolTip("Current Page / Total Pages")
+        self.txt_page = QLineEdit()
+        self.txt_page.setFixedWidth(50)
+        self.txt_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.txt_page.setToolTip("Current Page (Type number and hit Enter)")
+        self.txt_page.returnPressed.connect(self.on_page_input_return)
+
+        self.lbl_total = QLabel("/ 0")
+        self.lbl_total.setToolTip("Total Pages")
 
         self.btn_next = QPushButton("►")
         self.btn_next.setToolTip("Next Page (Right Arrow)")
@@ -184,14 +191,20 @@ class ReaderTab(QWidget):
         self.btn_fullscreen.setToolTip("Toggle Fullscreen Reader Mode")
         self.btn_fullscreen.clicked.connect(self.toggle_reader_fullscreen)
 
+        self.btn_ocr = QPushButton("👁️")
+        self.btn_ocr.setToolTip("OCR Current Page (Extract Text)")
+        self.btn_ocr.clicked.connect(self.perform_ocr_current_page)
+
         # Add to Layout
         widgets = [
             self.btn_reflow,
             self.btn_facing,
             self.btn_scroll_mode,
             self.btn_annotate,
+            self.btn_ocr,
             self.btn_prev,
-            self.lbl_page,
+            self.txt_page,
+            self.lbl_total,
             self.btn_next,
             self.combo_zoom,
             self.btn_theme,
@@ -542,9 +555,8 @@ class ReaderTab(QWidget):
         if self.view_mode == ViewMode.IMAGE:
             self.render_visible_pages()
             if self.current_doc:
-                self.lbl_page.setText(
-                    f"{self.current_page_index + 1} / {self.current_doc.page_count}"
-                )
+                self.txt_page.setText(str(self.current_page_index + 1))
+                self.lbl_total.setText(f"/ {self.current_doc.page_count}")
 
             # Save state
             self.settings.setValue("lastPage", self.current_page_index)
@@ -568,11 +580,41 @@ class ReaderTab(QWidget):
         except Exception:
             pass
 
+    def on_page_input_return(self) -> None:
+        """Handles manual page number entry."""
+        if not self.current_doc:
+            return
+
+        text = self.txt_page.text().strip()
+        if text.isdigit():
+            page_num = int(text)
+            # Validate Range (1-based input -> 0-based index)
+            if 1 <= page_num <= self.current_doc.page_count:
+                target_idx = page_num - 1
+                if target_idx != self.current_page_index:
+                    self.current_page_index = target_idx
+
+                    # Handle layout rebuild if not continuous (to ensure page widget exists)
+                    if not self.continuous_scroll:
+                        self.rebuild_layout()
+
+                    self.update_view()
+                    self.ensure_visible(self.current_page_index)
+
+                    # Remove focus from input so arrow keys work for navigation again
+                    self.scroll.setFocus()
+            else:
+                # Revert to current page if out of bounds
+                self.txt_page.setText(str(self.current_page_index + 1))
+        else:
+            # Revert if not a number
+            self.txt_page.setText(str(self.current_page_index + 1))
+
     # --- Scroll & Navigation Logic ---
 
     def defer_scroll_update(self, value: int) -> None:
         """Fast scroll handler that defers expensive rendering."""
-        self.lbl_page.setText(f"{self.current_page_index + 1}...")
+        self.txt_page.setText(str(self.current_page_index + 1))
         self.scroll_timer.start()
 
     def real_scroll_handler(self) -> None:
@@ -605,9 +647,7 @@ class ReaderTab(QWidget):
         if closest_page != self.current_page_index:
             self.current_page_index = closest_page
             if self.current_doc:
-                self.lbl_page.setText(
-                    f"{self.current_page_index + 1} / {self.current_doc.page_count}"
-                )
+                self.txt_page.setText(str(self.current_page_index + 1))
         self.render_visible_pages()
 
     def next_view(self) -> None:
@@ -728,12 +768,27 @@ class ReaderTab(QWidget):
 
         if self.view_mode == ViewMode.IMAGE:
             # Zoom
+            if (
+                mod & Qt.KeyboardModifier.ControlModifier
+                and mod & Qt.KeyboardModifier.ShiftModifier
+            ):
+                # Ctrl + Shift + Plus/Equal (+/=)
+                if key == Qt.Key.Key_Plus or key == Qt.Key.Key_Equal:
+                    self.zoom_step(1.1)
+                    event.accept()
+                    return
+                # Ctrl + Shift + Minus/Underscore (-/_)
+                if key == Qt.Key.Key_Minus or key == Qt.Key.Key_Underscore:
+                    self.zoom_step(0.9)
+                    event.accept()
+                    return
+
             if mod & Qt.KeyboardModifier.ControlModifier:
                 if key == Qt.Key.Key_Plus or key == Qt.Key.Key_Equal:
                     self.zoom_step(1.1)
                     event.accept()
                     return
-                if key == Qt.Key.Key_Minus:
+                if key == Qt.Key.Key_Minus or key == Qt.Key.Key_Underscore:
                     self.zoom_step(0.9)
                     event.accept()
                     return
@@ -948,6 +1003,32 @@ class ReaderTab(QWidget):
         if page_idx in self.rendered_pages:
             self.rendered_pages.remove(page_idx)
         self.render_visible_pages()
+
+    def perform_ocr_current_page(self) -> None:
+        """Triggers Rust backend OCR and shows result."""
+        if not self.current_doc:
+            return
+
+        # 1. Visual feedback (change cursor)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            # 2. Call Rust (scale=2.0 for better recognition)
+            text = self.current_doc.ocr_page(self.current_page_index, 2.0)
+
+            QApplication.restoreOverrideCursor()
+
+            if not text.strip():
+                text = "[No text detected by Tesseract]"
+
+            # 3. Show Result in Dialog (reuses QInputDialog import)
+            # This allows the user to copy/paste the text immediately
+            text_result, ok = QInputDialog.getMultiLineText(
+                self, "OCR Result", "Extracted Text (Copy to clipboard):", text
+            )
+
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            print(f"OCR Failed: {e}")
 
     # --- Feature Toggles ---
 

@@ -1,4 +1,5 @@
 target/
 __pycache__/
-.vscode/
+!tasks.json
 script*
+rough*
