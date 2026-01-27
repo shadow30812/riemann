@@ -2,13 +2,10 @@ use once_cell::sync::OnceCell;
 use pdfium_render::prelude::*;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use riemann_ocr_worker::OcrEngine;
 use std::sync::Mutex;
 
-// Import the OCR worker
-use riemann_ocr_worker::OcrEngine;
-
 // --- Thread Safety Wrappers ---
-
 /// Wrapper to make Pdfium thread-safe (Send + Sync).
 struct PdfiumWrapper(Pdfium);
 unsafe impl Send for PdfiumWrapper {}

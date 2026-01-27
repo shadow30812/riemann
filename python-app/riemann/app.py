@@ -9,11 +9,13 @@ from PySide6.QtGui import (
     QColor,
     QImage,
     QKeyEvent,
+    QKeySequence,
     QMouseEvent,
     QPainter,
     QPalette,
     QPen,
     QPixmap,
+    QShortcut,
     QWheelEvent,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -83,6 +85,11 @@ class ReaderTab(QWidget):
         self.view_mode: ViewMode = ViewMode.IMAGE
         self.is_annotating: bool = False
 
+        # Search State
+        self.search_result: Optional[
+            Tuple[int, List[Tuple[float, float, float, float]]]
+        ] = None
+
         # Caching & Storage
         self.page_widgets: Dict[int, QLabel] = {}
         self.rendered_pages: Set[int] = set()
@@ -106,6 +113,10 @@ class ReaderTab(QWidget):
         self.scroll_timer.setSingleShot(True)
         self.scroll_timer.setInterval(150)
         self.scroll_timer.timeout.connect(self.real_scroll_handler)
+
+        # Search Shortcut
+        self.shortcut_find = QShortcut(QKeySequence("Ctrl+F"), self)
+        self.shortcut_find.activated.connect(self.toggle_search_bar)
 
     # --- Initialization ---
 
@@ -195,11 +206,17 @@ class ReaderTab(QWidget):
         self.btn_ocr.setToolTip("OCR Current Page (Extract Text)")
         self.btn_ocr.clicked.connect(self.perform_ocr_current_page)
 
+        self.btn_search = QPushButton("🔍")
+        self.btn_search.setToolTip("Find in Document")
+        self.btn_search.setCheckable(True)
+        self.btn_search.clicked.connect(self.toggle_search_bar)
+
         # Add to Layout
         widgets = [
             self.btn_reflow,
             self.btn_facing,
             self.btn_scroll_mode,
+            self.btn_search,
             self.btn_annotate,
             self.btn_ocr,
             self.btn_prev,
@@ -214,6 +231,41 @@ class ReaderTab(QWidget):
             t_layout.addWidget(w)
         t_layout.addStretch()
         layout.addWidget(self.toolbar)
+
+        # Search Bar (Hidden by default)
+        self.search_bar = QWidget()
+        self.search_bar.setVisible(False)
+        self.search_bar.setFixedHeight(45)
+        self.search_bar.setStyleSheet(
+            "background-color: #2a2a2a;"
+            if self.dark_mode
+            else "background-color: #f0f0f0;"
+        )
+
+        sb_layout = QHBoxLayout(self.search_bar)
+        sb_layout.setContentsMargins(10, 5, 10, 5)
+
+        self.txt_search = QLineEdit()
+        self.txt_search.setPlaceholderText("Find text...")
+        self.txt_search.returnPressed.connect(self.find_next)
+
+        self.btn_find_prev = QPushButton("▲")
+        self.btn_find_prev.clicked.connect(self.find_prev)
+
+        self.btn_find_next = QPushButton("▼")
+        self.btn_find_next.clicked.connect(self.find_next)
+
+        self.btn_close_search = QPushButton("✕")
+        self.btn_close_search.setFlat(True)
+        self.btn_close_search.clicked.connect(self.toggle_search_bar)
+
+        sb_layout.addWidget(QLabel("Find:"))
+        sb_layout.addWidget(self.txt_search)
+        sb_layout.addWidget(self.btn_find_prev)
+        sb_layout.addWidget(self.btn_find_next)
+        sb_layout.addWidget(self.btn_close_search)
+
+        layout.addWidget(self.search_bar)
 
         # 2. Main View Stack
         self.stack = QStackedWidget()
@@ -487,14 +539,71 @@ class ReaderTab(QWidget):
     def _render_single_page(self, idx: int, scale: float) -> None:
         """Invokes the Rust backend to render a page and updates the UI."""
         try:
-            res = self.current_doc.render_page(idx, scale, 1 if self.dark_mode else 0)
+            # Calculate physical scale based on Device Pixel Ratio (DPR)
+            # This ensures crisp rendering on HiDPI/Retina displays
+            dpr = self.devicePixelRatio()
+            render_scale = scale * dpr
+
+            # Request high-res render from backend
+            res = self.current_doc.render_page(
+                idx, render_scale, 1 if self.dark_mode else 0
+            )
+
+            # Create image from raw data
             img = QImage(res.data, res.width, res.height, QImage.Format.Format_ARGB32)
+
+            # Tell Qt this image is high-DPI (e.g., 2x density) so it draws at logical size
+            img.setDevicePixelRatio(dpr)
+
             pix = QPixmap.fromImage(img)
+
+            # Draw Search Highlights
+            if self.search_result and self.search_result[0] == idx:
+                painter = QPainter(pix)
+                # Highlight color: Semi-transparent Blue/Yellow
+                color = (
+                    QColor(255, 255, 0, 100)
+                    if self.dark_mode
+                    else QColor(255, 255, 0, 128)
+                )
+                painter.setBrush(color)
+                painter.setPen(Qt.PenStyle.NoPen)
+
+                # PDF Coordinates: (left, top, right, bottom)
+                # Qt Coordinates: (0,0) is top-left.
+                # PDF (0,0) is usually bottom-left.
+                # y_qt = height_pixels - (y_pdf * scale_factor)
+
+                # Note: 'res.height' is the physical height in pixels.
+                # 'render_scale' maps PDF points -> physical pixels.
+
+                for left, top, right, bottom in self.search_result[1]:
+                    # Convert PDF points to Logical Pixels (for QPainter on QPixmap)
+                    # We use 'scale' (logical scale) not 'render_scale' because QPixmap handles DPR.
+
+                    # Correction: QPixmap coordinates are in physical pixels if setDevicePixelRatio is used?
+                    # Actually, QPainter on a QPixmap works in logical coordinates if the pixmap has DPR set.
+                    # But here we are painting *before* setting it on the label?
+                    # Simpler approach: Map directly to the image dimensions we just got.
+
+                    # Top in PDF is the "higher" Y value. Bottom is "lower".
+                    # In Qt Image space (0 at top):
+                    # y_rect = image_height - (top * render_scale)
+
+                    x = left * render_scale
+                    w = (right - left) * render_scale
+                    h = (top - bottom) * render_scale
+                    y = res.height - (top * render_scale)
+
+                    painter.drawRect(x, y, w, h)
+
+                painter.end()
 
             # Draw Annotations overlay
             if str(idx) in self.annotations:
                 painter = QPainter(pix)
                 painter.setPen(QPen(QColor(255, 255, 0, 180), 3))
+                # pix.width() returns logical width, so coordinate math remains consistent
                 for anno in self.annotations[str(idx)]:
                     x = int(anno["rel_pos"][0] * pix.width())
                     y = int(anno["rel_pos"][1] * pix.height())
@@ -505,7 +614,7 @@ class ReaderTab(QWidget):
             lbl.setPixmap(pix)
             lbl.setMinimumSize(0, 0)  # Allow resize based on content
 
-        except Exception:
+        except Exception as e:
             sys.stderr.write(f"Render error for page {idx}: {e}\n")
 
     def _probe_base_page_size(self) -> None:
@@ -579,6 +688,52 @@ class ReaderTab(QWidget):
             self.web.setHtml(html)
         except Exception:
             pass
+
+    def toggle_search_bar(self) -> None:
+        visible = not self.search_bar.isVisible()
+        self.search_bar.setVisible(visible)
+        self.btn_search.setChecked(visible)
+        if visible:
+            self.txt_search.setFocus()
+            self.txt_search.selectAll()
+
+    def find_next(self) -> None:
+        self._find_text(direction=1)
+
+    def find_prev(self) -> None:
+        self._find_text(direction=-1)
+
+    def _find_text(self, direction: int) -> None:
+        if not self.current_doc:
+            return
+
+        term = self.txt_search.text().strip().lower()
+        if not term:
+            return
+
+        # Start checking from the next/prev page
+        start_idx = self.current_page_index + direction
+        count = self.current_doc.page_count
+
+        # Scan all pages once
+        for i in range(count):
+            # Wrap around logic
+            idx = (start_idx + (i * direction)) % count
+
+            # Note: This is synchronous. For huge docs, we'd move this to a thread later.
+            try:
+                text = self.current_doc.get_page_text(idx)
+                if term in text.lower():
+                    self.current_page_index = idx
+
+                    if not self.continuous_scroll:
+                        self.rebuild_layout()
+
+                    self.update_view()
+                    self.ensure_visible(idx)
+                    return
+            except Exception:
+                continue
 
     def on_page_input_return(self) -> None:
         """Handles manual page number entry."""
