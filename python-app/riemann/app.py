@@ -4,9 +4,10 @@ import sys
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QSettings, Qt, QTimer
+from PySide6.QtCore import QEvent, QMimeData, QObject, QPoint, QSettings, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
+    QDrag,
     QImage,
     QKeyEvent,
     QKeySequence,
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
     QScrollerProperties,
     QSplitter,
     QStackedWidget,
+    QTabBar,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -1223,6 +1225,76 @@ class ReaderTab(QWidget):
             self.load_document(path)
 
 
+class DraggableTabWidget(QTabWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setMovable(True)  # Allows internal reordering
+        self.setTabBar(DraggableTabBar(self))
+
+
+class DraggableTabBar(QTabBar):
+    def mouseMoveEvent(self, event):
+        # 1. Detect drag initiation
+        if event.buttons() != Qt.MouseButton.LeftButton:
+            return
+
+        global_pos = event.globalPosition().toPoint()
+        pos_in_widget = self.mapFromGlobal(global_pos)
+
+        # 2. Get the tab being dragged
+        tab_index = self.tabAt(pos_in_widget)
+        if tab_index < 0:
+            return
+
+        # 3. Get the "ReaderTab" widget inside
+        widget = self.parent().widget(tab_index)
+        if not hasattr(widget, "current_path") or not widget.current_path:
+            return  # Can't drag a new/empty tab
+
+        # 4. Create Drag Object with File Path
+        mime = QMimeData()
+        mime.setText(widget.current_path)
+
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+
+        # Optional: Add a screenshot of the tab as the drag pixmap
+        pixmap = widget.grab()
+        drag.setPixmap(pixmap.scaled(200, 150, Qt.AspectRatioMode.KeepAspectRatio))
+        drag.setHotSpot(QPoint(100, 75))
+
+        # 5. Execute Drag
+        # If the drop action was "Move", we close the original tab
+        if drag.exec(Qt.DropAction.MoveAction) == Qt.DropAction.MoveAction:
+            self.parent().removeTab(tab_index)
+
+        super().mouseMoveEvent(event)
+
+
+# Monkey-patch the drop event on the TabWidget itself
+def tab_drop_event(self, event):
+    file_path = event.mimeData().text()
+    if os.path.exists(file_path):
+        # Logic to "Move" the tab here
+        # We need to access the main window to call "new_tab" usually,
+        # or we can just instantiate the ReaderTab directly.
+
+        # Assuming the parent's logic for adding a tab:
+        reader = ReaderTab()
+        reader.load_document(file_path)
+        self.addTab(reader, os.path.basename(file_path))
+        self.setCurrentWidget(reader)
+
+        event.acceptProposedAction()
+
+
+DraggableTabWidget.dragEnterEvent = (
+    lambda _, e: e.accept() if e.mimeData().hasText() else e.ignore()
+)
+DraggableTabWidget.dropEvent = tab_drop_event
+
+
 class RiemannWindow(QMainWindow):
     """
     The Main Window Manager.
@@ -1241,12 +1313,12 @@ class RiemannWindow(QMainWindow):
         self.setCentralWidget(self.splitter)
 
         # Tab Groups
-        self.tabs_main = QTabWidget()
+        self.tabs_main = DraggableTabWidget()
         self.tabs_main.setTabsClosable(True)
         self.tabs_main.tabCloseRequested.connect(self.close_tab)
         self.splitter.addWidget(self.tabs_main)
 
-        self.tabs_side = QTabWidget()
+        self.tabs_side = DraggableTabWidget()
         self.tabs_side.setTabsClosable(True)
         self.tabs_side.tabCloseRequested.connect(self.close_side_tab)
         self.tabs_side.hide()
@@ -1254,11 +1326,48 @@ class RiemannWindow(QMainWindow):
 
         self.setup_menu()
 
-        # Restore last session
-        last_file = self.settings.value("lastFile", type=str)
-        if last_file and os.path.exists(last_file):
-            self.new_tab(last_file, restore_state=True)
-        else:
+        # Global Shortcuts
+        # Ctrl+W: Closes the currently focused tab (Main or Side)
+        self.shortcut_close = QShortcut(QKeySequence("Ctrl+W"), self)
+        self.shortcut_close.activated.connect(self.close_active_tab)
+
+        # Ctrl+Q: Closes the entire application
+        self.shortcut_quit = QShortcut(QKeySequence("Ctrl+Q"), self)
+        self.shortcut_quit.activated.connect(self.close)
+
+        # Restore Window Layout (Splitter position, etc)
+        if self.settings.value("window/geometry"):
+            self.restoreGeometry(self.settings.value("window/geometry"))
+        if self.settings.value("window/state"):
+            self.restoreState(self.settings.value("window/state"))
+
+        # Restore Main Tabs
+        main_files = self.settings.value("session/main_tabs", [], type=list)
+        # Note: QSettings sometimes returns strings instead of lists if only 1 item exists
+        if isinstance(main_files, str):
+            main_files = [main_files]
+
+        for path in main_files:
+            if os.path.exists(path):
+                self.new_tab(path, restore_state=True)
+
+        # Restore Side Tabs
+        side_files = self.settings.value("session/side_tabs", [], type=list)
+        if isinstance(side_files, str):
+            side_files = [side_files]
+
+        if side_files:
+            # Ensure side view is visible if we have tabs for it
+            self.tabs_side.show()
+            for path in side_files:
+                if os.path.exists(path):
+                    # We manually add to side tabs here
+                    reader = ReaderTab()
+                    reader.load_document(path, restore_state=True)
+                    self.tabs_side.addTab(reader, os.path.basename(path))
+
+        # Fallback: If nothing opened, give a blank tab
+        if self.tabs_main.count() == 0:
             self.new_tab()
 
     def setup_menu(self) -> None:
@@ -1329,6 +1438,32 @@ class RiemannWindow(QMainWindow):
         if self.tabs_side.count() == 0:
             self.tabs_side.hide()
 
+    def closeEvent(self, event):
+        # Helper to get all paths from a tab widget
+        def get_open_files(tab_widget):
+            paths = []
+            for i in range(tab_widget.count()):
+                widget = tab_widget.widget(i)
+                if isinstance(widget, ReaderTab) and widget.current_path:
+                    paths.append(widget.current_path)
+            return paths
+
+        # Save Main Tabs
+        main_files = get_open_files(self.tabs_main)
+        self.settings.setValue("session/main_tabs", main_files)
+
+        # Save Side Tabs
+        side_files = get_open_files(self.tabs_side)
+        self.settings.setValue("session/side_tabs", side_files)
+
+        # Save Geometry (Window size/position)
+        self.settings.setValue("window/geometry", self.saveGeometry())
+        self.settings.setValue(
+            "window/state", self.saveState()
+        )  # Saves splitter position!
+
+        super().closeEvent(event)
+
     def toggle_reader_fullscreen(self) -> None:
         """
         Toggles 'Zen Mode' reading.
@@ -1396,6 +1531,42 @@ class RiemannWindow(QMainWindow):
             return
 
         super().keyPressEvent(event)
+
+    def close_active_tab(self):
+        # 1. Determine which widget has focus (Main or Side)
+        focus_widget = QApplication.focusWidget()
+
+        # Traverse up the widget tree to find if we are inside tabs_main or tabs_side
+        target_tabs = None
+        curr = focus_widget
+        while curr:
+            if curr == self.tabs_main:
+                target_tabs = self.tabs_main
+                break
+            elif curr == self.tabs_side:
+                target_tabs = self.tabs_side
+                break
+            curr = curr.parent()
+
+        # 2. Fallback: If focus is ambiguous (e.g. on the window frame),
+        # default to Side if it's open, otherwise Main.
+        if target_tabs is None:
+            if self.tabs_side.isVisible() and self.tabs_side.count() > 0:
+                # Optional: Check if side tabs actually have focus context,
+                # otherwise default to main.
+                # Simplest behavior: Close Main unless Side is explicitly focused.
+                target_tabs = self.tabs_main
+            else:
+                target_tabs = self.tabs_main
+
+        # 3. Close the current tab in the identified group
+        if target_tabs:
+            idx = target_tabs.currentIndex()
+            if idx != -1:
+                if target_tabs == self.tabs_main:
+                    self.close_tab(idx)
+                else:
+                    self.close_side_tab(idx)
 
 
 def run():
