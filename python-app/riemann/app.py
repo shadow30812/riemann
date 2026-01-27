@@ -4,7 +4,16 @@ import sys
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from PySide6.QtCore import QEvent, QMimeData, QObject, QPoint, QSettings, Qt, QTimer
+from PySide6.QtCore import (
+    QEvent,
+    QMimeData,
+    QObject,
+    QPoint,
+    QSettings,
+    Qt,
+    QTimer,
+    QUrl,
+)
 from PySide6.QtGui import (
     QColor,
     QDrag,
@@ -29,6 +38,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QScroller,
@@ -1295,6 +1305,147 @@ DraggableTabWidget.dragEnterEvent = (
 DraggableTabWidget.dropEvent = tab_drop_event
 
 
+class BrowserTab(QWidget):
+    """A full-featured web browser tab with Dark Mode support."""
+
+    def __init__(
+        self,
+        start_url: str = "https://www.google.com",
+        parent=None,
+        dark_mode: bool = True,
+    ):
+        super().__init__(parent)
+        self.dark_mode = dark_mode  # Store state
+
+        # Layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # --- Toolbar ---
+        self.toolbar = QWidget()
+        self.toolbar.setFixedHeight(40)
+        tb_layout = QHBoxLayout(self.toolbar)
+        tb_layout.setContentsMargins(5, 0, 5, 0)
+
+        # Navigation Buttons
+        self.btn_back = QPushButton("◀")
+        self.btn_back.setFixedWidth(30)
+        self.btn_fwd = QPushButton("▶")
+        self.btn_fwd.setFixedWidth(30)
+        self.btn_reload = QPushButton("↻")
+        self.btn_reload.setFixedWidth(30)
+
+        # Address Bar
+        self.txt_url = QLineEdit()
+        self.txt_url.setPlaceholderText("Enter URL or Search...")
+        self.txt_url.returnPressed.connect(self.navigate_to_url)
+
+        tb_layout.addWidget(self.btn_back)
+        tb_layout.addWidget(self.btn_fwd)
+        tb_layout.addWidget(self.btn_reload)
+        tb_layout.addWidget(self.txt_url)
+
+        layout.addWidget(self.toolbar)
+
+        # --- Progress Bar ---
+        self.progress = QProgressBar()
+        self.progress.setFixedHeight(2)
+        self.progress.setTextVisible(False)
+        layout.addWidget(self.progress)
+
+        # --- Web View ---
+        self.web = QWebEngineView()
+        layout.addWidget(self.web)
+
+        # --- Connections ---
+        self.btn_back.clicked.connect(self.web.back)
+        self.btn_fwd.clicked.connect(self.web.forward)
+        self.btn_reload.clicked.connect(self.web.reload)
+
+        self.web.urlChanged.connect(self._update_url_bar)
+        self.web.loadProgress.connect(self.progress.setValue)
+        self.web.loadFinished.connect(lambda: self.progress.setValue(0))
+        self.web.titleChanged.connect(self._update_tab_title)
+
+        # Initial Theme Application
+        self.apply_theme()
+
+        # Initial Load
+        self.web.load(QUrl(start_url))
+
+    def apply_theme(self):
+        """Updates styles for Dark/Light mode."""
+        if self.dark_mode:
+            # Dark Mode Styles
+            bg_color = "#333"
+            text_color = "#ddd"
+            input_bg = "#444"
+            border = "#555"
+            btn_hover = "rgba(255,255,255,0.1)"
+        else:
+            # Light Mode Styles
+            bg_color = "#f0f0f0"
+            text_color = "#222"
+            input_bg = "#fff"
+            border = "#ccc"
+            btn_hover = "rgba(0,0,0,0.1)"
+
+        self.toolbar.setStyleSheet(f"""
+            QWidget {{ background: {bg_color}; border-bottom: 1px solid {border}; }}
+            QLineEdit {{ 
+                background: {input_bg}; 
+                color: {text_color}; 
+                border: 1px solid {border}; 
+                border-radius: 4px; 
+                padding: 4px;
+            }}
+            QPushButton {{ 
+                background: transparent; 
+                color: {text_color}; 
+                border: none; 
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{ background: {btn_hover}; }}
+        """)
+
+        # Update Progress Bar Color
+        chunk_color = "#3a86ff" if self.dark_mode else "#007aff"
+        self.progress.setStyleSheet(f"""
+            QProgressBar {{ border: 0px; background: transparent; }} 
+            QProgressBar::chunk {{ background: {chunk_color}; }}
+        """)
+
+    def navigate_to_url(self):
+        text = self.txt_url.text().strip()
+        if not text:
+            return
+        if "." in text and " " not in text:
+            if not text.startswith("http"):
+                text = "https://" + text
+            url = QUrl(text)
+        else:
+            url = QUrl(f"https://www.google.com/search?q={text}")
+        self.web.load(url)
+
+    def _update_url_bar(self, url: QUrl):
+        self.txt_url.setText(url.toString())
+        self.txt_url.setCursorPosition(0)
+
+    def _update_tab_title(self, title: str):
+        parent = self.parent()
+        while parent:
+            if isinstance(parent, QTabWidget):
+                idx = parent.indexOf(self)
+                if idx != -1:
+                    short_title = (title[:20] + "..") if len(title) > 20 else title
+                    parent.setTabText(idx, short_title)
+                    parent.setTabToolTip(idx, title)
+                break
+            parent = parent.parent()
+
+
 class RiemannWindow(QMainWindow):
     """
     The Main Window Manager.
@@ -1312,7 +1463,7 @@ class RiemannWindow(QMainWindow):
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(self.splitter)
 
-        # Tab Groups
+        # Tab Groups - Using DraggableTabWidget
         self.tabs_main = DraggableTabWidget()
         self.tabs_main.setTabsClosable(True)
         self.tabs_main.tabCloseRequested.connect(self.close_tab)
@@ -1327,52 +1478,73 @@ class RiemannWindow(QMainWindow):
         self.setup_menu()
 
         # Global Shortcuts
-        # Ctrl+W: Closes the currently focused tab (Main or Side)
         self.shortcut_close = QShortcut(QKeySequence("Ctrl+W"), self)
         self.shortcut_close.activated.connect(self.close_active_tab)
 
-        # Ctrl+Q: Closes the entire application
         self.shortcut_quit = QShortcut(QKeySequence("Ctrl+Q"), self)
         self.shortcut_quit.activated.connect(self.close)
 
-        # Restore Window Layout (Splitter position, etc)
+        # --- RESTORE SESSION ---
+
+        # 1. Restore Window Layout
         if self.settings.value("window/geometry"):
             self.restoreGeometry(self.settings.value("window/geometry"))
         if self.settings.value("window/state"):
             self.restoreState(self.settings.value("window/state"))
 
-        # Restore Main Tabs
-        main_files = self.settings.value("session/main_tabs", [], type=list)
-        # Note: QSettings sometimes returns strings instead of lists if only 1 item exists
-        if isinstance(main_files, str):
-            main_files = [main_files]
+        # 2. Helper to restore a list of items to a specific tab widget
+        def restore_items(items, target_widget):
+            if isinstance(items, str):
+                items = [items]
 
-        for path in main_files:
-            if os.path.exists(path):
-                self.new_tab(path, restore_state=True)
+            for item in items:
+                # Case A: Legacy String Path (Old saves)
+                if isinstance(item, str):
+                    if os.path.exists(item):
+                        if target_widget == self.tabs_side:
+                            # Manually add to side
+                            reader = ReaderTab()
+                            reader.load_document(item, restore_state=True)
+                            target_widget.addTab(reader, os.path.basename(item))
+                        else:
+                            self.new_tab(item, restore_state=True)
 
-        # Restore Side Tabs
-        side_files = self.settings.value("session/side_tabs", [], type=list)
-        if isinstance(side_files, str):
-            side_files = [side_files]
+                # Case B: New Dictionary Format (PDF or Web)
+                elif isinstance(item, dict):
+                    i_type = item.get("type")
+                    data = item.get("data")
 
-        if side_files:
-            # Ensure side view is visible if we have tabs for it
+                    if i_type == "pdf" and data and os.path.exists(data):
+                        # Load PDF
+                        if target_widget == self.tabs_side:
+                            reader = ReaderTab()
+                            reader.load_document(data, restore_state=True)
+                            target_widget.addTab(reader, os.path.basename(data))
+                        else:
+                            self.new_tab(data, restore_state=True)
+
+                    elif i_type == "web" and data:
+                        # Load Browser
+                        # We temporarily force focus to target to reuse new_browser_tab logic
+                        # or just instantiate manually:
+                        browser = BrowserTab(data, dark_mode=self.dark_mode)
+                        target_widget.addTab(browser, "Loading...")
+
+        # 3. Execute Restoration
+        main_items = self.settings.value("session/main_tabs", [], type=list)
+        restore_items(main_items, self.tabs_main)
+
+        side_items = self.settings.value("session/side_tabs", [], type=list)
+        if side_items:
             self.tabs_side.show()
-            for path in side_files:
-                if os.path.exists(path):
-                    # We manually add to side tabs here
-                    reader = ReaderTab()
-                    reader.load_document(path, restore_state=True)
-                    self.tabs_side.addTab(reader, os.path.basename(path))
+            restore_items(side_items, self.tabs_side)
 
-        # Fallback: If nothing opened, give a blank tab
+        # 4. Fallback: If absolutely nothing opened, give a blank tab
         if self.tabs_main.count() == 0:
             self.new_tab()
 
     def setup_menu(self) -> None:
         menubar = self.menuBar()
-
         file_menu = menubar.addMenu("File")
 
         open_action = file_menu.addAction("Open PDF")
@@ -1388,6 +1560,10 @@ class RiemannWindow(QMainWindow):
         split_action.setShortcut("Ctrl+\\")
         split_action.triggered.connect(self.toggle_split_view)
 
+        browser_action = file_menu.addAction("New Browser Tab")
+        browser_action.setShortcut("Ctrl+B")
+        browser_action.triggered.connect(lambda: self.new_browser_tab())
+
     def new_tab(self, path: Optional[str] = None, restore_state: bool = False) -> None:
         reader = ReaderTab()
         title = "New Tab"
@@ -1398,6 +1574,24 @@ class RiemannWindow(QMainWindow):
 
         self.tabs_main.addTab(reader, title)
         self.tabs_main.setCurrentWidget(reader)
+
+    def new_browser_tab(self, url="https://www.google.com"):
+        # Pass self.dark_mode to the constructor
+        browser = BrowserTab(url, dark_mode=self.dark_mode)
+
+        # Add to whichever tab widget is currently active (Main or Side)
+        # (Re-using the focus logic from close_active_tab would be ideal here,
+        # but defaulting to Main is fine for now)
+        target = self.tabs_main
+        if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
+            target = self.tabs_side
+
+        idx = target.addTab(browser, "New Tab")
+        target.setCurrentIndex(idx)
+
+        # Focus the URL bar immediately
+        browser.txt_url.setFocus()
+        browser.txt_url.selectAll()
 
     def open_pdf_dialog(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
@@ -1441,12 +1635,14 @@ class RiemannWindow(QMainWindow):
     def closeEvent(self, event):
         # Helper to get all paths from a tab widget
         def get_open_files(tab_widget):
-            paths = []
+            items = []
             for i in range(tab_widget.count()):
                 widget = tab_widget.widget(i)
                 if isinstance(widget, ReaderTab) and widget.current_path:
-                    paths.append(widget.current_path)
-            return paths
+                    items.append({"type": "pdf", "data": widget.current_path})
+                elif isinstance(widget, BrowserTab):
+                    items.append({"type": "web", "data": widget.web.url().toString()})
+            return items
 
         # Save Main Tabs
         main_files = get_open_files(self.tabs_main)
@@ -1507,11 +1703,17 @@ class RiemannWindow(QMainWindow):
         self.settings.setValue("darkMode", self.dark_mode)
 
         def update_tab(tab: QWidget):
+            # Handle PDF Reader
             if isinstance(tab, ReaderTab):
                 tab.dark_mode = self.dark_mode
                 tab.apply_theme()
                 tab.rendered_pages.clear()
                 tab.update_view()
+
+            # Handle Web Browser (NEW)
+            elif isinstance(tab, BrowserTab):
+                tab.dark_mode = self.dark_mode
+                tab.apply_theme()
 
         for i in range(self.tabs_main.count()):
             update_tab(self.tabs_main.widget(i))
