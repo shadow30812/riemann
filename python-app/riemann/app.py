@@ -921,6 +921,10 @@ class ReaderTab(QWidget):
             event.accept()
             return
 
+        if (mod & Qt.KeyboardModifier.ControlModifier) and key == Qt.Key.Key_F:
+            self.toggle_search_bar()
+            return
+
         if self.view_mode == ViewMode.IMAGE:
             # Zoom
             if (
