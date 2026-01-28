@@ -1,6 +1,12 @@
-import json
 import os
 import sys
+
+# PyInstaller bundle
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    bundle_dir = sys._MEIPASS  # type: ignore[attr-defined]
+    os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = bundle_dir
+
+import json
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
