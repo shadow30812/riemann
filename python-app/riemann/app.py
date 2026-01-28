@@ -60,12 +60,29 @@ except ImportError as e:
 
 
 class ZoomMode(Enum):
+    """
+    Enumeration defining the zoom behavior of the PDF viewer.
+
+    Attributes:
+        MANUAL: Zoom level is set explicitly by the user.
+        FIT_WIDTH: Zoom level automatically adjusts to fit the page width to the viewport.
+        FIT_HEIGHT: Zoom level automatically adjusts to fit the page height to the viewport.
+    """
+
     MANUAL = 0
     FIT_WIDTH = 1
     FIT_HEIGHT = 2
 
 
 class ViewMode(Enum):
+    """
+    Enumeration defining the rendering mode of the document.
+
+    Attributes:
+        IMAGE: Standard PDF rendering where pages are drawn as images.
+        REFLOW: Text extraction mode rendered via HTML for easier reading on small screens.
+    """
+
     IMAGE = 0
     REFLOW = 1
 
@@ -73,23 +90,36 @@ class ViewMode(Enum):
 class ReaderTab(QWidget):
     """
     A self-contained PDF Viewer Widget.
-    Manages rendering, navigation, and state for a single open PDF.
+
+    This class manages the rendering pipeline, navigation, state (zoom, scroll),
+    and interactions (annotations, text selection) for a single open PDF document.
+
+    Attributes:
+        settings (QSettings): persistent application settings.
+        engine (riemann_core.PdfEngine): The Rust-based backend engine instance.
+        current_doc (riemann_core.RiemannDocument): The currently loaded PDF document object.
+        page_widgets (Dict[int, QLabel]): Mapping of page indices to their display widgets.
+        rendered_pages (Set[int]): Set of page indices currently holding rendered pixmaps.
+        annotations (Dict): Dictionary storing user annotations.
     """
 
     def __init__(self, parent: Optional[QWidget] = None):
+        """
+        Initialize the ReaderTab.
+
+        Args:
+            parent: The parent widget, if any.
+        """
         super().__init__(parent)
 
-        # Shared Settings
         self.settings: QSettings = QSettings("Riemann", "PDFReader")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        # Core State
         self.engine: Optional[riemann_core.PdfEngine] = None
         self.current_doc: Optional[riemann_core.RiemannDocument] = None
         self.current_path: Optional[str] = None
         self.current_page_index: int = 0
 
-        # View State
         self.dark_mode: bool = self.settings.value("darkMode", True, type=bool)
         self.zoom_mode: ZoomMode = ZoomMode.FIT_WIDTH
         self.manual_scale: float = 1.0
@@ -98,17 +128,14 @@ class ReaderTab(QWidget):
         self.view_mode: ViewMode = ViewMode.IMAGE
         self.is_annotating: bool = False
 
-        # Search State
         self.search_result: Optional[
             Tuple[int, List[Tuple[float, float, float, float]]]
         ] = None
 
-        # Caching & Storage
         self.page_widgets: Dict[int, QLabel] = {}
         self.rendered_pages: Set[int] = set()
         self.annotations: Dict[str, List[Dict[str, Any]]] = {}
 
-        # Virtualization / large-doc helpers
         self.virtual_threshold: int = 300
         self._virtual_enabled: bool = False
         self._top_spacer: Optional[QWidget] = None
@@ -121,38 +148,31 @@ class ReaderTab(QWidget):
         self.apply_theme()
         self._setup_scroller()
 
-        # Scroll Event Debouncing
         self.scroll_timer = QTimer()
         self.scroll_timer.setSingleShot(True)
         self.scroll_timer.setInterval(150)
         self.scroll_timer.timeout.connect(self.real_scroll_handler)
 
-        # Search Shortcut
         self.shortcut_find = QShortcut(QKeySequence("Ctrl+F"), self)
         self.shortcut_find.activated.connect(self.toggle_search_bar)
 
-    # --- Initialization ---
-
     def _init_backend(self) -> None:
-        """Initializes the Rust-based PDF engine."""
+        """Initializes the Rust-based PDF engine backend."""
         try:
             self.engine = riemann_core.PdfEngine()
         except Exception as e:
-            # Fatal error handled in global try/catch, this catches runtime instantiation
             sys.stderr.write(f"Backend Initialization Error: {e}\n")
 
     def setup_ui(self) -> None:
-        """Constructs the UI layout and widgets."""
+        """Constructs the visual hierarchy, toolbar, and main content area."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # 1. Toolbar Construction
         self.toolbar = QWidget()
         self.toolbar.setFixedHeight(50)
         t_layout = QHBoxLayout(self.toolbar)
 
-        # Toggle Buttons
         self.btn_reflow = QPushButton("📄/📝")
         self.btn_reflow.setToolTip("Toggle Text Reflow Mode")
         self.btn_reflow.setCheckable(True)
@@ -176,7 +196,6 @@ class ReaderTab(QWidget):
         self.btn_annotate.setCheckable(True)
         self.btn_annotate.clicked.connect(self.toggle_annotation_mode)
 
-        # Navigation Controls
         self.btn_prev = QPushButton("◄")
         self.btn_prev.setToolTip("Previous Page (Left Arrow)")
         self.btn_prev.clicked.connect(self.prev_view)
@@ -194,7 +213,6 @@ class ReaderTab(QWidget):
         self.btn_next.setToolTip("Next Page (Right Arrow)")
         self.btn_next.clicked.connect(self.next_view)
 
-        # Zoom Controls
         self.combo_zoom = QComboBox()
         self.combo_zoom.setEditable(True)
         self.combo_zoom.setToolTip("Zoom Level (Ctrl+Scroll)")
@@ -206,7 +224,6 @@ class ReaderTab(QWidget):
         self.combo_zoom.setFixedWidth(100)
         self._sync_zoom_ui()
 
-        # Theme & Window Controls
         self.btn_theme = QPushButton("🌓")
         self.btn_theme.setToolTip("Toggle Dark/Light Mode")
         self.btn_theme.clicked.connect(self.toggle_theme)
@@ -224,7 +241,6 @@ class ReaderTab(QWidget):
         self.btn_search.setCheckable(True)
         self.btn_search.clicked.connect(self.toggle_search_bar)
 
-        # Add to Layout
         widgets = [
             self.btn_reflow,
             self.btn_facing,
@@ -245,7 +261,6 @@ class ReaderTab(QWidget):
         t_layout.addStretch()
         layout.addWidget(self.toolbar)
 
-        # Search Bar (Hidden by default)
         self.search_bar = QWidget()
         self.search_bar.setVisible(False)
         self.search_bar.setFixedHeight(45)
@@ -280,10 +295,8 @@ class ReaderTab(QWidget):
 
         layout.addWidget(self.search_bar)
 
-        # 2. Main View Stack
         self.stack = QStackedWidget()
 
-        # Page View (Scroll Area)
         self.scroll = QScrollArea()
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.scroll.setWidgetResizable(True)
@@ -301,14 +314,13 @@ class ReaderTab(QWidget):
         self.scroll.verticalScrollBar().valueChanged.connect(self.defer_scroll_update)
         self.stack.addWidget(self.scroll)
 
-        # Reflow View (Web Engine)
         self.web = QWebEngineView()
         self.stack.addWidget(self.web)
 
         layout.addWidget(self.stack)
 
     def _setup_scroller(self) -> None:
-        """Configures kinetic scrolling physics."""
+        """Configures the kinetic scrolling properties for the viewport."""
         QScroller.grabGesture(
             self.scroll.viewport(), QScroller.ScrollerGestureType.LeftMouseButtonGesture
         )
@@ -317,15 +329,13 @@ class ReaderTab(QWidget):
         props.setScrollMetric(QScrollerProperties.ScrollMetric.MaximumVelocity, 0.8)
         QScroller.scroller(self.scroll.viewport()).setScrollerProperties(props)
 
-    # --- Document Loading & Core Logic ---
-
     def load_document(self, path: str, restore_state: bool = False) -> None:
         """
-        Loads a PDF from the given path.
+        Loads a PDF file from the specified path.
 
         Args:
-            path: Absolute path to the PDF file.
-            restore_state: If True, restores last page and scroll position.
+            path: Absolute file path to the PDF.
+            restore_state: If True, attempts to restore the last known page/scroll position.
         """
         try:
             self.current_doc = self.engine.load_document(path)
@@ -355,19 +365,17 @@ class ReaderTab(QWidget):
 
     def rebuild_layout(self) -> None:
         """
-        Reconstructs the layout of QLabels for the document pages.
-        Uses virtualization for very large documents when continuous_scroll is enabled.
+        Reconstructs the layout of QLabels representing the document pages.
+        Implements virtualization logic for large documents when continuous scroll is enabled.
         """
         if not self.current_doc:
             return
 
-        # Clear existing layout & caches
         self.page_widgets.clear()
         self.rendered_pages.clear()
         self._virtual_enabled = False
         self._virtual_range = (0, 0)
 
-        # Remove child widgets safely
         while self.scroll_layout.count():
             item = self.scroll_layout.takeAt(0)
             widget = item.widget()
@@ -375,41 +383,32 @@ class ReaderTab(QWidget):
                 widget.deleteLater()
 
         count = self.current_doc.page_count
-
-        # Decide whether to use virtualization
         use_virtual = self.continuous_scroll and (count > self.virtual_threshold)
 
         if use_virtual:
             self._virtual_enabled = True
-            # choose a generous buffer (pages before/after current)
             buf_before = 30
             buf_after = 40
             start = max(0, self.current_page_index - buf_before)
             end = min(count, self.current_page_index + buf_after)
             self._virtual_range = (start, end)
 
-            # estimate per-page height using cached base size and current scale
             if self._cached_base_size:
                 _, base_h = self._cached_base_size
             else:
-                # probe if possible
                 self._probe_base_page_size()
                 _, base_h = self._cached_base_size or (595, 842)
 
             scale = self.calculate_scale()
             page_height = int(base_h * scale) + self.scroll_layout.spacing()
 
-            # top spacer (representing pages 0..start-1)
             top_spacer = QWidget()
             top_spacer.setFixedHeight(max(0, start * page_height))
             top_spacer.setObjectName("topSpacer")
             self._top_spacer = top_spacer
             self.scroll_layout.addWidget(top_spacer)
 
-            # create labels for the window [start, end)
             for p_idx in range(start, end):
-                # pair handling for facing mode still supported inside the window
-                # keep same row-by-row layout as before, but only for the window
                 if self.facing_mode and (p_idx % 2 == 0) and (p_idx + 1 < end):
                     row_widget = QWidget()
                     row_layout = QHBoxLayout(row_widget)
@@ -421,19 +420,12 @@ class ReaderTab(QWidget):
                     row_layout.addWidget(lbl_left)
                     self.page_widgets[p_idx] = lbl_left
 
-                    # right page in pair
                     lbl_right = self._create_page_label(p_idx + 1)
                     row_layout.addWidget(lbl_right)
                     self.page_widgets[p_idx + 1] = lbl_right
 
                     self.scroll_layout.addWidget(row_widget)
-                    # skip the next index since we've added p_idx+1
-                    # advance p_idx by 1 manually using loop mechanics
-                    # Using simple approach: increment the loop variable via continue when appropriate
-                    # But since for-loop will still increment, we skip by using a small inner while would be needed.
-                    # Simpler: mark the next index as already created
                 else:
-                    # If page already created (due to pair), skip
                     if p_idx in self.page_widgets:
                         continue
                     row_widget = QWidget()
@@ -447,7 +439,6 @@ class ReaderTab(QWidget):
                     self.page_widgets[p_idx] = lbl
                     self.scroll_layout.addWidget(row_widget)
 
-            # bottom spacer (representing pages end..count-1)
             bottom_spacer = QWidget()
             bottom_spacer.setFixedHeight(max(0, (count - end) * page_height))
             bottom_spacer.setObjectName("bottomSpacer")
@@ -455,7 +446,6 @@ class ReaderTab(QWidget):
             self.scroll_layout.addWidget(bottom_spacer)
 
         else:
-            # non-virtualized (original logic): create a widget per page or small window
             if self.continuous_scroll:
                 pages_to_layout = range(count)
             else:
@@ -472,7 +462,6 @@ class ReaderTab(QWidget):
 
             while idx_ptr < len(indices):
                 p_idx = indices[idx_ptr]
-
                 is_pair = self.facing_mode and (p_idx + 1 < count) and (p_idx % 2 == 0)
 
                 row_widget = QWidget()
@@ -481,13 +470,11 @@ class ReaderTab(QWidget):
                 row_layout.setSpacing(10)
                 row_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-                # Left Page
                 lbl_left = self._create_page_label(p_idx)
                 row_layout.addWidget(lbl_left)
                 self.page_widgets[p_idx] = lbl_left
 
                 if is_pair:
-                    # Right Page
                     p_idx_right = p_idx + 1
                     lbl_right = self._create_page_label(p_idx_right)
                     row_layout.addWidget(lbl_right)
@@ -499,11 +486,19 @@ class ReaderTab(QWidget):
                 self.scroll_layout.addWidget(row_widget)
 
     def _create_page_label(self, index: int) -> QLabel:
-        """Creates a placeholder label for a page."""
+        """
+        Creates a placeholder QLabel for a specific page index.
+
+        Args:
+            index: The page number (0-based) this label represents.
+
+        Returns:
+            A configured QLabel instance.
+        """
         lbl = QLabel()
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setProperty("pageIndex", index)
-        lbl.setMinimumSize(100, 141)  # Default A4 aspect ratio placeholder
+        lbl.setMinimumSize(100, 141)
         lbl.setStyleSheet(
             f"background-color: {'#333' if self.dark_mode else '#fff'}; border: 1px solid #555;"
         )
@@ -512,24 +507,20 @@ class ReaderTab(QWidget):
 
     def render_visible_pages(self) -> None:
         """
-        Smart Rendering System:
-        1. Identifies pages currently visible + buffer zone.
-        2. Evicts non-visible pages to save memory.
-        3. Renders new pages via Rust backend.
+        Identifies currently visible pages and triggers their rendering.
+        Evicts off-screen pages to conserve memory.
         """
         if not self.current_doc or not self.page_widgets:
             return
 
         target_indices: Set[int] = set()
 
-        # Buffer zone: Render 7 pages before and 8 pages after current
         start = max(0, self.current_page_index - 7)
         end = min(self.current_doc.page_count, self.current_page_index + 8)
 
         for i in range(start, end):
             target_indices.add(i)
 
-        # 1. Evict
         for idx in list(self.rendered_pages):
             if idx not in target_indices:
                 if idx in self.page_widgets:
@@ -537,7 +528,6 @@ class ReaderTab(QWidget):
                     self.page_widgets[idx].setText(f"Page {idx + 1}")
                 self.rendered_pages.remove(idx)
 
-        # 2. Render
         scale = self.calculate_scale()
 
         for idx in target_indices:
@@ -550,30 +540,28 @@ class ReaderTab(QWidget):
             self.rendered_pages.add(idx)
 
     def _render_single_page(self, idx: int, scale: float) -> None:
-        """Invokes the Rust backend to render a page and updates the UI."""
+        """
+        Renders a specific page using the Rust backend and applies it to the UI.
+        Handles drawing overlays such as search results and annotations.
+
+        Args:
+            idx: The 0-based index of the page to render.
+            scale: The logical zoom scale to apply.
+        """
         try:
-            # Calculate physical scale based on Device Pixel Ratio (DPR)
-            # This ensures crisp rendering on HiDPI/Retina displays
             dpr = self.devicePixelRatio()
             render_scale = scale * dpr
 
-            # Request high-res render from backend
             res = self.current_doc.render_page(
                 idx, render_scale, 1 if self.dark_mode else 0
             )
 
-            # Create image from raw data
             img = QImage(res.data, res.width, res.height, QImage.Format.Format_ARGB32)
-
-            # Tell Qt this image is high-DPI (e.g., 2x density) so it draws at logical size
             img.setDevicePixelRatio(dpr)
-
             pix = QPixmap.fromImage(img)
 
-            # Draw Search Highlights
             if self.search_result and self.search_result[0] == idx:
                 painter = QPainter(pix)
-                # Highlight color: Semi-transparent Blue/Yellow
                 color = (
                     QColor(255, 255, 0, 100)
                     if self.dark_mode
@@ -582,41 +570,18 @@ class ReaderTab(QWidget):
                 painter.setBrush(color)
                 painter.setPen(Qt.PenStyle.NoPen)
 
-                # PDF Coordinates: (left, top, right, bottom)
-                # Qt Coordinates: (0,0) is top-left.
-                # PDF (0,0) is usually bottom-left.
-                # y_qt = height_pixels - (y_pdf * scale_factor)
-
-                # Note: 'res.height' is the physical height in pixels.
-                # 'render_scale' maps PDF points -> physical pixels.
-
                 for left, top, right, bottom in self.search_result[1]:
-                    # Convert PDF points to Logical Pixels (for QPainter on QPixmap)
-                    # We use 'scale' (logical scale) not 'render_scale' because QPixmap handles DPR.
-
-                    # Correction: QPixmap coordinates are in physical pixels if setDevicePixelRatio is used?
-                    # Actually, QPainter on a QPixmap works in logical coordinates if the pixmap has DPR set.
-                    # But here we are painting *before* setting it on the label?
-                    # Simpler approach: Map directly to the image dimensions we just got.
-
-                    # Top in PDF is the "higher" Y value. Bottom is "lower".
-                    # In Qt Image space (0 at top):
-                    # y_rect = image_height - (top * render_scale)
-
                     x = left * render_scale
                     w = (right - left) * render_scale
                     h = (top - bottom) * render_scale
                     y = res.height - (top * render_scale)
-
                     painter.drawRect(x, y, w, h)
 
                 painter.end()
 
-            # Draw Annotations overlay
             if str(idx) in self.annotations:
                 painter = QPainter(pix)
                 painter.setPen(QPen(QColor(255, 255, 0, 180), 3))
-                # pix.width() returns logical width, so coordinate math remains consistent
                 for anno in self.annotations[str(idx)]:
                     x = int(anno["rel_pos"][0] * pix.width())
                     y = int(anno["rel_pos"][1] * pix.height())
@@ -625,13 +590,13 @@ class ReaderTab(QWidget):
 
             lbl = self.page_widgets[idx]
             lbl.setPixmap(pix)
-            lbl.setMinimumSize(0, 0)  # Allow resize based on content
+            lbl.setMinimumSize(0, 0)
 
         except Exception as e:
             sys.stderr.write(f"Render error for page {idx}: {e}\n")
 
     def _probe_base_page_size(self) -> None:
-        """Cache base page size (pixels) for scale calculations and virtualization."""
+        """Calculates and caches the base page dimensions in pixels."""
         if not self.current_doc:
             self._cached_base_size = None
             return
@@ -639,15 +604,18 @@ class ReaderTab(QWidget):
             res = self.current_doc.render_page(0, 1.0, 0)
             self._cached_base_size = (res.width, res.height)
         except Exception:
-            # fall back to typical A4 pixel size at 72-96 DPI: use A4 ratio
             self._cached_base_size = (595, 842)
 
     def calculate_scale(self) -> float:
-        """Determines the render scale based on ZoomMode and Viewport size."""
+        """
+        Computes the current rendering scale factor based on view mode and window size.
+
+        Returns:
+            float: The scale factor (1.0 = 100%).
+        """
         if self.zoom_mode == ZoomMode.MANUAL:
             return self.manual_scale
 
-        # Use cached base size if available
         if not self._cached_base_size:
             try:
                 self._probe_base_page_size()
@@ -658,7 +626,6 @@ class ReaderTab(QWidget):
             return 1.0
 
         base_w, base_h = self._cached_base_size
-
         viewport = self.scroll.viewport()
         vw = max(10, viewport.width() - 30)
         vh = max(10, viewport.height() - 20)
@@ -673,14 +640,13 @@ class ReaderTab(QWidget):
         return 1.0
 
     def update_view(self) -> None:
-        """Triggers a full view update (Render or Reflow)."""
+        """Triggers a full refresh of the view (Render or Reflow)."""
         if self.view_mode == ViewMode.IMAGE:
             self.render_visible_pages()
             if self.current_doc:
                 self.txt_page.setText(str(self.current_page_index + 1))
                 self.lbl_total.setText(f"/ {self.current_doc.page_count}")
 
-            # Save state
             self.settings.setValue("lastPage", self.current_page_index)
             self.settings.setValue(
                 "lastScrollY", self.scroll.verticalScrollBar().value()
@@ -689,7 +655,7 @@ class ReaderTab(QWidget):
             self.render_reflow()
 
     def render_reflow(self) -> None:
-        """Extracts text and renders it as HTML in the WebEngineView."""
+        """Performs text extraction and renders content via the WebEngine."""
         if not self.current_doc:
             return
 
@@ -703,6 +669,7 @@ class ReaderTab(QWidget):
             pass
 
     def toggle_search_bar(self) -> None:
+        """Toggles the visibility of the text search bar."""
         visible = not self.search_bar.isVisible()
         self.search_bar.setVisible(visible)
         self.btn_search.setChecked(visible)
@@ -711,12 +678,20 @@ class ReaderTab(QWidget):
             self.txt_search.selectAll()
 
     def find_next(self) -> None:
+        """Searches for the next occurrence of the text."""
         self._find_text(direction=1)
 
     def find_prev(self) -> None:
+        """Searches for the previous occurrence of the text."""
         self._find_text(direction=-1)
 
     def _find_text(self, direction: int) -> None:
+        """
+        Executes text search logic.
+
+        Args:
+            direction: 1 for forward, -1 for backward.
+        """
         if not self.current_doc:
             return
 
@@ -724,24 +699,17 @@ class ReaderTab(QWidget):
         if not term:
             return
 
-        # Start checking from the next/prev page
         start_idx = self.current_page_index + direction
         count = self.current_doc.page_count
 
-        # Scan all pages once
         for i in range(count):
-            # Wrap around logic
             idx = (start_idx + (i * direction)) % count
-
-            # Note: This is synchronous. For huge docs, we'd move this to a thread later.
             try:
                 text = self.current_doc.get_page_text(idx)
                 if term in text.lower():
                     self.current_page_index = idx
-
                     if not self.continuous_scroll:
                         self.rebuild_layout()
-
                     self.update_view()
                     self.ensure_visible(idx)
                     return
@@ -749,67 +717,57 @@ class ReaderTab(QWidget):
                 continue
 
     def on_page_input_return(self) -> None:
-        """Handles manual page number entry."""
+        """Handles user input in the page number text field."""
         if not self.current_doc:
             return
 
         text = self.txt_page.text().strip()
         if text.isdigit():
             page_num = int(text)
-            # Validate Range (1-based input -> 0-based index)
             if 1 <= page_num <= self.current_doc.page_count:
                 target_idx = page_num - 1
                 if target_idx != self.current_page_index:
                     self.current_page_index = target_idx
-
-                    # Handle layout rebuild if not continuous (to ensure page widget exists)
                     if not self.continuous_scroll:
                         self.rebuild_layout()
-
                     self.update_view()
                     self.ensure_visible(self.current_page_index)
-
-                    # Remove focus from input so arrow keys work for navigation again
                     self.scroll.setFocus()
             else:
-                # Revert to current page if out of bounds
                 self.txt_page.setText(str(self.current_page_index + 1))
         else:
-            # Revert if not a number
             self.txt_page.setText(str(self.current_page_index + 1))
 
-    # --- Scroll & Navigation Logic ---
-
     def defer_scroll_update(self, value: int) -> None:
-        """Fast scroll handler that defers expensive rendering."""
+        """Queues a scroll update event to debounce rapid scrolling."""
         self.txt_page.setText(str(self.current_page_index + 1))
         self.scroll_timer.start()
 
     def real_scroll_handler(self) -> None:
-        """Executed after scroll settles."""
+        """Executes the expensive view update after scrolling has settled."""
         val = self.scroll.verticalScrollBar().value()
         self.on_scroll_changed(val)
 
     def on_scroll_changed(self, value: int) -> None:
-        """Determines current page index based on scroll position."""
+        """
+        Calculates the current page based on scroll position.
+
+        Args:
+            value: The vertical scroll bar value.
+        """
         viewport_center = value + (self.scroll.viewport().height() / 2)
         closest_page = self.current_page_index
         min_dist = float("inf")
 
-        # Heuristic: Scan known widgets to find closest to center
         for idx, widget in self.page_widgets.items():
-            # Fix: mapTo converts the widget's local coordinates to the scroll_content's system
-            # widget.y() alone was insufficient because widgets are nested in row containers
             try:
                 mapped_pos = widget.mapTo(self.scroll_content, QPoint(0, 0))
                 w_center = mapped_pos.y() + (widget.height() / 2)
-
                 dist = abs(w_center - viewport_center)
                 if dist < min_dist:
                     min_dist = dist
                     closest_page = idx
             except RuntimeError:
-                # Widget might be deleted/detached during rapid updates
                 continue
 
         if closest_page != self.current_page_index:
@@ -819,6 +777,7 @@ class ReaderTab(QWidget):
         self.render_visible_pages()
 
     def next_view(self) -> None:
+        """Navigates to the next page or pair of pages."""
         if not self.current_doc:
             return
         step = 2 if self.facing_mode else 1
@@ -831,6 +790,7 @@ class ReaderTab(QWidget):
             self.ensure_visible(self.current_page_index)
 
     def prev_view(self) -> None:
+        """Navigates to the previous page or pair of pages."""
         step = 2 if self.facing_mode else 1
         new_idx = max(0, self.current_page_index - step)
         if new_idx != self.current_page_index:
@@ -841,42 +801,45 @@ class ReaderTab(QWidget):
             self.ensure_visible(self.current_page_index)
 
     def scroll_page(self, direction: int) -> None:
+        """
+        Scrolls the viewport by one page height.
+
+        Args:
+            direction: 1 for down, -1 for up.
+        """
         bar = self.scroll.verticalScrollBar()
         page_step = self.scroll.viewport().height() * 0.9
         bar.setValue(bar.value() + (direction * page_step))
 
     def ensure_visible(self, index: int) -> None:
+        """
+        Ensures the specified page widget is visible in the scroll area.
+        Handles coordinate calculation for virtualized (non-instantiated) widgets.
+        """
         if index in self.page_widgets:
             widget = self.page_widgets[index]
             self.scroll.ensureWidgetVisible(widget, 0, 0)
             return
 
-        if not self._virtual_enabled:
+        if not self._virtual_enabled or not self._cached_base_size:
             return
 
-        # compute approximate Y position using cached page height and virtual offsets
         start, end = self._virtual_range
-        if not self._cached_base_size:
-            return
         _, base_h = self._cached_base_size
         scale = self.calculate_scale()
         page_h = int(base_h * scale) + self.scroll_layout.spacing()
 
-        # pages before the virtual window contribute top spacer height
         top_height = self._top_spacer.height() if self._top_spacer else 0
         idx_offset = index - start
         y_pos = top_height + max(0, idx_offset) * page_h
 
-        # center the target in viewport
         viewport_centre_offset = int(self.scroll.viewport().height() / 2)
         self.scroll.verticalScrollBar().setValue(
             max(0, int(y_pos - viewport_centre_offset))
         )
 
-    # --- Event Handling ---
-
     def event(self, e: QEvent) -> bool:
-        # Native Pinch Gesture Support
+        """Handles generic Qt events, including native gestures."""
         if e.type() == QEvent.Type.NativeGesture:
             if e.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
                 scale_factor = e.value()
@@ -888,6 +851,7 @@ class ReaderTab(QWidget):
         return super().event(e)
 
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
+        """Filters events for child widgets to handle clicks and keypresses."""
         if event.type() == QEvent.Type.KeyPress and source == self.scroll:
             self.keyPressEvent(event)
             return True
@@ -900,6 +864,7 @@ class ReaderTab(QWidget):
         return super().eventFilter(source, event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
+        """Handles mouse wheel events for scrolling and zooming."""
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             delta = event.angleDelta().y()
             viewport_y = event.position().y()
@@ -911,7 +876,6 @@ class ReaderTab(QWidget):
 
             self.on_zoom_changed_internal()
 
-            # Approximate scroll restore logic
             new_scroll = (content_y * factor) - viewport_y
             self.scroll.verticalScrollBar().setValue(int(new_scroll))
             event.accept()
@@ -919,10 +883,10 @@ class ReaderTab(QWidget):
             super().wheelEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Handles keyboard shortcuts for navigation and view controls."""
         key = event.key()
         mod = event.modifiers()
 
-        # Window-level shortcuts
         if key == Qt.Key.Key_Escape:
             if getattr(self, "_reader_fullscreen", False):
                 self.toggle_reader_fullscreen()
@@ -939,17 +903,14 @@ class ReaderTab(QWidget):
             return
 
         if self.view_mode == ViewMode.IMAGE:
-            # Zoom
             if (
                 mod & Qt.KeyboardModifier.ControlModifier
                 and mod & Qt.KeyboardModifier.ShiftModifier
             ):
-                # Ctrl + Shift + Plus/Equal (+/=)
                 if key == Qt.Key.Key_Plus or key == Qt.Key.Key_Equal:
                     self.zoom_step(1.1)
                     event.accept()
                     return
-                # Ctrl + Shift + Minus/Underscore (-/_)
                 if key == Qt.Key.Key_Minus or key == Qt.Key.Key_Underscore:
                     self.zoom_step(0.9)
                     event.accept()
@@ -965,7 +926,6 @@ class ReaderTab(QWidget):
                     event.accept()
                     return
 
-            # Nav
             if key == Qt.Key.Key_Right:
                 self.next_view()
                 event.accept()
@@ -992,7 +952,6 @@ class ReaderTab(QWidget):
                 event.accept()
                 return
 
-            # Toggles
             if key == Qt.Key.Key_N:
                 self.toggle_theme()
                 event.accept()
@@ -1021,46 +980,37 @@ class ReaderTab(QWidget):
         super().keyPressEvent(event)
 
     def resizeEvent(self, event) -> None:
-        """
-        Handles window resizing with debouncing to prevent freeze/deadlock
-        during splitter dragging or rapid resizing.
-        """
-        # Initialize a debounce timer if it doesn't exist
+        """Handles window resizing with debouncing to prevent UI freeze."""
         if not hasattr(self, "_resize_timer"):
             self._resize_timer = QTimer(self)
             self._resize_timer.setSingleShot(True)
-            self._resize_timer.setInterval(150)  # Wait 150ms after last resize
+            self._resize_timer.setInterval(150)
             self._resize_timer.timeout.connect(self._on_resize_timeout)
 
-        # If in a mode that requires re-render, restart the timer
         if self.zoom_mode in [ZoomMode.FIT_WIDTH, ZoomMode.FIT_HEIGHT]:
             self._resize_timer.start()
 
         super().resizeEvent(event)
 
     def _on_resize_timeout(self) -> None:
-        """Executes the expensive render/layout update after resizing stops."""
-        # 1. Clear cache
+        """Executes layout recalculation after resize settles."""
         self.rendered_pages.clear()
-
-        # 2. Re-calculate layout if necessary
         if self.current_doc:
             if not self.continuous_scroll:
                 self.rebuild_layout()
-
-            # 3. Trigger render
             self.update_view()
 
-    # --- Zoom & Theme ---
-
     def on_zoom_selected(self, idx: int) -> None:
+        """Handles zoom selection from the combobox."""
         self.apply_zoom_string(self.combo_zoom.currentText())
 
     def on_zoom_text_entered(self) -> None:
+        """Handles manual zoom text entry."""
         self.apply_zoom_string(self.combo_zoom.lineEdit().text())
         self.scroll.setFocus()
 
     def apply_zoom_string(self, text: str) -> None:
+        """Parses zoom string and applies it."""
         if "Fit Width" in text:
             self.zoom_mode = ZoomMode.FIT_WIDTH
         elif "Fit Height" in text:
@@ -1077,11 +1027,13 @@ class ReaderTab(QWidget):
         self.on_zoom_changed_internal()
 
     def zoom_step(self, factor: float) -> None:
+        """Increments or decrements zoom by a factor."""
         self.manual_scale *= factor
         self.zoom_mode = ZoomMode.MANUAL
         self.on_zoom_changed_internal()
 
     def on_zoom_changed_internal(self) -> None:
+        """Updates internal state and UI after a zoom change."""
         self.settings.setValue("zoomMode", self.zoom_mode.value)
         self.settings.setValue("zoomScale", self.manual_scale)
         self.rendered_pages.clear()
@@ -1089,6 +1041,7 @@ class ReaderTab(QWidget):
         self._sync_zoom_ui()
 
     def _sync_zoom_ui(self) -> None:
+        """Syncs the combobox text with current zoom state."""
         if self.zoom_mode == ZoomMode.FIT_WIDTH:
             self.combo_zoom.setCurrentText("Fit Width")
         elif self.zoom_mode == ZoomMode.FIT_HEIGHT:
@@ -1097,7 +1050,7 @@ class ReaderTab(QWidget):
             self.combo_zoom.setCurrentText(f"{int(self.manual_scale * 100)}%")
 
     def apply_theme(self) -> None:
-        """Applies colors based on Dark/Light mode."""
+        """Applies colors based on the current Dark/Light mode setting."""
         pal = self.palette()
         color = QColor(30, 30, 30) if self.dark_mode else QColor(240, 240, 240)
         pal.setColor(QPalette.ColorRole.Window, color)
@@ -1117,21 +1070,20 @@ class ReaderTab(QWidget):
         """)
 
     def toggle_theme(self) -> None:
+        """Toggles the dark mode state and propagates to parent window if possible."""
         if self.window() and isinstance(self.window(), RiemannWindow):
             main_win = self.window()
             if main_win.dark_mode == self.dark_mode:
                 main_win.toggle_theme()
                 return
 
-        # Local toggle (fallback)
         self.dark_mode = not self.dark_mode
         self.apply_theme()
         self.rendered_pages.clear()
         self.update_view()
 
-    # --- Actions: Annotations, etc. ---
-
     def load_annotations(self) -> None:
+        """Loads annotations from the sidecar JSON file."""
         if not self.current_path:
             return
         path = str(self.current_path) + ".riemann.json"
@@ -1142,16 +1094,19 @@ class ReaderTab(QWidget):
             self.annotations = {}
 
     def save_annotations(self) -> None:
+        """Saves current annotations to disk."""
         if not self.current_path:
             return
         with open(str(self.current_path) + ".riemann.json", "w") as f:
             json.dump(self.annotations, f)
 
     def toggle_annotation_mode(self, checked: bool) -> None:
+        """Toggles the annotation editing mode."""
         self.is_annotating = checked
         self.btn_annotate.setChecked(checked)
 
     def handle_annotation_click(self, label: QLabel, event: QMouseEvent) -> None:
+        """Handles click events on page labels for annotation creation or viewing."""
         page_idx = label.property("pageIndex")
         click_x = event.pos().x()
         click_y = event.pos().y()
@@ -1178,6 +1133,7 @@ class ReaderTab(QWidget):
     def show_annotation_popup(
         self, anno_data: Dict, page_idx: int, anno_index: int
     ) -> None:
+        """Displays a dialog to view or edit an existing annotation."""
         text = anno_data.get("text", "")
         new_text, ok = QInputDialog.getText(
             self, "View Note", "Content (Clear text to delete):", text=text
@@ -1192,6 +1148,7 @@ class ReaderTab(QWidget):
             self.refresh_page_render(page_idx)
 
     def create_new_annotation(self, page_idx: int, rel_x: float, rel_y: float) -> None:
+        """Creates a new annotation at the specified relative coordinates."""
         text, ok = QInputDialog.getText(self, "Add Note", "Note content:")
         if ok and text:
             if str(page_idx) not in self.annotations:
@@ -1203,29 +1160,25 @@ class ReaderTab(QWidget):
             self.refresh_page_render(page_idx)
 
     def refresh_page_render(self, page_idx: int) -> None:
+        """Forces a re-render of a specific page to show/hide annotations."""
         if page_idx in self.rendered_pages:
             self.rendered_pages.remove(page_idx)
         self.render_visible_pages()
 
     def perform_ocr_current_page(self) -> None:
-        """Triggers Rust backend OCR and shows result."""
+        """Performs OCR on the current page and displays the text."""
         if not self.current_doc:
             return
 
-        # 1. Visual feedback (change cursor)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            # 2. Call Rust (scale=2.0 for better recognition)
             text = self.current_doc.ocr_page(self.current_page_index, 2.0)
-
             QApplication.restoreOverrideCursor()
 
             if not text.strip():
                 text = "[No text detected by Tesseract]"
 
-            # 3. Show Result in Dialog (reuses QInputDialog import)
-            # This allows the user to copy/paste the text immediately
-            text_result, ok = QInputDialog.getMultiLineText(
+            QInputDialog.getMultiLineText(
                 self, "OCR Result", "Extracted Text (Copy to clipboard):", text
             )
 
@@ -1233,9 +1186,8 @@ class ReaderTab(QWidget):
             QApplication.restoreOverrideCursor()
             print(f"OCR Failed: {e}")
 
-    # --- Feature Toggles ---
-
     def toggle_view_mode(self) -> None:
+        """Switches between Image mode and Text Reflow mode."""
         self.view_mode = (
             ViewMode.REFLOW if self.view_mode == ViewMode.IMAGE else ViewMode.IMAGE
         )
@@ -1244,6 +1196,7 @@ class ReaderTab(QWidget):
         self.update_view()
 
     def toggle_facing_mode(self) -> None:
+        """Toggles 2-up facing pages mode."""
         self.facing_mode = not self.facing_mode
         self.settings.setValue("facingMode", self.facing_mode)
         self.btn_facing.setChecked(self.facing_mode)
@@ -1251,6 +1204,7 @@ class ReaderTab(QWidget):
         self.update_view()
 
     def toggle_scroll_mode(self) -> None:
+        """Toggles between single-page snapping and continuous scrolling."""
         self.continuous_scroll = not self.continuous_scroll
         self.settings.setValue("continuousScrollMode", self.continuous_scroll)
         self.btn_scroll_mode.setChecked(self.continuous_scroll)
@@ -1258,87 +1212,84 @@ class ReaderTab(QWidget):
         self.update_view()
 
     def toggle_reader_fullscreen(self) -> None:
+        """Toggles the window-level fullscreen mode."""
         if self.window() and isinstance(self.window(), RiemannWindow):
             self.window().toggle_reader_fullscreen()
 
     def open_pdf_dialog(self) -> None:
+        """Opens a file dialog to load a new PDF into this tab."""
         path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
         if path:
             self.load_document(path)
 
 
 class DraggableTabWidget(QTabWidget):
+    """A QTabWidget subclass that allows reordering and dragging tabs."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self.setMovable(True)  # Allows internal reordering
+        self.setMovable(True)
         self.setTabBar(DraggableTabBar(self))
+
+    def dragEnterEvent(self, e):
+        """Accepts drag events that contain text (file paths)."""
+        if e.mimeData().hasText():
+            e.accept()
+        else:
+            e.ignore()
+
+    def dropEvent(self, event):
+        """Handles dropping a file path to create a new tab."""
+        file_path = event.mimeData().text()
+        if os.path.exists(file_path):
+            reader = ReaderTab()
+            reader.load_document(file_path)
+            self.addTab(reader, os.path.basename(file_path))
+            self.setCurrentWidget(reader)
+            event.acceptProposedAction()
 
 
 class DraggableTabBar(QTabBar):
+    """A QTabBar that supports dragging tabs out of the window."""
+
     def mouseMoveEvent(self, event):
-        # 1. Detect drag initiation
+        """Initiates a drag operation when a tab is dragged."""
         if event.buttons() != Qt.MouseButton.LeftButton:
             return
 
         global_pos = event.globalPosition().toPoint()
         pos_in_widget = self.mapFromGlobal(global_pos)
 
-        # 2. Get the tab being dragged
         tab_index = self.tabAt(pos_in_widget)
         if tab_index < 0:
             return
 
-        # 3. Get the "ReaderTab" widget inside
         widget = self.parent().widget(tab_index)
         if not hasattr(widget, "current_path") or not widget.current_path:
-            return  # Can't drag a new/empty tab
+            return
 
-        # 4. Create Drag Object with File Path
         mime = QMimeData()
         mime.setText(widget.current_path)
 
         drag = QDrag(self)
         drag.setMimeData(mime)
 
-        # Optional: Add a screenshot of the tab as the drag pixmap
         pixmap = widget.grab()
         drag.setPixmap(pixmap.scaled(200, 150, Qt.AspectRatioMode.KeepAspectRatio))
         drag.setHotSpot(QPoint(100, 75))
 
-        # 5. Execute Drag
-        # If the drop action was "Move", we close the original tab
         if drag.exec(Qt.DropAction.MoveAction) == Qt.DropAction.MoveAction:
             self.parent().removeTab(tab_index)
 
         super().mouseMoveEvent(event)
 
 
-# Monkey-patch the drop event on the TabWidget itself
-def tab_drop_event(self, event):
-    file_path = event.mimeData().text()
-    if os.path.exists(file_path):
-        # Logic to "Move" the tab here
-        # We need to access the main window to call "new_tab" usually,
-        # or we can just instantiate the ReaderTab directly.
-
-        # Assuming the parent's logic for adding a tab:
-        reader = ReaderTab()
-        reader.load_document(file_path)
-        self.addTab(reader, os.path.basename(file_path))
-        self.setCurrentWidget(reader)
-
-        event.acceptProposedAction()
-
-
-DraggableTabWidget.dragEnterEvent = (
-    lambda _, e: e.accept() if e.mimeData().hasText() else e.ignore()
-)
-DraggableTabWidget.dropEvent = tab_drop_event
-
-
 class BrowserTab(QWidget):
-    """A full-featured web browser tab with Dark Mode support."""
+    """
+    A full-featured web browser tab using QWebEngineView.
+    Includes navigation controls and dark mode support.
+    """
 
     def __init__(
         self,
@@ -1346,21 +1297,26 @@ class BrowserTab(QWidget):
         parent=None,
         dark_mode: bool = True,
     ):
-        super().__init__(parent)
-        self.dark_mode = dark_mode  # Store state
+        """
+        Initialize the BrowserTab.
 
-        # Layout
+        Args:
+            start_url: The initial URL to load.
+            parent: Parent widget.
+            dark_mode: Whether to start in dark mode.
+        """
+        super().__init__(parent)
+        self.dark_mode = dark_mode
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # --- Toolbar ---
         self.toolbar = QWidget()
         self.toolbar.setFixedHeight(40)
         tb_layout = QHBoxLayout(self.toolbar)
         tb_layout.setContentsMargins(5, 0, 5, 0)
 
-        # Navigation Buttons
         self.btn_back = QPushButton("◀")
         self.btn_back.setFixedWidth(30)
         self.btn_fwd = QPushButton("▶")
@@ -1368,7 +1324,6 @@ class BrowserTab(QWidget):
         self.btn_reload = QPushButton("↻")
         self.btn_reload.setFixedWidth(30)
 
-        # --- Search Bar (Hidden by Default) ---
         self.search_bar = QWidget()
         self.search_bar.setFixedHeight(40)
         self.search_bar.setVisible(False)
@@ -1394,7 +1349,6 @@ class BrowserTab(QWidget):
 
         layout.addWidget(self.search_bar)
 
-        # Address Bar
         self.txt_url = QLineEdit()
         self.txt_url.setPlaceholderText("Enter URL or Search...")
         self.txt_url.returnPressed.connect(self.navigate_to_url)
@@ -1406,17 +1360,14 @@ class BrowserTab(QWidget):
 
         layout.addWidget(self.toolbar)
 
-        # --- Progress Bar ---
         self.progress = QProgressBar()
         self.progress.setFixedHeight(2)
         self.progress.setTextVisible(False)
         layout.addWidget(self.progress)
 
-        # --- Web View ---
         self.web = QWebEngineView()
         layout.addWidget(self.web)
 
-        # --- Connections ---
         self.btn_back.clicked.connect(self.web.back)
         self.btn_fwd.clicked.connect(self.web.forward)
         self.btn_reload.clicked.connect(self.web.reload)
@@ -1426,12 +1377,10 @@ class BrowserTab(QWidget):
         self.web.loadFinished.connect(lambda: self.progress.setValue(0))
         self.web.titleChanged.connect(self._update_tab_title)
 
-        # Shortcuts (Context-specific)
         self.shortcut_find = QShortcut(QKeySequence("Ctrl+F"), self)
         self.shortcut_find.activated.connect(self.toggle_search)
 
-        # Zoom Shortcuts
-        self.shortcut_zoom_in = QShortcut(QKeySequence("Ctrl+="), self)  # + is often =
+        self.shortcut_zoom_in = QShortcut(QKeySequence("Ctrl+="), self)
         self.shortcut_zoom_in.activated.connect(lambda: self.modify_zoom(0.1))
 
         self.shortcut_zoom_in_alt = QShortcut(QKeySequence("Ctrl++"), self)
@@ -1443,39 +1392,28 @@ class BrowserTab(QWidget):
         self.shortcut_zoom_reset = QShortcut(QKeySequence("Ctrl+0"), self)
         self.shortcut_zoom_reset.activated.connect(lambda: self.web.setZoomFactor(1.0))
 
-        # Initial Theme Application
         self.apply_theme()
-
-        # Initial Load
         self.web.load(QUrl(start_url))
 
     def apply_theme(self):
-        """Updates styles for Dark/Light mode, including the Web Content."""
+        """Applies dark mode styles to the UI and WebEngine."""
         settings = self.web.page().settings()
 
         if self.dark_mode:
-            # UI Colors
             bg = "#333"
             fg = "#ddd"
             inp_bg = "#444"
             border = "#555"
-
-            # Force Chromium to render pages in Dark Mode
             settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, True)
-            # Optional: Force dark background to prevent white flashes while loading
             self.web.page().setBackgroundColor(QColor("#333"))
         else:
-            # UI Colors
             bg = "#f0f0f0"
             fg = "#222"
             inp_bg = "#fff"
             border = "#ccc"
-
-            # Disable Chromium Dark Mode
             settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, False)
             self.web.page().setBackgroundColor(QColor("#fff"))
 
-        # Apply UI Styles (Toolbar, etc.)
         style = f"""
             QWidget {{ background: {bg}; color: {fg}; }}
             QLineEdit {{ background: {inp_bg}; border: 1px solid {border}; border-radius: 4px; padding: 4px; }}
@@ -1491,28 +1429,30 @@ class BrowserTab(QWidget):
         )
 
     def modify_zoom(self, delta):
+        """Adjusts the browser zoom level."""
         new_zoom = self.web.zoomFactor() + delta
         self.web.setZoomFactor(max(0.1, min(new_zoom, 5.0)))
 
     def toggle_search(self):
+        """Toggles the find-in-page bar."""
         visible = not self.search_bar.isVisible()
         self.search_bar.setVisible(visible)
         if visible:
             self.txt_find.setFocus()
             self.txt_find.selectAll()
         else:
-            self.web.findText("")  # Clear highlighting
+            self.web.findText("")
 
     def find_next(self):
+        """Finds next occurrence of text in page."""
         self.web.findText(self.txt_find.text())
 
     def find_prev(self):
-        # QWebEngineView.findText defaults to forward.
-        # To find backwards, we need QWebEnginePage.FindFlag.FindBackward
-        # But for simplicity in PySide6 wrappers:
+        """Finds previous occurrence of text in page."""
         self.web.findText(self.txt_find.text(), QWebEngineView.FindFlag.FindBackward)
 
     def navigate_to_url(self):
+        """Loads the URL or search query entered in the address bar."""
         text = self.txt_url.text().strip()
         if not text:
             return
@@ -1525,10 +1465,12 @@ class BrowserTab(QWidget):
         self.web.load(url)
 
     def _update_url_bar(self, url: QUrl):
+        """Updates URL bar text when navigation occurs."""
         self.txt_url.setText(url.toString())
         self.txt_url.setCursorPosition(0)
 
     def _update_tab_title(self, title: str):
+        """Updates the parent tab title when the page title changes."""
         parent = self.parent()
         while parent:
             if isinstance(parent, QTabWidget):
@@ -1544,10 +1486,13 @@ class BrowserTab(QWidget):
 class RiemannWindow(QMainWindow):
     """
     The Main Window Manager.
-    Handles global application state, window chrome, and tab management.
+
+    Handles global application state, window chrome, shortcuts, and
+    orchestrates the split-view tab management system.
     """
 
     def __init__(self):
+        """Initialize the main window, UI, and session."""
         super().__init__()
         self.setWindowTitle("Riemann Reader")
         self.resize(1200, 900)
@@ -1558,7 +1503,6 @@ class RiemannWindow(QMainWindow):
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(self.splitter)
 
-        # Tab Groups
         self.tabs_main = DraggableTabWidget()
         self.tabs_main.setTabsClosable(True)
         self.tabs_main.tabCloseRequested.connect(self.close_tab)
@@ -1567,120 +1511,102 @@ class RiemannWindow(QMainWindow):
         self.tabs_side = DraggableTabWidget()
         self.tabs_side.setTabsClosable(True)
         self.tabs_side.tabCloseRequested.connect(self.close_side_tab)
-        self.tabs_side.hide()  # Explicitly hide initially
+        self.tabs_side.hide()
         self.splitter.addWidget(self.tabs_side)
 
         self.setup_menu()
-
-        # --- EXPLICIT SHORTCUTS ---
-        # We use ApplicationShortcut to ensure they work even if focus is inside
-        # a WebEngineView or if the menu actions are misconfigured.
 
         self.shortcut_close = QShortcut(QKeySequence("Ctrl+W"), self)
         self.shortcut_close.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.shortcut_close.activated.connect(self.close_active_tab)
 
-        self.shortcut_quit = QShortcut(QKeySequence("Ctrl+Q"), self)
-        self.shortcut_quit.setContext(Qt.ShortcutContext.ApplicationShortcut)
-        self.shortcut_quit.activated.connect(self.close)
-
-        self.shortcut_browser = QShortcut(QKeySequence("Ctrl+B"), self)
-        self.shortcut_browser.setContext(Qt.ShortcutContext.ApplicationShortcut)
-        self.shortcut_browser.activated.connect(lambda: self.new_browser_tab())
-
         self.shortcut_split = QShortcut(QKeySequence("Ctrl+\\"), self)
         self.shortcut_split.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.shortcut_split.activated.connect(self.toggle_split_view)
 
-        # --- RESTORE SESSION ---
+        self._restore_session()
 
-        # 1. Restore Window Geometry
+    def _restore_session(self):
+        """Restores window geometry and open tabs from settings."""
         if self.settings.value("window/geometry"):
             self.restoreGeometry(self.settings.value("window/geometry"))
 
-        # 2. Helper to restore items
-        def restore_items(items, target_widget):
-            if isinstance(items, str):
-                items = [items]
+        self._restore_tabs_from_settings("session/main_tabs", self.tabs_main)
+        self._restore_tabs_from_settings("session/side_tabs", self.tabs_side)
 
-            for item in items:
-                # Case A: Legacy String Path
-                if isinstance(item, str) and os.path.exists(item):
-                    if target_widget == self.tabs_side:
-                        reader = ReaderTab()
-                        reader.load_document(item, restore_state=True)
-                        target_widget.addTab(reader, os.path.basename(item))
-                    else:
-                        self.new_tab(item, restore_state=True)
-
-                # Case B: New Dictionary Format
-                elif isinstance(item, dict):
-                    i_type = item.get("type")
-                    data = item.get("data")
-
-                    if i_type == "pdf" and data and os.path.exists(data):
-                        if target_widget == self.tabs_side:
-                            reader = ReaderTab()
-                            reader.load_document(data, restore_state=True)
-                            target_widget.addTab(reader, os.path.basename(data))
-                        else:
-                            self.new_tab(data, restore_state=True)
-                    elif i_type == "web" and data:
-                        browser = BrowserTab(data, dark_mode=self.dark_mode)
-                        target_widget.addTab(browser, "Loading...")
-
-        # 3. Execute Restoration
-        main_items = self.settings.value("session/main_tabs", [], type=list)
-        restore_items(main_items, self.tabs_main)
-
-        side_items = self.settings.value("session/side_tabs", [], type=list)
-        restore_items(side_items, self.tabs_side)
-
-        # 4. Strict Visibility Logic
-        # Only show side tabs if populated. This prevents the "Ghost Tab".
         if self.tabs_side.count() > 0:
             self.tabs_side.show()
-            # Only restore splitter state if side tabs are actually visible
             if self.settings.value("splitter/state"):
                 self.splitter.restoreState(self.settings.value("splitter/state"))
         else:
             self.tabs_side.hide()
 
-        # 5. Fallback
         if self.tabs_main.count() == 0:
             self.new_tab()
 
+    def _restore_tabs_from_settings(self, key: str, target_widget: QTabWidget) -> None:
+        """
+        Parses saved tab data and recreates tabs in the target widget.
+
+        Args:
+            key: The QSettings key to read.
+            target_widget: The tab widget to populate.
+        """
+        items = self.settings.value(key, [], type=list)
+        if isinstance(items, str):
+            items = [items]
+
+        for item in items:
+            if isinstance(item, str) and os.path.exists(item):
+                self._add_pdf_tab(item, target_widget, restore_state=True)
+
+            elif isinstance(item, dict):
+                i_type = item.get("type")
+                data = item.get("data")
+
+                if i_type == "pdf" and data and os.path.exists(data):
+                    self._add_pdf_tab(data, target_widget, restore_state=True)
+                elif i_type == "web" and data:
+                    self._add_browser_tab(data, target_widget)
+
+    def _add_pdf_tab(
+        self, path: str, target_widget: QTabWidget, restore_state: bool = False
+    ) -> None:
+        """Creates and adds a ReaderTab to the specified widget."""
+        reader = ReaderTab()
+        reader.load_document(path, restore_state=restore_state)
+        target_widget.addTab(reader, os.path.basename(path))
+
+    def _add_browser_tab(self, url: str, target_widget: QTabWidget) -> None:
+        """Creates and adds a BrowserTab to the specified widget."""
+        browser = BrowserTab(url, dark_mode=self.dark_mode)
+        target_widget.addTab(browser, "Loading...")
+
     def setup_menu(self) -> None:
+        """Configures the application menu bar."""
         menubar = self.menuBar()
         file_menu = menubar.addMenu("File")
 
-        # Smart Open
         open_action = file_menu.addAction("Open PDF")
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self.open_pdf_smart)
 
-        # Re-assign Ctrl+T to also trigger Smart Open (Standard Browser Behavior)
-        # Or you can assign Ctrl+T to new_browser_tab if you prefer.
-        # Here we map it to Open PDF since that's the primary app function.
         new_tab_action = file_menu.addAction("Open New PDF Tab")
         new_tab_action.setShortcut("Ctrl+T")
         new_tab_action.triggered.connect(self.open_pdf_smart)
 
         file_menu.addSeparator()
 
-        # Browser
-        # browser_action = file_menu.addAction("New Browser Tab")
-        # browser_action.setShortcut("Ctrl+B")
-        # browser_action.triggered.connect(lambda: self.new_browser_tab())
+        browser_action = file_menu.addAction("New Browser Tab")
+        browser_action.setShortcut("Ctrl+B")
+        browser_action.triggered.connect(lambda: self.new_browser_tab())
 
-        # file_menu.addSeparator()
+        file_menu.addSeparator()
 
-        # # Quit
-        # exit_action = file_menu.addAction("Exit")
-        # exit_action.setShortcut("Ctrl+Q")
-        # exit_action.triggered.connect(self.close)
+        exit_action = file_menu.addAction("Exit")
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
 
-        # View Menu
         view_menu = menubar.addMenu("View")
 
         theme_action = view_menu.addAction("Toggle Theme")
@@ -1688,73 +1614,45 @@ class RiemannWindow(QMainWindow):
         theme_action.triggered.connect(self.toggle_theme)
 
     def new_tab(self, path: Optional[str] = None, restore_state: bool = False) -> None:
-        reader = ReaderTab()
-        title = "New Tab"
-
+        """Creates a new PDF tab in the main tab widget."""
         if path:
-            reader.load_document(path, restore_state=restore_state)
-            title = os.path.basename(path)
-
-        self.tabs_main.addTab(reader, title)
-        self.tabs_main.setCurrentWidget(reader)
+            self._add_pdf_tab(path, self.tabs_main, restore_state)
+        else:
+            reader = ReaderTab()
+            self.tabs_main.addTab(reader, "New Tab")
+            self.tabs_main.setCurrentWidget(reader)
 
     def new_browser_tab(self, url="https://www.google.com"):
-        # Pass self.dark_mode to the constructor
-        browser = BrowserTab(url, dark_mode=self.dark_mode)
-
-        # Add to whichever tab widget is currently active (Main or Side)
-        # (Re-using the focus logic from close_active_tab would be ideal here,
-        # but defaulting to Main is fine for now)
+        """Creates a new browser tab in the currently active group."""
         target = self.tabs_main
         if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
             target = self.tabs_side
 
-        idx = target.addTab(browser, "New Tab")
-        target.setCurrentIndex(idx)
-
-        # Focus the URL bar immediately
-        browser.txt_url.setFocus()
-        browser.txt_url.selectAll()
-
-    def open_pdf_dialog(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
-        if path:
-            current = self.tabs_main.currentWidget()
-            if isinstance(current, ReaderTab) and current.current_path is None:
-                current.load_document(path)
-                self.tabs_main.setTabText(
-                    self.tabs_main.currentIndex(), os.path.basename(path)
-                )
-            else:
-                self.new_tab(path)
+        self._add_browser_tab(url, target)
+        new_tab = target.widget(target.count() - 1)
+        target.setCurrentWidget(new_tab)
+        new_tab.txt_url.setFocus()
+        new_tab.txt_url.selectAll()
 
     def open_pdf_smart(self):
         """
-        Opens a PDF. Reuses the current tab if it's empty;
-        otherwise opens a new tab.
+        Opens a PDF. Reuses the current tab if empty; otherwise opens a new one.
         """
         path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
         if not path:
             return
 
-        # Check if we can reuse the current tab
         current_widget = self.tabs_main.currentWidget()
-
-        # We reuse the tab ONLY if:
-        # 1. It is a ReaderTab (not a Browser)
-        # 2. It has no document loaded yet
         is_empty_reader = (
             isinstance(current_widget, ReaderTab) and not current_widget.current_path
         )
 
         if is_empty_reader:
-            # Reuse existing
             current_widget.load_document(path)
             self.tabs_main.setTabText(
                 self.tabs_main.currentIndex(), os.path.basename(path)
             )
         else:
-            # Create new
             self.new_tab(path)
 
     def toggle_split_view(self) -> None:
@@ -1771,12 +1669,14 @@ class RiemannWindow(QMainWindow):
             self.tabs_side.setCurrentWidget(current)
 
     def close_tab(self, index: int) -> None:
+        """Closes a tab in the main group."""
         widget = self.tabs_main.widget(index)
         if widget:
             widget.deleteLater()
         self.tabs_main.removeTab(index)
 
     def close_side_tab(self, index: int) -> None:
+        """Closes a tab in the side group and hides the splitter if empty."""
         widget = self.tabs_side.widget(index)
         if widget:
             widget.deleteLater()
@@ -1785,7 +1685,8 @@ class RiemannWindow(QMainWindow):
             self.tabs_side.hide()
 
     def closeEvent(self, event):
-        # Helper to get all paths from a tab widget
+        """Saves session state before closing."""
+
         def get_open_files(tab_widget):
             items = []
             for i in range(tab_widget.count()):
@@ -1796,27 +1697,15 @@ class RiemannWindow(QMainWindow):
                     items.append({"type": "web", "data": widget.web.url().toString()})
             return items
 
-        # Save Main Tabs
-        main_files = get_open_files(self.tabs_main)
-        self.settings.setValue("session/main_tabs", main_files)
-
-        # Save Side Tabs
-        side_files = get_open_files(self.tabs_side)
-        self.settings.setValue("session/side_tabs", side_files)
-
-        # Save Geometry (Window size/position)
+        self.settings.setValue("session/main_tabs", get_open_files(self.tabs_main))
+        self.settings.setValue("session/side_tabs", get_open_files(self.tabs_side))
         self.settings.setValue("window/geometry", self.saveGeometry())
-        self.settings.setValue(
-            "window/state", self.saveState()
-        )  # Saves splitter position!
+        self.settings.setValue("window/state", self.saveState())
 
         super().closeEvent(event)
 
     def toggle_reader_fullscreen(self) -> None:
-        """
-        Toggles 'Zen Mode' reading.
-        Hides OS chrome, tab bars, and toolbars for an immersive experience.
-        """
+        """Toggles 'Zen Mode' reading, hiding UI chrome."""
         if not getattr(self, "_reader_fullscreen", False):
             self._reader_fullscreen = True
             self._was_maximized = self.isMaximized()
@@ -1841,6 +1730,7 @@ class RiemannWindow(QMainWindow):
                 self.showNormal()
 
     def _set_tabs_toolbar_visible(self, visible: bool) -> None:
+        """Helper to hide/show toolbars in all tabs."""
         for i in range(self.tabs_main.count()):
             w = self.tabs_main.widget(i)
             if isinstance(w, ReaderTab):
@@ -1851,18 +1741,16 @@ class RiemannWindow(QMainWindow):
                 w.toolbar.setVisible(visible)
 
     def toggle_theme(self) -> None:
+        """Globally toggles the application theme."""
         self.dark_mode = not self.dark_mode
         self.settings.setValue("darkMode", self.dark_mode)
 
         def update_tab(tab: QWidget):
-            # Handle PDF Reader
             if isinstance(tab, ReaderTab):
                 tab.dark_mode = self.dark_mode
                 tab.apply_theme()
                 tab.rendered_pages.clear()
                 tab.update_view()
-
-            # Handle Web Browser (NEW)
             elif isinstance(tab, BrowserTab):
                 tab.dark_mode = self.dark_mode
                 tab.apply_theme()
@@ -1873,6 +1761,7 @@ class RiemannWindow(QMainWindow):
             update_tab(self.tabs_side.widget(i))
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Global key handlers."""
         if event.key() == Qt.Key.Key_Escape:
             if getattr(self, "_reader_fullscreen", False):
                 self.toggle_reader_fullscreen()
@@ -1887,12 +1776,11 @@ class RiemannWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def close_active_tab(self):
-        # 1. Determine which widget has focus (Main or Side)
+        """Intelligently closes the currently active tab based on focus."""
         focus_widget = QApplication.focusWidget()
-
-        # Traverse up the widget tree to find if we are inside tabs_main or tabs_side
         target_tabs = None
         curr = focus_widget
+
         while curr:
             if curr == self.tabs_main:
                 target_tabs = self.tabs_main
@@ -1902,18 +1790,12 @@ class RiemannWindow(QMainWindow):
                 break
             curr = curr.parent()
 
-        # 2. Fallback: If focus is ambiguous (e.g. on the window frame),
-        # default to Side if it's open, otherwise Main.
         if target_tabs is None:
             if self.tabs_side.isVisible() and self.tabs_side.count() > 0:
-                # Optional: Check if side tabs actually have focus context,
-                # otherwise default to main.
-                # Simplest behavior: Close Main unless Side is explicitly focused.
                 target_tabs = self.tabs_main
             else:
                 target_tabs = self.tabs_main
 
-        # 3. Close the current tab in the identified group
         if target_tabs:
             idx = target_tabs.currentIndex()
             if idx != -1:

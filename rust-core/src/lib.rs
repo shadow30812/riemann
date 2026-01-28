@@ -5,13 +5,12 @@ use pyo3::types::PyBytes;
 use riemann_ocr_worker::OcrEngine;
 use std::sync::Mutex;
 
-// --- Thread Safety Wrappers ---
-/// Wrapper to make Pdfium thread-safe (Send + Sync).
+/// Wrapper to ensure Pdfium is treated as thread-safe (Send + Sync) for PyO3.
 struct PdfiumWrapper(Pdfium);
 unsafe impl Send for PdfiumWrapper {}
 unsafe impl Sync for PdfiumWrapper {}
 
-/// Wrapper to make PdfDocument thread-safe (Send + Sync).
+/// Wrapper to ensure PdfDocument is treated as thread-safe (Send + Sync) for PyO3.
 struct DocumentWrapper(PdfDocument<'static>);
 unsafe impl Send for DocumentWrapper {}
 unsafe impl Sync for DocumentWrapper {}
@@ -19,6 +18,9 @@ unsafe impl Sync for DocumentWrapper {}
 static PDFIUM: OnceCell<PdfiumWrapper> = OnceCell::new();
 
 /// Initializes and retrieves the static Pdfium instance.
+///
+/// Attempts to bind to the system library first, falling back to a local
+/// binary if necessary. Panics if the library cannot be loaded.
 fn get_pdfium() -> &'static Pdfium {
     &PDFIUM
         .get_or_init(|| {
@@ -32,7 +34,23 @@ fn get_pdfium() -> &'static Pdfium {
         .0
 }
 
-/// Represents the result of a page render operation.
+/// Helper function to generate a bitmap from a specific page at a given scale.
+///
+/// Encapsulates the configuration logic shared between standard rendering and OCR.
+fn generate_bitmap<'a>(page: &'a PdfPage<'a>, scale: f32) -> PyResult<PdfBitmap<'a>> {
+    let width = (page.width().value * scale) as i32;
+    let height = (page.height().value * scale) as i32;
+
+    let render_config = PdfRenderConfig::new()
+        .set_target_width(width)
+        .set_target_height(height)
+        .rotate_if_landscape(PdfPageRenderRotation::None, true);
+
+    page.render_with_config(&render_config)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+}
+
+/// Represents the result of a page render operation passed back to Python.
 #[pyclass]
 struct RenderResult {
     #[pyo3(get)]
@@ -44,6 +62,9 @@ struct RenderResult {
 }
 
 /// A thread-safe wrapper around a PDF document.
+///
+/// Manages the underlying Pdfium document state and provides methods for
+/// rendering, text extraction, and OCR.
 #[pyclass]
 struct RiemannDocument {
     inner: Mutex<DocumentWrapper>,
@@ -59,10 +80,10 @@ impl RiemannDocument {
     ///     py (Python): The Python GIL token.
     ///     page_index (u16): The index of the page to render.
     ///     scale (f32): The zoom scale factor.
-    ///     dark_mode_int (u8): 1 for dark mode (invert colors), 0 for standard.
+    ///     dark_mode_int (u8): 1 to invert colors for dark mode, 0 for standard.
     ///
     /// Returns:
-    ///     RenderResult: Object containing width, height, and raw RGBA bytes.
+    ///     RenderResult: Object containing width, height, and raw BGRA bytes.
     fn render_page(
         &self,
         py: Python,
@@ -79,28 +100,14 @@ impl RiemannDocument {
             .get(page_index)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
 
-        let width = (page.width().value * scale) as i32;
-        let height = (page.height().value * scale) as i32;
-
-        let render_config = PdfRenderConfig::new()
-            .set_target_width(width)
-            .set_target_height(height)
-            .rotate_if_landscape(PdfPageRenderRotation::None, true);
-
-        let bitmap = page
-            .render_with_config(&render_config)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-
+        let bitmap = generate_bitmap(&page, scale)?;
         let mut buffer = bitmap.as_raw_bytes().to_vec();
 
-        // Idiomatic color inversion for Dark Mode
         if dark_mode {
-            // Pdfium typically renders BGRA. We invert B, G, R, but keep Alpha.
             buffer.chunks_exact_mut(4).for_each(|pixel| {
                 pixel[0] = 255 - pixel[0]; // Blue
                 pixel[1] = 255 - pixel[1]; // Green
                 pixel[2] = 255 - pixel[2]; // Red
-                                           // pixel[3] is Alpha, leave it alone
             });
         }
 
@@ -119,12 +126,11 @@ impl RiemannDocument {
     ///     page_index (u16): The index of the page.
     ///
     /// Returns:
-    ///     String: The extracted text content.
+    ///     String: The extracted text content, or an empty string if bounds are exceeded.
     fn get_page_text(&self, page_index: u16) -> PyResult<String> {
         let doc_guard = self.inner.lock().unwrap();
         let pages = doc_guard.0.pages();
 
-        // Robust bounds check preventing u16 vs usize mismatch
         if (page_index as usize) >= (pages.len() as usize) {
             return Ok(String::new());
         }
@@ -137,7 +143,6 @@ impl RiemannDocument {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Text Access Error: {}", e))
         })?;
 
-        // Guard against empty buffers (FPDF segfault prevention)
         if text_accessor.is_empty() {
             return Ok(String::new());
         }
@@ -162,23 +167,9 @@ impl RiemannDocument {
             .get(page_index)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
 
-        // Render purely for OCR (no PyBytes needed)
-        let width = (page.width().value * scale) as i32;
-        let height = (page.height().value * scale) as i32;
-
-        let render_config = PdfRenderConfig::new()
-            .set_target_width(width)
-            .set_target_height(height)
-            .rotate_if_landscape(PdfPageRenderRotation::None, true);
-
-        let bitmap = page
-            .render_with_config(&render_config)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-
+        let bitmap = generate_bitmap(&page, scale)?;
         let mut buffer = bitmap.as_raw_bytes().to_vec();
 
-        // Fix Color Format: Pdfium is BGRA, image crate expects RGBA.
-        // We must swap B and R channels so Tesseract gets the correct grayscale luminosity.
         buffer.chunks_exact_mut(4).for_each(|pixel| {
             let blue = pixel[0];
             let red = pixel[2];
@@ -186,7 +177,6 @@ impl RiemannDocument {
             pixel[2] = blue;
         });
 
-        // Invoke the Worker
         let engine = OcrEngine::new();
         let text = engine
             .recognize_text(bitmap.width() as u32, bitmap.height() as u32, &buffer)

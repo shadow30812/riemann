@@ -3,27 +3,49 @@ use image::{ImageBuffer, Rgba};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+/// A worker struct for handling Optical Character Recognition (OCR) tasks.
+///
+/// Wraps the external `tesseract` binary process to perform text extraction
+/// on raw image data.
 pub struct OcrEngine;
 
+impl Default for OcrEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OcrEngine {
+    /// Creates a new instance of the OCR engine.
     pub fn new() -> Self {
         OcrEngine
     }
 
-    /// Takes raw RGBA pixels (from PDFium), encodes to PNG, and pipes to Tesseract
+    /// Recognizes text from raw pixel data.
+    ///
+    /// This function performs the following pipeline:
+    /// 1. Wraps raw RGBA bytes into an image buffer.
+    /// 2. Encodes the buffer to PNG format in memory.
+    /// 3. Pipes the PNG data to a spawned `tesseract` process via stdin.
+    /// 4. Captures and returns the text output from stdout.
+    ///
+    /// # Arguments
+    /// * `width` - Image width in pixels.
+    /// * `height` - Image height in pixels.
+    /// * `data` - Raw slice of RGBA pixel data.
+    ///
+    /// # Returns
+    /// A `Result` containing the extracted String or an error if the process fails.
     pub fn recognize_text(&self, width: u32, height: u32, data: &[u8]) -> Result<String> {
-        // 1. Create image buffer
         let buffer: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(width, height, data)
-            .context("Failed to create image buffer for OCR")?;
+            .context("Failed to create image buffer from raw pixel data")?;
 
-        // 2. Encode to PNG in memory to send to Tesseract
         let mut png_data = Vec::new();
         let encoder = image::codecs::png::PngEncoder::new(&mut png_data);
         buffer
             .write_with_encoder(encoder)
-            .context("Failed to encode PNG for OCR")?;
+            .context("Failed to encode in-memory PNG for OCR processing")?;
 
-        // 3. Spawn Tesseract process (stdin -> stdout)
         let mut child = Command::new("tesseract")
             .arg("stdin")
             .arg("stdout")
@@ -33,23 +55,21 @@ impl OcrEngine {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context("Tesseract process failed to start. Ensure 'tesseract-ocr' is installed.")?;
+            .context("Tesseract process failed to start. Please ensure 'tesseract-ocr' is installed and in your PATH.")?;
 
-        // 4. Pipe PNG to stdin
         if let Some(mut stdin) = child.stdin.take() {
             stdin
                 .write_all(&png_data)
-                .context("Failed to pipe image to Tesseract")?;
+                .context("Failed to pipe PNG data to Tesseract stdin")?;
         }
 
-        // 5. Capture results
         let output = child
             .wait_with_output()
-            .context("Failed to wait for Tesseract")?;
+            .context("Failed to wait for Tesseract process execution")?;
 
         if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("Tesseract Error: {}", err);
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Tesseract execution failed with error: {}", err_msg);
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
