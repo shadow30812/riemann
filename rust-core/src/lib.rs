@@ -138,13 +138,13 @@ impl RiemannDocument {
         })?;
 
         // Guard against empty buffers (FPDF segfault prevention)
-        if text_accessor.len() == 0 {
+        if text_accessor.is_empty() {
             return Ok(String::new());
         }
 
         Ok(text_accessor.all())
     }
-    
+
     /// Runs OCR on the specified page and returns the recognized text.
     ///
     /// Args:

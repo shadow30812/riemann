@@ -28,6 +28,7 @@ from PySide6.QtGui import (
     QShortcut,
     QWheelEvent,
 )
+from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
@@ -1019,6 +1020,37 @@ class ReaderTab(QWidget):
 
         super().keyPressEvent(event)
 
+    def resizeEvent(self, event) -> None:
+        """
+        Handles window resizing with debouncing to prevent freeze/deadlock
+        during splitter dragging or rapid resizing.
+        """
+        # Initialize a debounce timer if it doesn't exist
+        if not hasattr(self, "_resize_timer"):
+            self._resize_timer = QTimer(self)
+            self._resize_timer.setSingleShot(True)
+            self._resize_timer.setInterval(150)  # Wait 150ms after last resize
+            self._resize_timer.timeout.connect(self._on_resize_timeout)
+
+        # If in a mode that requires re-render, restart the timer
+        if self.zoom_mode in [ZoomMode.FIT_WIDTH, ZoomMode.FIT_HEIGHT]:
+            self._resize_timer.start()
+
+        super().resizeEvent(event)
+
+    def _on_resize_timeout(self) -> None:
+        """Executes the expensive render/layout update after resizing stops."""
+        # 1. Clear cache
+        self.rendered_pages.clear()
+
+        # 2. Re-calculate layout if necessary
+        if self.current_doc:
+            if not self.continuous_scroll:
+                self.rebuild_layout()
+
+            # 3. Trigger render
+            self.update_view()
+
     # --- Zoom & Theme ---
 
     def on_zoom_selected(self, idx: int) -> None:
@@ -1336,6 +1368,32 @@ class BrowserTab(QWidget):
         self.btn_reload = QPushButton("↻")
         self.btn_reload.setFixedWidth(30)
 
+        # --- Search Bar (Hidden by Default) ---
+        self.search_bar = QWidget()
+        self.search_bar.setFixedHeight(40)
+        self.search_bar.setVisible(False)
+        sb_layout = QHBoxLayout(self.search_bar)
+        sb_layout.setContentsMargins(5, 0, 5, 0)
+
+        self.txt_find = QLineEdit()
+        self.txt_find.setPlaceholderText("Find in page...")
+        self.txt_find.returnPressed.connect(self.find_next)
+
+        self.btn_find_next = QPushButton("▼")
+        self.btn_find_next.clicked.connect(self.find_next)
+        self.btn_find_prev = QPushButton("▲")
+        self.btn_find_prev.clicked.connect(self.find_prev)
+        self.btn_close_find = QPushButton("✕")
+        self.btn_close_find.clicked.connect(self.toggle_search)
+
+        sb_layout.addWidget(QLabel("Find:"))
+        sb_layout.addWidget(self.txt_find)
+        sb_layout.addWidget(self.btn_find_next)
+        sb_layout.addWidget(self.btn_find_prev)
+        sb_layout.addWidget(self.btn_close_find)
+
+        layout.addWidget(self.search_bar)
+
         # Address Bar
         self.txt_url = QLineEdit()
         self.txt_url.setPlaceholderText("Enter URL or Search...")
@@ -1368,6 +1426,23 @@ class BrowserTab(QWidget):
         self.web.loadFinished.connect(lambda: self.progress.setValue(0))
         self.web.titleChanged.connect(self._update_tab_title)
 
+        # Shortcuts (Context-specific)
+        self.shortcut_find = QShortcut(QKeySequence("Ctrl+F"), self)
+        self.shortcut_find.activated.connect(self.toggle_search)
+
+        # Zoom Shortcuts
+        self.shortcut_zoom_in = QShortcut(QKeySequence("Ctrl+="), self)  # + is often =
+        self.shortcut_zoom_in.activated.connect(lambda: self.modify_zoom(0.1))
+
+        self.shortcut_zoom_in_alt = QShortcut(QKeySequence("Ctrl++"), self)
+        self.shortcut_zoom_in_alt.activated.connect(lambda: self.modify_zoom(0.1))
+
+        self.shortcut_zoom_out = QShortcut(QKeySequence("Ctrl+-"), self)
+        self.shortcut_zoom_out.activated.connect(lambda: self.modify_zoom(-0.1))
+
+        self.shortcut_zoom_reset = QShortcut(QKeySequence("Ctrl+0"), self)
+        self.shortcut_zoom_reset.activated.connect(lambda: self.web.setZoomFactor(1.0))
+
         # Initial Theme Application
         self.apply_theme()
 
@@ -1375,47 +1450,67 @@ class BrowserTab(QWidget):
         self.web.load(QUrl(start_url))
 
     def apply_theme(self):
-        """Updates styles for Dark/Light mode."""
+        """Updates styles for Dark/Light mode, including the Web Content."""
+        settings = self.web.page().settings()
+
         if self.dark_mode:
-            # Dark Mode Styles
-            bg_color = "#333"
-            text_color = "#ddd"
-            input_bg = "#444"
+            # UI Colors
+            bg = "#333"
+            fg = "#ddd"
+            inp_bg = "#444"
             border = "#555"
-            btn_hover = "rgba(255,255,255,0.1)"
+
+            # Force Chromium to render pages in Dark Mode
+            settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, True)
+            # Optional: Force dark background to prevent white flashes while loading
+            self.web.page().setBackgroundColor(QColor("#333"))
         else:
-            # Light Mode Styles
-            bg_color = "#f0f0f0"
-            text_color = "#222"
-            input_bg = "#fff"
+            # UI Colors
+            bg = "#f0f0f0"
+            fg = "#222"
+            inp_bg = "#fff"
             border = "#ccc"
-            btn_hover = "rgba(0,0,0,0.1)"
 
-        self.toolbar.setStyleSheet(f"""
-            QWidget {{ background: {bg_color}; border-bottom: 1px solid {border}; }}
-            QLineEdit {{ 
-                background: {input_bg}; 
-                color: {text_color}; 
-                border: 1px solid {border}; 
-                border-radius: 4px; 
-                padding: 4px;
-            }}
-            QPushButton {{ 
-                background: transparent; 
-                color: {text_color}; 
-                border: none; 
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{ background: {btn_hover}; }}
-        """)
+            # Disable Chromium Dark Mode
+            settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, False)
+            self.web.page().setBackgroundColor(QColor("#fff"))
 
-        # Update Progress Bar Color
-        chunk_color = "#3a86ff" if self.dark_mode else "#007aff"
-        self.progress.setStyleSheet(f"""
-            QProgressBar {{ border: 0px; background: transparent; }} 
-            QProgressBar::chunk {{ background: {chunk_color}; }}
-        """)
+        # Apply UI Styles (Toolbar, etc.)
+        style = f"""
+            QWidget {{ background: {bg}; color: {fg}; }}
+            QLineEdit {{ background: {inp_bg}; border: 1px solid {border}; border-radius: 4px; padding: 4px; }}
+            QPushButton {{ background: transparent; border: none; padding: 4px; }}
+            QPushButton:hover {{ background: rgba(128,128,128,0.2); border-radius: 4px; }}
+        """
+        self.toolbar.setStyleSheet(style)
+        self.search_bar.setStyleSheet(style)
+
+        chunk = "#3a86ff" if self.dark_mode else "#007aff"
+        self.progress.setStyleSheet(
+            f"QProgressBar {{ border: 0px; background: transparent; }} QProgressBar::chunk {{ background: {chunk}; }}"
+        )
+
+    def modify_zoom(self, delta):
+        new_zoom = self.web.zoomFactor() + delta
+        self.web.setZoomFactor(max(0.1, min(new_zoom, 5.0)))
+
+    def toggle_search(self):
+        visible = not self.search_bar.isVisible()
+        self.search_bar.setVisible(visible)
+        if visible:
+            self.txt_find.setFocus()
+            self.txt_find.selectAll()
+        else:
+            self.web.findText("")  # Clear highlighting
+
+    def find_next(self):
+        self.web.findText(self.txt_find.text())
+
+    def find_prev(self):
+        # QWebEngineView.findText defaults to forward.
+        # To find backwards, we need QWebEnginePage.FindFlag.FindBackward
+        # But for simplicity in PySide6 wrappers:
+        self.web.findText(self.txt_find.text(), QWebEngineView.FindFlag.FindBackward)
 
     def navigate_to_url(self):
         text = self.txt_url.text().strip()
@@ -1463,7 +1558,7 @@ class RiemannWindow(QMainWindow):
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(self.splitter)
 
-        # Tab Groups - Using DraggableTabWidget
+        # Tab Groups
         self.tabs_main = DraggableTabWidget()
         self.tabs_main.setTabsClosable(True)
         self.tabs_main.tabCloseRequested.connect(self.close_tab)
@@ -1472,61 +1567,65 @@ class RiemannWindow(QMainWindow):
         self.tabs_side = DraggableTabWidget()
         self.tabs_side.setTabsClosable(True)
         self.tabs_side.tabCloseRequested.connect(self.close_side_tab)
-        self.tabs_side.hide()
+        self.tabs_side.hide()  # Explicitly hide initially
         self.splitter.addWidget(self.tabs_side)
 
         self.setup_menu()
 
-        # Global Shortcuts
+        # --- EXPLICIT SHORTCUTS ---
+        # We use ApplicationShortcut to ensure they work even if focus is inside
+        # a WebEngineView or if the menu actions are misconfigured.
+
         self.shortcut_close = QShortcut(QKeySequence("Ctrl+W"), self)
+        self.shortcut_close.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.shortcut_close.activated.connect(self.close_active_tab)
 
         self.shortcut_quit = QShortcut(QKeySequence("Ctrl+Q"), self)
+        self.shortcut_quit.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.shortcut_quit.activated.connect(self.close)
+
+        self.shortcut_browser = QShortcut(QKeySequence("Ctrl+B"), self)
+        self.shortcut_browser.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_browser.activated.connect(lambda: self.new_browser_tab())
+
+        self.shortcut_split = QShortcut(QKeySequence("Ctrl+\\"), self)
+        self.shortcut_split.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_split.activated.connect(self.toggle_split_view)
 
         # --- RESTORE SESSION ---
 
-        # 1. Restore Window Layout
+        # 1. Restore Window Geometry
         if self.settings.value("window/geometry"):
             self.restoreGeometry(self.settings.value("window/geometry"))
-        if self.settings.value("window/state"):
-            self.restoreState(self.settings.value("window/state"))
 
-        # 2. Helper to restore a list of items to a specific tab widget
+        # 2. Helper to restore items
         def restore_items(items, target_widget):
             if isinstance(items, str):
                 items = [items]
 
             for item in items:
-                # Case A: Legacy String Path (Old saves)
-                if isinstance(item, str):
-                    if os.path.exists(item):
-                        if target_widget == self.tabs_side:
-                            # Manually add to side
-                            reader = ReaderTab()
-                            reader.load_document(item, restore_state=True)
-                            target_widget.addTab(reader, os.path.basename(item))
-                        else:
-                            self.new_tab(item, restore_state=True)
+                # Case A: Legacy String Path
+                if isinstance(item, str) and os.path.exists(item):
+                    if target_widget == self.tabs_side:
+                        reader = ReaderTab()
+                        reader.load_document(item, restore_state=True)
+                        target_widget.addTab(reader, os.path.basename(item))
+                    else:
+                        self.new_tab(item, restore_state=True)
 
-                # Case B: New Dictionary Format (PDF or Web)
+                # Case B: New Dictionary Format
                 elif isinstance(item, dict):
                     i_type = item.get("type")
                     data = item.get("data")
 
                     if i_type == "pdf" and data and os.path.exists(data):
-                        # Load PDF
                         if target_widget == self.tabs_side:
                             reader = ReaderTab()
                             reader.load_document(data, restore_state=True)
                             target_widget.addTab(reader, os.path.basename(data))
                         else:
                             self.new_tab(data, restore_state=True)
-
                     elif i_type == "web" and data:
-                        # Load Browser
-                        # We temporarily force focus to target to reuse new_browser_tab logic
-                        # or just instantiate manually:
                         browser = BrowserTab(data, dark_mode=self.dark_mode)
                         target_widget.addTab(browser, "Loading...")
 
@@ -1535,11 +1634,19 @@ class RiemannWindow(QMainWindow):
         restore_items(main_items, self.tabs_main)
 
         side_items = self.settings.value("session/side_tabs", [], type=list)
-        if side_items:
-            self.tabs_side.show()
-            restore_items(side_items, self.tabs_side)
+        restore_items(side_items, self.tabs_side)
 
-        # 4. Fallback: If absolutely nothing opened, give a blank tab
+        # 4. Strict Visibility Logic
+        # Only show side tabs if populated. This prevents the "Ghost Tab".
+        if self.tabs_side.count() > 0:
+            self.tabs_side.show()
+            # Only restore splitter state if side tabs are actually visible
+            if self.settings.value("splitter/state"):
+                self.splitter.restoreState(self.settings.value("splitter/state"))
+        else:
+            self.tabs_side.hide()
+
+        # 5. Fallback
         if self.tabs_main.count() == 0:
             self.new_tab()
 
@@ -1547,22 +1654,38 @@ class RiemannWindow(QMainWindow):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("File")
 
+        # Smart Open
         open_action = file_menu.addAction("Open PDF")
         open_action.setShortcut("Ctrl+O")
-        open_action.triggered.connect(self.open_pdf_dialog)
+        open_action.triggered.connect(self.open_pdf_smart)
 
-        new_tab_action = file_menu.addAction("New Tab")
+        # Re-assign Ctrl+T to also trigger Smart Open (Standard Browser Behavior)
+        # Or you can assign Ctrl+T to new_browser_tab if you prefer.
+        # Here we map it to Open PDF since that's the primary app function.
+        new_tab_action = file_menu.addAction("Open New PDF Tab")
         new_tab_action.setShortcut("Ctrl+T")
-        new_tab_action.triggered.connect(self.new_tab)
+        new_tab_action.triggered.connect(self.open_pdf_smart)
 
+        file_menu.addSeparator()
+
+        # Browser
+        # browser_action = file_menu.addAction("New Browser Tab")
+        # browser_action.setShortcut("Ctrl+B")
+        # browser_action.triggered.connect(lambda: self.new_browser_tab())
+
+        # file_menu.addSeparator()
+
+        # # Quit
+        # exit_action = file_menu.addAction("Exit")
+        # exit_action.setShortcut("Ctrl+Q")
+        # exit_action.triggered.connect(self.close)
+
+        # View Menu
         view_menu = menubar.addMenu("View")
-        split_action = view_menu.addAction("Split Editor Right")
-        split_action.setShortcut("Ctrl+\\")
-        split_action.triggered.connect(self.toggle_split_view)
 
-        browser_action = file_menu.addAction("New Browser Tab")
-        browser_action.setShortcut("Ctrl+B")
-        browser_action.triggered.connect(lambda: self.new_browser_tab())
+        theme_action = view_menu.addAction("Toggle Theme")
+        theme_action.setShortcut("Ctrl+D")
+        theme_action.triggered.connect(self.toggle_theme)
 
     def new_tab(self, path: Optional[str] = None, restore_state: bool = False) -> None:
         reader = ReaderTab()
@@ -1604,6 +1727,35 @@ class RiemannWindow(QMainWindow):
                 )
             else:
                 self.new_tab(path)
+
+    def open_pdf_smart(self):
+        """
+        Opens a PDF. Reuses the current tab if it's empty;
+        otherwise opens a new tab.
+        """
+        path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
+        if not path:
+            return
+
+        # Check if we can reuse the current tab
+        current_widget = self.tabs_main.currentWidget()
+
+        # We reuse the tab ONLY if:
+        # 1. It is a ReaderTab (not a Browser)
+        # 2. It has no document loaded yet
+        is_empty_reader = (
+            isinstance(current_widget, ReaderTab) and not current_widget.current_path
+        )
+
+        if is_empty_reader:
+            # Reuse existing
+            current_widget.load_document(path)
+            self.tabs_main.setTabText(
+                self.tabs_main.currentIndex(), os.path.basename(path)
+            )
+        else:
+            # Create new
+            self.new_tab(path)
 
     def toggle_split_view(self) -> None:
         """Moves the currently active tab to the side splitter."""
