@@ -1,0 +1,109 @@
+name: Build and Release
+
+on:
+    push:
+        tags:
+            - "v*" # Triggers only when you push a tag like v0.1.0
+
+jobs:
+    build-and-release:
+        name: Build for ${{ matrix.os }}
+        runs-on: ${{ matrix.os }}
+        strategy:
+            matrix:
+                include:
+                    - os: ubuntu-latest
+                      artifact_name: Riemann-Linux
+                      asset_name: Riemann-Linux
+                      pdfium_url: https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz
+                    - os: windows-latest
+                      artifact_name: Riemann.exe
+                      asset_name: Riemann-Windows.exe
+                      pdfium_url: https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-win-x64.tgz
+                    - os: macos-latest
+                      artifact_name: Riemann
+                      asset_name: Riemann-macOS
+                      pdfium_url: https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-x64.tgz
+
+        steps:
+            - uses: actions/checkout@v3
+
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                  python-version: "3.11"
+
+            - name: Set up Rust
+              uses: actions-rs/toolchain@v1
+              with:
+                  profile: minimal
+                  toolchain: stable
+                  override: true
+
+            - name: Install dependencies
+              run: |
+                  pip install --upgrade pip
+                  pip install maturin pyinstaller pyside6
+
+            - name: Download and Extract PDFium
+              shell: python
+              run: |
+                  import os, urllib.request, tarfile, sys
+
+                  url = "${{ matrix.pdfium_url }}"
+                  os.makedirs("libs", exist_ok=True)
+                  print(f"Downloading {url}...")
+
+                  file_name = "pdfium.tgz"
+                  urllib.request.urlretrieve(url, file_name)
+
+                  print("Extracting...")
+                  with tarfile.open(file_name) as tar:
+                      # Windows puts dll in bin/, Linux/Mac in lib/
+                      for member in tar.getmembers():
+                          if member.name.endswith(".dll") or member.name.endswith(".so") or member.name.endswith(".dylib"):
+                              member.name = os.path.basename(member.name) # Flatten path
+                              tar.extract(member, path="libs")
+                              print(f"Extracted {member.name} to libs/")
+
+            - name: Build Rust Backend
+              run: maturin develop --release
+
+            - name: Move Rust Extension (Cross-Platform)
+              shell: python
+              run: |
+                  import riemann_core, shutil, os
+                  # Find where maturin installed the .so/.pyd
+                  src = riemann_core.__file__
+                  # Determine destination name based on OS
+                  ext = ".pyd" if os.name == "nt" else ".abi3.so"
+                  dst = os.path.join('python-app', 'riemann', f'riemann_core{ext}')
+
+                  print(f"Moving {src} -> {dst}")
+                  shutil.copy2(src, dst)
+
+            - name: Build with PyInstaller
+              run: pyinstaller Riemann.spec --clean --noconfirm
+
+            - name: Zip Artifact (Windows/Linux)
+              if: matrix.os != 'macos-latest'
+              run: |
+                  # We zip the single file to make it easier to download
+                  cd dist
+                  if [ "${{ runner.os }}" == "Windows" ]; then
+                    7z a ../${{ matrix.asset_name }}.zip Riemann.exe
+                  else
+                    zip -r ../${{ matrix.asset_name }}.zip Riemann
+                  fi
+
+            - name: Zip Artifact (macOS)
+              if: matrix.os == 'macos-latest'
+              run: |
+                  cd dist
+                  zip -r ../${{ matrix.asset_name }}.zip Riemann
+
+            - name: Upload Release Asset
+              uses: softprops/action-gh-release@v1
+              if: startsWith(github.ref, 'refs/tags/')
+              with:
+                  files: ${{ matrix.asset_name }}.zip

@@ -16,20 +16,28 @@ datas += tmp_ret[0]
 binaries += tmp_ret[1]
 hiddenimports += tmp_ret[2]
 
-# 2. Collect QtWebEngine (Essential for the browser view)
+# 2. Collect QtWebEngine
 qt_ret = collect_all('PySide6')
 datas += qt_ret[0]
 binaries += qt_ret[1]
 hiddenimports += qt_ret[2]
 
-# 3. Bundle PDFium
-# Ensure libs/libpdfium.so exists in your project root!
-pdfium_path = os.path.abspath("libs/libpdfium.so")
+# 3. Bundle PDFium (Cross-Platform Logic)
+# Determine the correct filename for the current OS
+pdfium_filename = "libpdfium.so"
+if sys.platform == "win32":
+    pdfium_filename = "pdfium.dll"
+elif sys.platform == "darwin":
+    pdfium_filename = "libpdfium.dylib"
+
+# We assume the CI/Script placed it in 'libs/'
+pdfium_path = os.path.abspath(os.path.join("libs", pdfium_filename))
+
 if os.path.exists(pdfium_path):
     # This puts it at the root of the temp folder at runtime
     binaries.append((pdfium_path, "."))
 else:
-    print("WARNING: libpdfium.so not found in libs/ folder!")
+    print(f"WARNING: {pdfium_filename} not found in libs/ folder!")
 
 a = Analysis(
     ['build_entry.py'],
@@ -49,9 +57,6 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-# 4. ONE-FILE CONFIGURATION
-# Notice we pass a.binaries, a.zipfiles, and a.datas directly to EXE
-# and we REMOVE the COLLECT step entirely.
 exe = EXE(
     pyz,
     a.scripts,
@@ -62,11 +67,11 @@ exe = EXE(
     name='Riemann',
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False, 
-    upx=True, # Compresses the binary (takes longer to build, smaller file)
+    strip=False,
+    upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False, # Set to True if you want to see errors
+    console=False, # Set to True if debugging crashes
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
