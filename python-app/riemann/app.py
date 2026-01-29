@@ -16,6 +16,7 @@ from PySide6.QtCore import (
     QObject,
     QPoint,
     QSettings,
+    QStandardPaths,
     Qt,
     QTimer,
     QUrl,
@@ -34,7 +35,11 @@ from PySide6.QtGui import (
     QShortcut,
     QWheelEvent,
 )
-from PySide6.QtWebEngineCore import QWebEngineSettings
+from PySide6.QtWebEngineCore import (
+    QWebEnginePage,
+    QWebEngineProfile,
+    QWebEngineSettings,
+)
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
@@ -377,11 +382,16 @@ class ReaderTab(QWidget):
         if not self.current_doc:
             return
 
+        # [FIX] Capture current scroll value before modifying layout
+        old_scroll_val = self.scroll.verticalScrollBar().value()
+        was_virtual = self._virtual_enabled
+
         self.page_widgets.clear()
         self.rendered_pages.clear()
         self._virtual_enabled = False
         self._virtual_range = (0, 0)
 
+        # Clear existing widgets
         while self.scroll_layout.count():
             item = self.scroll_layout.takeAt(0)
             widget = item.widget()
@@ -415,6 +425,7 @@ class ReaderTab(QWidget):
             self.scroll_layout.addWidget(top_spacer)
 
             for p_idx in range(start, end):
+                # ... (Keep existing loop logic for adding page widgets) ...
                 if self.facing_mode and (p_idx % 2 == 0) and (p_idx + 1 < end):
                     row_widget = QWidget()
                     row_layout = QHBoxLayout(row_widget)
@@ -452,6 +463,7 @@ class ReaderTab(QWidget):
             self.scroll_layout.addWidget(bottom_spacer)
 
         else:
+            # ... (Keep existing non-virtual logic) ...
             if self.continuous_scroll:
                 pages_to_layout = range(count)
             else:
@@ -465,7 +477,6 @@ class ReaderTab(QWidget):
 
             indices = list(pages_to_layout)
             idx_ptr = 0
-
             while idx_ptr < len(indices):
                 p_idx = indices[idx_ptr]
                 is_pair = self.facing_mode and (p_idx + 1 < count) and (p_idx % 2 == 0)
@@ -491,6 +502,15 @@ class ReaderTab(QWidget):
 
                 self.scroll_layout.addWidget(row_widget)
 
+        # [FIX] Restore scroll position
+        # Force the layout to calculate size immediately so the scroll range is valid
+        self.scroll_content.adjustSize()
+
+        # Only restore if we were already in virtual mode or switching into it,
+        # to prevent jumping when switching from Single Page -> Continuous
+        if self.continuous_scroll:
+            self.scroll.verticalScrollBar().setValue(old_scroll_val)
+
     def _create_page_label(self, index: int) -> QLabel:
         """
         Creates a placeholder QLabel for a specific page index.
@@ -504,7 +524,8 @@ class ReaderTab(QWidget):
         lbl = QLabel()
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setProperty("pageIndex", index)
-        lbl.setMinimumSize(100, 141)
+        w, h = self._get_target_page_size()
+        lbl.setFixedSize(w, h)
         lbl.setStyleSheet(
             f"background-color: {'#333' if self.dark_mode else '#fff'}; border: 1px solid #555;"
         )
@@ -596,10 +617,19 @@ class ReaderTab(QWidget):
 
             lbl = self.page_widgets[idx]
             lbl.setPixmap(pix)
-            lbl.setMinimumSize(0, 0)
+            # lbl.setMinimumSize(0, 0)
 
         except Exception as e:
             sys.stderr.write(f"Render error for page {idx}: {e}\n")
+
+    def _get_target_page_size(self) -> Tuple[int, int]:
+        """Calculates the target pixel dimensions for pages at current scale."""
+        if not self._cached_base_size:
+            return (int(595 * self.manual_scale), int(842 * self.manual_scale))
+
+        base_w, base_h = self._cached_base_size
+        scale = self.calculate_scale()
+        return (int(base_w * scale), int(base_h * scale))
 
     def _probe_base_page_size(self) -> None:
         """Calculates and caches the base page dimensions in pixels."""
@@ -780,6 +810,23 @@ class ReaderTab(QWidget):
             self.current_page_index = closest_page
             if self.current_doc:
                 self.txt_page.setText(str(self.current_page_index + 1))
+
+        if self._virtual_enabled:
+            start, end = self._virtual_range
+            buffer_threshold = 10
+
+            if (self.current_page_index > end - buffer_threshold) or (
+                self.current_page_index < start + buffer_threshold
+            ):
+                if not (
+                    start == 0 and self.current_page_index < buffer_threshold
+                ) and not (
+                    end == self.current_doc.page_count
+                    and self.current_page_index > end - buffer_threshold
+                ):
+                    self.rebuild_layout()
+                    self.ensure_visible(self.current_page_index)
+
         self.render_visible_pages()
 
     def next_view(self) -> None:
@@ -1000,6 +1047,7 @@ class ReaderTab(QWidget):
 
     def _on_resize_timeout(self) -> None:
         """Executes layout recalculation after resize settles."""
+        self._update_all_widget_sizes()
         self.rendered_pages.clear()
         if self.current_doc:
             if not self.continuous_scroll:
@@ -1038,10 +1086,18 @@ class ReaderTab(QWidget):
         self.zoom_mode = ZoomMode.MANUAL
         self.on_zoom_changed_internal()
 
+    def _update_all_widget_sizes(self) -> None:
+        """Resizes all page widgets to match the new scale."""
+        w, h = self._get_target_page_size()
+        for lbl in self.page_widgets.values():
+            lbl.setFixedSize(w, h)
+
     def on_zoom_changed_internal(self) -> None:
         """Updates internal state and UI after a zoom change."""
         self.settings.setValue("zoomMode", self.zoom_mode.value)
         self.settings.setValue("zoomScale", self.manual_scale)
+        self._update_all_widget_sizes()
+
         self.rendered_pages.clear()
         self.update_view()
         self._sync_zoom_ui()
@@ -1372,6 +1428,20 @@ class BrowserTab(QWidget):
         layout.addWidget(self.progress)
 
         self.web = QWebEngineView()
+        base_path = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.AppDataLocation
+        )
+        storage_path = os.path.join(base_path, "browser_data")
+        os.makedirs(storage_path, exist_ok=True)
+
+        profile = QWebEngineProfile("RiemannPersistentProfile", self.web)
+        profile.setPersistentStoragePath(storage_path)
+        profile.setPersistentCookiesPolicy(
+            QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
+        )
+
+        page = QWebEnginePage(profile, self.web)
+        self.web.setPage(page)
         layout.addWidget(self.web)
 
         self.btn_back.clicked.connect(self.web.back)
