@@ -774,7 +774,12 @@ class ReaderTab(QWidget):
                 target_idx = page_num - 1
                 if target_idx != self.current_page_index:
                     self.current_page_index = target_idx
-                    if not self.continuous_scroll:
+                    if self.continuous_scroll and self._virtual_enabled:
+                        start, end = self._virtual_range
+                        if target_idx < start or target_idx >= end:
+                            self.rebuild_layout()
+
+                    elif not self.continuous_scroll:
                         self.rebuild_layout()
                     self.update_view()
                     self.ensure_visible(self.current_page_index)
@@ -1015,30 +1020,31 @@ class ReaderTab(QWidget):
                 event.accept()
                 return
 
-            if key == Qt.Key.Key_N:
-                self.toggle_theme()
-                event.accept()
-                return
-            elif key == Qt.Key.Key_R:
-                self.toggle_view_mode()
-                event.accept()
-                return
-            elif key == Qt.Key.Key_C:
-                self.toggle_scroll_mode()
-                event.accept()
-                return
-            elif key == Qt.Key.Key_D:
-                self.toggle_facing_mode()
-                event.accept()
-                return
-            elif key == Qt.Key.Key_W:
-                self.apply_zoom_string("Fit Width")
-                event.accept()
-                return
-            elif key == Qt.Key.Key_H:
-                self.apply_zoom_string("Fit Height")
-                event.accept()
-                return
+            if mod == Qt.KeyboardModifier.NoModifier:
+                if key == Qt.Key.Key_N:
+                    self.toggle_theme()
+                    event.accept()
+                    return
+                elif key == Qt.Key.Key_R:
+                    self.toggle_view_mode()
+                    event.accept()
+                    return
+                elif key == Qt.Key.Key_C:
+                    self.toggle_scroll_mode()
+                    event.accept()
+                    return
+                elif key == Qt.Key.Key_D:
+                    self.toggle_facing_mode()
+                    event.accept()
+                    return
+                elif key == Qt.Key.Key_W:
+                    self.apply_zoom_string("Fit Width")
+                    event.accept()
+                    return
+                elif key == Qt.Key.Key_H:
+                    self.apply_zoom_string("Fit Height")
+                    event.accept()
+                    return
 
         super().keyPressEvent(event)
 
@@ -1610,7 +1616,19 @@ class RiemannWindow(QMainWindow):
         self.shortcut_split.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.shortcut_split.activated.connect(self.toggle_split_view)
 
+        self.shortcut_fullscreen = QShortcut(QKeySequence(Qt.Key.Key_F11), self)
+        self.shortcut_fullscreen.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_fullscreen.activated.connect(self.toggle_reader_fullscreen)
+
+        self.shortcut_escape = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        self.shortcut_escape.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_escape.activated.connect(self._handle_escape)
+
         self._restore_session()
+
+    def _handle_escape(self):
+        if getattr(self, "_reader_fullscreen", False):
+            self.toggle_reader_fullscreen()
 
     def _restore_session(self):
         """Restores window geometry and open tabs from settings."""
@@ -1760,6 +1778,10 @@ class RiemannWindow(QMainWindow):
         if widget:
             widget.deleteLater()
         self.tabs_main.removeTab(index)
+
+        if self.tabs_main.count() == 0 and self.tabs_side.count() == 0:
+            if getattr(self, "_reader_fullscreen", False):
+                self.toggle_reader_fullscreen()
 
     def close_side_tab(self, index: int) -> None:
         """Closes a tab in the side group and hides the splitter if empty."""
