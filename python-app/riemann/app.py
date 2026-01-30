@@ -382,9 +382,14 @@ class ReaderTab(QWidget):
         if not self.current_doc:
             return
 
-        # [FIX] Capture current scroll value before modifying layout
-        old_scroll_val = self.scroll.verticalScrollBar().value()
-        was_virtual = self._virtual_enabled
+        # [FIX] 1. Block signals to prevent 'valueChanged' from firing during the wipe
+        # This prevents the app from thinking the user scrolled to 0 when we clear widgets.
+        sb = self.scroll.verticalScrollBar()
+        was_blocked = sb.signalsBlocked()
+        sb.blockSignals(True)
+
+        # [FIX] 2. Capture the exact pixel scroll position
+        old_scroll_val = sb.value()
 
         self.page_widgets.clear()
         self.rendered_pages.clear()
@@ -418,14 +423,15 @@ class ReaderTab(QWidget):
             scale = self.calculate_scale()
             page_height = int(base_h * scale) + self.scroll_layout.spacing()
 
+            # Top Spacer
             top_spacer = QWidget()
             top_spacer.setFixedHeight(max(0, start * page_height))
             top_spacer.setObjectName("topSpacer")
             self._top_spacer = top_spacer
             self.scroll_layout.addWidget(top_spacer)
 
+            # Page Widgets
             for p_idx in range(start, end):
-                # ... (Keep existing loop logic for adding page widgets) ...
                 if self.facing_mode and (p_idx % 2 == 0) and (p_idx + 1 < end):
                     row_widget = QWidget()
                     row_layout = QHBoxLayout(row_widget)
@@ -456,6 +462,7 @@ class ReaderTab(QWidget):
                     self.page_widgets[p_idx] = lbl
                     self.scroll_layout.addWidget(row_widget)
 
+            # Bottom Spacer
             bottom_spacer = QWidget()
             bottom_spacer.setFixedHeight(max(0, (count - end) * page_height))
             bottom_spacer.setObjectName("bottomSpacer")
@@ -463,7 +470,7 @@ class ReaderTab(QWidget):
             self.scroll_layout.addWidget(bottom_spacer)
 
         else:
-            # ... (Keep existing non-virtual logic) ...
+            # (Standard non-virtual logic)
             if self.continuous_scroll:
                 pages_to_layout = range(count)
             else:
@@ -502,14 +509,17 @@ class ReaderTab(QWidget):
 
                 self.scroll_layout.addWidget(row_widget)
 
-        # [FIX] Restore scroll position
-        # Force the layout to calculate size immediately so the scroll range is valid
+        # [FIX] 3. Force the scroll content to recalculate its height immediately
+        # This ensures the maximum scroll range is updated BEFORE we try to restore the value.
         self.scroll_content.adjustSize()
+        QApplication.processEvents()  # Process any pending layout requests
 
-        # Only restore if we were already in virtual mode or switching into it,
-        # to prevent jumping when switching from Single Page -> Continuous
+        # [FIX] 4. Restore the scroll position
         if self.continuous_scroll:
-            self.scroll.verticalScrollBar().setValue(old_scroll_val)
+            sb.setValue(old_scroll_val)
+
+        # [FIX] 5. Unblock signals so user interaction works again
+        sb.blockSignals(was_blocked)
 
     def _create_page_label(self, index: int) -> QLabel:
         """
