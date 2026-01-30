@@ -4,9 +4,13 @@ import sys
 # PyInstaller bundle
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     bundle_dir = sys._MEIPASS  # type: ignore[attr-defined]
+
     os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = bundle_dir
 
 import json
+import shutil
+import tempfile
+import urllib.request
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -23,8 +27,11 @@ from PySide6.QtCore import (
     QUrl,
 )
 from PySide6.QtGui import (
+    QAction,
     QColor,
+    QDesktopServices,
     QDrag,
+    QIcon,
     QImage,
     QKeyEvent,
     QKeySequence,
@@ -37,6 +44,7 @@ from PySide6.QtGui import (
     QWheelEvent,
 )
 from PySide6.QtWebEngineCore import (
+    QWebEngineDownloadRequest,
     QWebEnginePage,
     QWebEngineProfile,
     QWebEngineScript,
@@ -51,11 +59,14 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
     QMainWindow,
+    QMenu,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -64,6 +75,8 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QTabBar,
+    QTableWidget,
+    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -102,6 +115,397 @@ class ViewMode(Enum):
 
     IMAGE = 0
     REFLOW = 1
+
+
+class BookmarksManager:
+    """Manages persistent bookmarks."""
+
+    def __init__(self):
+        base = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.AppDataLocation
+        )
+        self.path = os.path.join(base, "bookmarks.json")
+        self.bookmarks = []
+        self.load()
+
+    def load(self):
+        if os.path.exists(self.path):
+            try:
+                with open(self.path, "r") as f:
+                    self.bookmarks = json.load(f)
+            except:
+                self.bookmarks = []
+
+    def save(self):
+        try:
+            with open(self.path, "w") as f:
+                json.dump(self.bookmarks, f)
+        except:
+            pass
+
+    def add(self, title: str, url: str):
+        """Adds a bookmark."""
+        for b in self.bookmarks:
+            if b["url"] == url:
+                return
+        self.bookmarks.append({"title": title, "url": url})
+        self.save()
+
+    def remove(self, url: str):
+        """Removes a bookmark by URL."""
+        self.bookmarks = [b for b in self.bookmarks if b["url"] != url]
+        self.save()
+
+    def is_bookmarked(self, url: str) -> bool:
+        return any(b["url"] == url for b in self.bookmarks)
+
+
+class DownloadManager(QDialog):
+    """
+    Displays a list of recent downloads with controls (Pause/Resume/Cancel).
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Downloads")
+        self.resize(800, 425)
+
+        layout = QVBoxLayout(self)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(4)  # Added Actions Column
+        self.table.setHorizontalHeaderLabels(["File", "Status", "Path", "Actions"])
+
+        header = self.table.horizontalHeader()
+        header.setSectionsMovable(True)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(False)
+
+        # Make Path column wide by default
+        self.table.setColumnWidth(0, 240)  # File
+        self.table.setColumnWidth(1, 120)  # Status
+        self.table.setColumnWidth(2, 360)  # Path (default wide)
+        self.table.setColumnWidth(3, 120)  # Actions
+
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        layout.addWidget(self.table)
+
+        btn_clear = QPushButton("Clear Finished")
+        btn_clear.clicked.connect(self.clear_finished)
+        layout.addWidget(btn_clear)
+
+        base = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.AppDataLocation
+        )
+        os.makedirs(base, exist_ok=True)
+        self._persist_path = os.path.join(base, "downloads_history.json")
+
+        self.downloads = []
+
+        # load persisted rows (metadata only) - will populate UI but won't reattach active QDownload objects
+        self._load_persistent_entries()
+
+    def _set_open_button(self, row, full_path):
+        """Helper to replace the control buttons with an 'Open' button."""
+        container = QWidget()
+        h_layout = QHBoxLayout(container)
+        h_layout.setContentsMargins(2, 2, 2, 2)
+        h_layout.setSpacing(4)
+
+        btn_open = QPushButton("Open")
+        btn_open.setFixedWidth(50)
+
+        def _open_path(p=full_path):
+            if p and os.path.exists(p):
+                QDesktopServices.openUrl(QUrl.fromLocalFile(p))
+            else:
+                QMessageBox.information(self, "Open File", "File not found on disk.")
+
+        btn_open.clicked.connect(_open_path)
+        h_layout.addWidget(btn_open)
+
+        # Ensure we are setting it on the Actions column (index 3)
+        self.table.setCellWidget(row, 3, container)
+
+    def _load_persistent_entries(self):
+        if not os.path.exists(self._persist_path):
+            return
+        try:
+            with open(self._persist_path, "r") as f:
+                entries = json.load(f)
+        except Exception:
+            return
+
+        for e in entries:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(
+                row, 0, QTableWidgetItem(e.get("file_name", "<unknown>"))
+            )
+            self.table.setItem(row, 1, QTableWidgetItem(e.get("status", "Completed")))
+            path_str = e.get("full_path", "...")
+            path_item = QTableWidgetItem(path_str)
+            path_item.setToolTip(path_str)
+            self.table.setItem(row, 2, path_item)
+
+            self._set_open_button(row, path_str)
+
+            # placeholder actions (no active download object)
+            container = QWidget()
+            h_layout = QHBoxLayout(container)
+            h_layout.setContentsMargins(2, 2, 2, 2)
+            h_layout.setSpacing(4)
+            btn_dummy = QPushButton("Open")
+            btn_dummy.setFixedWidth(50)
+
+            # when clicked, try to open the file on disk if exists
+            def _open_path(p=e.get("full_path", "")):
+                if p and os.path.exists(p):
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(p))
+                else:
+                    QMessageBox.information(
+                        self, "Open File", "File not found on disk."
+                    )
+
+            btn_dummy.clicked.connect(_open_path)
+            h_layout.addWidget(btn_dummy)
+            self.table.setCellWidget(row, 3, container)
+
+    def _make_state_slot(self, row, item):
+        # explicit slot so we can disconnect it later
+        def _slot(state):
+            try:
+                self.update_status(row, item, state)
+            except RuntimeError:
+                # underlying C++ widget deleted; disconnect to avoid repeated errors
+                try:
+                    item.stateChanged.disconnect(_slot)
+                except Exception:
+                    pass
+
+        return _slot
+
+    def _persist_entries(self):
+        """Persist the current table rows (metadata only). Non-active downloads stored as-is."""
+        out = []
+        for i in range(self.table.rowCount()):
+            file_item = self.table.item(i, 0)
+            status_item = self.table.item(i, 1)
+            path_item = self.table.item(i, 2)
+            out.append(
+                {
+                    "file_name": file_item.text() if file_item else "",
+                    "status": status_item.text() if status_item else "",
+                    "full_path": path_item.text() if path_item else "",
+                }
+            )
+        try:
+            with open(self._persist_path, "w") as f:
+                json.dump(out, f)
+        except Exception:
+            pass
+
+    def _make_finished_slot(self, row, item):
+        def _slot():
+            try:
+                self.on_finished(row, item)
+            except RuntimeError:
+                try:
+                    item.finished.disconnect(_slot)
+                except Exception:
+                    pass
+
+        return _slot
+
+    def add_download(self, download_item):
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+
+        name = download_item.downloadFileName()
+        self.table.setItem(row, 0, QTableWidgetItem(name))
+        self.table.setItem(row, 1, QTableWidgetItem("Starting..."))
+
+        path_text = download_item.downloadDirectory()
+        if path_text:
+            full_path = os.path.join(
+                download_item.downloadDirectory(), download_item.downloadFileName()
+            )
+        else:
+            full_path = "..."
+        path_item = QTableWidgetItem(full_path)
+        path_item.setToolTip(full_path)
+        self.table.setItem(row, 2, path_item)
+
+        # -- buttons (your current code) --
+        container = QWidget()
+        h_layout = QHBoxLayout(container)
+        h_layout.setContentsMargins(2, 2, 2, 2)
+        h_layout.setSpacing(4)
+
+        btn_pause = QPushButton("⏸")
+        btn_pause.setFixedWidth(30)
+        btn_pause.setToolTip("Pause")
+
+        btn_resume = QPushButton("▶")
+        btn_resume.setFixedWidth(30)
+        btn_resume.setToolTip("Resume")
+        btn_resume.setEnabled(False)
+
+        btn_cancel = QPushButton("⏹")
+        btn_cancel.setFixedWidth(30)
+        btn_cancel.setToolTip("Cancel")
+
+        h_layout.addWidget(btn_pause)
+        h_layout.addWidget(btn_resume)
+        h_layout.addWidget(btn_cancel)
+        # if table has 4 columns (Actions) place in col 3, else adjust to col 2
+        try:
+            self.table.setCellWidget(row, 3, container)
+        except Exception:
+            # fallback if table has only 3 columns
+            self.table.setCellWidget(row, 2, container)
+
+        btn_pause.clicked.connect(download_item.pause)
+        btn_resume.clicked.connect(download_item.resume)
+        btn_cancel.clicked.connect(download_item.cancel)
+
+        # create slots we can later disconnect
+        state_slot = self._make_state_slot(row, download_item)
+        finished_slot = self._make_finished_slot(row, download_item)
+
+        download_item.stateChanged.connect(state_slot)
+        download_item.stateChanged.connect(finished_slot)
+
+        # store everything
+        self.downloads.append(
+            {
+                "item": download_item,
+                "row": row,
+                "btns": (btn_pause, btn_resume, btn_cancel),
+                "state_slot": state_slot,
+                "finished_slot": finished_slot,
+            }
+        )
+
+        # initial update
+        try:
+            self.update_status(row, download_item, download_item.state())
+        except RuntimeError:
+            pass
+
+        self._persist_entries()
+
+    def update_status(self, row, item, state):
+        # be robust if widget was deleted; catch exceptions around Qt calls
+
+        try:
+            status = "Unknown"
+            btns = None
+            for d in self.downloads:
+                if d["item"] == item:
+                    btns = d["btns"]
+                    break
+
+            if state == QWebEngineDownloadRequest.DownloadState.DownloadInProgress:
+                percent = 0
+                if item.totalBytes() > 0:
+                    percent = int(item.receivedBytes() / item.totalBytes() * 100)
+                status = f"{percent}%"
+                if btns:
+                    btns[0].setEnabled(True)
+                    btns[1].setEnabled(False)
+                    btns[2].setEnabled(True)
+
+            elif state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
+                status = "Completed"
+                if btns:
+                    btns[0].setEnabled(False)
+                    btns[1].setEnabled(False)
+                    btns[2].setEnabled(False)
+
+                path = item.downloadDirectory() + "/" + item.downloadFileName()
+                path_item = QTableWidgetItem(path)
+                path_item.setToolTip(path)
+
+                self.table.setItem(row, 2, path_item)
+                self._set_open_button(row, path)
+                self._persist_entries()
+
+            elif state == QWebEngineDownloadRequest.DownloadState.DownloadCancelled:
+                status = "Cancelled"
+                if btns:
+                    btns[0].setEnabled(False)
+                    btns[1].setEnabled(True)
+                    btns[2].setEnabled(False)
+                self._persist_entries()
+
+            elif state == QWebEngineDownloadRequest.DownloadState.DownloadInterrupted:
+                status = "Interrupted/Paused"
+                if item.isPaused():
+                    status = "Paused"
+                    if btns:
+                        btns[0].setEnabled(False)
+                        btns[1].setEnabled(True)
+                        btns[2].setEnabled(True)
+                else:
+                    status = "Failed"
+                    if btns:
+                        btns[0].setEnabled(False)
+                        btns[1].setEnabled(False)
+                        btns[2].setEnabled(False)
+                self._persist_entries()
+
+            self.table.setItem(row, 1, QTableWidgetItem(status))
+
+        except RuntimeError:
+            # C++ widget deleted — nothing to do
+            pass
+        except Exception as e:
+            # other errors; log if you want
+            print("update_status error:", e)
+
+    def clear_finished(self):
+        """Removes completed/cancelled rows."""
+        rows_to_remove = []
+        for i in range(self.table.rowCount()):
+            status_item = self.table.item(i, 1)
+            if status_item and status_item.text() in [
+                "Completed",
+                "Cancelled",
+                "Failed",
+            ]:
+                rows_to_remove.append(i)
+
+        for i in sorted(rows_to_remove, reverse=True):
+            self.table.removeRow(i)
+            # Remove from tracking list
+            if i < len(self.downloads):
+                del self.downloads[i]
+
+        self._persist_entries()
+
+    def on_finished(self, row, item):
+        # keep behavior but robust
+        try:
+            self.update_status(row, item, item.state())
+        except Exception:
+            pass
+
+    def closeEvent(self, event):
+        # disconnect signals for all tracked download items to avoid callbacks after deletion
+        for d in list(self.downloads):
+            try:
+                d["item"].stateChanged.disconnect(d.get("state_slot"))
+            except Exception:
+                pass
+            try:
+                d["item"].finished.disconnect(d.get("finished_slot"))
+            except Exception:
+                pass
+
+        self._persist_entries()
+        super().closeEvent(event)
 
 
 class HistoryManager:
@@ -244,6 +648,10 @@ class ReaderTab(QWidget):
         self.toolbar.setFixedHeight(50)
         t_layout = QHBoxLayout(self.toolbar)
 
+        self.btn_save = QPushButton("💾")
+        self.btn_save.setToolTip("Save Copy of PDF")
+        self.btn_save.clicked.connect(self.save_document)
+
         self.btn_reflow = QPushButton("📄/📝")
         self.btn_reflow.setToolTip("Toggle Text Reflow Mode")
         self.btn_reflow.setCheckable(True)
@@ -313,6 +721,7 @@ class ReaderTab(QWidget):
         self.btn_search.clicked.connect(self.toggle_search_bar)
 
         widgets = [
+            self.btn_save,
             self.btn_reflow,
             self.btn_facing,
             self.btn_scroll_mode,
@@ -389,6 +798,24 @@ class ReaderTab(QWidget):
         self.stack.addWidget(self.web)
 
         layout.addWidget(self.stack)
+
+    def save_document(self) -> None:
+        """Saves a copy of the current PDF to a user-specified location."""
+        if not self.current_path or not os.path.exists(self.current_path):
+            QMessageBox.warning(self, "Save Error", "No document loaded to save.")
+            return
+
+        suggested_name = os.path.basename(self.current_path)
+        dest_path, _ = QFileDialog.getSaveFileName(
+            self, "Save PDF As", suggested_name, "PDF Files (*.pdf)"
+        )
+
+        if dest_path:
+            try:
+                shutil.copy2(self.current_path, dest_path)
+                QMessageBox.information(self, "Success", f"Saved to {dest_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Could not save file:\n{e}")
 
     def _setup_scroller(self) -> None:
         """Configures the kinetic scrolling properties for the viewport."""
@@ -1456,7 +1883,9 @@ class BrowserTab(QWidget):
             QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
         )
 
+        self.profile.downloadRequested.connect(self._handle_download)
         self.inject_ad_skipper()
+        self.inject_backspace_handler()
 
         # --- UI Setup ---
         layout = QVBoxLayout(self)
@@ -1486,10 +1915,18 @@ class BrowserTab(QWidget):
         self.completer.setFilterMode(Qt.MatchFlag.MatchContains)
         self.txt_url.setCompleter(self.completer)
 
+        # Bookmark Button
+        self.btn_bookmark = QPushButton("☆")
+        self.btn_bookmark.setFixedWidth(30)
+        self.btn_bookmark.setCheckable(True)
+        self.btn_bookmark.setToolTip("Bookmark this page")
+        self.btn_bookmark.clicked.connect(self.toggle_bookmark)
+
         tb_layout.addWidget(self.btn_back)
         tb_layout.addWidget(self.btn_fwd)
         tb_layout.addWidget(self.btn_reload)
         tb_layout.addWidget(self.txt_url)
+        tb_layout.addWidget(self.btn_bookmark)
 
         layout.addWidget(self.toolbar)
 
@@ -1519,13 +1956,34 @@ class BrowserTab(QWidget):
         layout.addWidget(self.search_bar)
 
         self.progress = QProgressBar()
-        self.progress.setFixedHeight(2)
+        self.progress.setFixedHeight(4)
         self.progress.setTextVisible(False)
+        self.progress.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                background-color: transparent;
+            }
+            QProgressBar::chunk {
+                background-color: #FF4500; /* Flashier OrangeRed */
+                border-radius: 2px;
+            }
+        """)
         layout.addWidget(self.progress)
+
+        # Overlay Notification Label (Toast)
+        self.lbl_toast = QLabel(self)
+        self.lbl_toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_toast.setStyleSheet(
+            "background-color: #333; color: white; padding: 10px; border-radius: 5px; font-weight: bold;"
+        )
+        self.lbl_toast.hide()
 
         # Web View
         self.web = QWebEngineView()
         page = QWebEnginePage(self.profile, self.web)
+        page.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.PdfViewerEnabled, False
+        )
         page.settings().setAttribute(
             QWebEngineSettings.WebAttribute.FullScreenSupportEnabled, True
         )
@@ -1571,6 +2029,12 @@ class BrowserTab(QWidget):
         self.shortcut_zoom_reset = QShortcut(QKeySequence("Ctrl+0"), self)
         self.shortcut_zoom_reset.activated.connect(lambda: self.web.setZoomFactor(1.0))
 
+        self.shortcut_back_alt = QShortcut(QKeySequence("Alt+Left"), self)
+        self.shortcut_back_alt.activated.connect(self.web.back)
+
+        self.shortcut_fwd_alt = QShortcut(QKeySequence("Alt+Right"), self)
+        self.shortcut_fwd_alt.activated.connect(self.web.forward)
+
         # Initial Setup
         self.apply_theme()
 
@@ -1607,6 +2071,31 @@ class BrowserTab(QWidget):
         """
         script = QWebEngineScript()
         script.setName("RiemannAdBlock")
+        script.setSourceCode(js_code)
+        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
+        script.setRunsOnSubFrames(True)
+        self.profile.scripts().insert(script)
+
+    def inject_backspace_handler(self):
+        """Injects JS to handle Backspace navigation (Back if not in input)."""
+        js_code = """
+        document.addEventListener("keydown", function(e) {
+            if (e.key === "Backspace" && !e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+                const tag = document.activeElement.tagName;
+                const type = document.activeElement.type;
+                const isInput = (tag === "INPUT" && type !== "button" && type !== "submit" && type !== "checkbox" && type !== "radio") 
+                                || tag === "TEXTAREA" 
+                                || document.activeElement.isContentEditable;
+                if (!isInput) {
+                    e.preventDefault();
+                    window.history.back();
+                }
+            }
+        });
+        """
+        script = QWebEngineScript()
+        script.setName("RiemannBackspace")
         script.setSourceCode(js_code)
         script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
         script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
@@ -1665,6 +2154,25 @@ class BrowserTab(QWidget):
             url.setScheme("https")
         self.web.load(url)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Re-center toast if visible
+        if self.lbl_toast.isVisible():
+            self.lbl_toast.move(
+                (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
+            )
+
+    def show_toast(self, message: str):
+        """Displays a temporary notification overlay."""
+        self.lbl_toast.setText(message)
+        self.lbl_toast.adjustSize()
+        self.lbl_toast.move(
+            (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
+        )
+        self.lbl_toast.show()
+        self.lbl_toast.raise_()
+        QTimer.singleShot(3000, self.lbl_toast.hide)
+
     def _update_url_bar(self, url: QUrl):
         """Updates URL bar and History."""
         s_url = url.toString()
@@ -1674,6 +2182,31 @@ class BrowserTab(QWidget):
         # [NEW] Add to history
         if self.window() and hasattr(self.window(), "add_to_history"):
             self.window().add_to_history(s_url)
+
+        self._update_bookmark_icon(s_url)
+
+    def _update_bookmark_icon(self, url):
+        if self.window() and hasattr(self.window(), "bookmarks_manager"):
+            is_bm = self.window().bookmarks_manager.is_bookmarked(url)
+            self.btn_bookmark.setChecked(is_bm)
+            self.btn_bookmark.setText("★" if is_bm else "☆")
+
+    def toggle_bookmark(self):
+        """Toggles bookmark status for current URL."""
+        if not self.window() or not hasattr(self.window(), "bookmarks_manager"):
+            return
+
+        url = self.web.url().toString()
+        title = self.web.title()
+        bm = self.window().bookmarks_manager
+
+        if bm.is_bookmarked(url):
+            bm.remove(url)
+            self.show_toast("Bookmark Removed")
+        else:
+            bm.add(title, url)
+            self.show_toast("Bookmark Added")
+        self._update_bookmark_icon(url)
 
     def _update_tab_title(self, title: str):
         parent = self.parent()
@@ -1686,6 +2219,49 @@ class BrowserTab(QWidget):
                     )
                 break
             parent = parent.parent()
+
+    def _handle_download(self, download_item):
+        # Ask user where to save (ALWAYS)
+        default_dir = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DownloadLocation
+        )
+
+        suggested_name = download_item.downloadFileName()
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save File",
+            os.path.join(default_dir, suggested_name),
+        )
+
+        if not path:
+            download_item.cancel()
+            return
+
+        # REQUIRED: set BEFORE accept()
+        download_item.setDownloadDirectory(os.path.dirname(path))
+        download_item.setDownloadFileName(os.path.basename(path))
+
+        # Now accept (this actually starts the download)
+        download_item.accept()
+
+        # ONLY NOW add it to the manager
+        if self.window() and hasattr(self.window(), "download_manager_dialog"):
+            self.window().download_manager_dialog.add_download(download_item)
+
+    def _check_pdf_open(self, state, item, temp_folder):
+        if state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
+            full_path = os.path.join(temp_folder, item.downloadFileName())
+            self._on_pdf_downloaded(full_path)
+
+    def _on_pdf_downloaded(self, path):
+        """Callback when an auto-downloaded PDF finishes."""
+        if (
+            os.path.exists(path)
+            and self.window()
+            and hasattr(self.window(), "open_pdf_in_new_tab")
+        ):
+            self.window().open_pdf_in_new_tab(path)
 
 
 class RiemannWindow(QMainWindow):
@@ -1701,12 +2277,14 @@ class RiemannWindow(QMainWindow):
 
         self.settings = QSettings("Riemann", "PDFReader")
         self.dark_mode = self.settings.value("darkMode", True, type=bool)
+        self.download_manager_dialog = DownloadManager(self)
 
         # [NEW] History System
         self.history_manager = HistoryManager()
         self.history_model = QStringListModel(self.history_manager.get_model_data())
-        self.closed_tabs_stack = []
+        self.bookmarks_manager = BookmarksManager()
 
+        self.closed_tabs_stack = []
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(self.splitter)
 
@@ -1827,11 +2405,19 @@ class RiemannWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        exit_action = file_menu.addAction("Exit")
+        exit_action = file_menu.addAction("Exit (Ctrl+Q)")
         exit_action.triggered.connect(self.close)
 
         view_menu = menubar.addMenu("View")
-        
+
+        bm_action = view_menu.addAction("Bookmarks")
+        bm_action.setShortcut("Ctrl+K")
+        bm_action.triggered.connect(self.show_bookmarks)
+
+        dl_action = view_menu.addAction("Downloads")
+        dl_action.setShortcut("Ctrl+J")
+        dl_action.triggered.connect(self.show_downloads)
+
         history_action = view_menu.addAction("History")
         history_action.setShortcut("Ctrl+H")
         history_action.triggered.connect(self.show_history)
@@ -2072,6 +2658,61 @@ class RiemannWindow(QMainWindow):
         list_widget.itemDoubleClicked.connect(open_item)
 
         dialog.exec()
+
+    def show_bookmarks(self):
+        """Displays a dialog with bookmarks."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Bookmarks")
+        dialog.resize(600, 400)
+        layout = QVBoxLayout(dialog)
+        list_widget = QListWidget()
+
+        for bm in self.bookmarks_manager.bookmarks:
+            list_widget.addItem(f"{bm['title']} ({bm['url']})")
+
+        layout.addWidget(list_widget)
+        button_box = QDialogButtonBox(QDialogButtonBox.Open | QDialogButtonBox.Close)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        def open_bm():
+            item = list_widget.currentItem()
+            if not item:
+                return
+            # Basic parsing, reliable enough for internal use
+            url = item.text().split(" (")[-1][:-1]
+            dialog.accept()
+            self.new_browser_tab(url)
+
+        button_box.accepted.connect(open_bm)
+        list_widget.itemDoubleClicked.connect(open_bm)
+        dialog.exec()
+
+    def show_downloads(self):
+        """Shows the download manager dialog."""
+        self.download_manager_dialog.show()
+        self.download_manager_dialog.raise_()
+
+    def toggle_auto_pdf(self, checked):
+        """Updates the auto-open PDF setting."""
+        self.settings.setValue("browser/auto_open_pdf", checked)
+
+    def open_pdf_in_new_tab(self, path: str):
+        """
+        Opens a PDF in a new Reader Tab.
+        Preferentially opens in the Side Split if active, otherwise Main.
+        """
+        # Determine target widget (Side if visible, else Main)
+        target = self.tabs_side if (self.tabs_side.isVisible()) else self.tabs_main
+
+        # If we are in the main tabs and just clicked a link, it's nice to open
+        # the PDF in the SIDE view (Split View) so we don't lose the browser.
+        if target == self.tabs_main and self.tabs_side.isHidden():
+            self.toggle_split_view()  # Activate split view
+            target = self.tabs_side  # Target the new side view
+
+        self._add_pdf_tab(path, target)
+        target.setCurrentIndex(target.count() - 1)
 
 
 def run():
