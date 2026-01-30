@@ -17,6 +17,7 @@ from PySide6.QtCore import (
     QPoint,
     QSettings,
     QStandardPaths,
+    QStringListModel,
     Qt,
     QTimer,
     QUrl,
@@ -38,17 +39,22 @@ from PySide6.QtGui import (
 from PySide6.QtWebEngineCore import (
     QWebEnginePage,
     QWebEngineProfile,
+    QWebEngineScript,
     QWebEngineSettings,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QCompleter,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QInputDialog,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMainWindow,
     QProgressBar,
     QPushButton,
@@ -96,6 +102,60 @@ class ViewMode(Enum):
 
     IMAGE = 0
     REFLOW = 1
+
+
+class HistoryManager:
+    """Manages persistent history for PDFs and Websites."""
+
+    def __init__(self):
+        base = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.AppDataLocation
+        )
+        self.path = os.path.join(base, "history.json")
+        self.history = []
+        self.popular_sites = [
+            "google.com",
+            "youtube.com",
+            "github.com",
+            "stackoverflow.com",
+            "reddit.com",
+            "wikipedia.org",
+            "arxiv.org",
+            "chatgpt.com",
+        ]
+        self.load()
+
+    def load(self):
+        if os.path.exists(self.path):
+            try:
+                with open(self.path, "r") as f:
+                    self.history = json.load(f)
+            except:
+                self.history = []
+
+    def save(self):
+        try:
+            with open(self.path, "w") as f:
+                json.dump(self.history, f)
+        except:
+            pass
+
+    def add(self, item: str):
+        """Adds an item to history, removing duplicates and keeping latest."""
+        if not item:
+            return
+        # Remove existing to move to top
+        if item in self.history:
+            self.history.remove(item)
+        self.history.insert(0, item)
+        self.history = self.history[:500]  # Limit to 500 items
+        self.save()
+
+    def get_model_data(self) -> List[str]:
+        """Returns combined list of history and popular sites for autocomplete."""
+        # Merge popular sites that aren't already in history
+        extras = [s for s in self.popular_sites if s not in self.history]
+        return self.history + extras
 
 
 class ReaderTab(QWidget):
@@ -1371,7 +1431,7 @@ class DraggableTabBar(QTabBar):
 class BrowserTab(QWidget):
     """
     A full-featured web browser tab using QWebEngineView.
-    Includes navigation controls and dark mode support.
+    Includes navigation controls, dark mode support, ad-blocking, and history autocomplete.
     """
 
     def __init__(
@@ -1380,21 +1440,30 @@ class BrowserTab(QWidget):
         parent=None,
         dark_mode: bool = True,
     ):
-        """
-        Initialize the BrowserTab.
-
-        Args:
-            start_url: The initial URL to load.
-            parent: Parent widget.
-            dark_mode: Whether to start in dark mode.
-        """
         super().__init__(parent)
         self.dark_mode = dark_mode
 
+        # Initialize Profile FIRST (Destruction Order Fix)
+        base_path = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.AppDataLocation
+        )
+        storage_path = os.path.join(base_path, "browser_data")
+        os.makedirs(storage_path, exist_ok=True)
+
+        self.profile = QWebEngineProfile("RiemannPersistentProfile", self)
+        self.profile.setPersistentStoragePath(storage_path)
+        self.profile.setPersistentCookiesPolicy(
+            QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
+        )
+
+        self.inject_ad_skipper()
+
+        # --- UI Setup ---
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # Toolbar
         self.toolbar = QWidget()
         self.toolbar.setFixedHeight(40)
         tb_layout = QHBoxLayout(self.toolbar)
@@ -1407,6 +1476,24 @@ class BrowserTab(QWidget):
         self.btn_reload = QPushButton("↻")
         self.btn_reload.setFixedWidth(30)
 
+        self.txt_url = QLineEdit()
+        self.txt_url.setPlaceholderText("Enter URL or Search...")
+        self.txt_url.returnPressed.connect(self.navigate_to_url)
+
+        # [NEW] Setup Autocomplete
+        self.completer = QCompleter()
+        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.txt_url.setCompleter(self.completer)
+
+        tb_layout.addWidget(self.btn_back)
+        tb_layout.addWidget(self.btn_fwd)
+        tb_layout.addWidget(self.btn_reload)
+        tb_layout.addWidget(self.txt_url)
+
+        layout.addWidget(self.toolbar)
+
+        # Search Bar
         self.search_bar = QWidget()
         self.search_bar.setFixedHeight(40)
         self.search_bar.setVisible(False)
@@ -1429,42 +1516,24 @@ class BrowserTab(QWidget):
         sb_layout.addWidget(self.btn_find_next)
         sb_layout.addWidget(self.btn_find_prev)
         sb_layout.addWidget(self.btn_close_find)
-
         layout.addWidget(self.search_bar)
-
-        self.txt_url = QLineEdit()
-        self.txt_url.setPlaceholderText("Enter URL or Search...")
-        self.txt_url.returnPressed.connect(self.navigate_to_url)
-
-        tb_layout.addWidget(self.btn_back)
-        tb_layout.addWidget(self.btn_fwd)
-        tb_layout.addWidget(self.btn_reload)
-        tb_layout.addWidget(self.txt_url)
-
-        layout.addWidget(self.toolbar)
 
         self.progress = QProgressBar()
         self.progress.setFixedHeight(2)
         self.progress.setTextVisible(False)
         layout.addWidget(self.progress)
 
+        # Web View
         self.web = QWebEngineView()
-        base_path = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.AppDataLocation
+        page = QWebEnginePage(self.profile, self.web)
+        page.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.FullScreenSupportEnabled, True
         )
-        storage_path = os.path.join(base_path, "browser_data")
-        os.makedirs(storage_path, exist_ok=True)
-
-        profile = QWebEngineProfile("RiemannPersistentProfile", self.web)
-        profile.setPersistentStoragePath(storage_path)
-        profile.setPersistentCookiesPolicy(
-            QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
-        )
-
-        page = QWebEnginePage(profile, self.web)
+        page.fullScreenRequested.connect(self._handle_fullscreen_request)
         self.web.setPage(page)
         layout.addWidget(self.web)
 
+        # Connections
         self.btn_back.clicked.connect(self.web.back)
         self.btn_fwd.clicked.connect(self.web.forward)
         self.btn_reload.clicked.connect(self.web.reload)
@@ -1473,6 +1542,19 @@ class BrowserTab(QWidget):
         self.web.loadProgress.connect(self.progress.setValue)
         self.web.loadFinished.connect(lambda: self.progress.setValue(0))
         self.web.titleChanged.connect(self._update_tab_title)
+
+        # [NEW] Shortcuts
+        self.shortcut_reload = QShortcut(QKeySequence("F5"), self)
+        self.shortcut_reload.activated.connect(self.web.reload)
+
+        self.shortcut_reload_ctrl = QShortcut(QKeySequence("Ctrl+R"), self)
+        self.shortcut_reload_ctrl.activated.connect(self.web.reload)
+
+        self.shortcut_hard_reload = QShortcut(QKeySequence("Ctrl+Shift+R"), self)
+        self.shortcut_hard_reload.activated.connect(self.hard_reload)
+
+        self.shortcut_f6 = QShortcut(QKeySequence(Qt.Key.Key_F6), self)
+        self.shortcut_f6.activated.connect(self.focus_url_bar)
 
         self.shortcut_find = QShortcut(QKeySequence("Ctrl+F"), self)
         self.shortcut_find.activated.connect(self.toggle_search)
@@ -1489,93 +1571,119 @@ class BrowserTab(QWidget):
         self.shortcut_zoom_reset = QShortcut(QKeySequence("Ctrl+0"), self)
         self.shortcut_zoom_reset.activated.connect(lambda: self.web.setZoomFactor(1.0))
 
+        # Initial Setup
         self.apply_theme()
+
+        # Link completer model if window exists (handled in showEvent or parent set usually,
+        # but we can also try lazily or rely on RiemannWindow to set it)
+        if self.window() and hasattr(self.window(), "history_model"):
+            self.completer.setModel(self.window().history_model)
+
         self.web.load(QUrl(start_url))
 
-    def apply_theme(self):
-        """Applies dark mode styles to the UI and WebEngine."""
-        settings = self.web.page().settings()
+    def hard_reload(self):
+        """Clears the cache and reloads the page."""
+        self.profile.clearHttpCache()
+        self.web.reload()
 
+    def inject_ad_skipper(self):
+        js_code = """
+        (function() {
+            const clearAds = () => {
+                const skipBtns = document.querySelectorAll('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .videoAdUiSkipButton');
+                skipBtns.forEach(b => { b.click(); });
+                const overlays = document.querySelectorAll('.ytp-ad-overlay-close-button');
+                overlays.forEach(b => { b.click(); });
+                const video = document.querySelector('video');
+                const adShowing = document.querySelector('.ad-showing');
+                if (video && adShowing) {
+                    video.playbackRate = 16.0;
+                    video.muted = true;
+                    if(isFinite(video.duration)) video.currentTime = video.duration;
+                }
+            };
+            setInterval(clearAds, 50);
+        })();
+        """
+        script = QWebEngineScript()
+        script.setName("RiemannAdBlock")
+        script.setSourceCode(js_code)
+        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
+        script.setRunsOnSubFrames(True)
+        self.profile.scripts().insert(script)
+
+    def focus_url_bar(self):
+        self.txt_url.setFocus()
+        self.txt_url.selectAll()
+
+    def _handle_fullscreen_request(self, request):
+        request.accept()
+        if self.window() and hasattr(self.window(), "toggle_reader_fullscreen"):
+            is_fs = getattr(self.window(), "_reader_fullscreen", False)
+            if request.toggleOn() != is_fs:
+                self.window().toggle_reader_fullscreen()
+
+    def apply_theme(self):
+        settings = self.web.page().settings()
         if self.dark_mode:
-            bg = "#333"
-            fg = "#ddd"
-            inp_bg = "#444"
-            border = "#555"
+            bg, fg, inp_bg, border = "#333", "#ddd", "#444", "#555"
             settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, True)
             self.web.page().setBackgroundColor(QColor("#333"))
         else:
-            bg = "#f0f0f0"
-            fg = "#222"
-            inp_bg = "#fff"
-            border = "#ccc"
+            bg, fg, inp_bg, border = "#f0f0f0", "#222", "#fff", "#ccc"
             settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, False)
             self.web.page().setBackgroundColor(QColor("#fff"))
-
-        style = f"""
-            QWidget {{ background: {bg}; color: {fg}; }}
-            QLineEdit {{ background: {inp_bg}; border: 1px solid {border}; border-radius: 4px; padding: 4px; }}
-            QPushButton {{ background: transparent; border: none; padding: 4px; }}
-            QPushButton:hover {{ background: rgba(128,128,128,0.2); border-radius: 4px; }}
-        """
+        style = f"QWidget {{ background: {bg}; color: {fg}; }} QLineEdit {{ background: {inp_bg}; border: 1px solid {border}; border-radius: 4px; padding: 4px; }}"
         self.toolbar.setStyleSheet(style)
         self.search_bar.setStyleSheet(style)
 
-        chunk = "#3a86ff" if self.dark_mode else "#007aff"
-        self.progress.setStyleSheet(
-            f"QProgressBar {{ border: 0px; background: transparent; }} QProgressBar::chunk {{ background: {chunk}; }}"
-        )
-
     def modify_zoom(self, delta):
-        """Adjusts the browser zoom level."""
-        new_zoom = self.web.zoomFactor() + delta
-        self.web.setZoomFactor(max(0.1, min(new_zoom, 5.0)))
+        self.web.setZoomFactor(max(0.1, min(self.web.zoomFactor() + delta, 5.0)))
 
     def toggle_search(self):
-        """Toggles the find-in-page bar."""
-        visible = not self.search_bar.isVisible()
-        self.search_bar.setVisible(visible)
-        if visible:
+        self.search_bar.setVisible(not self.search_bar.isVisible())
+        if self.search_bar.isVisible():
             self.txt_find.setFocus()
-            self.txt_find.selectAll()
-        else:
-            self.web.findText("")
 
     def find_next(self):
-        """Finds next occurrence of text in page."""
         self.web.findText(self.txt_find.text())
 
     def find_prev(self):
-        """Finds previous occurrence of text in page."""
         self.web.findText(self.txt_find.text(), QWebEngineView.FindFlag.FindBackward)
 
     def navigate_to_url(self):
-        """Loads the URL or search query entered in the address bar."""
         text = self.txt_url.text().strip()
         if not text:
             return
-        if "." in text and " " not in text:
-            if not text.startswith("http"):
-                text = "https://" + text
-            url = QUrl(text)
-        else:
-            url = QUrl(f"https://www.google.com/search?q={text}")
+        url = QUrl(
+            text
+            if text.startswith("http") or ("." in text and " " not in text)
+            else f"https://www.google.com/search?q={text}"
+        )
+        if not url.scheme():
+            url.setScheme("https")
         self.web.load(url)
 
     def _update_url_bar(self, url: QUrl):
-        """Updates URL bar text when navigation occurs."""
-        self.txt_url.setText(url.toString())
+        """Updates URL bar and History."""
+        s_url = url.toString()
+        self.txt_url.setText(s_url)
         self.txt_url.setCursorPosition(0)
 
+        # [NEW] Add to history
+        if self.window() and hasattr(self.window(), "add_to_history"):
+            self.window().add_to_history(s_url)
+
     def _update_tab_title(self, title: str):
-        """Updates the parent tab title when the page title changes."""
         parent = self.parent()
         while parent:
             if isinstance(parent, QTabWidget):
                 idx = parent.indexOf(self)
                 if idx != -1:
-                    short_title = (title[:20] + "..") if len(title) > 20 else title
-                    parent.setTabText(idx, short_title)
-                    parent.setTabToolTip(idx, title)
+                    parent.setTabText(
+                        idx, (title[:20] + "..") if len(title) > 20 else title
+                    )
                 break
             parent = parent.parent()
 
@@ -1583,19 +1691,21 @@ class BrowserTab(QWidget):
 class RiemannWindow(QMainWindow):
     """
     The Main Window Manager.
-
-    Handles global application state, window chrome, shortcuts, and
-    orchestrates the split-view tab management system.
+    Handles global state, split-view tabs, history, and shortcuts.
     """
 
     def __init__(self):
-        """Initialize the main window, UI, and session."""
         super().__init__()
         self.setWindowTitle("Riemann Reader")
         self.resize(1200, 900)
 
         self.settings = QSettings("Riemann", "PDFReader")
         self.dark_mode = self.settings.value("darkMode", True, type=bool)
+
+        # [NEW] History System
+        self.history_manager = HistoryManager()
+        self.history_model = QStringListModel(self.history_manager.get_model_data())
+        self.closed_tabs_stack = []
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(self.splitter)
@@ -1613,9 +1723,19 @@ class RiemannWindow(QMainWindow):
 
         self.setup_menu()
 
+        # [NEW] Shortcuts
+        # Ctrl+Q: Global Exit (Fixes fullscreen exit issue)
+        self.shortcut_exit = QShortcut(QKeySequence("Ctrl+Q"), self)
+        self.shortcut_exit.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_exit.activated.connect(self.close)
+
         self.shortcut_close = QShortcut(QKeySequence("Ctrl+W"), self)
         self.shortcut_close.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.shortcut_close.activated.connect(self.close_active_tab)
+
+        self.shortcut_restore = QShortcut(QKeySequence("Ctrl+Shift+T"), self)
+        self.shortcut_restore.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_restore.activated.connect(self.restore_last_closed_tab)
 
         self.shortcut_split = QShortcut(QKeySequence("Ctrl+\\"), self)
         self.shortcut_split.setContext(Qt.ShortcutContext.ApplicationShortcut)
@@ -1631,15 +1751,18 @@ class RiemannWindow(QMainWindow):
 
         self._restore_session()
 
+    def add_to_history(self, item: str):
+        """Adds item to history and updates the shared autocomplete model."""
+        self.history_manager.add(item)
+        self.history_model.setStringList(self.history_manager.get_model_data())
+
     def _handle_escape(self):
         if getattr(self, "_reader_fullscreen", False):
             self.toggle_reader_fullscreen()
 
     def _restore_session(self):
-        """Restores window geometry and open tabs from settings."""
         if self.settings.value("window/geometry"):
             self.restoreGeometry(self.settings.value("window/geometry"))
-
         self._restore_tabs_from_settings("session/main_tabs", self.tabs_main)
         self._restore_tabs_from_settings("session/side_tabs", self.tabs_side)
 
@@ -1653,46 +1776,38 @@ class RiemannWindow(QMainWindow):
         if self.tabs_main.count() == 0:
             self.new_tab()
 
-    def _restore_tabs_from_settings(self, key: str, target_widget: QTabWidget) -> None:
-        """
-        Parses saved tab data and recreates tabs in the target widget.
-
-        Args:
-            key: The QSettings key to read.
-            target_widget: The tab widget to populate.
-        """
+    def _restore_tabs_from_settings(self, key, target_widget):
         items = self.settings.value(key, [], type=list)
         if isinstance(items, str):
             items = [items]
-
         for item in items:
             if isinstance(item, str) and os.path.exists(item):
-                self._add_pdf_tab(item, target_widget, restore_state=True)
-
+                self._add_pdf_tab(item, target_widget, True)
             elif isinstance(item, dict):
-                i_type = item.get("type")
-                data = item.get("data")
-
-                if i_type == "pdf" and data and os.path.exists(data):
-                    self._add_pdf_tab(data, target_widget, restore_state=True)
-                elif i_type == "web" and data:
-                    self._add_browser_tab(data, target_widget)
+                if (
+                    item.get("type") == "pdf"
+                    and item.get("data")
+                    and os.path.exists(item.get("data"))
+                ):
+                    self._add_pdf_tab(item["data"], target_widget, True)
+                elif item.get("type") == "web" and item.get("data"):
+                    self._add_browser_tab(item["data"], target_widget)
 
     def _add_pdf_tab(
         self, path: str, target_widget: QTabWidget, restore_state: bool = False
-    ) -> None:
-        """Creates and adds a ReaderTab to the specified widget."""
+    ):
+        self.add_to_history(path)  # Add loaded PDF to history
         reader = ReaderTab()
         reader.load_document(path, restore_state=restore_state)
         target_widget.addTab(reader, os.path.basename(path))
 
-    def _add_browser_tab(self, url: str, target_widget: QTabWidget) -> None:
-        """Creates and adds a BrowserTab to the specified widget."""
+    def _add_browser_tab(self, url: str, target_widget: QTabWidget):
         browser = BrowserTab(url, dark_mode=self.dark_mode)
+        # Manually link model if added dynamically
+        browser.completer.setModel(self.history_model)
         target_widget.addTab(browser, "Loading...")
 
-    def setup_menu(self) -> None:
-        """Configures the application menu bar."""
+    def setup_menu(self):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("File")
 
@@ -1713,17 +1828,19 @@ class RiemannWindow(QMainWindow):
         file_menu.addSeparator()
 
         exit_action = file_menu.addAction("Exit")
-        exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
 
         view_menu = menubar.addMenu("View")
+        
+        history_action = view_menu.addAction("History")
+        history_action.setShortcut("Ctrl+H")
+        history_action.triggered.connect(self.show_history)
 
         theme_action = view_menu.addAction("Toggle Theme")
         theme_action.setShortcut("Ctrl+D")
         theme_action.triggered.connect(self.toggle_theme)
 
-    def new_tab(self, path: Optional[str] = None, restore_state: bool = False) -> None:
-        """Creates a new PDF tab in the main tab widget."""
+    def new_tab(self, path=None, restore_state=False):
         if path:
             self._add_pdf_tab(path, self.tabs_main, restore_state)
         else:
@@ -1732,11 +1849,9 @@ class RiemannWindow(QMainWindow):
             self.tabs_main.setCurrentWidget(reader)
 
     def new_browser_tab(self, url="https://www.google.com"):
-        """Creates a new browser tab in the currently active group."""
         target = self.tabs_main
         if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
             target = self.tabs_side
-
         self._add_browser_tab(url, target)
         new_tab = target.widget(target.count() - 1)
         target.setCurrentWidget(new_tab)
@@ -1744,31 +1859,22 @@ class RiemannWindow(QMainWindow):
         new_tab.txt_url.selectAll()
 
     def open_pdf_smart(self):
-        """
-        Opens a PDF. Reuses the current tab if empty; otherwise opens a new one.
-        """
         path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
         if not path:
             return
-
-        current_widget = self.tabs_main.currentWidget()
-        is_empty_reader = (
-            isinstance(current_widget, ReaderTab) and not current_widget.current_path
-        )
-
-        if is_empty_reader:
-            current_widget.load_document(path)
+        self.add_to_history(path)
+        current = self.tabs_main.currentWidget()
+        if isinstance(current, ReaderTab) and not current.current_path:
+            current.load_document(path)
             self.tabs_main.setTabText(
                 self.tabs_main.currentIndex(), os.path.basename(path)
             )
         else:
             self.new_tab(path)
 
-    def toggle_split_view(self) -> None:
-        """Moves the currently active tab to the side splitter."""
+    def toggle_split_view(self):
         if self.tabs_side.isHidden():
             self.tabs_side.show()
-
         current = self.tabs_main.currentWidget()
         if current:
             idx = self.tabs_main.indexOf(current)
@@ -1777,145 +1883,195 @@ class RiemannWindow(QMainWindow):
             self.tabs_side.addTab(current, text)
             self.tabs_side.setCurrentWidget(current)
 
-    def close_tab(self, index: int) -> None:
-        """Closes a tab in the main group."""
+    def _record_closed_tab(self, widget: QWidget):
+        if isinstance(widget, ReaderTab) and widget.current_path:
+            self.closed_tabs_stack.append({"type": "pdf", "data": widget.current_path})
+        elif isinstance(widget, BrowserTab):
+            self.closed_tabs_stack.append(
+                {"type": "web", "data": widget.web.url().toString()}
+            )
+
+    def restore_last_closed_tab(self):
+        if not self.closed_tabs_stack:
+            return
+        last = self.closed_tabs_stack.pop()
+        target = (
+            self.tabs_side
+            if self.tabs_side.isVisible() and self.tabs_side.hasFocus()
+            else self.tabs_main
+        )
+        if last["type"] == "pdf":
+            self._add_pdf_tab(last["data"], target, True)
+        elif last["type"] == "web":
+            self._add_browser_tab(last["data"], target)
+        target.setCurrentIndex(target.count() - 1)
+
+    def close_tab(self, index: int):
+        """Closes a tab and handles fullscreen exit if empty."""
         widget = self.tabs_main.widget(index)
         if widget:
+            self._record_closed_tab(widget)
             widget.deleteLater()
         self.tabs_main.removeTab(index)
 
+        # [FIX] If no tabs left, exit fullscreen so user isn't stuck
         if self.tabs_main.count() == 0 and self.tabs_side.count() == 0:
             if getattr(self, "_reader_fullscreen", False):
                 self.toggle_reader_fullscreen()
 
-    def close_side_tab(self, index: int) -> None:
-        """Closes a tab in the side group and hides the splitter if empty."""
+    def close_side_tab(self, index: int):
         widget = self.tabs_side.widget(index)
         if widget:
+            self._record_closed_tab(widget)
             widget.deleteLater()
         self.tabs_side.removeTab(index)
         if self.tabs_side.count() == 0:
             self.tabs_side.hide()
 
+        if self.tabs_main.count() == 0 and self.tabs_side.count() == 0:
+            if getattr(self, "_reader_fullscreen", False):
+                self.toggle_reader_fullscreen()
+
     def closeEvent(self, event):
-        """Saves session state before closing."""
+        def get_files(w):
+            l = []
+            for i in range(w.count()):
+                wid = w.widget(i)
+                if isinstance(wid, ReaderTab) and wid.current_path:
+                    l.append({"type": "pdf", "data": wid.current_path})
+                elif isinstance(wid, BrowserTab):
+                    l.append({"type": "web", "data": wid.web.url().toString()})
+            return l
 
-        def get_open_files(tab_widget):
-            items = []
-            for i in range(tab_widget.count()):
-                widget = tab_widget.widget(i)
-                if isinstance(widget, ReaderTab) and widget.current_path:
-                    items.append({"type": "pdf", "data": widget.current_path})
-                elif isinstance(widget, BrowserTab):
-                    items.append({"type": "web", "data": widget.web.url().toString()})
-            return items
-
-        self.settings.setValue("session/main_tabs", get_open_files(self.tabs_main))
-        self.settings.setValue("session/side_tabs", get_open_files(self.tabs_side))
+        self.settings.setValue("session/main_tabs", get_files(self.tabs_main))
+        self.settings.setValue("session/side_tabs", get_files(self.tabs_side))
         self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/state", self.saveState())
-
         super().closeEvent(event)
 
-    def toggle_reader_fullscreen(self) -> None:
-        """Toggles 'Zen Mode' reading, hiding UI chrome."""
+    def toggle_reader_fullscreen(self):
         if not getattr(self, "_reader_fullscreen", False):
             self._reader_fullscreen = True
             self._was_maximized = self.isMaximized()
-
             self.menuBar().hide()
             self.tabs_main.tabBar().hide()
             self.tabs_side.tabBar().hide()
             self._set_tabs_toolbar_visible(False)
-
             self.showFullScreen()
         else:
             self._reader_fullscreen = False
-
             self.menuBar().show()
             self.tabs_main.tabBar().show()
             self.tabs_side.tabBar().show()
             self._set_tabs_toolbar_visible(True)
-
             if self._was_maximized:
                 self.showMaximized()
             else:
                 self.showNormal()
 
-    def _set_tabs_toolbar_visible(self, visible: bool) -> None:
-        """Helper to hide/show toolbars in all tabs."""
+    def _set_tabs_toolbar_visible(self, visible: bool):
         for i in range(self.tabs_main.count()):
             w = self.tabs_main.widget(i)
-            if isinstance(w, ReaderTab):
+            if hasattr(w, "toolbar"):
                 w.toolbar.setVisible(visible)
         for i in range(self.tabs_side.count()):
             w = self.tabs_side.widget(i)
-            if isinstance(w, ReaderTab):
+            if hasattr(w, "toolbar"):
                 w.toolbar.setVisible(visible)
 
-    def toggle_theme(self) -> None:
-        """Globally toggles the application theme."""
+    def toggle_theme(self):
         self.dark_mode = not self.dark_mode
         self.settings.setValue("darkMode", self.dark_mode)
 
-        def update_tab(tab: QWidget):
-            if isinstance(tab, ReaderTab):
-                tab.dark_mode = self.dark_mode
-                tab.apply_theme()
-                tab.rendered_pages.clear()
-                tab.update_view()
-            elif isinstance(tab, BrowserTab):
-                tab.dark_mode = self.dark_mode
-                tab.apply_theme()
+        def update(w):
+            if hasattr(w, "dark_mode"):
+                w.dark_mode = self.dark_mode
+                w.apply_theme()
+            if isinstance(w, ReaderTab):
+                w.rendered_pages.clear()
+                w.update_view()
 
         for i in range(self.tabs_main.count()):
-            update_tab(self.tabs_main.widget(i))
+            update(self.tabs_main.widget(i))
         for i in range(self.tabs_side.count()):
-            update_tab(self.tabs_side.widget(i))
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        """Global key handlers."""
-        if event.key() == Qt.Key.Key_Escape:
-            if getattr(self, "_reader_fullscreen", False):
-                self.toggle_reader_fullscreen()
-                event.accept()
-                return
-
-        if event.key() == Qt.Key.Key_F11:
-            self.toggle_reader_fullscreen()
-            event.accept()
-            return
-
-        super().keyPressEvent(event)
+            update(self.tabs_side.widget(i))
 
     def close_active_tab(self):
-        """Intelligently closes the currently active tab based on focus."""
         focus_widget = QApplication.focusWidget()
-        target_tabs = None
+        target = None
         curr = focus_widget
-
         while curr:
             if curr == self.tabs_main:
-                target_tabs = self.tabs_main
+                target = self.tabs_main
                 break
             elif curr == self.tabs_side:
-                target_tabs = self.tabs_side
+                target = self.tabs_side
                 break
             curr = curr.parent()
 
-        if target_tabs is None:
-            if self.tabs_side.isVisible() and self.tabs_side.count() > 0:
-                target_tabs = self.tabs_main
-            else:
-                target_tabs = self.tabs_main
+        if not target:
+            target = (
+                self.tabs_main
+                if not (self.tabs_side.isVisible() and self.tabs_side.count() > 0)
+                else self.tabs_main
+            )
 
-        if target_tabs:
-            idx = target_tabs.currentIndex()
-            if idx != -1:
-                if target_tabs == self.tabs_main:
-                    self.close_tab(idx)
+        idx = target.currentIndex()
+        if idx != -1:
+            if target == self.tabs_main:
+                self.close_tab(idx)
+            else:
+                self.close_side_tab(idx)
+
+    def show_history(self):
+        """Displays a dialog with the unified history list."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("History")
+        dialog.resize(600, 400)
+
+        layout = QVBoxLayout(dialog)
+
+        list_widget = QListWidget()
+        # Load history items (excluding default popular sites if desired,
+        # but here we load what is in the persistent history list)
+        items = self.history_manager.history
+        list_widget.addItems(items)
+
+        layout.addWidget(list_widget)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Open | QDialogButtonBox.Close)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        def open_item():
+            item = list_widget.currentItem()
+            if not item:
+                return
+
+            data = item.text()
+            dialog.accept()
+
+            # Logic to determine if File or Web
+            if os.path.exists(data):
+                # reuse open_pdf_smart logic logic or call _add_pdf_tab directly
+                current = self.tabs_main.currentWidget()
+                if isinstance(current, ReaderTab) and not current.current_path:
+                    current.load_document(data)
+                    self.tabs_main.setTabText(
+                        self.tabs_main.currentIndex(), os.path.basename(data)
+                    )
                 else:
-                    self.close_side_tab(idx)
+                    self._add_pdf_tab(data, self.tabs_main)
+            else:
+                # Assume it's a URL
+                self.new_browser_tab(data)
+
+        button_box.accepted.disconnect()  # disconnect default
+        button_box.accepted.connect(open_item)
+        list_widget.itemDoubleClicked.connect(open_item)
+
+        dialog.exec()
 
 
 def run():
