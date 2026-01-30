@@ -1,2267 +1,32 @@
 import os
 import sys
 
-# PyInstaller bundle
+# PyInstaller bundle logic MUST run before other imports
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     bundle_dir = sys._MEIPASS  # type: ignore[attr-defined]
-
     os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = bundle_dir
 
-import json
-import shutil
-import tempfile
-import urllib.request
-from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, List, Optional
 
-from PySide6.QtCore import (
-    QEvent,
-    QMimeData,
-    QObject,
-    QPoint,
-    QSettings,
-    QStandardPaths,
-    QStringListModel,
-    Qt,
-    QTimer,
-    QUrl,
-)
-from PySide6.QtGui import (
-    QAction,
-    QColor,
-    QDesktopServices,
-    QDrag,
-    QIcon,
-    QImage,
-    QKeyEvent,
-    QKeySequence,
-    QMouseEvent,
-    QPainter,
-    QPalette,
-    QPen,
-    QPixmap,
-    QShortcut,
-    QWheelEvent,
-)
-from PySide6.QtWebEngineCore import (
-    QWebEngineDownloadRequest,
-    QWebEnginePage,
-    QWebEngineProfile,
-    QWebEngineScript,
-    QWebEngineSettings,
-)
-from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtCore import QSettings, QStringListModel, Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
-    QCompleter,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
-    QHBoxLayout,
-    QHeaderView,
-    QInputDialog,
-    QLabel,
-    QLineEdit,
     QListWidget,
     QMainWindow,
-    QMenu,
-    QMessageBox,
-    QProgressBar,
-    QPushButton,
-    QScrollArea,
-    QScroller,
-    QScrollerProperties,
     QSplitter,
-    QStackedWidget,
-    QTabBar,
-    QTableWidget,
-    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-try:
-    import riemann_core
-except ImportError as e:
-    print(f"CRITICAL: Could not import riemann_core backend.\nError: {e}")
-    sys.exit(1)
-
-
-class ZoomMode(Enum):
-    """
-    Enumeration defining the zoom behavior of the PDF viewer.
-
-    Attributes:
-        MANUAL: Zoom level is set explicitly by the user.
-        FIT_WIDTH: Zoom level automatically adjusts to fit the page width to the viewport.
-        FIT_HEIGHT: Zoom level automatically adjusts to fit the page height to the viewport.
-    """
-
-    MANUAL = 0
-    FIT_WIDTH = 1
-    FIT_HEIGHT = 2
-
-
-class ViewMode(Enum):
-    """
-    Enumeration defining the rendering mode of the document.
-
-    Attributes:
-        IMAGE: Standard PDF rendering where pages are drawn as images.
-        REFLOW: Text extraction mode rendered via HTML for easier reading on small screens.
-    """
-
-    IMAGE = 0
-    REFLOW = 1
-
-
-class BookmarksManager:
-    """Manages persistent bookmarks."""
-
-    def __init__(self):
-        base = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.AppDataLocation
-        )
-        self.path = os.path.join(base, "bookmarks.json")
-        self.bookmarks = []
-        self.load()
-
-    def load(self):
-        if os.path.exists(self.path):
-            try:
-                with open(self.path, "r") as f:
-                    self.bookmarks = json.load(f)
-            except:
-                self.bookmarks = []
-
-    def save(self):
-        try:
-            with open(self.path, "w") as f:
-                json.dump(self.bookmarks, f)
-        except:
-            pass
-
-    def add(self, title: str, url: str):
-        """Adds a bookmark."""
-        for b in self.bookmarks:
-            if b["url"] == url:
-                return
-        self.bookmarks.append({"title": title, "url": url})
-        self.save()
-
-    def remove(self, url: str):
-        """Removes a bookmark by URL."""
-        self.bookmarks = [b for b in self.bookmarks if b["url"] != url]
-        self.save()
-
-    def is_bookmarked(self, url: str) -> bool:
-        return any(b["url"] == url for b in self.bookmarks)
-
-
-class DownloadManager(QDialog):
-    """
-    Displays a list of recent downloads with controls (Pause/Resume/Cancel).
-    """
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Downloads")
-        self.resize(800, 425)
-
-        layout = QVBoxLayout(self)
-
-        self.table = QTableWidget()
-        self.table.setColumnCount(4)  # Added Actions Column
-        self.table.setHorizontalHeaderLabels(["File", "Status", "Path", "Actions"])
-
-        header = self.table.horizontalHeader()
-        header.setSectionsMovable(True)
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(False)
-
-        # Make Path column wide by default
-        self.table.setColumnWidth(0, 240)  # File
-        self.table.setColumnWidth(1, 120)  # Status
-        self.table.setColumnWidth(2, 360)  # Path (default wide)
-        self.table.setColumnWidth(3, 120)  # Actions
-
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        layout.addWidget(self.table)
-
-        btn_clear = QPushButton("Clear Finished")
-        btn_clear.clicked.connect(self.clear_finished)
-        layout.addWidget(btn_clear)
-
-        base = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.AppDataLocation
-        )
-        os.makedirs(base, exist_ok=True)
-        self._persist_path = os.path.join(base, "downloads_history.json")
-
-        self.downloads = []
-
-        # load persisted rows (metadata only) - will populate UI but won't reattach active QDownload objects
-        self._load_persistent_entries()
-
-    def _set_open_button(self, row, full_path):
-        """Helper to replace the control buttons with an 'Open' button."""
-        container = QWidget()
-        h_layout = QHBoxLayout(container)
-        h_layout.setContentsMargins(2, 2, 2, 2)
-        h_layout.setSpacing(4)
-
-        btn_open = QPushButton("Open")
-        btn_open.setFixedWidth(50)
-
-        def _open_path(p=full_path):
-            if p and os.path.exists(p):
-                QDesktopServices.openUrl(QUrl.fromLocalFile(p))
-            else:
-                QMessageBox.information(self, "Open File", "File not found on disk.")
-
-        btn_open.clicked.connect(_open_path)
-        h_layout.addWidget(btn_open)
-
-        # Ensure we are setting it on the Actions column (index 3)
-        self.table.setCellWidget(row, 3, container)
-
-    def _load_persistent_entries(self):
-        if not os.path.exists(self._persist_path):
-            return
-        try:
-            with open(self._persist_path, "r") as f:
-                entries = json.load(f)
-        except Exception:
-            return
-
-        for e in entries:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(
-                row, 0, QTableWidgetItem(e.get("file_name", "<unknown>"))
-            )
-            self.table.setItem(row, 1, QTableWidgetItem(e.get("status", "Completed")))
-            path_str = e.get("full_path", "...")
-            path_item = QTableWidgetItem(path_str)
-            path_item.setToolTip(path_str)
-            self.table.setItem(row, 2, path_item)
-
-            self._set_open_button(row, path_str)
-
-            # placeholder actions (no active download object)
-            container = QWidget()
-            h_layout = QHBoxLayout(container)
-            h_layout.setContentsMargins(2, 2, 2, 2)
-            h_layout.setSpacing(4)
-            btn_dummy = QPushButton("Open")
-            btn_dummy.setFixedWidth(50)
-
-            # when clicked, try to open the file on disk if exists
-            def _open_path(p=e.get("full_path", "")):
-                if p and os.path.exists(p):
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(p))
-                else:
-                    QMessageBox.information(
-                        self, "Open File", "File not found on disk."
-                    )
-
-            btn_dummy.clicked.connect(_open_path)
-            h_layout.addWidget(btn_dummy)
-            self.table.setCellWidget(row, 3, container)
-
-    def _make_state_slot(self, row, item):
-        # explicit slot so we can disconnect it later
-        def _slot(state):
-            try:
-                self.update_status(row, item, state)
-            except RuntimeError:
-                # underlying C++ widget deleted; disconnect to avoid repeated errors
-                try:
-                    item.stateChanged.disconnect(_slot)
-                except Exception:
-                    pass
-
-        return _slot
-
-    def _persist_entries(self):
-        """Persist the current table rows (metadata only). Non-active downloads stored as-is."""
-        out = []
-        for i in range(self.table.rowCount()):
-            file_item = self.table.item(i, 0)
-            status_item = self.table.item(i, 1)
-            path_item = self.table.item(i, 2)
-            out.append(
-                {
-                    "file_name": file_item.text() if file_item else "",
-                    "status": status_item.text() if status_item else "",
-                    "full_path": path_item.text() if path_item else "",
-                }
-            )
-        try:
-            with open(self._persist_path, "w") as f:
-                json.dump(out, f)
-        except Exception:
-            pass
-
-    def _make_finished_slot(self, row, item):
-        def _slot():
-            try:
-                self.on_finished(row, item)
-            except RuntimeError:
-                try:
-                    item.finished.disconnect(_slot)
-                except Exception:
-                    pass
-
-        return _slot
-
-    def add_download(self, download_item):
-        row = self.table.rowCount()
-        self.table.insertRow(row)
-
-        name = download_item.downloadFileName()
-        self.table.setItem(row, 0, QTableWidgetItem(name))
-        self.table.setItem(row, 1, QTableWidgetItem("Starting..."))
-
-        path_text = download_item.downloadDirectory()
-        if path_text:
-            full_path = os.path.join(
-                download_item.downloadDirectory(), download_item.downloadFileName()
-            )
-        else:
-            full_path = "..."
-        path_item = QTableWidgetItem(full_path)
-        path_item.setToolTip(full_path)
-        self.table.setItem(row, 2, path_item)
-
-        # -- buttons (your current code) --
-        container = QWidget()
-        h_layout = QHBoxLayout(container)
-        h_layout.setContentsMargins(2, 2, 2, 2)
-        h_layout.setSpacing(4)
-
-        btn_pause = QPushButton("⏸")
-        btn_pause.setFixedWidth(30)
-        btn_pause.setToolTip("Pause")
-
-        btn_resume = QPushButton("▶")
-        btn_resume.setFixedWidth(30)
-        btn_resume.setToolTip("Resume")
-        btn_resume.setEnabled(False)
-
-        btn_cancel = QPushButton("⏹")
-        btn_cancel.setFixedWidth(30)
-        btn_cancel.setToolTip("Cancel")
-
-        h_layout.addWidget(btn_pause)
-        h_layout.addWidget(btn_resume)
-        h_layout.addWidget(btn_cancel)
-        # if table has 4 columns (Actions) place in col 3, else adjust to col 2
-        try:
-            self.table.setCellWidget(row, 3, container)
-        except Exception:
-            # fallback if table has only 3 columns
-            self.table.setCellWidget(row, 2, container)
-
-        btn_pause.clicked.connect(download_item.pause)
-        btn_resume.clicked.connect(download_item.resume)
-        btn_cancel.clicked.connect(download_item.cancel)
-
-        # create slots we can later disconnect
-        state_slot = self._make_state_slot(row, download_item)
-        finished_slot = self._make_finished_slot(row, download_item)
-
-        download_item.stateChanged.connect(state_slot)
-        download_item.stateChanged.connect(finished_slot)
-
-        # store everything
-        self.downloads.append(
-            {
-                "item": download_item,
-                "row": row,
-                "btns": (btn_pause, btn_resume, btn_cancel),
-                "state_slot": state_slot,
-                "finished_slot": finished_slot,
-            }
-        )
-
-        # initial update
-        try:
-            self.update_status(row, download_item, download_item.state())
-        except RuntimeError:
-            pass
-
-        self._persist_entries()
-
-    def update_status(self, row, item, state):
-        # be robust if widget was deleted; catch exceptions around Qt calls
-
-        try:
-            status = "Unknown"
-            btns = None
-            for d in self.downloads:
-                if d["item"] == item:
-                    btns = d["btns"]
-                    break
-
-            if state == QWebEngineDownloadRequest.DownloadState.DownloadInProgress:
-                percent = 0
-                if item.totalBytes() > 0:
-                    percent = int(item.receivedBytes() / item.totalBytes() * 100)
-                status = f"{percent}%"
-                if btns:
-                    btns[0].setEnabled(True)
-                    btns[1].setEnabled(False)
-                    btns[2].setEnabled(True)
-
-            elif state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
-                status = "Completed"
-                if btns:
-                    btns[0].setEnabled(False)
-                    btns[1].setEnabled(False)
-                    btns[2].setEnabled(False)
-
-                path = item.downloadDirectory() + "/" + item.downloadFileName()
-                path_item = QTableWidgetItem(path)
-                path_item.setToolTip(path)
-
-                self.table.setItem(row, 2, path_item)
-                self._set_open_button(row, path)
-                self._persist_entries()
-
-            elif state == QWebEngineDownloadRequest.DownloadState.DownloadCancelled:
-                status = "Cancelled"
-                if btns:
-                    btns[0].setEnabled(False)
-                    btns[1].setEnabled(True)
-                    btns[2].setEnabled(False)
-                self._persist_entries()
-
-            elif state == QWebEngineDownloadRequest.DownloadState.DownloadInterrupted:
-                status = "Interrupted/Paused"
-                if item.isPaused():
-                    status = "Paused"
-                    if btns:
-                        btns[0].setEnabled(False)
-                        btns[1].setEnabled(True)
-                        btns[2].setEnabled(True)
-                else:
-                    status = "Failed"
-                    if btns:
-                        btns[0].setEnabled(False)
-                        btns[1].setEnabled(False)
-                        btns[2].setEnabled(False)
-                self._persist_entries()
-
-            self.table.setItem(row, 1, QTableWidgetItem(status))
-
-        except RuntimeError:
-            # C++ widget deleted — nothing to do
-            pass
-        except Exception as e:
-            # other errors; log if you want
-            print("update_status error:", e)
-
-    def clear_finished(self):
-        """Removes completed/cancelled rows."""
-        rows_to_remove = []
-        for i in range(self.table.rowCount()):
-            status_item = self.table.item(i, 1)
-            if status_item and status_item.text() in [
-                "Completed",
-                "Cancelled",
-                "Failed",
-            ]:
-                rows_to_remove.append(i)
-
-        for i in sorted(rows_to_remove, reverse=True):
-            self.table.removeRow(i)
-            # Remove from tracking list
-            if i < len(self.downloads):
-                del self.downloads[i]
-
-        self._persist_entries()
-
-    def on_finished(self, row, item):
-        # keep behavior but robust
-        try:
-            self.update_status(row, item, item.state())
-        except Exception:
-            pass
-
-    def closeEvent(self, event):
-        # disconnect signals for all tracked download items to avoid callbacks after deletion
-        for d in list(self.downloads):
-            try:
-                d["item"].stateChanged.disconnect(d.get("state_slot"))
-            except Exception:
-                pass
-            try:
-                d["item"].finished.disconnect(d.get("finished_slot"))
-            except Exception:
-                pass
-
-        self._persist_entries()
-        super().closeEvent(event)
-
-
-class HistoryManager:
-    """Manages persistent history for PDFs and Websites."""
-
-    def __init__(self):
-        base = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.AppDataLocation
-        )
-        self.path = os.path.join(base, "history.json")
-        self.history = []
-        self.popular_sites = [
-            "google.com",
-            "youtube.com",
-            "github.com",
-            "stackoverflow.com",
-            "reddit.com",
-            "wikipedia.org",
-            "arxiv.org",
-            "chatgpt.com",
-        ]
-        self.load()
-
-    def load(self):
-        if os.path.exists(self.path):
-            try:
-                with open(self.path, "r") as f:
-                    self.history = json.load(f)
-            except:
-                self.history = []
-
-    def save(self):
-        try:
-            with open(self.path, "w") as f:
-                json.dump(self.history, f)
-        except:
-            pass
-
-    def add(self, item: str):
-        """Adds an item to history, removing duplicates and keeping latest."""
-        if not item:
-            return
-        # Remove existing to move to top
-        if item in self.history:
-            self.history.remove(item)
-        self.history.insert(0, item)
-        self.history = self.history[:500]  # Limit to 500 items
-        self.save()
-
-    def get_model_data(self) -> List[str]:
-        """Returns combined list of history and popular sites for autocomplete."""
-        # Merge popular sites that aren't already in history
-        extras = [s for s in self.popular_sites if s not in self.history]
-        return self.history + extras
-
-
-class ReaderTab(QWidget):
-    """
-    A self-contained PDF Viewer Widget.
-
-    This class manages the rendering pipeline, navigation, state (zoom, scroll),
-    and interactions (annotations, text selection) for a single open PDF document.
-
-    Attributes:
-        settings (QSettings): persistent application settings.
-        engine (riemann_core.PdfEngine): The Rust-based backend engine instance.
-        current_doc (riemann_core.RiemannDocument): The currently loaded PDF document object.
-        page_widgets (Dict[int, QLabel]): Mapping of page indices to their display widgets.
-        rendered_pages (Set[int]): Set of page indices currently holding rendered pixmaps.
-        annotations (Dict): Dictionary storing user annotations.
-    """
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        """
-        Initialize the ReaderTab.
-
-        Args:
-            parent: The parent widget, if any.
-        """
-        super().__init__(parent)
-
-        self.settings: QSettings = QSettings("Riemann", "PDFReader")
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-
-        self.engine: Optional[riemann_core.PdfEngine] = None
-        self.current_doc: Optional[riemann_core.RiemannDocument] = None
-        self.current_path: Optional[str] = None
-        self.current_page_index: int = 0
-
-        self.dark_mode: bool = self.settings.value("darkMode", True, type=bool)
-        self.zoom_mode: ZoomMode = ZoomMode.FIT_WIDTH
-        self.manual_scale: float = 1.0
-        self.facing_mode: bool = False
-        self.continuous_scroll: bool = True
-        self.view_mode: ViewMode = ViewMode.IMAGE
-        self.is_annotating: bool = False
-
-        self.search_result: Optional[
-            Tuple[int, List[Tuple[float, float, float, float]]]
-        ] = None
-
-        self.page_widgets: Dict[int, QLabel] = {}
-        self.rendered_pages: Set[int] = set()
-        self.annotations: Dict[str, List[Dict[str, Any]]] = {}
-
-        self.virtual_threshold: int = 300
-        self._virtual_enabled: bool = False
-        self._top_spacer: Optional[QWidget] = None
-        self._bottom_spacer: Optional[QWidget] = None
-        self._virtual_range: Tuple[int, int] = (0, 0)
-        self._cached_base_size: Optional[tuple] = None
-
-        self._init_backend()
-        self.setup_ui()
-        self.apply_theme()
-        self._setup_scroller()
-
-        self.scroll_timer = QTimer()
-        self.scroll_timer.setSingleShot(True)
-        self.scroll_timer.setInterval(150)
-        self.scroll_timer.timeout.connect(self.real_scroll_handler)
-
-        self.shortcut_find = QShortcut(QKeySequence("Ctrl+F"), self)
-        self.shortcut_find.activated.connect(self.toggle_search_bar)
-
-    def _init_backend(self) -> None:
-        """Initializes the Rust-based PDF engine backend."""
-        try:
-            self.engine = riemann_core.PdfEngine()
-        except Exception as e:
-            sys.stderr.write(f"Backend Initialization Error: {e}\n")
-
-    def setup_ui(self) -> None:
-        """Constructs the visual hierarchy, toolbar, and main content area."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        self.toolbar = QWidget()
-        self.toolbar.setFixedHeight(50)
-        t_layout = QHBoxLayout(self.toolbar)
-
-        self.btn_save = QPushButton("💾")
-        self.btn_save.setToolTip("Save Copy of PDF")
-        self.btn_save.clicked.connect(self.save_document)
-
-        self.btn_reflow = QPushButton("📄/📝")
-        self.btn_reflow.setToolTip("Toggle Text Reflow Mode")
-        self.btn_reflow.setCheckable(True)
-        self.btn_reflow.setChecked(self.view_mode == ViewMode.REFLOW)
-        self.btn_reflow.clicked.connect(self.toggle_view_mode)
-
-        self.btn_facing = QPushButton("📄/📖")
-        self.btn_facing.setToolTip("Toggle Facing Pages (Single / Two-Page View)")
-        self.btn_facing.setCheckable(True)
-        self.btn_facing.setChecked(self.facing_mode)
-        self.btn_facing.clicked.connect(self.toggle_facing_mode)
-
-        self.btn_scroll_mode = QPushButton("📄/📜")
-        self.btn_scroll_mode.setToolTip("Toggle Scroll Mode (Single Page / Continuous)")
-        self.btn_scroll_mode.setCheckable(True)
-        self.btn_scroll_mode.setChecked(self.continuous_scroll)
-        self.btn_scroll_mode.clicked.connect(self.toggle_scroll_mode)
-
-        self.btn_annotate = QPushButton("🖊️")
-        self.btn_annotate.setToolTip("Enable/Disable Annotation Mode")
-        self.btn_annotate.setCheckable(True)
-        self.btn_annotate.clicked.connect(self.toggle_annotation_mode)
-
-        self.btn_prev = QPushButton("◄")
-        self.btn_prev.setToolTip("Previous Page (Left Arrow)")
-        self.btn_prev.clicked.connect(self.prev_view)
-
-        self.txt_page = QLineEdit()
-        self.txt_page.setFixedWidth(50)
-        self.txt_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.txt_page.setToolTip("Current Page (Type number and hit Enter)")
-        self.txt_page.returnPressed.connect(self.on_page_input_return)
-
-        self.lbl_total = QLabel("/ 0")
-        self.lbl_total.setToolTip("Total Pages")
-
-        self.btn_next = QPushButton("►")
-        self.btn_next.setToolTip("Next Page (Right Arrow)")
-        self.btn_next.clicked.connect(self.next_view)
-
-        self.combo_zoom = QComboBox()
-        self.combo_zoom.setEditable(True)
-        self.combo_zoom.setToolTip("Zoom Level (Ctrl+Scroll)")
-        self.combo_zoom.addItems(
-            ["Fit Width", "Fit Height", "50%", "75%", "100%", "125%", "150%", "200%"]
-        )
-        self.combo_zoom.currentIndexChanged.connect(self.on_zoom_selected)
-        self.combo_zoom.lineEdit().returnPressed.connect(self.on_zoom_text_entered)
-        self.combo_zoom.setFixedWidth(100)
-        self._sync_zoom_ui()
-
-        self.btn_theme = QPushButton("🌓")
-        self.btn_theme.setToolTip("Toggle Dark/Light Mode")
-        self.btn_theme.clicked.connect(self.toggle_theme)
-
-        self.btn_fullscreen = QPushButton("⛶")
-        self.btn_fullscreen.setToolTip("Toggle Fullscreen Reader Mode")
-        self.btn_fullscreen.clicked.connect(self.toggle_reader_fullscreen)
-
-        self.btn_ocr = QPushButton("👁️")
-        self.btn_ocr.setToolTip("OCR Current Page (Extract Text)")
-        self.btn_ocr.clicked.connect(self.perform_ocr_current_page)
-
-        self.btn_search = QPushButton("🔍")
-        self.btn_search.setToolTip("Find in Document")
-        self.btn_search.setCheckable(True)
-        self.btn_search.clicked.connect(self.toggle_search_bar)
-
-        widgets = [
-            self.btn_save,
-            self.btn_reflow,
-            self.btn_facing,
-            self.btn_scroll_mode,
-            self.btn_search,
-            self.btn_annotate,
-            self.btn_ocr,
-            self.btn_prev,
-            self.txt_page,
-            self.lbl_total,
-            self.btn_next,
-            self.combo_zoom,
-            self.btn_theme,
-            self.btn_fullscreen,
-        ]
-        for w in widgets:
-            t_layout.addWidget(w)
-        t_layout.addStretch()
-        layout.addWidget(self.toolbar)
-
-        self.search_bar = QWidget()
-        self.search_bar.setVisible(False)
-        self.search_bar.setFixedHeight(45)
-        self.search_bar.setStyleSheet(
-            "background-color: #2a2a2a;"
-            if self.dark_mode
-            else "background-color: #f0f0f0;"
-        )
-
-        sb_layout = QHBoxLayout(self.search_bar)
-        sb_layout.setContentsMargins(10, 5, 10, 5)
-
-        self.txt_search = QLineEdit()
-        self.txt_search.setPlaceholderText("Find text...")
-        self.txt_search.returnPressed.connect(self.find_next)
-
-        self.btn_find_prev = QPushButton("▲")
-        self.btn_find_prev.clicked.connect(self.find_prev)
-
-        self.btn_find_next = QPushButton("▼")
-        self.btn_find_next.clicked.connect(self.find_next)
-
-        self.btn_close_search = QPushButton("✕")
-        self.btn_close_search.setFlat(True)
-        self.btn_close_search.clicked.connect(self.toggle_search_bar)
-
-        sb_layout.addWidget(QLabel("Find:"))
-        sb_layout.addWidget(self.txt_search)
-        sb_layout.addWidget(self.btn_find_prev)
-        sb_layout.addWidget(self.btn_find_next)
-        sb_layout.addWidget(self.btn_close_search)
-
-        layout.addWidget(self.search_bar)
-
-        self.stack = QStackedWidget()
-
-        self.scroll = QScrollArea()
-        self.scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.scroll.setWidgetResizable(True)
-        self.scroll.installEventFilter(self)
-        self.scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-
-        self.scroll_content = QWidget()
-        self.scroll_content.setObjectName("scrollContent")
-        self.scroll_layout = QVBoxLayout(self.scroll_content)
-        self.scroll_layout.setContentsMargins(10, 10, 10, 10)
-        self.scroll_layout.setSpacing(20)
-        self.scroll_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.scroll.setWidget(self.scroll_content)
-        self.scroll.verticalScrollBar().valueChanged.connect(self.defer_scroll_update)
-        self.stack.addWidget(self.scroll)
-
-        self.web = QWebEngineView()
-        self.stack.addWidget(self.web)
-
-        layout.addWidget(self.stack)
-
-    def save_document(self) -> None:
-        """Saves a copy of the current PDF to a user-specified location."""
-        if not self.current_path or not os.path.exists(self.current_path):
-            QMessageBox.warning(self, "Save Error", "No document loaded to save.")
-            return
-
-        suggested_name = os.path.basename(self.current_path)
-        dest_path, _ = QFileDialog.getSaveFileName(
-            self, "Save PDF As", suggested_name, "PDF Files (*.pdf)"
-        )
-
-        if dest_path:
-            try:
-                shutil.copy2(self.current_path, dest_path)
-                QMessageBox.information(self, "Success", f"Saved to {dest_path}")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not save file:\n{e}")
-
-    def _setup_scroller(self) -> None:
-        """Configures the kinetic scrolling properties for the viewport."""
-        QScroller.grabGesture(
-            self.scroll.viewport(), QScroller.ScrollerGestureType.LeftMouseButtonGesture
-        )
-        props = QScroller.scroller(self.scroll.viewport()).scrollerProperties()
-        props.setScrollMetric(QScrollerProperties.ScrollMetric.DecelerationFactor, 0.5)
-        props.setScrollMetric(QScrollerProperties.ScrollMetric.MaximumVelocity, 0.8)
-        QScroller.scroller(self.scroll.viewport()).setScrollerProperties(props)
-
-    def load_document(self, path: str, restore_state: bool = False) -> None:
-        """
-        Loads a PDF file from the specified path.
-
-        Args:
-            path: Absolute file path to the PDF.
-            restore_state: If True, attempts to restore the last known page/scroll position.
-        """
-        try:
-            self.current_doc = self.engine.load_document(path)
-            self._probe_base_page_size()
-            self.current_path = path
-            self.settings.setValue("lastFile", path)
-            self.load_annotations()
-
-            if restore_state:
-                saved_page = self.settings.value("lastPage", 0, type=int)
-                saved_scroll = self.settings.value("lastScrollY", 0, type=int)
-                self.current_page_index = min(
-                    saved_page, self.current_doc.page_count - 1
-                )
-                self.rebuild_layout()
-                self.update_view()
-                QTimer.singleShot(
-                    50, lambda: self.scroll.verticalScrollBar().setValue(saved_scroll)
-                )
-            else:
-                self.current_page_index = 0
-                self.rebuild_layout()
-                self.update_view()
-
-        except Exception as e:
-            sys.stderr.write(f"Load error: {e}\n")
-
-    def rebuild_layout(self) -> None:
-        """
-        Reconstructs the layout of QLabels representing the document pages.
-        Implements virtualization logic for large documents when continuous scroll is enabled.
-        """
-        if not self.current_doc:
-            return
-
-        # [FIX] 1. Block signals to prevent 'valueChanged' from firing during the wipe
-        # This prevents the app from thinking the user scrolled to 0 when we clear widgets.
-        sb = self.scroll.verticalScrollBar()
-        was_blocked = sb.signalsBlocked()
-        sb.blockSignals(True)
-
-        # [FIX] 2. Capture the exact pixel scroll position
-        old_scroll_val = sb.value()
-
-        self.page_widgets.clear()
-        self.rendered_pages.clear()
-        self._virtual_enabled = False
-        self._virtual_range = (0, 0)
-
-        # Clear existing widgets
-        while self.scroll_layout.count():
-            item = self.scroll_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-
-        count = self.current_doc.page_count
-        use_virtual = self.continuous_scroll and (count > self.virtual_threshold)
-
-        if use_virtual:
-            self._virtual_enabled = True
-            buf_before = 30
-            buf_after = 40
-            start = max(0, self.current_page_index - buf_before)
-            end = min(count, self.current_page_index + buf_after)
-            self._virtual_range = (start, end)
-
-            if self._cached_base_size:
-                _, base_h = self._cached_base_size
-            else:
-                self._probe_base_page_size()
-                _, base_h = self._cached_base_size or (595, 842)
-
-            scale = self.calculate_scale()
-            page_height = int(base_h * scale) + self.scroll_layout.spacing()
-
-            # Top Spacer
-            top_spacer = QWidget()
-            top_spacer.setFixedHeight(max(0, start * page_height))
-            top_spacer.setObjectName("topSpacer")
-            self._top_spacer = top_spacer
-            self.scroll_layout.addWidget(top_spacer)
-
-            # Page Widgets
-            for p_idx in range(start, end):
-                if self.facing_mode and (p_idx % 2 == 0) and (p_idx + 1 < end):
-                    row_widget = QWidget()
-                    row_layout = QHBoxLayout(row_widget)
-                    row_layout.setContentsMargins(0, 0, 0, 0)
-                    row_layout.setSpacing(10)
-                    row_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-                    lbl_left = self._create_page_label(p_idx)
-                    row_layout.addWidget(lbl_left)
-                    self.page_widgets[p_idx] = lbl_left
-
-                    lbl_right = self._create_page_label(p_idx + 1)
-                    row_layout.addWidget(lbl_right)
-                    self.page_widgets[p_idx + 1] = lbl_right
-
-                    self.scroll_layout.addWidget(row_widget)
-                else:
-                    if p_idx in self.page_widgets:
-                        continue
-                    row_widget = QWidget()
-                    row_layout = QHBoxLayout(row_widget)
-                    row_layout.setContentsMargins(0, 0, 0, 0)
-                    row_layout.setSpacing(10)
-                    row_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-                    lbl = self._create_page_label(p_idx)
-                    row_layout.addWidget(lbl)
-                    self.page_widgets[p_idx] = lbl
-                    self.scroll_layout.addWidget(row_widget)
-
-            # Bottom Spacer
-            bottom_spacer = QWidget()
-            bottom_spacer.setFixedHeight(max(0, (count - end) * page_height))
-            bottom_spacer.setObjectName("bottomSpacer")
-            self._bottom_spacer = bottom_spacer
-            self.scroll_layout.addWidget(bottom_spacer)
-
-        else:
-            # (Standard non-virtual logic)
-            if self.continuous_scroll:
-                pages_to_layout = range(count)
-            else:
-                if self.facing_mode:
-                    start = (self.current_page_index // 2) * 2
-                    pages_to_layout = range(start, min(start + 2, count))
-                else:
-                    pages_to_layout = range(
-                        self.current_page_index, self.current_page_index + 1
-                    )
-
-            indices = list(pages_to_layout)
-            idx_ptr = 0
-            while idx_ptr < len(indices):
-                p_idx = indices[idx_ptr]
-                is_pair = self.facing_mode and (p_idx + 1 < count) and (p_idx % 2 == 0)
-
-                row_widget = QWidget()
-                row_layout = QHBoxLayout(row_widget)
-                row_layout.setContentsMargins(0, 0, 0, 0)
-                row_layout.setSpacing(10)
-                row_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-                lbl_left = self._create_page_label(p_idx)
-                row_layout.addWidget(lbl_left)
-                self.page_widgets[p_idx] = lbl_left
-
-                if is_pair:
-                    p_idx_right = p_idx + 1
-                    lbl_right = self._create_page_label(p_idx_right)
-                    row_layout.addWidget(lbl_right)
-                    self.page_widgets[p_idx_right] = lbl_right
-                    idx_ptr += 2
-                else:
-                    idx_ptr += 1
-
-                self.scroll_layout.addWidget(row_widget)
-
-        # [FIX] 3. Force the scroll content to recalculate its height immediately
-        # This ensures the maximum scroll range is updated BEFORE we try to restore the value.
-        self.scroll_content.adjustSize()
-        QApplication.processEvents()  # Process any pending layout requests
-
-        # [FIX] 4. Restore the scroll position
-        if self.continuous_scroll:
-            sb.setValue(old_scroll_val)
-
-        # [FIX] 5. Unblock signals so user interaction works again
-        sb.blockSignals(was_blocked)
-
-    def _create_page_label(self, index: int) -> QLabel:
-        """
-        Creates a placeholder QLabel for a specific page index.
-
-        Args:
-            index: The page number (0-based) this label represents.
-
-        Returns:
-            A configured QLabel instance.
-        """
-        lbl = QLabel()
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setProperty("pageIndex", index)
-        w, h = self._get_target_page_size()
-        lbl.setFixedSize(w, h)
-        lbl.setStyleSheet(
-            f"background-color: {'#333' if self.dark_mode else '#fff'}; border: 1px solid #555;"
-        )
-        lbl.installEventFilter(self)
-        return lbl
-
-    def render_visible_pages(self) -> None:
-        """
-        Identifies currently visible pages and triggers their rendering.
-        Evicts off-screen pages to conserve memory.
-        """
-        if not self.current_doc or not self.page_widgets:
-            return
-
-        target_indices: Set[int] = set()
-
-        start = max(0, self.current_page_index - 7)
-        end = min(self.current_doc.page_count, self.current_page_index + 8)
-
-        for i in range(start, end):
-            target_indices.add(i)
-
-        for idx in list(self.rendered_pages):
-            if idx not in target_indices:
-                if idx in self.page_widgets:
-                    self.page_widgets[idx].clear()
-                    self.page_widgets[idx].setText(f"Page {idx + 1}")
-                self.rendered_pages.remove(idx)
-
-        scale = self.calculate_scale()
-
-        for idx in target_indices:
-            if idx in self.rendered_pages:
-                continue
-            if idx not in self.page_widgets:
-                continue
-
-            self._render_single_page(idx, scale)
-            self.rendered_pages.add(idx)
-
-    def _render_single_page(self, idx: int, scale: float) -> None:
-        """
-        Renders a specific page using the Rust backend and applies it to the UI.
-        Handles drawing overlays such as search results and annotations.
-
-        Args:
-            idx: The 0-based index of the page to render.
-            scale: The logical zoom scale to apply.
-        """
-        try:
-            dpr = self.devicePixelRatio()
-            render_scale = scale * dpr
-
-            res = self.current_doc.render_page(
-                idx, render_scale, 1 if self.dark_mode else 0
-            )
-
-            img = QImage(res.data, res.width, res.height, QImage.Format.Format_ARGB32)
-            img.setDevicePixelRatio(dpr)
-            pix = QPixmap.fromImage(img)
-
-            if self.search_result and self.search_result[0] == idx:
-                painter = QPainter(pix)
-                color = (
-                    QColor(255, 255, 0, 100)
-                    if self.dark_mode
-                    else QColor(255, 255, 0, 128)
-                )
-                painter.setBrush(color)
-                painter.setPen(Qt.PenStyle.NoPen)
-
-                for left, top, right, bottom in self.search_result[1]:
-                    x = left * render_scale
-                    w = (right - left) * render_scale
-                    h = (top - bottom) * render_scale
-                    y = res.height - (top * render_scale)
-                    painter.drawRect(x, y, w, h)
-
-                painter.end()
-
-            if str(idx) in self.annotations:
-                painter = QPainter(pix)
-                painter.setPen(QPen(QColor(255, 255, 0, 180), 3))
-                for anno in self.annotations[str(idx)]:
-                    x = int(anno["rel_pos"][0] * pix.width())
-                    y = int(anno["rel_pos"][1] * pix.height())
-                    painter.drawEllipse(QPoint(x, y), 10, 10)
-                painter.end()
-
-            lbl = self.page_widgets[idx]
-            lbl.setPixmap(pix)
-            # lbl.setMinimumSize(0, 0)
-
-        except Exception as e:
-            sys.stderr.write(f"Render error for page {idx}: {e}\n")
-
-    def _get_target_page_size(self) -> Tuple[int, int]:
-        """Calculates the target pixel dimensions for pages at current scale."""
-        if not self._cached_base_size:
-            return (int(595 * self.manual_scale), int(842 * self.manual_scale))
-
-        base_w, base_h = self._cached_base_size
-        scale = self.calculate_scale()
-        return (int(base_w * scale), int(base_h * scale))
-
-    def _probe_base_page_size(self) -> None:
-        """Calculates and caches the base page dimensions in pixels."""
-        if not self.current_doc:
-            self._cached_base_size = None
-            return
-        try:
-            res = self.current_doc.render_page(0, 1.0, 0)
-            self._cached_base_size = (res.width, res.height)
-        except Exception:
-            self._cached_base_size = (595, 842)
-
-    def calculate_scale(self) -> float:
-        """
-        Computes the current rendering scale factor based on view mode and window size.
-
-        Returns:
-            float: The scale factor (1.0 = 100%).
-        """
-        if self.zoom_mode == ZoomMode.MANUAL:
-            return self.manual_scale
-
-        if not self._cached_base_size:
-            try:
-                self._probe_base_page_size()
-            except Exception:
-                return 1.0
-
-        if not self._cached_base_size:
-            return 1.0
-
-        base_w, base_h = self._cached_base_size
-        viewport = self.scroll.viewport()
-        vw = max(10, viewport.width() - 30)
-        vh = max(10, viewport.height() - 20)
-
-        if self.facing_mode and self.zoom_mode == ZoomMode.FIT_WIDTH:
-            return vw / (base_w * 2)
-        elif self.zoom_mode == ZoomMode.FIT_WIDTH:
-            return vw / base_w
-        elif self.zoom_mode == ZoomMode.FIT_HEIGHT:
-            return vh / base_h
-
-        return 1.0
-
-    def update_view(self) -> None:
-        """Triggers a full refresh of the view (Render or Reflow)."""
-        if self.view_mode == ViewMode.IMAGE:
-            self.render_visible_pages()
-            if self.current_doc:
-                self.txt_page.setText(str(self.current_page_index + 1))
-                self.lbl_total.setText(f"/ {self.current_doc.page_count}")
-
-            self.settings.setValue("lastPage", self.current_page_index)
-            self.settings.setValue(
-                "lastScrollY", self.scroll.verticalScrollBar().value()
-            )
-        else:
-            self.render_reflow()
-
-    def render_reflow(self) -> None:
-        """Performs text extraction and renders content via the WebEngine."""
-        if not self.current_doc:
-            return
-
-        try:
-            text = self.current_doc.get_page_text(self.current_page_index)
-            bg = "#1e1e1e" if self.dark_mode else "#fff"
-            fg = "#ddd" if self.dark_mode else "#222"
-            html = f"<html><body style='background:{bg};color:{fg};padding:40px;'>{text}</body></html>"
-            self.web.setHtml(html)
-        except Exception:
-            pass
-
-    def toggle_search_bar(self) -> None:
-        """Toggles the visibility of the text search bar."""
-        visible = not self.search_bar.isVisible()
-        self.search_bar.setVisible(visible)
-        self.btn_search.setChecked(visible)
-        if visible:
-            self.txt_search.setFocus()
-            self.txt_search.selectAll()
-
-    def find_next(self) -> None:
-        """Searches for the next occurrence of the text."""
-        self._find_text(direction=1)
-
-    def find_prev(self) -> None:
-        """Searches for the previous occurrence of the text."""
-        self._find_text(direction=-1)
-
-    def _find_text(self, direction: int) -> None:
-        """
-        Executes text search logic.
-
-        Args:
-            direction: 1 for forward, -1 for backward.
-        """
-        if not self.current_doc:
-            return
-
-        term = self.txt_search.text().strip().lower()
-        if not term:
-            return
-
-        start_idx = self.current_page_index + direction
-        count = self.current_doc.page_count
-
-        for i in range(count):
-            idx = (start_idx + (i * direction)) % count
-            try:
-                text = self.current_doc.get_page_text(idx)
-                if term in text.lower():
-                    self.current_page_index = idx
-                    if self.continuous_scroll and self._virtual_enabled:
-                        start, end = self._virtual_range
-                        if idx < start or idx >= end:
-                            self.rebuild_layout()
-
-                    elif not self.continuous_scroll:
-                        self.rebuild_layout()
-                    self.update_view()
-                    self.ensure_visible(idx)
-                    return
-            except Exception:
-                continue
-
-    def on_page_input_return(self) -> None:
-        """Handles user input in the page number text field."""
-        if not self.current_doc:
-            return
-
-        text = self.txt_page.text().strip()
-        if text.isdigit():
-            page_num = int(text)
-            if 1 <= page_num <= self.current_doc.page_count:
-                target_idx = page_num - 1
-                if target_idx != self.current_page_index:
-                    self.current_page_index = target_idx
-                    if self.continuous_scroll and self._virtual_enabled:
-                        start, end = self._virtual_range
-                        if target_idx < start or target_idx >= end:
-                            self.rebuild_layout()
-
-                    elif not self.continuous_scroll:
-                        self.rebuild_layout()
-                    self.update_view()
-                    self.ensure_visible(self.current_page_index)
-                    self.scroll.setFocus()
-            else:
-                self.txt_page.setText(str(self.current_page_index + 1))
-        else:
-            self.txt_page.setText(str(self.current_page_index + 1))
-
-    def defer_scroll_update(self, value: int) -> None:
-        """Queues a scroll update event to debounce rapid scrolling."""
-        self.txt_page.setText(str(self.current_page_index + 1))
-        self.scroll_timer.start()
-
-    def real_scroll_handler(self) -> None:
-        """Executes the expensive view update after scrolling has settled."""
-        val = self.scroll.verticalScrollBar().value()
-        self.on_scroll_changed(val)
-
-    def on_scroll_changed(self, value: int) -> None:
-        """
-        Calculates the current page based on scroll position.
-
-        Args:
-            value: The vertical scroll bar value.
-        """
-        viewport_center = value + (self.scroll.viewport().height() / 2)
-        closest_page = self.current_page_index
-        min_dist = float("inf")
-
-        for idx, widget in self.page_widgets.items():
-            try:
-                mapped_pos = widget.mapTo(self.scroll_content, QPoint(0, 0))
-                w_center = mapped_pos.y() + (widget.height() / 2)
-                dist = abs(w_center - viewport_center)
-                if dist < min_dist:
-                    min_dist = dist
-                    closest_page = idx
-            except RuntimeError:
-                continue
-
-        if closest_page != self.current_page_index:
-            self.current_page_index = closest_page
-            if self.current_doc:
-                self.txt_page.setText(str(self.current_page_index + 1))
-
-        if self._virtual_enabled:
-            start, end = self._virtual_range
-            buffer_threshold = 10
-
-            if (self.current_page_index > end - buffer_threshold) or (
-                self.current_page_index < start + buffer_threshold
-            ):
-                if not (
-                    start == 0 and self.current_page_index < buffer_threshold
-                ) and not (
-                    end == self.current_doc.page_count
-                    and self.current_page_index > end - buffer_threshold
-                ):
-                    self.rebuild_layout()
-                    self.ensure_visible(self.current_page_index)
-
-        self.render_visible_pages()
-
-    def next_view(self) -> None:
-        """Navigates to the next page or pair of pages."""
-        if not self.current_doc:
-            return
-        step = 2 if self.facing_mode else 1
-        new_idx = min(self.current_doc.page_count - 1, self.current_page_index + step)
-        if new_idx != self.current_page_index:
-            self.current_page_index = new_idx
-            if not self.continuous_scroll:
-                self.rebuild_layout()
-            self.update_view()
-            self.ensure_visible(self.current_page_index)
-
-    def prev_view(self) -> None:
-        """Navigates to the previous page or pair of pages."""
-        step = 2 if self.facing_mode else 1
-        new_idx = max(0, self.current_page_index - step)
-        if new_idx != self.current_page_index:
-            self.current_page_index = new_idx
-            if not self.continuous_scroll:
-                self.rebuild_layout()
-            self.update_view()
-            self.ensure_visible(self.current_page_index)
-
-    def scroll_page(self, direction: int) -> None:
-        """
-        Scrolls the viewport by one page height.
-
-        Args:
-            direction: 1 for down, -1 for up.
-        """
-        bar = self.scroll.verticalScrollBar()
-        page_step = self.scroll.viewport().height() * 0.9
-        bar.setValue(bar.value() + (direction * page_step))
-
-    def ensure_visible(self, index: int) -> None:
-        """
-        Ensures the specified page widget is visible in the scroll area.
-        Handles coordinate calculation for virtualized (non-instantiated) widgets.
-        """
-        if index in self.page_widgets:
-            widget = self.page_widgets[index]
-            self.scroll.ensureWidgetVisible(widget, 0, 0)
-            return
-
-        if not self._virtual_enabled or not self._cached_base_size:
-            return
-
-        start, end = self._virtual_range
-        _, base_h = self._cached_base_size
-        scale = self.calculate_scale()
-        page_h = int(base_h * scale) + self.scroll_layout.spacing()
-
-        top_height = self._top_spacer.height() if self._top_spacer else 0
-        idx_offset = index - start
-        y_pos = top_height + max(0, idx_offset) * page_h
-
-        viewport_centre_offset = int(self.scroll.viewport().height() / 2)
-        self.scroll.verticalScrollBar().setValue(
-            max(0, int(y_pos - viewport_centre_offset))
-        )
-
-    def event(self, e: QEvent) -> bool:
-        """Handles generic Qt events, including native gestures."""
-        if e.type() == QEvent.Type.NativeGesture:
-            if e.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
-                scale_factor = e.value()
-                self.zoom_mode = ZoomMode.MANUAL
-                self.manual_scale *= 1.0 + scale_factor
-                self.manual_scale = max(0.1, min(self.manual_scale, 5.0))
-                self.on_zoom_changed_internal()
-                return True
-        return super().event(e)
-
-    def eventFilter(self, source: QObject, event: QEvent) -> bool:
-        """Filters events for child widgets to handle clicks and keypresses."""
-        if event.type() == QEvent.Type.KeyPress and source == self.scroll:
-            self.keyPressEvent(event)
-            return True
-
-        if event.type() == QEvent.Type.MouseButtonPress and isinstance(source, QLabel):
-            if self.is_annotating:
-                self.handle_annotation_click(source, event)
-                return True
-
-        return super().eventFilter(source, event)
-
-    def wheelEvent(self, event: QWheelEvent) -> None:
-        """Handles mouse wheel events for scrolling and zooming."""
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            delta = event.angleDelta().y()
-            viewport_y = event.position().y()
-            content_y = viewport_y + self.scroll.verticalScrollBar().value()
-
-            factor = 1.1 if delta > 0 else 0.9
-            self.manual_scale *= factor
-            self.zoom_mode = ZoomMode.MANUAL
-
-            self.on_zoom_changed_internal()
-
-            new_scroll = (content_y * factor) - viewport_y
-            self.scroll.verticalScrollBar().setValue(int(new_scroll))
-            event.accept()
-        else:
-            super().wheelEvent(event)
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        """Handles keyboard shortcuts for navigation and view controls."""
-        key = event.key()
-        mod = event.modifiers()
-
-        if key == Qt.Key.Key_Escape:
-            if getattr(self, "_reader_fullscreen", False):
-                self.toggle_reader_fullscreen()
-                event.accept()
-                return
-
-        if key == Qt.Key.Key_F11 or key == Qt.Key.Key_F:
-            self.toggle_reader_fullscreen()
-            event.accept()
-            return
-
-        if (mod & Qt.KeyboardModifier.ControlModifier) and key == Qt.Key.Key_F:
-            self.toggle_search_bar()
-            return
-
-        if self.view_mode == ViewMode.IMAGE:
-            if (
-                mod & Qt.KeyboardModifier.ControlModifier
-                and mod & Qt.KeyboardModifier.ShiftModifier
-            ):
-                if key == Qt.Key.Key_Plus or key == Qt.Key.Key_Equal:
-                    self.zoom_step(1.1)
-                    event.accept()
-                    return
-                if key == Qt.Key.Key_Minus or key == Qt.Key.Key_Underscore:
-                    self.zoom_step(0.9)
-                    event.accept()
-                    return
-
-            if mod & Qt.KeyboardModifier.ControlModifier:
-                if key == Qt.Key.Key_Plus or key == Qt.Key.Key_Equal:
-                    self.zoom_step(1.1)
-                    event.accept()
-                    return
-                if key == Qt.Key.Key_Minus or key == Qt.Key.Key_Underscore:
-                    self.zoom_step(0.9)
-                    event.accept()
-                    return
-
-            if key == Qt.Key.Key_Right:
-                self.next_view()
-                event.accept()
-                return
-            elif key == Qt.Key.Key_Left:
-                self.prev_view()
-                event.accept()
-                return
-            elif key == Qt.Key.Key_Space:
-                direction = -1 if (mod & Qt.KeyboardModifier.ShiftModifier) else 1
-                self.scroll_page(direction)
-                event.accept()
-                return
-            elif key == Qt.Key.Key_Down:
-                self.scroll.verticalScrollBar().setValue(
-                    self.scroll.verticalScrollBar().value() + 50
-                )
-                event.accept()
-                return
-            elif key == Qt.Key.Key_Up:
-                self.scroll.verticalScrollBar().setValue(
-                    self.scroll.verticalScrollBar().value() - 50
-                )
-                event.accept()
-                return
-
-            if mod == Qt.KeyboardModifier.NoModifier:
-                if key == Qt.Key.Key_N:
-                    self.toggle_theme()
-                    event.accept()
-                    return
-                elif key == Qt.Key.Key_R:
-                    self.toggle_view_mode()
-                    event.accept()
-                    return
-                elif key == Qt.Key.Key_C:
-                    self.toggle_scroll_mode()
-                    event.accept()
-                    return
-                elif key == Qt.Key.Key_D:
-                    self.toggle_facing_mode()
-                    event.accept()
-                    return
-                elif key == Qt.Key.Key_W:
-                    self.apply_zoom_string("Fit Width")
-                    event.accept()
-                    return
-                elif key == Qt.Key.Key_H:
-                    self.apply_zoom_string("Fit Height")
-                    event.accept()
-                    return
-
-        super().keyPressEvent(event)
-
-    def resizeEvent(self, event) -> None:
-        """Handles window resizing with debouncing to prevent UI freeze."""
-        if not hasattr(self, "_resize_timer"):
-            self._resize_timer = QTimer(self)
-            self._resize_timer.setSingleShot(True)
-            self._resize_timer.setInterval(150)
-            self._resize_timer.timeout.connect(self._on_resize_timeout)
-
-        if self.zoom_mode in [ZoomMode.FIT_WIDTH, ZoomMode.FIT_HEIGHT]:
-            self._resize_timer.start()
-
-        super().resizeEvent(event)
-
-    def _on_resize_timeout(self) -> None:
-        """Executes layout recalculation after resize settles."""
-        self._update_all_widget_sizes()
-        self.rendered_pages.clear()
-        if self.current_doc:
-            if not self.continuous_scroll:
-                self.rebuild_layout()
-            self.update_view()
-
-    def on_zoom_selected(self, idx: int) -> None:
-        """Handles zoom selection from the combobox."""
-        self.apply_zoom_string(self.combo_zoom.currentText())
-
-    def on_zoom_text_entered(self) -> None:
-        """Handles manual zoom text entry."""
-        self.apply_zoom_string(self.combo_zoom.lineEdit().text())
-        self.scroll.setFocus()
-
-    def apply_zoom_string(self, text: str) -> None:
-        """Parses zoom string and applies it."""
-        if "Fit Width" in text:
-            self.zoom_mode = ZoomMode.FIT_WIDTH
-        elif "Fit Height" in text:
-            self.zoom_mode = ZoomMode.FIT_HEIGHT
-        else:
-            try:
-                val = float(text.lower().replace("%", "").strip())
-                if val > 5.0:
-                    val /= 100.0
-                self.manual_scale = val
-                self.zoom_mode = ZoomMode.MANUAL
-            except ValueError:
-                pass
-        self.on_zoom_changed_internal()
-
-    def zoom_step(self, factor: float) -> None:
-        """Increments or decrements zoom by a factor."""
-        self.manual_scale *= factor
-        self.zoom_mode = ZoomMode.MANUAL
-        self.on_zoom_changed_internal()
-
-    def _update_all_widget_sizes(self) -> None:
-        """Resizes all page widgets to match the new scale."""
-        w, h = self._get_target_page_size()
-        for lbl in self.page_widgets.values():
-            lbl.setFixedSize(w, h)
-
-    def on_zoom_changed_internal(self) -> None:
-        """Updates internal state and UI after a zoom change."""
-        self.settings.setValue("zoomMode", self.zoom_mode.value)
-        self.settings.setValue("zoomScale", self.manual_scale)
-        self._update_all_widget_sizes()
-
-        self.rendered_pages.clear()
-        self.update_view()
-        self._sync_zoom_ui()
-
-    def _sync_zoom_ui(self) -> None:
-        """Syncs the combobox text with current zoom state."""
-        if self.zoom_mode == ZoomMode.FIT_WIDTH:
-            self.combo_zoom.setCurrentText("Fit Width")
-        elif self.zoom_mode == ZoomMode.FIT_HEIGHT:
-            self.combo_zoom.setCurrentText("Fit Height")
-        else:
-            self.combo_zoom.setCurrentText(f"{int(self.manual_scale * 100)}%")
-
-    def apply_theme(self) -> None:
-        """Applies colors based on the current Dark/Light mode setting."""
-        pal = self.palette()
-        color = QColor(30, 30, 30) if self.dark_mode else QColor(240, 240, 240)
-        pal.setColor(QPalette.ColorRole.Window, color)
-        self.setPalette(pal)
-
-        bg = "#222" if self.dark_mode else "#eee"
-        self.scroll_content.setStyleSheet(
-            f"#scrollContent {{ background-color: {bg}; }}"
-        )
-
-        fg = "#ddd" if self.dark_mode else "#111"
-        self.toolbar.setStyleSheet(f"""
-            QWidget {{ background: {color.name()}; color: {fg}; }}
-            QPushButton {{ border: none; padding: 6px; border-radius: 4px; }}
-            QPushButton:hover {{ background: rgba(128,128,128,0.3); }}
-            QPushButton:checked {{ background: rgba(80, 160, 255, 0.4); border: 1px solid #50a0ff; }}
-        """)
-
-    def toggle_theme(self) -> None:
-        """Toggles the dark mode state and propagates to parent window if possible."""
-        if self.window() and isinstance(self.window(), RiemannWindow):
-            main_win = self.window()
-            if main_win.dark_mode == self.dark_mode:
-                main_win.toggle_theme()
-                return
-
-        self.dark_mode = not self.dark_mode
-        self.apply_theme()
-        self.rendered_pages.clear()
-        self.update_view()
-
-    def load_annotations(self) -> None:
-        """Loads annotations from the sidecar JSON file."""
-        if not self.current_path:
-            return
-        path = str(self.current_path) + ".riemann.json"
-        if os.path.exists(path):
-            with open(path, "r") as f:
-                self.annotations = json.load(f)
-        else:
-            self.annotations = {}
-
-    def save_annotations(self) -> None:
-        """Saves current annotations to disk."""
-        if not self.current_path:
-            return
-        with open(str(self.current_path) + ".riemann.json", "w") as f:
-            json.dump(self.annotations, f)
-
-    def toggle_annotation_mode(self, checked: bool) -> None:
-        """Toggles the annotation editing mode."""
-        self.is_annotating = checked
-        self.btn_annotate.setChecked(checked)
-
-    def handle_annotation_click(self, label: QLabel, event: QMouseEvent) -> None:
-        """Handles click events on page labels for annotation creation or viewing."""
-        page_idx = label.property("pageIndex")
-        click_x = event.pos().x()
-        click_y = event.pos().y()
-
-        rel_x = click_x / label.width()
-        rel_y = click_y / label.height()
-
-        page_annos = self.annotations.get(str(page_idx), [])
-        hit_threshold_px = 20
-
-        for i, anno in enumerate(page_annos):
-            ax, ay = anno["rel_pos"]
-            px_x = ax * label.width()
-            px_y = ay * label.height()
-            dist = ((click_x - px_x) ** 2 + (click_y - px_y) ** 2) ** 0.5
-
-            if dist < hit_threshold_px:
-                self.show_annotation_popup(anno, page_idx, i)
-                return
-
-        if self.is_annotating:
-            self.create_new_annotation(page_idx, rel_x, rel_y)
-
-    def show_annotation_popup(
-        self, anno_data: Dict, page_idx: int, anno_index: int
-    ) -> None:
-        """Displays a dialog to view or edit an existing annotation."""
-        text = anno_data.get("text", "")
-        new_text, ok = QInputDialog.getText(
-            self, "View Note", "Content (Clear text to delete):", text=text
-        )
-
-        if ok:
-            if not new_text.strip():
-                del self.annotations[str(page_idx)][anno_index]
-            else:
-                self.annotations[str(page_idx)][anno_index]["text"] = new_text
-            self.save_annotations()
-            self.refresh_page_render(page_idx)
-
-    def create_new_annotation(self, page_idx: int, rel_x: float, rel_y: float) -> None:
-        """Creates a new annotation at the specified relative coordinates."""
-        text, ok = QInputDialog.getText(self, "Add Note", "Note content:")
-        if ok and text:
-            if str(page_idx) not in self.annotations:
-                self.annotations[str(page_idx)] = []
-            self.annotations[str(page_idx)].append(
-                {"rel_pos": (rel_x, rel_y), "text": text}
-            )
-            self.save_annotations()
-            self.refresh_page_render(page_idx)
-
-    def refresh_page_render(self, page_idx: int) -> None:
-        """Forces a re-render of a specific page to show/hide annotations."""
-        if page_idx in self.rendered_pages:
-            self.rendered_pages.remove(page_idx)
-        self.render_visible_pages()
-
-    def perform_ocr_current_page(self) -> None:
-        """Performs OCR on the current page and displays the text."""
-        if not self.current_doc:
-            return
-
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            text = self.current_doc.ocr_page(self.current_page_index, 2.0)
-            QApplication.restoreOverrideCursor()
-
-            if not text.strip():
-                text = "[No text detected by Tesseract]"
-
-            QInputDialog.getMultiLineText(
-                self, "OCR Result", "Extracted Text (Copy to clipboard):", text
-            )
-
-        except Exception as e:
-            QApplication.restoreOverrideCursor()
-            print(f"OCR Failed: {e}")
-
-    def toggle_view_mode(self) -> None:
-        """Switches between Image mode and Text Reflow mode."""
-        self.view_mode = (
-            ViewMode.REFLOW if self.view_mode == ViewMode.IMAGE else ViewMode.IMAGE
-        )
-        self.stack.setCurrentIndex(0 if self.view_mode == ViewMode.IMAGE else 1)
-        self.btn_reflow.setChecked(self.view_mode == ViewMode.REFLOW)
-        self.update_view()
-
-    def toggle_facing_mode(self) -> None:
-        """Toggles 2-up facing pages mode."""
-        self.facing_mode = not self.facing_mode
-        self.settings.setValue("facingMode", self.facing_mode)
-        self.btn_facing.setChecked(self.facing_mode)
-        self.rebuild_layout()
-        self.update_view()
-
-    def toggle_scroll_mode(self) -> None:
-        """Toggles between single-page snapping and continuous scrolling."""
-        self.continuous_scroll = not self.continuous_scroll
-        self.settings.setValue("continuousScrollMode", self.continuous_scroll)
-        self.btn_scroll_mode.setChecked(self.continuous_scroll)
-        self.rebuild_layout()
-        self.update_view()
-
-    def toggle_reader_fullscreen(self) -> None:
-        """Toggles the window-level fullscreen mode."""
-        if self.window() and isinstance(self.window(), RiemannWindow):
-            self.window().toggle_reader_fullscreen()
-
-    def open_pdf_dialog(self) -> None:
-        """Opens a file dialog to load a new PDF into this tab."""
-        path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
-        if path:
-            self.load_document(path)
-
-
-class DraggableTabWidget(QTabWidget):
-    """A QTabWidget subclass that allows reordering and dragging tabs."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setMovable(True)
-        self.setTabBar(DraggableTabBar(self))
-
-    def dragEnterEvent(self, e):
-        """Accepts drag events that contain text (file paths)."""
-        if e.mimeData().hasText():
-            e.accept()
-        else:
-            e.ignore()
-
-    def dropEvent(self, event):
-        """Handles dropping a file path to create a new tab."""
-        file_path = event.mimeData().text()
-        if os.path.exists(file_path):
-            reader = ReaderTab()
-            reader.load_document(file_path)
-            self.addTab(reader, os.path.basename(file_path))
-            self.setCurrentWidget(reader)
-            event.acceptProposedAction()
-
-
-class DraggableTabBar(QTabBar):
-    """A QTabBar that supports dragging tabs out of the window."""
-
-    def mouseMoveEvent(self, event):
-        """Initiates a drag operation when a tab is dragged."""
-        if event.buttons() != Qt.MouseButton.LeftButton:
-            return
-
-        global_pos = event.globalPosition().toPoint()
-        pos_in_widget = self.mapFromGlobal(global_pos)
-
-        tab_index = self.tabAt(pos_in_widget)
-        if tab_index < 0:
-            return
-
-        widget = self.parent().widget(tab_index)
-        if not hasattr(widget, "current_path") or not widget.current_path:
-            return
-
-        mime = QMimeData()
-        mime.setText(widget.current_path)
-
-        drag = QDrag(self)
-        drag.setMimeData(mime)
-
-        pixmap = widget.grab()
-        drag.setPixmap(pixmap.scaled(200, 150, Qt.AspectRatioMode.KeepAspectRatio))
-        drag.setHotSpot(QPoint(100, 75))
-
-        if drag.exec(Qt.DropAction.MoveAction) == Qt.DropAction.MoveAction:
-            self.parent().removeTab(tab_index)
-
-        super().mouseMoveEvent(event)
-
-
-class BrowserTab(QWidget):
-    """
-    A full-featured web browser tab using QWebEngineView.
-    Includes navigation controls, dark mode support, ad-blocking, and history autocomplete.
-    """
-
-    def __init__(
-        self,
-        start_url: str = "https://www.google.com",
-        parent=None,
-        dark_mode: bool = True,
-    ):
-        super().__init__(parent)
-        self.dark_mode = dark_mode
-
-        # Initialize Profile FIRST (Destruction Order Fix)
-        base_path = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.AppDataLocation
-        )
-        storage_path = os.path.join(base_path, "browser_data")
-        os.makedirs(storage_path, exist_ok=True)
-
-        self.profile = QWebEngineProfile("RiemannPersistentProfile", self)
-        self.profile.setPersistentStoragePath(storage_path)
-        self.profile.setPersistentCookiesPolicy(
-            QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
-        )
-
-        self.profile.downloadRequested.connect(self._handle_download)
-        self.inject_ad_skipper()
-        self.inject_backspace_handler()
-
-        # --- UI Setup ---
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # Toolbar
-        self.toolbar = QWidget()
-        self.toolbar.setFixedHeight(40)
-        tb_layout = QHBoxLayout(self.toolbar)
-        tb_layout.setContentsMargins(5, 0, 5, 0)
-
-        self.btn_back = QPushButton("◀")
-        self.btn_back.setFixedWidth(30)
-        self.btn_fwd = QPushButton("▶")
-        self.btn_fwd.setFixedWidth(30)
-        self.btn_reload = QPushButton("↻")
-        self.btn_reload.setFixedWidth(30)
-
-        self.txt_url = QLineEdit()
-        self.txt_url.setPlaceholderText("Enter URL or Search...")
-        self.txt_url.returnPressed.connect(self.navigate_to_url)
-
-        # [NEW] Setup Autocomplete
-        self.completer = QCompleter()
-        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        self.txt_url.setCompleter(self.completer)
-
-        # Bookmark Button
-        self.btn_bookmark = QPushButton("☆")
-        self.btn_bookmark.setFixedWidth(30)
-        self.btn_bookmark.setCheckable(True)
-        self.btn_bookmark.setToolTip("Bookmark this page")
-        self.btn_bookmark.clicked.connect(self.toggle_bookmark)
-
-        tb_layout.addWidget(self.btn_back)
-        tb_layout.addWidget(self.btn_fwd)
-        tb_layout.addWidget(self.btn_reload)
-        tb_layout.addWidget(self.txt_url)
-        tb_layout.addWidget(self.btn_bookmark)
-
-        layout.addWidget(self.toolbar)
-
-        # Search Bar
-        self.search_bar = QWidget()
-        self.search_bar.setFixedHeight(40)
-        self.search_bar.setVisible(False)
-        sb_layout = QHBoxLayout(self.search_bar)
-        sb_layout.setContentsMargins(5, 0, 5, 0)
-
-        self.txt_find = QLineEdit()
-        self.txt_find.setPlaceholderText("Find in page...")
-        self.txt_find.returnPressed.connect(self.find_next)
-
-        self.btn_find_next = QPushButton("▼")
-        self.btn_find_next.clicked.connect(self.find_next)
-        self.btn_find_prev = QPushButton("▲")
-        self.btn_find_prev.clicked.connect(self.find_prev)
-        self.btn_close_find = QPushButton("✕")
-        self.btn_close_find.clicked.connect(self.toggle_search)
-
-        sb_layout.addWidget(QLabel("Find:"))
-        sb_layout.addWidget(self.txt_find)
-        sb_layout.addWidget(self.btn_find_next)
-        sb_layout.addWidget(self.btn_find_prev)
-        sb_layout.addWidget(self.btn_close_find)
-        layout.addWidget(self.search_bar)
-
-        self.progress = QProgressBar()
-        self.progress.setFixedHeight(4)
-        self.progress.setTextVisible(False)
-        self.progress.setStyleSheet("""
-            QProgressBar {
-                border: none;
-                background-color: transparent;
-            }
-            QProgressBar::chunk {
-                background-color: #FF4500; /* Flashier OrangeRed */
-                border-radius: 2px;
-            }
-        """)
-        layout.addWidget(self.progress)
-
-        # Overlay Notification Label (Toast)
-        self.lbl_toast = QLabel(self)
-        self.lbl_toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_toast.setStyleSheet(
-            "background-color: #333; color: white; padding: 10px; border-radius: 5px; font-weight: bold;"
-        )
-        self.lbl_toast.hide()
-
-        # Web View
-        self.web = QWebEngineView()
-        page = QWebEnginePage(self.profile, self.web)
-        page.settings().setAttribute(
-            QWebEngineSettings.WebAttribute.PdfViewerEnabled, False
-        )
-        page.settings().setAttribute(
-            QWebEngineSettings.WebAttribute.FullScreenSupportEnabled, True
-        )
-        page.fullScreenRequested.connect(self._handle_fullscreen_request)
-        self.web.setPage(page)
-        layout.addWidget(self.web)
-
-        # Connections
-        self.btn_back.clicked.connect(self.web.back)
-        self.btn_fwd.clicked.connect(self.web.forward)
-        self.btn_reload.clicked.connect(self.web.reload)
-
-        self.web.urlChanged.connect(self._update_url_bar)
-        self.web.loadProgress.connect(self.progress.setValue)
-        self.web.loadFinished.connect(lambda: self.progress.setValue(0))
-        self.web.titleChanged.connect(self._update_tab_title)
-
-        # [NEW] Shortcuts
-        self.shortcut_reload = QShortcut(QKeySequence("F5"), self)
-        self.shortcut_reload.activated.connect(self.web.reload)
-
-        self.shortcut_reload_ctrl = QShortcut(QKeySequence("Ctrl+R"), self)
-        self.shortcut_reload_ctrl.activated.connect(self.web.reload)
-
-        self.shortcut_hard_reload = QShortcut(QKeySequence("Ctrl+Shift+R"), self)
-        self.shortcut_hard_reload.activated.connect(self.hard_reload)
-
-        self.shortcut_f6 = QShortcut(QKeySequence(Qt.Key.Key_F6), self)
-        self.shortcut_f6.activated.connect(self.focus_url_bar)
-
-        self.shortcut_find = QShortcut(QKeySequence("Ctrl+F"), self)
-        self.shortcut_find.activated.connect(self.toggle_search)
-
-        self.shortcut_zoom_in = QShortcut(QKeySequence("Ctrl+="), self)
-        self.shortcut_zoom_in.activated.connect(lambda: self.modify_zoom(0.1))
-
-        self.shortcut_zoom_in_alt = QShortcut(QKeySequence("Ctrl++"), self)
-        self.shortcut_zoom_in_alt.activated.connect(lambda: self.modify_zoom(0.1))
-
-        self.shortcut_zoom_out = QShortcut(QKeySequence("Ctrl+-"), self)
-        self.shortcut_zoom_out.activated.connect(lambda: self.modify_zoom(-0.1))
-
-        self.shortcut_zoom_reset = QShortcut(QKeySequence("Ctrl+0"), self)
-        self.shortcut_zoom_reset.activated.connect(lambda: self.web.setZoomFactor(1.0))
-
-        self.shortcut_back_alt = QShortcut(QKeySequence("Alt+Left"), self)
-        self.shortcut_back_alt.activated.connect(self.web.back)
-
-        self.shortcut_fwd_alt = QShortcut(QKeySequence("Alt+Right"), self)
-        self.shortcut_fwd_alt.activated.connect(self.web.forward)
-
-        # Initial Setup
-        self.apply_theme()
-
-        # Link completer model if window exists (handled in showEvent or parent set usually,
-        # but we can also try lazily or rely on RiemannWindow to set it)
-        if self.window() and hasattr(self.window(), "history_model"):
-            self.completer.setModel(self.window().history_model)
-
-        self.web.load(QUrl(start_url))
-
-    def hard_reload(self):
-        """Clears the cache and reloads the page."""
-        self.profile.clearHttpCache()
-        self.web.reload()
-
-    def inject_ad_skipper(self):
-        js_code = """
-        (function() {
-            const clearAds = () => {
-                const skipBtns = document.querySelectorAll('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .videoAdUiSkipButton');
-                skipBtns.forEach(b => { b.click(); });
-                const overlays = document.querySelectorAll('.ytp-ad-overlay-close-button');
-                overlays.forEach(b => { b.click(); });
-                const video = document.querySelector('video');
-                const adShowing = document.querySelector('.ad-showing');
-                if (video && adShowing) {
-                    video.playbackRate = 16.0;
-                    video.muted = true;
-                    if(isFinite(video.duration)) video.currentTime = video.duration;
-                }
-            };
-            setInterval(clearAds, 50);
-        })();
-        """
-        script = QWebEngineScript()
-        script.setName("RiemannAdBlock")
-        script.setSourceCode(js_code)
-        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
-        script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
-        script.setRunsOnSubFrames(True)
-        self.profile.scripts().insert(script)
-
-    def inject_backspace_handler(self):
-        """Injects JS to handle Backspace navigation (Back if not in input)."""
-        js_code = """
-        document.addEventListener("keydown", function(e) {
-            if (e.key === "Backspace" && !e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
-                const tag = document.activeElement.tagName;
-                const type = document.activeElement.type;
-                const isInput = (tag === "INPUT" && type !== "button" && type !== "submit" && type !== "checkbox" && type !== "radio") 
-                                || tag === "TEXTAREA" 
-                                || document.activeElement.isContentEditable;
-                if (!isInput) {
-                    e.preventDefault();
-                    window.history.back();
-                }
-            }
-        });
-        """
-        script = QWebEngineScript()
-        script.setName("RiemannBackspace")
-        script.setSourceCode(js_code)
-        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
-        script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
-        script.setRunsOnSubFrames(True)
-        self.profile.scripts().insert(script)
-
-    def focus_url_bar(self):
-        self.txt_url.setFocus()
-        self.txt_url.selectAll()
-
-    def _handle_fullscreen_request(self, request):
-        request.accept()
-        if self.window() and hasattr(self.window(), "toggle_reader_fullscreen"):
-            is_fs = getattr(self.window(), "_reader_fullscreen", False)
-            if request.toggleOn() != is_fs:
-                self.window().toggle_reader_fullscreen()
-
-    def apply_theme(self):
-        settings = self.web.page().settings()
-        if self.dark_mode:
-            bg, fg, inp_bg, border = "#333", "#ddd", "#444", "#555"
-            settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, True)
-            self.web.page().setBackgroundColor(QColor("#333"))
-        else:
-            bg, fg, inp_bg, border = "#f0f0f0", "#222", "#fff", "#ccc"
-            settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, False)
-            self.web.page().setBackgroundColor(QColor("#fff"))
-        style = f"QWidget {{ background: {bg}; color: {fg}; }} QLineEdit {{ background: {inp_bg}; border: 1px solid {border}; border-radius: 4px; padding: 4px; }}"
-        self.toolbar.setStyleSheet(style)
-        self.search_bar.setStyleSheet(style)
-
-    def modify_zoom(self, delta):
-        self.web.setZoomFactor(max(0.1, min(self.web.zoomFactor() + delta, 5.0)))
-
-    def toggle_search(self):
-        self.search_bar.setVisible(not self.search_bar.isVisible())
-        if self.search_bar.isVisible():
-            self.txt_find.setFocus()
-
-    def find_next(self):
-        self.web.findText(self.txt_find.text())
-
-    def find_prev(self):
-        self.web.findText(self.txt_find.text(), QWebEngineView.FindFlag.FindBackward)
-
-    def navigate_to_url(self):
-        text = self.txt_url.text().strip()
-        if not text:
-            return
-        url = QUrl(
-            text
-            if text.startswith("http") or ("." in text and " " not in text)
-            else f"https://www.google.com/search?q={text}"
-        )
-        if not url.scheme():
-            url.setScheme("https")
-        self.web.load(url)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        # Re-center toast if visible
-        if self.lbl_toast.isVisible():
-            self.lbl_toast.move(
-                (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
-            )
-
-    def show_toast(self, message: str):
-        """Displays a temporary notification overlay."""
-        self.lbl_toast.setText(message)
-        self.lbl_toast.adjustSize()
-        self.lbl_toast.move(
-            (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
-        )
-        self.lbl_toast.show()
-        self.lbl_toast.raise_()
-        QTimer.singleShot(3000, self.lbl_toast.hide)
-
-    def _update_url_bar(self, url: QUrl):
-        """Updates URL bar and History."""
-        s_url = url.toString()
-        self.txt_url.setText(s_url)
-        self.txt_url.setCursorPosition(0)
-
-        # [NEW] Add to history
-        if self.window() and hasattr(self.window(), "add_to_history"):
-            self.window().add_to_history(s_url)
-
-        self._update_bookmark_icon(s_url)
-
-    def _update_bookmark_icon(self, url):
-        if self.window() and hasattr(self.window(), "bookmarks_manager"):
-            is_bm = self.window().bookmarks_manager.is_bookmarked(url)
-            self.btn_bookmark.setChecked(is_bm)
-            self.btn_bookmark.setText("★" if is_bm else "☆")
-
-    def toggle_bookmark(self):
-        """Toggles bookmark status for current URL."""
-        if not self.window() or not hasattr(self.window(), "bookmarks_manager"):
-            return
-
-        url = self.web.url().toString()
-        title = self.web.title()
-        bm = self.window().bookmarks_manager
-
-        if bm.is_bookmarked(url):
-            bm.remove(url)
-            self.show_toast("Bookmark Removed")
-        else:
-            bm.add(title, url)
-            self.show_toast("Bookmark Added")
-        self._update_bookmark_icon(url)
-
-    def _update_tab_title(self, title: str):
-        parent = self.parent()
-        while parent:
-            if isinstance(parent, QTabWidget):
-                idx = parent.indexOf(self)
-                if idx != -1:
-                    parent.setTabText(
-                        idx, (title[:20] + "..") if len(title) > 20 else title
-                    )
-                break
-            parent = parent.parent()
-
-    def _handle_download(self, download_item):
-        # Ask user where to save (ALWAYS)
-        default_dir = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.DownloadLocation
-        )
-
-        suggested_name = download_item.downloadFileName()
-
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save File",
-            os.path.join(default_dir, suggested_name),
-        )
-
-        if not path:
-            download_item.cancel()
-            return
-
-        # REQUIRED: set BEFORE accept()
-        download_item.setDownloadDirectory(os.path.dirname(path))
-        download_item.setDownloadFileName(os.path.basename(path))
-
-        # Now accept (this actually starts the download)
-        download_item.accept()
-
-        # ONLY NOW add it to the manager
-        if self.window() and hasattr(self.window(), "download_manager_dialog"):
-            self.window().download_manager_dialog.add_download(download_item)
-
-    def _check_pdf_open(self, state, item, temp_folder):
-        if state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
-            full_path = os.path.join(temp_folder, item.downloadFileName())
-            self._on_pdf_downloaded(full_path)
-
-    def _on_pdf_downloaded(self, path):
-        """Callback when an auto-downloaded PDF finishes."""
-        if (
-            os.path.exists(path)
-            and self.window()
-            and hasattr(self.window(), "open_pdf_in_new_tab")
-        ):
-            self.window().open_pdf_in_new_tab(path)
+from .core.managers import BookmarksManager, DownloadManager, HistoryManager
+from .ui.browser import BrowserTab
+from .ui.components import DraggableTabWidget
+from .ui.reader import ReaderTab
 
 
 class RiemannWindow(QMainWindow):
@@ -2270,21 +35,21 @@ class RiemannWindow(QMainWindow):
     Handles global state, split-view tabs, history, and shortcuts.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initializes the main application window."""
         super().__init__()
         self.setWindowTitle("Riemann Reader")
         self.resize(1200, 900)
 
         self.settings = QSettings("Riemann", "PDFReader")
-        self.dark_mode = self.settings.value("darkMode", True, type=bool)
+        self.dark_mode: bool = self.settings.value("darkMode", True, type=bool)
         self.download_manager_dialog = DownloadManager(self)
 
-        # [NEW] History System
         self.history_manager = HistoryManager()
         self.history_model = QStringListModel(self.history_manager.get_model_data())
         self.bookmarks_manager = BookmarksManager()
 
-        self.closed_tabs_stack = []
+        self.closed_tabs_stack: List[dict] = []
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(self.splitter)
 
@@ -2301,8 +66,6 @@ class RiemannWindow(QMainWindow):
 
         self.setup_menu()
 
-        # [NEW] Shortcuts
-        # Ctrl+Q: Global Exit (Fixes fullscreen exit issue)
         self.shortcut_exit = QShortcut(QKeySequence("Ctrl+Q"), self)
         self.shortcut_exit.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.shortcut_exit.activated.connect(self.close)
@@ -2329,16 +92,23 @@ class RiemannWindow(QMainWindow):
 
         self._restore_session()
 
-    def add_to_history(self, item: str):
-        """Adds item to history and updates the shared autocomplete model."""
+    def add_to_history(self, item: str) -> None:
+        """
+        Adds item to history and updates the shared autocomplete model.
+
+        Args:
+            item: The URL or file path to add.
+        """
         self.history_manager.add(item)
         self.history_model.setStringList(self.history_manager.get_model_data())
 
-    def _handle_escape(self):
+    def _handle_escape(self) -> None:
+        """Handles the Escape key to exit fullscreen."""
         if getattr(self, "_reader_fullscreen", False):
             self.toggle_reader_fullscreen()
 
-    def _restore_session(self):
+    def _restore_session(self) -> None:
+        """Restores the window geometry and open tabs from the previous session."""
         if self.settings.value("window/geometry"):
             self.restoreGeometry(self.settings.value("window/geometry"))
         self._restore_tabs_from_settings("session/main_tabs", self.tabs_main)
@@ -2354,7 +124,14 @@ class RiemannWindow(QMainWindow):
         if self.tabs_main.count() == 0:
             self.new_tab()
 
-    def _restore_tabs_from_settings(self, key, target_widget):
+    def _restore_tabs_from_settings(self, key: str, target_widget: QTabWidget) -> None:
+        """
+        Helper to restore tabs from QSettings.
+
+        Args:
+            key: The settings key to read from.
+            target_widget: The QTabWidget to populate.
+        """
         items = self.settings.value(key, [], type=list)
         if isinstance(items, str):
             items = [items]
@@ -2373,19 +150,21 @@ class RiemannWindow(QMainWindow):
 
     def _add_pdf_tab(
         self, path: str, target_widget: QTabWidget, restore_state: bool = False
-    ):
-        self.add_to_history(path)  # Add loaded PDF to history
+    ) -> None:
+        """Adds a PDF Reader tab."""
+        self.add_to_history(path)
         reader = ReaderTab()
         reader.load_document(path, restore_state=restore_state)
         target_widget.addTab(reader, os.path.basename(path))
 
-    def _add_browser_tab(self, url: str, target_widget: QTabWidget):
+    def _add_browser_tab(self, url: str, target_widget: QTabWidget) -> None:
+        """Adds a Web Browser tab."""
         browser = BrowserTab(url, dark_mode=self.dark_mode)
-        # Manually link model if added dynamically
         browser.completer.setModel(self.history_model)
         target_widget.addTab(browser, "Loading...")
 
-    def setup_menu(self):
+    def setup_menu(self) -> None:
+        """Configures the main window menu bar."""
         menubar = self.menuBar()
         file_menu = menubar.addMenu("File")
 
@@ -2426,7 +205,8 @@ class RiemannWindow(QMainWindow):
         theme_action.setShortcut("Ctrl+D")
         theme_action.triggered.connect(self.toggle_theme)
 
-    def new_tab(self, path=None, restore_state=False):
+    def new_tab(self, path: Optional[str] = None, restore_state: bool = False) -> None:
+        """Creates a new PDF tab."""
         if path:
             self._add_pdf_tab(path, self.tabs_main, restore_state)
         else:
@@ -2434,7 +214,8 @@ class RiemannWindow(QMainWindow):
             self.tabs_main.addTab(reader, "New Tab")
             self.tabs_main.setCurrentWidget(reader)
 
-    def new_browser_tab(self, url="https://www.google.com"):
+    def new_browser_tab(self, url: str = "https://www.google.com") -> None:
+        """Creates a new Browser tab."""
         target = self.tabs_main
         if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
             target = self.tabs_side
@@ -2444,7 +225,8 @@ class RiemannWindow(QMainWindow):
         new_tab.txt_url.setFocus()
         new_tab.txt_url.selectAll()
 
-    def open_pdf_smart(self):
+    def open_pdf_smart(self) -> None:
+        """Opens a PDF in the current tab if empty, or a new tab otherwise."""
         path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
         if not path:
             return
@@ -2458,7 +240,8 @@ class RiemannWindow(QMainWindow):
         else:
             self.new_tab(path)
 
-    def toggle_split_view(self):
+    def toggle_split_view(self) -> None:
+        """Toggles the split-screen view mode."""
         if self.tabs_side.isHidden():
             self.tabs_side.show()
         current = self.tabs_main.currentWidget()
@@ -2469,7 +252,8 @@ class RiemannWindow(QMainWindow):
             self.tabs_side.addTab(current, text)
             self.tabs_side.setCurrentWidget(current)
 
-    def _record_closed_tab(self, widget: QWidget):
+    def _record_closed_tab(self, widget: QWidget) -> None:
+        """Records a closed tab to the stack for restoration."""
         if isinstance(widget, ReaderTab) and widget.current_path:
             self.closed_tabs_stack.append({"type": "pdf", "data": widget.current_path})
         elif isinstance(widget, BrowserTab):
@@ -2477,7 +261,8 @@ class RiemannWindow(QMainWindow):
                 {"type": "web", "data": widget.web.url().toString()}
             )
 
-    def restore_last_closed_tab(self):
+    def restore_last_closed_tab(self) -> None:
+        """Restores the most recently closed tab."""
         if not self.closed_tabs_stack:
             return
         last = self.closed_tabs_stack.pop()
@@ -2492,20 +277,20 @@ class RiemannWindow(QMainWindow):
             self._add_browser_tab(last["data"], target)
         target.setCurrentIndex(target.count() - 1)
 
-    def close_tab(self, index: int):
-        """Closes a tab and handles fullscreen exit if empty."""
+    def close_tab(self, index: int) -> None:
+        """Closes a tab from the main tab widget."""
         widget = self.tabs_main.widget(index)
         if widget:
             self._record_closed_tab(widget)
             widget.deleteLater()
         self.tabs_main.removeTab(index)
 
-        # [FIX] If no tabs left, exit fullscreen so user isn't stuck
         if self.tabs_main.count() == 0 and self.tabs_side.count() == 0:
             if getattr(self, "_reader_fullscreen", False):
                 self.toggle_reader_fullscreen()
 
-    def close_side_tab(self, index: int):
+    def close_side_tab(self, index: int) -> None:
+        """Closes a tab from the side tab widget."""
         widget = self.tabs_side.widget(index)
         if widget:
             self._record_closed_tab(widget)
@@ -2518,7 +303,9 @@ class RiemannWindow(QMainWindow):
             if getattr(self, "_reader_fullscreen", False):
                 self.toggle_reader_fullscreen()
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: Any) -> None:
+        """Saves session state before closing."""
+
         def get_files(w):
             l = []
             for i in range(w.count()):
@@ -2535,7 +322,8 @@ class RiemannWindow(QMainWindow):
         self.settings.setValue("window/state", self.saveState())
         super().closeEvent(event)
 
-    def toggle_reader_fullscreen(self):
+    def toggle_reader_fullscreen(self) -> None:
+        """Toggles fullscreen mode for the entire window."""
         if not getattr(self, "_reader_fullscreen", False):
             self._reader_fullscreen = True
             self._was_maximized = self.isMaximized()
@@ -2555,7 +343,8 @@ class RiemannWindow(QMainWindow):
             else:
                 self.showNormal()
 
-    def _set_tabs_toolbar_visible(self, visible: bool):
+    def _set_tabs_toolbar_visible(self, visible: bool) -> None:
+        """Helper to hide/show toolbars in tabs."""
         for i in range(self.tabs_main.count()):
             w = self.tabs_main.widget(i)
             if hasattr(w, "toolbar"):
@@ -2565,7 +354,8 @@ class RiemannWindow(QMainWindow):
             if hasattr(w, "toolbar"):
                 w.toolbar.setVisible(visible)
 
-    def toggle_theme(self):
+    def toggle_theme(self) -> None:
+        """Toggles Dark/Light mode globally."""
         self.dark_mode = not self.dark_mode
         self.settings.setValue("darkMode", self.dark_mode)
 
@@ -2582,7 +372,8 @@ class RiemannWindow(QMainWindow):
         for i in range(self.tabs_side.count()):
             update(self.tabs_side.widget(i))
 
-    def close_active_tab(self):
+    def close_active_tab(self) -> None:
+        """Closes the currently focused tab."""
         focus_widget = QApplication.focusWidget()
         target = None
         curr = focus_widget
@@ -2609,7 +400,7 @@ class RiemannWindow(QMainWindow):
             else:
                 self.close_side_tab(idx)
 
-    def show_history(self):
+    def show_history(self) -> None:
         """Displays a dialog with the unified history list."""
         dialog = QDialog(self)
         dialog.setWindowTitle("History")
@@ -2618,8 +409,6 @@ class RiemannWindow(QMainWindow):
         layout = QVBoxLayout(dialog)
 
         list_widget = QListWidget()
-        # Load history items (excluding default popular sites if desired,
-        # but here we load what is in the persistent history list)
         items = self.history_manager.history
         list_widget.addItems(items)
 
@@ -2630,7 +419,7 @@ class RiemannWindow(QMainWindow):
         button_box.rejected.connect(dialog.reject)
         layout.addWidget(button_box)
 
-        def open_item():
+        def open_item() -> None:
             item = list_widget.currentItem()
             if not item:
                 return
@@ -2638,9 +427,7 @@ class RiemannWindow(QMainWindow):
             data = item.text()
             dialog.accept()
 
-            # Logic to determine if File or Web
             if os.path.exists(data):
-                # reuse open_pdf_smart logic logic or call _add_pdf_tab directly
                 current = self.tabs_main.currentWidget()
                 if isinstance(current, ReaderTab) and not current.current_path:
                     current.load_document(data)
@@ -2650,16 +437,15 @@ class RiemannWindow(QMainWindow):
                 else:
                     self._add_pdf_tab(data, self.tabs_main)
             else:
-                # Assume it's a URL
                 self.new_browser_tab(data)
 
-        button_box.accepted.disconnect()  # disconnect default
+        button_box.accepted.disconnect()
         button_box.accepted.connect(open_item)
         list_widget.itemDoubleClicked.connect(open_item)
 
         dialog.exec()
 
-    def show_bookmarks(self):
+    def show_bookmarks(self) -> None:
         """Displays a dialog with bookmarks."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Bookmarks")
@@ -2675,11 +461,10 @@ class RiemannWindow(QMainWindow):
         button_box.rejected.connect(dialog.reject)
         layout.addWidget(button_box)
 
-        def open_bm():
+        def open_bm() -> None:
             item = list_widget.currentItem()
             if not item:
                 return
-            # Basic parsing, reliable enough for internal use
             url = item.text().split(" (")[-1][:-1]
             dialog.accept()
             self.new_browser_tab(url)
@@ -2688,34 +473,32 @@ class RiemannWindow(QMainWindow):
         list_widget.itemDoubleClicked.connect(open_bm)
         dialog.exec()
 
-    def show_downloads(self):
+    def show_downloads(self) -> None:
         """Shows the download manager dialog."""
         self.download_manager_dialog.show()
         self.download_manager_dialog.raise_()
 
-    def toggle_auto_pdf(self, checked):
+    def toggle_auto_pdf(self, checked: bool) -> None:
         """Updates the auto-open PDF setting."""
         self.settings.setValue("browser/auto_open_pdf", checked)
 
-    def open_pdf_in_new_tab(self, path: str):
+    def open_pdf_in_new_tab(self, path: str) -> None:
         """
         Opens a PDF in a new Reader Tab.
         Preferentially opens in the Side Split if active, otherwise Main.
         """
-        # Determine target widget (Side if visible, else Main)
         target = self.tabs_side if (self.tabs_side.isVisible()) else self.tabs_main
 
-        # If we are in the main tabs and just clicked a link, it's nice to open
-        # the PDF in the SIDE view (Split View) so we don't lose the browser.
         if target == self.tabs_main and self.tabs_side.isHidden():
-            self.toggle_split_view()  # Activate split view
-            target = self.tabs_side  # Target the new side view
+            self.toggle_split_view()
+            target = self.tabs_side
 
         self._add_pdf_tab(path, target)
         target.setCurrentIndex(target.count() - 1)
 
 
-def run():
+def run() -> None:
+    """Application entry point."""
     app = QApplication(sys.argv)
     window = RiemannWindow()
     window.show()
