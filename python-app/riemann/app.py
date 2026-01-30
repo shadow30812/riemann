@@ -754,7 +754,12 @@ class ReaderTab(QWidget):
                 text = self.current_doc.get_page_text(idx)
                 if term in text.lower():
                     self.current_page_index = idx
-                    if not self.continuous_scroll:
+                    if self.continuous_scroll and self._virtual_enabled:
+                        start, end = self._virtual_range
+                        if idx < start or idx >= end:
+                            self.rebuild_layout()
+
+                    elif not self.continuous_scroll:
                         self.rebuild_layout()
                     self.update_view()
                     self.ensure_visible(idx)
