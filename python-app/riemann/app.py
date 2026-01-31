@@ -12,9 +12,11 @@ from PySide6.QtCore import QSettings, QStringListModel, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QListWidget,
     QMainWindow,
     QSplitter,
@@ -27,6 +29,32 @@ from .core.managers import BookmarksManager, DownloadManager, HistoryManager
 from .ui.browser import BrowserTab
 from .ui.components import DraggableTabWidget
 from .ui.reader import ReaderTab
+
+
+class SettingsDialog(QDialog):
+    def __init__(self, parent: "RiemannWindow") -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self.resize(400, 200)
+        form_layout = QFormLayout(self)
+
+        self.lay = form_layout
+        self.cb_dark = QCheckBox()
+        self.cb_dark.setChecked(parent.dark_mode)
+        form_layout.addRow("Dark Mode:", self.cb_dark)
+
+        self.cb_auto_pdf = QCheckBox()
+        self.cb_auto_pdf.setChecked(
+            parent.settings.value("browser/auto_open_pdf", False, type=bool)
+        )
+        form_layout.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
+
+        self.button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        form_layout.addRow(self.button_box)
 
 
 class RiemannWindow(QMainWindow):
@@ -201,9 +229,22 @@ class RiemannWindow(QMainWindow):
         history_action.setShortcut("Ctrl+H")
         history_action.triggered.connect(self.show_history)
 
+        settings_action = view_menu.addAction("Settings")
+        settings_action.setShortcut("Ctrl+,")
+        settings_action.triggered.connect(self.show_settings)
+
         theme_action = view_menu.addAction("Toggle Theme")
         theme_action.setShortcut("Ctrl+D")
         theme_action.triggered.connect(self.toggle_theme)
+
+    def show_settings(self) -> None:
+        """Displays the configuration dialog."""
+        dlg = SettingsDialog(self)
+        if dlg.exec():
+            if dlg.cb_dark.isChecked() != self.dark_mode:
+                self.toggle_theme()
+
+            self.toggle_auto_pdf(dlg.cb_auto_pdf.isChecked())
 
     def new_tab(self, path: Optional[str] = None, restore_state: bool = False) -> None:
         """Creates a new PDF tab."""
@@ -226,8 +267,13 @@ class RiemannWindow(QMainWindow):
         new_tab.txt_url.selectAll()
 
     def open_pdf_smart(self) -> None:
-        """Opens a PDF in the current tab if empty, or a new tab otherwise."""
-        path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
+        """Opens a Document (PDF/MD) in the current tab if empty, or a new tab otherwise."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Document",
+            "",
+            "Documents (*.pdf *.md);;PDF Files (*.pdf);;Markdown (*.md)",
+        )
         if not path:
             return
         self.add_to_history(path)

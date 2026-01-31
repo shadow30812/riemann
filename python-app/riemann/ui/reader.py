@@ -1,15 +1,29 @@
+import html
+import io
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from ..core.constants import ViewMode, ZoomMode
-from PySide6.QtCore import QEvent, QObject, QPoint, QSettings, Qt, QTimer
+import markdown
+from PIL import Image
+from PySide6.QtCore import (
+    QBuffer,
+    QEvent,
+    QObject,
+    QPoint,
+    QRect,
+    QSettings,
+    Qt,
+    QThread,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
-    QAction,
     QColor,
-    QIcon,
     QImage,
     QKeyEvent,
     QKeySequence,
@@ -26,13 +40,14 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QFileDialog,
-    QFrame,
     QHBoxLayout,
     QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressDialog,
     QPushButton,
+    QRubberBand,
     QScrollArea,
     QScroller,
     QScrollerProperties,
@@ -41,12 +56,65 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-# Try importing the backend, but handle failure gracefully for refactoring safety
+from ..core.constants import ViewMode, ZoomMode
+
 try:
     import riemann_core
 except ImportError as e:
     print(f"CRITICAL: Could not import riemann_core backend.\nError: {e}")
     sys.exit(1)
+
+
+class InstallerThread(QThread):
+    """
+    Background thread to run 'pip install' so the UI doesn't freeze.
+    """
+
+    finished_install = Signal()
+    install_error = Signal(str)
+
+    def run(self):
+        try:
+            cmd = [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "pix2tex[gui]",
+                "torch",
+                "torchvision",
+            ]
+
+            subprocess.check_call(cmd)
+            self.finished_install.emit()
+        except subprocess.CalledProcessError:
+            self.install_error.emit(
+                "Installation failed.\nPlease check your internet connection."
+            )
+        except Exception as e:
+            self.install_error.emit(f"Installer Error: {e}")
+
+
+class LoaderThread(QThread):
+    """
+    Background thread to load the heavy Pix2Tex model without freezing the UI.
+    """
+
+    finished_loading = Signal(object)
+    error_occurred = Signal(str)
+
+    def run(self):
+        try:
+            from pix2tex.cli import LatexOCR
+
+            model = LatexOCR()
+            self.finished_loading.emit(model)
+        except ImportError:
+            self.error_occurred.emit(
+                "Module 'pix2tex' not found.\nPlease run: pip install pix2tex[gui] torch torchvision"
+            )
+        except Exception as e:
+            self.error_occurred.emit(f"AI Initialization Failed:\n{str(e)}")
 
 
 class ReaderTab(QWidget):
@@ -89,6 +157,14 @@ class ReaderTab(QWidget):
         self.continuous_scroll: bool = True
         self.view_mode: ViewMode = ViewMode.IMAGE
         self.is_annotating: bool = False
+
+        self.is_snipping: bool = False
+        self.snip_start: QPoint = QPoint()
+        self.snip_band: Optional[QRubberBand] = None
+
+        self.latex_model = None
+        self.loader_thread: Optional[LoaderThread] = None
+        self._pending_snip_image = None
 
         self.search_result: Optional[
             Tuple[int, List[Tuple[float, float, float, float]]]
@@ -162,6 +238,11 @@ class ReaderTab(QWidget):
         self.btn_annotate.setCheckable(True)
         self.btn_annotate.clicked.connect(self.toggle_annotation_mode)
 
+        self.btn_snip = QPushButton("✂️")
+        self.btn_snip.setToolTip("Snip Math to LaTeX (Draw a box around an equation)")
+        self.btn_snip.setCheckable(True)
+        self.btn_snip.clicked.connect(self.toggle_snip_mode)
+
         self.btn_prev = QPushButton("◄")
         self.btn_prev.setToolTip("Previous Page (Left Arrow)")
         self.btn_prev.clicked.connect(self.prev_view)
@@ -214,6 +295,7 @@ class ReaderTab(QWidget):
             self.btn_scroll_mode,
             self.btn_search,
             self.btn_annotate,
+            self.btn_snip,
             self.btn_ocr,
             self.btn_prev,
             self.txt_page,
@@ -286,6 +368,44 @@ class ReaderTab(QWidget):
 
         layout.addWidget(self.stack)
 
+    def toggle_snip_mode(self, checked: bool) -> None:
+        """Enables the rubberband selection mode for Math OCR."""
+        self.is_snipping = checked
+        self.btn_snip.setChecked(checked)
+        if checked:
+            self.is_annotating = False
+            self.btn_annotate.setChecked(False)
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            if self.snip_band:
+                self.snip_band.hide()
+
+    def _init_latex_model(self):
+        """Lazy loads the heavy Pix2Tex model only when needed."""
+        if self.latex_model is not None:
+            return True
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            from pix2tex.cli import LatexOCR
+
+            self.latex_model = LatexOCR()
+            QApplication.restoreOverrideCursor()
+            return True
+        except ImportError:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(
+                self,
+                "Missing Library",
+                "pix2tex is not installed.\n\nRun: pip install pix2tex[gui] torch torchvision",
+            )
+            return False
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, "Model Error", f"Failed to load AI model:\n{e}")
+            return False
+
     def save_document(self) -> None:
         """Saves a copy of the current PDF to a user-specified location."""
         if not self.current_path or not os.path.exists(self.current_path):
@@ -316,12 +436,46 @@ class ReaderTab(QWidget):
 
     def load_document(self, path: str, restore_state: bool = False) -> None:
         """
-        Loads a PDF file from the specified path.
+        Loads a PDF or Markdown file from the specified path.
 
         Args:
-            path: Absolute file path to the PDF.
+            path: Absolute file path to the file.
             restore_state: If True, attempts to restore the last known page/scroll position.
         """
+        if path.lower().endswith(".md"):
+            self.current_path = path
+            self.settings.setValue("lastFile", path)
+
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    text = f.read()
+
+                html_content = markdown.markdown(
+                    text, extensions=["fenced_code", "tables"]
+                )
+
+                bg = "#1e1e1e" if self.dark_mode else "#fff"
+                fg = "#ddd" if self.dark_mode else "#222"
+                style = f"""
+                    body {{ background:{bg}; color:{fg}; padding:40px; font-family: sans-serif; max-width: 800px; margin: 0 auto; line-height: 1.6; }}
+                    pre {{ background: {"#333" if self.dark_mode else "#f5f5f5"}; padding: 10px; border-radius: 5px; }}
+                    code {{ font-family: monospace; }}
+                    a {{ color: #50a0ff; }}
+                """
+
+                full_html = f"<html><head><style>{style}</style></head><body>{html_content}</body></html>"
+
+                self.web.setHtml(full_html)
+                self.view_mode = ViewMode.REFLOW
+                self.stack.setCurrentIndex(1)
+
+                self.btn_facing.setEnabled(False)
+                self.btn_ocr.setEnabled(False)
+
+            except Exception as e:
+                sys.stderr.write(f"Markdown Load Error: {e}\n")
+            return
+
         try:
             self.current_doc = self.engine.load_document(path)
             self._probe_base_page_size()
@@ -667,13 +821,57 @@ class ReaderTab(QWidget):
             return
 
         try:
-            text = self.current_doc.get_page_text(self.current_page_index)
+            raw_text = self.current_doc.get_page_text(self.current_page_index)
+            clean_text = re.sub(r"[ \t]+", " ", raw_text)
+            safe_text = html.escape(clean_text)
+            formatted_text = safe_text.replace("\n", "<br>")
+
             bg = "#1e1e1e" if self.dark_mode else "#fff"
             fg = "#ddd" if self.dark_mode else "#222"
-            html = f"<html><body style='background:{bg};color:{fg};padding:40px;'>{text}</body></html>"
-            self.web.setHtml(html)
-        except Exception:
-            pass
+
+            katex_head = """
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+                onload="renderMathInElement(document.body, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '$', right: '$', display: false},
+                        {left: '\\(', right: '\\)', display: false},
+                        {left: '\\[', right: '\\]', display: true}
+                    ],
+                    throwOnError: false
+                });">
+            </script>
+            """
+
+            full_html = f"""<!DOCTYPE html>
+            <html>
+            <head>
+                {katex_head}
+                <style>
+                    body {{
+                        background: {bg};
+                        color: {fg};
+                        padding: 40px;
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        line-height: 1.6;
+                        text-align: left;
+                    }}
+                    .katex {{ font-size: 1.1em; }}
+                    .katex-display {{
+                        text-align: left !important;
+                        margin-left: 0 !important;
+                        text-indent: 0 !important;
+                    }}
+                </style>
+            </head>
+            <body>{formatted_text}</body>
+            </html>
+            """
+            self.web.setHtml(full_html)
+        except Exception as e:
+            sys.stderr.write(f"Reflow Error: {e}\n")
 
     def toggle_search_bar(self) -> None:
         """Toggles the visibility of the text search bar."""
@@ -890,12 +1088,165 @@ class ReaderTab(QWidget):
             self.keyPressEvent(event)
             return True
 
+        if isinstance(source, QLabel) and self.is_snipping:
+            if event.type() == QEvent.Type.MouseButtonPress:
+                self.snip_start = event.pos()
+                if not self.snip_band:
+                    self.snip_band = QRubberBand(QRubberBand.Shape.Rectangle, source)
+                self.snip_band.setGeometry(
+                    self.snip_start.x(), self.snip_start.y(), 0, 0
+                )
+                self.snip_band.show()
+                return True
+
+            elif event.type() == QEvent.Type.MouseMove:
+                if self.snip_band and self.snip_band.isVisible():
+                    rect = QRect(self.snip_start, event.pos()).normalized()
+                    self.snip_band.setGeometry(rect)
+                return True
+
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                if self.snip_band and self.snip_band.isVisible():
+                    rect = self.snip_band.geometry()
+                    self.snip_band.hide()
+                    if rect.width() > 10 and rect.height() > 10:
+                        self.process_snip(source, rect)
+                return True
+
         if event.type() == QEvent.Type.MouseButtonPress and isinstance(source, QLabel):
             if self.is_annotating:
                 self.handle_annotation_click(source, event)
                 return True
 
         return super().eventFilter(source, event)
+
+    def process_snip(self, label: QLabel, rect: QRect):
+        """Prepares the image and attempts to run inference."""
+        pixmap = label.pixmap()
+        if not pixmap:
+            return
+
+        dpr = pixmap.devicePixelRatio()
+        x = int(rect.x() * dpr)
+        y = int(rect.y() * dpr)
+        w = int(rect.width() * dpr)
+        h = int(rect.height() * dpr)
+
+        scaled_rect = QRect(x, y, w, h)
+        cropped = pixmap.copy(scaled_rect)
+
+        buffer = QBuffer()
+        buffer.open(QBuffer.ReadWrite)
+        cropped.save(buffer, "PNG")
+        pil_image = Image.open(io.BytesIO(buffer.data()))
+
+        self.run_latex_inference(pil_image)
+
+    def run_latex_inference(self, pil_image):
+        """Checks model status and runs inference or triggers loading."""
+
+        if self.latex_model:
+            self._execute_inference(pil_image)
+            return
+
+        self._pending_snip_image = pil_image
+        self.toggle_snip_mode(False)
+
+        self.progress = QProgressDialog(
+            "Initializing AI Engine...\n(First run may trigger a ~150MB download)",
+            "Cancel",
+            0,
+            0,
+            self,
+        )
+        self.progress.setWindowTitle("Please Wait")
+        self.progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress.setMinimumDuration(0)
+        self.progress.setCancelButton(None)
+
+        self.loader_thread = LoaderThread()
+        self.loader_thread.finished_loading.connect(self._on_model_loaded)
+        self.loader_thread.error_occurred.connect(self._on_model_error)
+
+        self.loader_thread.start()
+
+    def _on_model_loaded(self, model_instance):
+        """Callback when thread finishes successfully."""
+        self.progress.close()
+        self.latex_model = model_instance
+
+        if self._pending_snip_image:
+            self._execute_inference(self._pending_snip_image)
+            self._pending_snip_image = None
+
+    def _on_model_error(self, error_msg: str):
+        """Callback when thread loading fails."""
+        self.progress.close()
+        if "not found" in error_msg:
+            reply = QMessageBox.question(
+                self,
+                "Missing AI Components",
+                "The LaTeX OCR feature requires downloading additional AI libraries (~500MB).\n\n"
+                "Would you like to download and install them now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                self.install_dependencies()
+            else:
+                self._pending_snip_image = None
+        else:
+            self._pending_snip_image = None
+            QMessageBox.critical(self, "Error", error_msg)
+
+    def install_dependencies(self):
+        """Starts the background installer."""
+        self.progress = QProgressDialog(
+            "Downloading and Installing AI Libraries...\n(This may take a few minutes)",
+            None,
+            0,
+            0,
+            self,
+        )
+        self.progress.setWindowTitle("Installing")
+        self.progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress.setMinimumDuration(0)
+        self.progress.show()
+
+        self.installer_thread = InstallerThread()
+        self.installer_thread.finished_install.connect(self._on_install_finished)
+        self.installer_thread.install_error.connect(self._on_install_error)
+        self.installer_thread.start()
+
+    def _on_install_finished(self):
+        """Called when pip install completes successfully."""
+        self.progress.close()
+        QMessageBox.information(
+            self,
+            "Success",
+            "AI Libraries installed successfully!\nInitializing engine...",
+        )
+
+        self.run_latex_inference(self._pending_snip_image)
+
+    def _on_install_error(self, msg: str):
+        """Called when pip install fails."""
+        self.progress.close()
+        self._pending_snip_image = None
+        QMessageBox.critical(self, "Installation Failed", msg)
+
+    def _execute_inference(self, pil_image):
+        """Runs the actual prediction on the main thread (inference is fast enough)."""
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            latex_code = self.latex_model(pil_image)
+        except Exception as e:
+            latex_code = f"Error during inference: {e}"
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        self.toggle_snip_mode(False)
+        QInputDialog.getMultiLineText(self, "LaTeX Result", "Copy Code:", latex_code)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         """Handles mouse wheel events for scrolling and zooming."""
@@ -1115,7 +1466,7 @@ class ReaderTab(QWidget):
 
     def toggle_theme(self) -> None:
         """Toggles the dark mode state and propagates to parent window if possible."""
-        from ..app import RiemannWindow  # Local import to avoid circular dependency
+        from ..app import RiemannWindow
 
         if self.window() and isinstance(self.window(), RiemannWindow):
             main_win = self.window()
@@ -1259,7 +1610,7 @@ class ReaderTab(QWidget):
 
     def toggle_reader_fullscreen(self) -> None:
         """Toggles the window-level fullscreen mode."""
-        from ..app import RiemannWindow  # Local import to avoid circular dependency
+        from ..app import RiemannWindow
 
         if self.window() and isinstance(self.window(), RiemannWindow):
             self.window().toggle_reader_fullscreen()
