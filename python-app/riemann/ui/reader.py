@@ -713,6 +713,9 @@ class ReaderTab(QWidget):
             img.setDevicePixelRatio(dpr)
             pix = QPixmap.fromImage(img)
 
+            logical_w = pix.width() / dpr
+            logical_h = pix.height() / dpr
+
             if self.search_result and self.search_result[0] == idx:
                 painter = QPainter(pix)
                 color = (
@@ -724,10 +727,10 @@ class ReaderTab(QWidget):
                 painter.setPen(Qt.PenStyle.NoPen)
 
                 for left, top, right, bottom in self.search_result[1]:
-                    x = left * render_scale
-                    w = (right - left) * render_scale
-                    h = (top - bottom) * render_scale
-                    y = res.height - (top * render_scale)
+                    x = int(left * scale)
+                    w = int((right - left) * scale)
+                    h = int((top - bottom) * scale)
+                    y = int(res.height - (top * scale))
                     painter.drawRect(x, y, w, h)
 
                 painter.end()
@@ -735,9 +738,10 @@ class ReaderTab(QWidget):
             if str(idx) in self.annotations:
                 painter = QPainter(pix)
                 painter.setPen(QPen(QColor(255, 255, 0, 180), 3))
+                painter.setBrush(QColor(255, 255, 0, 50))
                 for anno in self.annotations[str(idx)]:
-                    x = int(anno["rel_pos"][0] * pix.width())
-                    y = int(anno["rel_pos"][1] * pix.height())
+                    x = int(anno["rel_pos"][0] * logical_w)
+                    y = int(anno["rel_pos"][1] * logical_h)
                     painter.drawEllipse(QPoint(x, y), 10, 10)
                 painter.end()
 
@@ -1114,8 +1118,7 @@ class ReaderTab(QWidget):
                 return True
 
         if event.type() == QEvent.Type.MouseButtonPress and isinstance(source, QLabel):
-            if self.is_annotating:
-                self.handle_annotation_click(source, event)
+            if self.handle_annotation_click(source, event):
                 return True
 
         return super().eventFilter(source, event)
@@ -1502,8 +1505,11 @@ class ReaderTab(QWidget):
         self.is_annotating = checked
         self.btn_annotate.setChecked(checked)
 
-    def handle_annotation_click(self, label: QLabel, event: QMouseEvent) -> None:
-        """Handles click events on page labels for annotation creation or viewing."""
+    def handle_annotation_click(self, label: QLabel, event: QMouseEvent) -> bool:
+        """
+        Handles click events on page labels.
+        Returns: True if event was handled (popup shown or annotation created).
+        """
         page_idx = label.property("pageIndex")
         click_x = event.pos().x()
         click_y = event.pos().y()
@@ -1522,10 +1528,13 @@ class ReaderTab(QWidget):
 
             if dist < hit_threshold_px:
                 self.show_annotation_popup(anno, page_idx, i)
-                return
+                return True
 
         if self.is_annotating:
             self.create_new_annotation(page_idx, rel_x, rel_y)
+            return True
+
+        return False
 
     def show_annotation_popup(
         self, anno_data: Dict, page_idx: int, anno_index: int
