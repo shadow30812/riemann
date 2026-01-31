@@ -9,6 +9,8 @@ from PySide6.QtWebEngineCore import (
     QWebEngineProfile,
     QWebEngineScript,
     QWebEngineSettings,
+    QWebEngineUrlRequestInfo,
+    QWebEngineUrlRequestInterceptor,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
@@ -23,6 +25,32 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
+    """
+    Intercepts network requests and blocks known ad/tracking domains.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.blocked_domains = [
+            "doubleclick.net",
+            "googleadservices.com",
+            "googlesyndication.com",
+            "adservice.google.com",
+            "pagead2.googlesyndication.com",
+            "tpc.googlesyndication.com",
+            "youtube.com/api/stats/ads",
+            "youtube.com/ptracking",
+            "youtube.com/pagead",
+            "google-analytics.com",
+        ]
+
+    def interceptRequest(self, info: QWebEngineUrlRequestInfo):
+        url = info.requestUrl().toString().lower()
+        if any(domain in url for domain in self.blocked_domains):
+            info.block(True)
 
 
 class BrowserTab(QWidget):
@@ -61,6 +89,8 @@ class BrowserTab(QWidget):
         self.profile.setPersistentCookiesPolicy(
             QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
         )
+        self.ad_interceptor = AdBlockInterceptor(self)
+        self.profile.setUrlRequestInterceptor(self.ad_interceptor)
 
         self.profile.downloadRequested.connect(self._handle_download)
         self.inject_ad_skipper()
@@ -97,11 +127,16 @@ class BrowserTab(QWidget):
         self.btn_bookmark.setToolTip("Bookmark this page")
         self.btn_bookmark.clicked.connect(self.toggle_bookmark)
 
+        self.lbl_zoom = QLabel("100%")
+        self.lbl_zoom.setFixedWidth(40)
+        self.lbl_zoom.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         tb_layout.addWidget(self.btn_back)
         tb_layout.addWidget(self.btn_fwd)
         tb_layout.addWidget(self.btn_reload)
         tb_layout.addWidget(self.txt_url)
         tb_layout.addWidget(self.btn_bookmark)
+        tb_layout.addWidget(self.lbl_zoom)
 
         layout.addWidget(self.toolbar)
 
@@ -196,8 +231,11 @@ class BrowserTab(QWidget):
         self.shortcut_zoom_out = QShortcut(QKeySequence("Ctrl+-"), self)
         self.shortcut_zoom_out.activated.connect(lambda: self.modify_zoom(-0.1))
 
+        self.shortcut_zoom_out = QShortcut(QKeySequence("Ctrl+_"), self)
+        self.shortcut_zoom_out.activated.connect(lambda: self.modify_zoom(-0.1))
+
         self.shortcut_zoom_reset = QShortcut(QKeySequence("Ctrl+0"), self)
-        self.shortcut_zoom_reset.activated.connect(lambda: self.web.setZoomFactor(1.0))
+        self.shortcut_zoom_reset.activated.connect(self.reset_zoom)
 
         self.shortcut_back_alt = QShortcut(QKeySequence("Alt+Left"), self)
         self.shortcut_back_alt.activated.connect(self.web.back)
@@ -299,8 +337,15 @@ class BrowserTab(QWidget):
         self.search_bar.setStyleSheet(style)
 
     def modify_zoom(self, delta: float) -> None:
-        """Increments or decrements the zoom factor."""
-        self.web.setZoomFactor(max(0.1, min(self.web.zoomFactor() + delta, 5.0)))
+        """Increments or decrements the zoom factor and updates the label."""
+        new_factor = max(0.1, min(self.web.zoomFactor() + delta, 5.0))
+        self.web.setZoomFactor(new_factor)
+        self.lbl_zoom.setText(f"{int(new_factor * 100)}%")
+
+    def reset_zoom(self) -> None:
+        """Resets zoom to 100% and updates the label."""
+        self.web.setZoomFactor(1.0)
+        self.lbl_zoom.setText("100%")
 
     def toggle_search(self) -> None:
         """Toggles the visibility of the find-in-page bar."""

@@ -1,7 +1,8 @@
 import os
 import sys
 
-# PyInstaller bundle logic MUST run before other imports
+os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "9222")
+
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     bundle_dir = sys._MEIPASS  # type: ignore[attr-defined]
     os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = bundle_dir
