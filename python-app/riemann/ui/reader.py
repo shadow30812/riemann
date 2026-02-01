@@ -17,21 +17,25 @@ from PySide6.QtCore import (
     QPoint,
     QRect,
     QSettings,
+    QSize,
     Qt,
     QThread,
     QTimer,
     Signal,
 )
 from PySide6.QtGui import (
+    QBrush,
     QColor,
     QImage,
     QKeyEvent,
     QKeySequence,
     QMouseEvent,
     QPainter,
+    QPainterPath,
     QPalette,
     QPen,
     QPixmap,
+    QPolygon,
     QShortcut,
     QWheelEvent,
 )
@@ -57,12 +61,61 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.constants import ViewMode, ZoomMode
+from .components import AnnotationToolbar
 
 try:
     import riemann_core
 except ImportError as e:
     print(f"CRITICAL: Could not import riemann_core backend.\nError: {e}")
     sys.exit(1)
+
+
+class PageWidget(QLabel):
+    """
+    Optimized QLabel subclass that handles temporary drawing layers
+    to prevent lag during mouse movement.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.temp_points: List[QPoint] = []
+        self.temp_pen = QPen()
+
+    def set_temp_stroke(
+        self, points: List[QPoint], color_str: str, thickness: int, is_highlight: bool
+    ):
+        """Updates the temporary stroke data and triggers a lightweight repaint."""
+        self.temp_points = points
+        c = QColor(color_str)
+        if is_highlight:
+            c.setAlpha(80)
+            w = thickness * 3
+        else:
+            c.setAlpha(255)
+            w = thickness
+        self.temp_pen = QPen(
+            c,
+            w,
+            Qt.PenStyle.SolidLine,
+            Qt.PenCapStyle.RoundCap,
+            Qt.PenJoinStyle.RoundJoin,
+        )
+        self.update()  # Triggers paintEvent, much faster than setPixmap
+
+    def clear_temp_stroke(self):
+        self.temp_points = []
+        self.update()
+
+    def paintEvent(self, event):
+        # 1. Draw the cached PDF image (fast)
+        super().paintEvent(event)
+
+        # 2. Draw the live stroke on top (fast)
+        if self.temp_points and len(self.temp_points) > 1:
+            painter = QPainter(self)
+            painter.setPen(self.temp_pen)
+            painter.drawPolyline(QPolygon(self.temp_points))
+            painter.end()
 
 
 class InstallerThread(QThread):
@@ -158,6 +211,13 @@ class ReaderTab(QWidget):
         self.view_mode: ViewMode = ViewMode.IMAGE
         self.is_annotating: bool = False
 
+        self.current_tool: str = "nav"
+        self.pen_color: str = "#ff0000"
+        self.pen_thickness: int = 3
+        self.active_drawing: List[QPoint] = []
+        self.undo_stack: List[Tuple[str, int, int]] = []
+        self.redo_stack: List[Dict] = []
+
         self.is_snipping: bool = False
         self.snip_start: QPoint = QPoint()
         self.snip_band: Optional[QRubberBand] = None
@@ -170,6 +230,8 @@ class ReaderTab(QWidget):
             Tuple[int, List[Tuple[float, float, float, float]]]
         ] = None
 
+        self.undo_stack: List[Tuple[str, int, int]] = []
+        self.redo_stack: List[Dict] = []
         self.page_widgets: Dict[int, QLabel] = {}
         self.rendered_pages: Set[int] = set()
         self.annotations: Dict[str, List[Dict[str, Any]]] = {}
@@ -193,6 +255,12 @@ class ReaderTab(QWidget):
 
         self.shortcut_find = QShortcut(QKeySequence("Ctrl+F"), self)
         self.shortcut_find.activated.connect(self.toggle_search_bar)
+
+        self.shortcut_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self.shortcut_undo.activated.connect(self.undo_annotation)
+
+        self.shortcut_redo = QShortcut(QKeySequence("Ctrl+Shift+Z"), self)
+        self.shortcut_redo.activated.connect(self.redo_annotation)
 
     def _init_backend(self) -> None:
         """Initializes the Rust-based PDF engine backend."""
@@ -234,7 +302,7 @@ class ReaderTab(QWidget):
         self.btn_scroll_mode.clicked.connect(self.toggle_scroll_mode)
 
         self.btn_annotate = QPushButton("🖊️")
-        self.btn_annotate.setToolTip("Enable/Disable Annotation Mode")
+        self.btn_annotate.setToolTip("Show Annotation Tools")
         self.btn_annotate.setCheckable(True)
         self.btn_annotate.clicked.connect(self.toggle_annotation_mode)
 
@@ -309,6 +377,15 @@ class ReaderTab(QWidget):
             t_layout.addWidget(w)
         t_layout.addStretch()
         layout.addWidget(self.toolbar)
+
+        self.anno_toolbar = AnnotationToolbar(self)
+        self.anno_toolbar.setVisible(False)
+        self.anno_toolbar.tool_changed.connect(self.set_tool)
+        self.anno_toolbar.color_changed.connect(self.set_color)
+        self.anno_toolbar.thickness_changed.connect(self.set_thickness)
+        self.anno_toolbar.undo_requested.connect(self.undo_annotation)
+        self.anno_toolbar.redo_requested.connect(self.redo_annotation)
+        layout.addWidget(self.anno_toolbar)
 
         self.search_bar = QWidget()
         self.search_bar.setVisible(False)
@@ -639,7 +716,7 @@ class ReaderTab(QWidget):
 
     def _create_page_label(self, index: int) -> QLabel:
         """
-        Creates a placeholder QLabel for a specific page index.
+        Uses the new PageWidget for better performance
 
         Args:
             index: The page number (0-based) this label represents.
@@ -647,7 +724,7 @@ class ReaderTab(QWidget):
         Returns:
             A configured QLabel instance.
         """
-        lbl = QLabel()
+        lbl = PageWidget()
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setProperty("pageIndex", index)
         w, h = self._get_target_page_size()
@@ -737,12 +814,87 @@ class ReaderTab(QWidget):
 
             if str(idx) in self.annotations:
                 painter = QPainter(pix)
-                painter.setPen(QPen(QColor(255, 255, 0, 180), 3))
-                painter.setBrush(QColor(255, 255, 0, 50))
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
                 for anno in self.annotations[str(idx)]:
-                    x = int(anno["rel_pos"][0] * logical_w)
-                    y = int(anno["rel_pos"][1] * logical_h)
-                    painter.drawEllipse(QPoint(x, y), 10, 10)
+                    atype = anno.get("type", "note")
+
+                    if atype == "note":
+                        pos = anno.get("rel_pos", (0, 0))
+                        x, y = int(pos[0] * logical_w), int(pos[1] * logical_h)
+                        painter.setPen(QPen(QColor(255, 255, 0, 180), 2))
+                        painter.setBrush(QColor(255, 255, 0, 50))
+                        painter.drawEllipse(QPoint(x, y), 10, 10)
+
+                    elif atype == "text":
+                        pos = anno.get("rel_pos", (0, 0))
+                        x, y = int(pos[0] * logical_w), int(pos[1] * logical_h)
+                        painter.setPen(QPen(QColor(anno.get("color", "#ff0000"))))
+                        font = painter.font()
+                        font.setPointSize(12)
+                        painter.setFont(font)
+                        painter.drawText(x, y, anno.get("text", ""))
+
+                    elif atype == "shape":
+                        rx, ry, rw, rh = anno["rect"]
+                        rect = QRect(
+                            int(rx * logical_w),
+                            int(ry * logical_h),
+                            int(rw * logical_w),
+                            int(rh * logical_h),
+                        )
+                        c = QColor(anno["color"])
+                        pen = QPen(c, anno["thickness"])
+                        painter.setPen(pen)
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        if anno["subtype"] == "oval":
+                            painter.drawEllipse(rect)
+                        else:
+                            painter.drawRect(rect)
+
+                    elif atype == "drawing":
+                        points = anno["points"]
+                        if not points:
+                            continue
+                        poly = QPolygon(
+                            [
+                                QPoint(int(p[0] * logical_w), int(p[1] * logical_h))
+                                for p in points
+                            ]
+                        )
+                        c = QColor(anno["color"])
+                        thickness = anno["thickness"]
+
+                        if anno["subtype"] == "highlight":
+                            c.setAlpha(80)
+                            thickness *= 3
+
+                        pen = QPen(
+                            c,
+                            thickness,
+                            Qt.PenStyle.SolidLine,
+                            Qt.PenCapStyle.RoundCap,
+                            Qt.PenJoinStyle.RoundJoin,
+                        )
+                        painter.setPen(pen)
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.drawPolyline(poly)
+
+                    elif atype == "stamp":
+                        pos = anno["rel_pos"]
+                        cx, cy = int(pos[0] * logical_w), int(pos[1] * logical_h)
+                        c = QColor(anno.get("color", "#00ff00"))
+                        size = 20
+                        pen = QPen(c, 3)
+                        painter.setPen(pen)
+
+                        if anno["subtype"] == "stamp_tick":
+                            painter.drawLine(cx - 10, cy, cx - 3, cy + 10)
+                            painter.drawLine(cx - 3, cy + 10, cx + 12, cy - 10)
+                        elif anno["subtype"] == "stamp_cross":
+                            painter.drawLine(cx - 10, cy - 10, cx + 10, cy + 10)
+                            painter.drawLine(cx + 10, cy - 10, cx - 10, cy + 10)
+
                 painter.end()
 
             lbl = self.page_widgets[idx]
@@ -1130,11 +1282,215 @@ class ReaderTab(QWidget):
                         self.process_snip(source, rect)
                 return True
 
+        if (
+            self.anno_toolbar.isVisible()
+            and isinstance(source, QLabel)
+            and self.current_tool != "nav"
+        ):
+            page_idx = source.property("pageIndex")
+
+            # 1. Pointers / Stamps / Text (Click actions)
+            if event.type() == QEvent.Type.MouseButtonPress:
+                if self.current_tool == "note":
+                    if self.handle_annotation_click(source, event):
+                        return True
+                    rel_x = event.pos().x() / source.width()
+                    rel_y = event.pos().y() / source.height()
+                    self.create_new_annotation(page_idx, rel_x, rel_y)
+                    return True
+
+                elif self.current_tool == "text":
+                    rel_x = event.pos().x() / source.width()
+                    rel_y = event.pos().y() / source.height()
+                    self.create_new_annotation(page_idx, rel_x, rel_y, "text")
+                    return True
+
+                elif self.current_tool.startswith("stamp"):
+                    rel_x = event.pos().x() / source.width()
+                    rel_y = event.pos().y() / source.height()
+                    self._add_anno_data(
+                        page_idx,
+                        {
+                            "type": "stamp",
+                            "subtype": self.current_tool,  # stamp_tick, stamp_cross
+                            "rel_pos": (rel_x, rel_y),
+                            "color": self.pen_color,
+                        },
+                    )
+                    return True
+
+                elif self.current_tool in ["pen", "highlight"]:
+                    self.active_drawing = [event.pos()]
+                    return True
+
+                elif self.current_tool in ["rect", "oval"]:
+                    self.snip_start = event.pos()
+                    if not self.snip_band:
+                        self.snip_band = QRubberBand(
+                            QRubberBand.Shape.Rectangle, source
+                        )
+                    self.snip_band.setGeometry(QRect(self.snip_start, QSize()))
+                    self.snip_band.show()
+                    return True
+
+                elif self.current_tool == "eraser":
+                    # Click eraser: delete object near cursor
+                    self._handle_eraser_click(source, event.pos(), page_idx)
+                    return True
+
+            # 2. Drawing (Move actions)
+            elif event.type() == QEvent.Type.MouseMove:
+                if self.current_tool in ["pen", "highlight"] and self.active_drawing:
+                    # Draw temp line on QLabel for feedback
+                    self.active_drawing.append(event.pos())
+                    source.set_temp_stroke(
+                        self.active_drawing,
+                        self.pen_color,
+                        self.pen_thickness,
+                        self.current_tool == "highlight",
+                    )
+                    return True
+
+                elif (
+                    self.current_tool in ["rect", "oval"]
+                    and self.snip_band
+                    and self.snip_band.isVisible()
+                ):
+                    self.snip_band.setGeometry(
+                        QRect(self.snip_start, event.pos()).normalized()
+                    )
+                    return True
+
+            # 3. Finish Drawing (Release actions)
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                if self.current_tool in ["pen", "highlight"] and self.active_drawing:
+                    # Convert pixel points to relative points
+                    w, h = source.width(), source.height()
+                    rel_points = [(p.x() / w, p.y() / h) for p in self.active_drawing]
+                    self._add_anno_data(
+                        page_idx,
+                        {
+                            "type": "drawing",
+                            "subtype": self.current_tool,
+                            "points": rel_points,
+                            "color": self.pen_color,
+                            "thickness": self.pen_thickness,
+                        },
+                    )
+                    self.active_drawing = []
+                    source.clear_temp_stroke()
+                    self.refresh_page_render(page_idx)
+                    return True
+
+                elif self.current_tool in ["rect", "oval"] and self.snip_band:
+                    rect = self.snip_band.geometry()
+                    self.snip_band.hide()
+                    if rect.width() > 5:
+                        w, h = source.width(), source.height()
+                        # Normalize coordinates
+                        data = {
+                            "type": "shape",
+                            "subtype": self.current_tool,
+                            "rect": (
+                                rect.x() / w,
+                                rect.y() / h,
+                                rect.width() / w,
+                                rect.height() / h,
+                            ),
+                            "color": self.pen_color,
+                            "thickness": self.pen_thickness,
+                        }
+                        self._add_anno_data(page_idx, data)
+                    return True
+
+        # Fallback to existing note click handling if in Nav mode
         if event.type() == QEvent.Type.MouseButtonPress and isinstance(source, QLabel):
             if self.handle_annotation_click(source, event):
                 return True
 
         return super().eventFilter(source, event)
+
+    def _add_anno_data(self, page_idx: int, data: Dict) -> None:
+        """Helper to append annotation data and manage undo stack."""
+        pid = str(page_idx)
+        if pid not in self.annotations:
+            self.annotations[pid] = []
+
+        self.annotations[pid].append(data)
+        self.undo_stack.append(("add", page_idx, len(self.annotations[pid]) - 1))
+        self.redo_stack.clear()  # New action clears redo
+        self.save_annotations()
+        self.refresh_page_render(page_idx)
+
+    def _draw_temp_stroke(self, label: QLabel, points: List[QPoint]) -> None:
+        """Draws a temporary line on the QLabel without saving it."""
+        if len(points) < 2:
+            return
+        pix = label.pixmap()
+        painter = QPainter(pix)
+
+        c = QColor(self.pen_color)
+        if self.current_tool == "highlight":
+            c.setAlpha(80)
+            pen = QPen(
+                c,
+                self.pen_thickness * 3,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        else:
+            pen = QPen(
+                c,
+                self.pen_thickness,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+
+        painter.setPen(pen)
+        painter.drawLine(points[-2], points[-1])
+        painter.end()
+        label.setPixmap(pix)
+
+    def _handle_eraser_click(self, label: QLabel, pos: QPoint, page_idx: int) -> None:
+        """Deletes the annotation visually closest to the click."""
+        pid = str(page_idx)
+        if pid not in self.annotations:
+            return
+
+        w, h = label.width(), label.height()
+        rel_x, rel_y = pos.x() / w, pos.y() / h
+
+        candidates = self.annotations[pid]
+        best_idx = -1
+        min_dist = 0.05  # Threshold (5% of page dimension)
+
+        for i, anno in enumerate(candidates):
+            dist = 1.0
+
+            # Calculate distance based on type
+            if anno.get("type") in ["note", "stamp", "text"]:
+                ax, ay = anno["rel_pos"]
+                dist = ((rel_x - ax) ** 2 + (rel_y - ay) ** 2) ** 0.5
+            elif anno.get("type") == "shape":
+                rx, ry, rw, rh = anno["rect"]
+                cx, cy = rx + rw / 2, ry + rh / 2
+                dist = ((rel_x - cx) ** 2 + (rel_y - cy) ** 2) ** 0.5
+            elif anno.get("type") == "drawing":
+                # Check distance to first point (approximation)
+                if anno["points"]:
+                    ax, ay = anno["points"][0]
+                    dist = ((rel_x - ax) ** 2 + (rel_y - ay) ** 2) ** 0.5
+
+            if dist < min_dist:
+                min_dist = dist
+                best_idx = i
+
+        if best_idx != -1:
+            self.annotations[pid].pop(best_idx)
+            self.save_annotations()
+            self.refresh_page_render(page_idx)
 
     def process_snip(self, label: QLabel, rect: QRect):
         """Prepares the image and attempts to run inference."""
@@ -1514,9 +1870,71 @@ class ReaderTab(QWidget):
             json.dump(self.annotations, f)
 
     def toggle_annotation_mode(self, checked: bool) -> None:
-        """Toggles the annotation editing mode."""
-        self.is_annotating = checked
+        """Toggles the visibility of the annotation toolbar."""
+        self.anno_toolbar.setVisible(checked)
         self.btn_annotate.setChecked(checked)
+        if not checked:
+            self.current_tool = "nav"
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            # Default to nav or last used tool? Let's stick to nav initially safe
+            self.current_tool = "nav"
+            self.anno_toolbar.btn_nav.setChecked(True)
+
+    def set_tool(self, tool_id: str) -> None:
+        self.current_tool = tool_id
+        if tool_id == "nav":
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        elif tool_id == "note":
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        elif tool_id in ["text", "pen", "highlight", "rect", "oval"]:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        elif tool_id.startswith("stamp"):
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        elif tool_id == "eraser":
+            self.setCursor(Qt.CursorShape.ForbiddenCursor)
+
+    def set_color(self, color_code: str) -> None:
+        self.pen_color = color_code
+
+    def set_thickness(self, val: int) -> None:
+        self.pen_thickness = val
+
+    def undo_annotation(self) -> None:
+        if not self.undo_stack:
+            return
+
+        # Pop action: (type, page_idx, anno_index_in_list)
+        # Note: Index-based undo is tricky if we delete items from middle.
+        # Better strategy: Pop the actual object or use IDs.
+        # For simplicity in this structure: we remove the last item added to that page.
+
+        last_action = self.undo_stack.pop()
+        page_idx_str = str(last_action[1])
+
+        if page_idx_str in self.annotations and self.annotations[page_idx_str]:
+            # We assume the stack tracks order correctly.
+            # We remove the last item from the list for that page.
+            # (A robust system would use UUIDs, but this works for LIFO)
+            removed_item = self.annotations[page_idx_str].pop()
+            self.redo_stack.append((page_idx_str, removed_item))
+            self.save_annotations()
+            self.refresh_page_render(int(page_idx_str))
+
+    def redo_annotation(self) -> None:
+        if not self.redo_stack:
+            return
+
+        page_idx_str, item = self.redo_stack.pop()
+        if page_idx_str not in self.annotations:
+            self.annotations[page_idx_str] = []
+
+        self.annotations[page_idx_str].append(item)
+        self.undo_stack.append(
+            ("add", int(page_idx_str), len(self.annotations[page_idx_str]) - 1)
+        )
+        self.save_annotations()
+        self.refresh_page_render(int(page_idx_str))
 
     def handle_annotation_click(self, label: QLabel, event: QMouseEvent) -> bool:
         """
@@ -1527,25 +1945,19 @@ class ReaderTab(QWidget):
         click_x = event.pos().x()
         click_y = event.pos().y()
 
-        rel_x = click_x / label.width()
-        rel_y = click_y / label.height()
-
         page_annos = self.annotations.get(str(page_idx), [])
         hit_threshold_px = 20
 
         for i, anno in enumerate(page_annos):
-            ax, ay = anno["rel_pos"]
-            px_x = ax * label.width()
-            px_y = ay * label.height()
-            dist = ((click_x - px_x) ** 2 + (click_y - px_y) ** 2) ** 0.5
+            if anno.get("type", "note") == "note" and "rel_pos" in anno:
+                ax, ay = anno["rel_pos"]
+                px_x = ax * label.width()
+                px_y = ay * label.height()
+                dist = ((click_x - px_x) ** 2 + (click_y - px_y) ** 2) ** 0.5
 
-            if dist < hit_threshold_px:
-                self.show_annotation_popup(anno, page_idx, i)
-                return True
-
-        if self.is_annotating:
-            self.create_new_annotation(page_idx, rel_x, rel_y)
-            return True
+                if dist < hit_threshold_px:
+                    self.show_annotation_popup(anno, page_idx, i)
+                    return True
 
         return False
 
@@ -1566,17 +1978,19 @@ class ReaderTab(QWidget):
             self.save_annotations()
             self.refresh_page_render(page_idx)
 
-    def create_new_annotation(self, page_idx: int, rel_x: float, rel_y: float) -> None:
+    def create_new_annotation(
+        self, page_idx: int, rel_x: float, rel_y: float, type="note"
+    ) -> None:
         """Creates a new annotation at the specified relative coordinates."""
-        text, ok = QInputDialog.getText(self, "Add Note", "Note content:")
+        text, ok = QInputDialog.getText(self, "Add Annotation", "Content:")
         if ok and text:
-            if str(page_idx) not in self.annotations:
-                self.annotations[str(page_idx)] = []
-            self.annotations[str(page_idx)].append(
-                {"rel_pos": (rel_x, rel_y), "text": text}
-            )
-            self.save_annotations()
-            self.refresh_page_render(page_idx)
+            data = {
+                "type": type,
+                "rel_pos": (rel_x, rel_y),
+                "text": text,
+                "color": self.pen_color,
+            }
+            self._add_anno_data(page_idx, data)
 
     def refresh_page_render(self, page_idx: int) -> None:
         """Forces a re-render of a specific page to show/hide annotations."""

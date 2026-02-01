@@ -261,6 +261,9 @@ class BrowserTab(QWidget):
         self.shortcut_music = QShortcut(QKeySequence("Ctrl+M"), self)
         self.shortcut_music.activated.connect(self.btn_music.click)
 
+        self.shortcut_devtools_func = QShortcut(QKeySequence("F12"), self)
+        self.shortcut_devtools_func.activated.connect(self.open_devtools)
+
         self.shortcut_devtools = QShortcut(QKeySequence("Ctrl+Shift+I"), self)
         self.shortcut_devtools.activated.connect(self.open_devtools)
 
