@@ -8,10 +8,10 @@
             this.nodes = {};
             this.initialized = false;
             this.enabled = false;
-            this.smartMode = false; // [NEW] Smart Mode State
+            this.smartMode = false;
             this.mediaElement = null;
+            this.smartInterval = null; // [NEW] Timer for efficient background logic
 
-            // Define Presets
             this.presets = {
                 'universal': { name: '✨ Universal Hi-Fi', gain: 1.2, sat: 40, width: 1.2, bass: 3.5, treble: 2.5, air: 0.15 },
                 'laptop': { name: '💻 Laptop Speakers', gain: 1.5, sat: 20, width: 1.0, bass: -5.0, treble: 4.0, air: 0.05 },
@@ -21,15 +21,14 @@
             };
 
             this.currentPreset = 'universal';
-            this.params = { ...this.presets['universal'] }; // Store current values for UI sync
+            this.params = { ...this.presets['universal'] };
 
             this.initUI();
             this.startObserver();
 
+            // [NEW] Fallback Unlocker
             document.addEventListener('click', () => {
-                if (this.ctx.state === 'suspended') {
-                    this.ctx.resume();
-                }
+                if (this.ctx.state === 'suspended') this.ctx.resume();
             }, { once: false, passive: true });
         }
 
@@ -50,7 +49,7 @@
             // 2. DSP: Create Nodes
             this.nodes.preAmp = this.ctx.createGain();
             this.nodes.saturator = this.ctx.createWaveShaper();
-            this.nodes.saturator.oversample = '4x';
+            this.nodes.saturator.oversample = '4x'; // High quality saturation
 
             this.nodes.splitter = this.ctx.createChannelSplitter(2);
             this.nodes.midGain = this.ctx.createGain();
@@ -83,7 +82,7 @@
             this.nodes.limiter.attack.value = 0;
 
             this.nodes.analyser = this.ctx.createAnalyser();
-            this.nodes.analyser.fftSize = 512; // Increased for better bass resolution
+            this.nodes.analyser.fftSize = 512;
             this.nodes.analyser.smoothingTimeConstant = 0.85;
 
             // 3. Connect Graph
@@ -110,6 +109,9 @@
 
             this.initialized = true;
             this.loadPreset(this.currentPreset);
+
+            // [NEW] Start the Efficient Smart Loop (Detached from Visualizer)
+            this.startSmartLoop();
         }
 
         makeDistortionCurve(amount) {
@@ -135,12 +137,8 @@
                         this.initAudio().then(() => {
                             if (this.sourceNode) this.sourceNode.disconnect();
                             this.sourceNode = this.ctx.createMediaElementSource(media);
-                            if (this.enabled) {
-                                this.sourceNode.connect(this.nodes.preAmp);
-                                this.nodes.analyser.connect(this.ctx.destination);
-                            } else {
-                                this.sourceNode.connect(this.ctx.destination);
-                            }
+                            if (this.enabled) this.enable(); // Re-attach logic
+                            else this.sourceNode.connect(this.ctx.destination);
                         });
                     } catch (e) { console.error("Riemann Attach Error:", e); }
                 }
@@ -148,72 +146,70 @@
             setInterval(attach, 1000);
         }
 
-        // [NEW] Smart DSP Logic
-        runSmartLogic(dataArray) {
-            if (!this.smartMode || !this.initialized) return;
+        // [NEW] Efficient Background Loop for Smart Logic
+        startSmartLoop() {
+            if (this.smartInterval) clearInterval(this.smartInterval);
 
-            // 1. Calculate Energy Bands
+            // Run only 10 times per second (100ms) instead of 60 (16ms)
+            // This is huge for battery savings.
+            this.smartInterval = setInterval(() => {
+                if (!this.smartMode || !this.initialized || !this.enabled) return;
+
+                const bufferLength = this.nodes.analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                this.nodes.analyser.getByteFrequencyData(dataArray);
+
+                this.runSmartLogic(dataArray);
+            }, 100);
+        }
+
+        runSmartLogic(dataArray) {
+            // 1. Calculate Energy
             const bufferLength = dataArray.length;
             let bassSum = 0, midSum = 0, highSum = 0;
 
-            // Freq = index * sampleRate / fftSize. With 44.1k & 512 fft, bin size ~86Hz
-            // Approx bins: Bass (0-3), Mids (3-50), Highs (50+)
-
             for (let i = 0; i < bufferLength; i++) {
-                if (i < 4) bassSum += dataArray[i];       // ~0-340Hz
-                else if (i < 60) midSum += dataArray[i];  // ~340-5kHz
-                else highSum += dataArray[i];             // ~5kHz+
+                if (i < 4) bassSum += dataArray[i];
+                else if (i < 60) midSum += dataArray[i];
+                else highSum += dataArray[i];
             }
 
             const bassAvg = bassSum / 4;
             const midAvg = midSum / 56;
             const highAvg = highSum / (bufferLength - 60);
 
-            // 2. Define "Ideal" Ratios relative to Mids (The Harman Curve-ish)
-            // We want Bass to be slightly louder than Mids, and Highs slightly quieter
+            // 2. Target Curve
             const targetBass = midAvg * 1.2;
             const targetHigh = midAvg * 0.9;
-            const targetLoudness = 140; // Target average amplitude (0-255)
+            const targetLoudness = 140;
 
-            // 3. Gentle Nudge Function (Slow reaction time)
-            const nudge = (current, target, speed = 0.05) => {
-                const diff = target - current;
-                return current + (diff * speed);
-            };
-
-            // 4. Adjust Parameters
-
-            // Auto-Gain (Loudness Normalization)
-            // If overall energy is low, boost gain. If high, cut gain.
-            // But clamp it between 0.8 and 2.0 to avoid silence or blowing ears
+            // 3. Adjust (Gentle Nudge)
             let newGain = this.params.gain;
-            if (midAvg > 10) { // Only adjust if audio is actually playing
+            if (midAvg > 10) {
                 const gainCorrection = (targetLoudness - midAvg) * 0.001;
                 newGain = Math.max(0.8, Math.min(2.0, this.params.gain + gainCorrection));
             }
 
-            // Auto-EQ
-            // If bass is weak compared to mids, boost it.
             const bassCorrection = (targetBass - bassAvg) * 0.05;
             let newBass = Math.max(-5, Math.min(8, this.params.bass + bassCorrection));
 
-            // If highs are weak, boost them
             const highCorrection = (targetHigh - highAvg) * 0.05;
             let newTreble = Math.max(-2, Math.min(6, this.params.treble + highCorrection));
 
-            // Apply Changes (Smoothly)
+            // Apply
             this.setParam('preAmp', 'gain', newGain);
             this.setParam('lowShelf', 'gain', newBass);
             this.setParam('highShelf', 'gain', newTreble);
 
-            // Update UI Sliders (Ghost movement)
-            this.updateUISliders();
+            // Only update UI if it's actually visible
+            if (this.ui && this.ui.style.display !== 'none') {
+                this.updateUISliders();
+            }
         }
 
         setParam(node, param, value) {
             if (!this.initialized) return;
 
-            // Update internal state
             if (node === 'preAmp') this.params.gain = value;
             if (node === 'saturator') this.params.sat = value;
             if (node === 'width') this.params.width = value;
@@ -221,14 +217,12 @@
             if (node === 'highShelf') this.params.treble = value;
             if (node === 'reverbGain') this.params.air = value;
 
-            // Apply to DSP
             if (node === 'saturator') {
                 this.nodes.saturator.curve = this.makeDistortionCurve(value);
             } else if (node === 'width') {
                 this.nodes.sideGain.gain.value = value;
                 this.nodes.midGain.gain.value = 2 - value;
             } else {
-                // Smooth ramp to prevent clicking artifacts
                 this.nodes[node][param].setTargetAtTime(value, this.ctx.currentTime, 0.1);
             }
         }
@@ -237,7 +231,7 @@
             const p = this.presets[key];
             if (!p) return;
             this.currentPreset = key;
-            this.smartMode = false; // Presets turn off smart mode
+            this.smartMode = false;
             this.updateSmartButton();
 
             this.setParam('preAmp', 'gain', p.gain);
@@ -254,11 +248,9 @@
 
         toggleSmartMode() {
             if (!this.smartMode) {
-                // If turning ON: Switch to 'flat' first to give AI a clean slate
                 this.loadPreset('flat');
-                this.smartMode = true; // Re-enable after loadPreset disabled it
+                this.smartMode = true;
             } else {
-                // If turning OFF: Just disable flag, keep current slider positions
                 this.smartMode = false;
             }
             this.updateSmartButton();
@@ -276,7 +268,6 @@
 
         updateUISliders() {
             if (!this.ui) return;
-            // Helper to find and set value without triggering oninput event (loop)
             const set = (id, val) => {
                 const el = this.ui.querySelector(`#riemann-slider-${id}`);
                 if (el) el.value = val;
@@ -291,11 +282,11 @@
 
         enable() {
             if (!this.initialized || !this.sourceNode) return;
+
             if (this.ctx.state === 'suspended') {
-                this.ctx.resume().then(() => {
-                    console.log("Riemann: Audio Context Resumed Successfully");
-                });
+                this.ctx.resume().then(() => console.log("Riemann: Audio Resumed"));
             }
+
             this.enabled = true;
             this.sourceNode.disconnect();
             this.sourceNode.connect(this.nodes.preAmp);
@@ -342,7 +333,6 @@
             leftSide.appendChild(title);
             header.appendChild(leftSide);
 
-            // [NEW] Smart Toggle Button in Header
             const smartBtn = document.createElement('button');
             smartBtn.id = 'riemann-smart-btn';
             smartBtn.textContent = '🧠 SMART OFF';
@@ -364,13 +354,11 @@
             // PRESET SELECTOR
             const presetRow = document.createElement('div');
             presetRow.style.display = 'flex';
-
             const select = document.createElement('select');
             Object.assign(select.style, {
                 width: '100%', padding: '4px', borderRadius: '4px',
                 background: '#222', color: '#fff', border: '1px solid #444'
             });
-
             for (const [key, val] of Object.entries(this.presets)) {
                 const opt = document.createElement('option');
                 opt.value = key;
@@ -406,7 +394,7 @@
                 input.style.flex = '1';
                 input.style.accentColor = '#FF4500';
                 input.oninput = (e) => {
-                    this.smartMode = false; // Manual control disables smart mode
+                    this.smartMode = false;
                     this.updateSmartButton();
                     callback(parseFloat(e.target.value));
                 };
@@ -439,14 +427,14 @@
 
         drawVisualizer() {
             requestAnimationFrame(() => this.drawVisualizer());
+            // [FIX] Strict Battery Check
+            // If the UI is hidden, we STOP rendering pixels completely.
+            // This allows the GPU to sleep.
             if (!this.initialized || this.ui.style.display === 'none') return;
 
             const bufferLength = this.nodes.analyser.frequencyBinCount;
             const dataArray = new Uint8Array(bufferLength);
             this.nodes.analyser.getByteFrequencyData(dataArray);
-
-            // [NEW] Trigger Smart Logic every frame
-            this.runSmartLogic(dataArray);
 
             const ctx = this.canvasCtx;
             const w = ctx.canvas.width;
