@@ -546,7 +546,16 @@ class RiemannWindow(QMainWindow):
 
 def run() -> None:
     """Application entry point."""
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+        "--disable-web-security "
+        "--autoplay-policy=no-user-gesture-required "
+        "--disable-features=AudioServiceOutOfProcess"
+    )
+    sys.argv.append("--disable-web-security")
+    sys.argv.append("--autoplay-policy=no-user-gesture-required")
+
     app = QApplication(sys.argv)
+    app.setApplicationName("Riemann")
     window = RiemannWindow()
     window.show()
     sys.exit(app.exec())

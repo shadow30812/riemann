@@ -127,6 +127,19 @@ class BrowserTab(QWidget):
         self.btn_bookmark.setToolTip("Bookmark this page")
         self.btn_bookmark.clicked.connect(self.toggle_bookmark)
 
+        self.btn_music = QPushButton("♫")
+        self.btn_music.setFixedWidth(30)
+        self.btn_music.setCheckable(True)
+        self.btn_music.setToolTip("Toggle Audiophile Music Mode")
+        self.btn_music.clicked.connect(self.toggle_music_mode)
+        self.btn_music.setStyleSheet("""
+            QPushButton:checked {
+                background-color: #FF4500;
+                color: white;
+                border: 1px solid #CC3700;
+            }
+        """)
+
         self.lbl_zoom = QLabel("100%")
         self.lbl_zoom.setFixedWidth(40)
         self.lbl_zoom.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -136,6 +149,7 @@ class BrowserTab(QWidget):
         tb_layout.addWidget(self.btn_reload)
         tb_layout.addWidget(self.txt_url)
         tb_layout.addWidget(self.btn_bookmark)
+        tb_layout.addWidget(self.btn_music)
         tb_layout.addWidget(self.lbl_zoom)
 
         layout.addWidget(self.toolbar)
@@ -205,6 +219,7 @@ class BrowserTab(QWidget):
         self.web.urlChanged.connect(self._update_url_bar)
         self.web.loadProgress.connect(self.progress.setValue)
         self.web.loadFinished.connect(lambda: self.progress.setValue(0))
+        self.web.loadFinished.connect(self._restore_music_mode)
         self.web.titleChanged.connect(self._update_tab_title)
 
         self.shortcut_reload = QShortcut(QKeySequence("F5"), self)
@@ -216,7 +231,7 @@ class BrowserTab(QWidget):
         self.shortcut_hard_reload = QShortcut(QKeySequence("Ctrl+Shift+R"), self)
         self.shortcut_hard_reload.activated.connect(self.hard_reload)
 
-        self.shortcut_f6 = QShortcut(QKeySequence(Qt.Key.Key_F6), self)
+        self.shortcut_f6 = QShortcut(QKeySequence("F6"), self)
         self.shortcut_f6.activated.connect(self.focus_url_bar)
 
         self.shortcut_find = QShortcut(QKeySequence("Ctrl+F"), self)
@@ -242,6 +257,9 @@ class BrowserTab(QWidget):
 
         self.shortcut_fwd_alt = QShortcut(QKeySequence("Alt+Right"), self)
         self.shortcut_fwd_alt.activated.connect(self.web.forward)
+
+        self.shortcut_music = QShortcut(QKeySequence("Ctrl+M"), self)
+        self.shortcut_music.activated.connect(self.btn_music.click)
 
         self.apply_theme()
 
@@ -441,6 +459,64 @@ class BrowserTab(QWidget):
                     )
                 break
             parent = parent.parent()
+
+    def get_audio_script(self):
+        """
+        Robustly loads the audio_engine.js file.
+        Anchors the path relative to this browser.py file.
+        """
+        try:
+            # 1. Get the directory containing browser.py (riemann/ui)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+
+            # 2. Go up one level to 'riemann', then into 'assets'
+            # Result: .../riemann/assets/audio_engine.js
+            script_path = os.path.join(current_dir, "..", "assets", "audio_engine.js")
+            script_path = os.path.abspath(script_path)  # Normalize path
+
+
+            if not os.path.exists(script_path):
+                print(f"[Riemann Error] Audio Engine not found at: {script_path}")
+                self.show_toast("Error: Missing audio_engine.js")
+                return ""
+
+            with open(script_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                return content
+
+        except Exception as e:
+            print(f"[ERROR] Failed to load audio script: {e}")
+            return ""
+
+    def toggle_music_mode(self) -> None:
+        """Toggles the Audio Engine state based on button check status."""
+        is_active = self.btn_music.isChecked()
+
+        # 1. Prepare Script
+        base_js = self.get_audio_script()
+        if not base_js:
+            print("[ERROR] Aborting injection: Script content is empty.")
+            self.btn_music.setChecked(False)
+            return
+
+        # 2. Command: Enable or Disable
+        if is_active:
+            command = "if(window.RiemannAudio) window.RiemannAudio.enable();"
+            self.show_toast("Music Mode ON")
+        else:
+            command = "if(window.RiemannAudio) window.RiemannAudio.disable();"
+            self.show_toast("Music Mode OFF")
+
+        # 3. Inject (Base + Command)
+        # We inject the base engine every time just in case it wasn't loaded
+        full_script = base_js + "\n" + command
+        self.web.page().runJavaScript(full_script)
+
+    def _restore_music_mode(self) -> None:
+        """Re-enables music mode after page navigation if button is checked."""
+        if self.btn_music.isChecked():
+            # Wait briefly for DOM to settle, then inject
+            QTimer.singleShot(1000, self.toggle_music_mode)
 
     def _handle_download(self, download_item: QWebEngineDownloadRequest) -> None:
         """Handles file download requests."""
