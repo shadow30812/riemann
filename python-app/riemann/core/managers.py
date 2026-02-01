@@ -105,16 +105,22 @@ class HistoryManager:
             QStandardPaths.StandardLocation.AppDataLocation
         )
         self.path = os.path.join(base, "history.json")
-        self.history: List[str] = []
+        self.history: Dict[str, List[str]] = {"pdf": [], "web": []}
         self.popular_sites: List[str] = [
+            "music.youtube.com",
+            "whatsapp.com",
             "google.com",
+            "monkeytype.com",
+            "erp.iitkgp.ac.in",
             "youtube.com",
+            "keep.google.com",
+            "linkedin.com",
             "github.com",
-            "stackoverflow.com",
+            "pplx.ai",
             "reddit.com",
             "wikipedia.org",
-            "arxiv.org",
             "chatgpt.com",
+            "gemini.google.com",
         ]
         self.load()
 
@@ -123,9 +129,13 @@ class HistoryManager:
         if os.path.exists(self.path):
             try:
                 with open(self.path, "r") as f:
-                    self.history = json.load(f)
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        self.history = {"pdf": [], "web": data}
+                    elif isinstance(data, dict):
+                        self.history = data
             except Exception:
-                self.history = []
+                self.history = {"pdf": [], "web": []}
 
     def save(self) -> None:
         """Saves the current history to the JSON persistence file."""
@@ -135,22 +145,26 @@ class HistoryManager:
         except Exception:
             pass
 
-    def add(self, item: str) -> None:
+    def add(self, item: str, item_type: str = "web") -> None:
         """
-        Adds an item to the history.
+        Adds an item to the specific history category.
 
         Removes duplicates to promote the item to the top of the list
         and limits the history to 500 entries.
 
         Args:
-            item: The file path or URL to add.
+            item: The URL or file path.
+            item_type: 'pdf' or 'web'.
         """
         if not item:
             return
-        if item in self.history:
-            self.history.remove(item)
-        self.history.insert(0, item)
-        self.history = self.history[:500]
+        target_list = self.history.get(item_type, [])
+
+        if item in target_list:
+            target_list.remove(item)
+
+        target_list.insert(0, item)
+        self.history[item_type] = target_list[:500]
         self.save()
 
     def get_model_data(self) -> List[str]:
@@ -160,8 +174,13 @@ class HistoryManager:
         Returns:
             A list of strings suitable for autocomplete models.
         """
-        extras = [s for s in self.popular_sites if s not in self.history]
-        return self.history + extras
+        web_history = self.history.get("web", [])
+        pdf_history = self.history.get("pdf", [])
+        extras = [s for s in self.popular_sites if s not in web_history]
+        return web_history + extras + pdf_history
+
+    def get_list(self, item_type: str) -> List[str]:
+        return self.history.get(item_type, [])
 
 
 class DownloadManager(QDialog):

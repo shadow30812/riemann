@@ -980,12 +980,11 @@ class ReaderTab(QWidget):
             raw_text = self.current_doc.get_page_text(self.current_page_index)
             clean_text = re.sub(r"[ \t]+", " ", raw_text)
             safe_text = html.escape(clean_text)
-            formatted_text = safe_text.replace("\n", "<br>")
 
             bg = "#1e1e1e" if self.dark_mode else "#fff"
             fg = "#ddd" if self.dark_mode else "#222"
 
-            katex_head = """
+            katex_head = r"""
             <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
             <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
             <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
@@ -1013,6 +1012,8 @@ class ReaderTab(QWidget):
                         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
                         line-height: 1.6;
                         text-align: left;
+                        /* FIX 2: Use CSS to handle wrapping and newlines */
+                        white-space: pre-wrap; 
                     }}
                     .katex {{ font-size: 1.1em; }}
                     .katex-display {{
@@ -1022,10 +1023,11 @@ class ReaderTab(QWidget):
                     }}
                 </style>
             </head>
-            <body>{formatted_text}</body>
+            <body>{safe_text}</body>
             </html>
             """
             self.web.setHtml(full_html)
+
         except Exception as e:
             sys.stderr.write(f"Reflow Error: {e}\n")
 

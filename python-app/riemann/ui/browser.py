@@ -66,6 +66,7 @@ class BrowserTab(QWidget):
         start_url: str = "https://www.google.com",
         parent: Optional[QWidget] = None,
         dark_mode: bool = True,
+        incognito: bool = False,
     ) -> None:
         """
         Initializes the BrowserTab.
@@ -77,18 +78,25 @@ class BrowserTab(QWidget):
         """
         super().__init__(parent)
         self.dark_mode = dark_mode
+        self.incognito = incognito
 
-        base_path = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.AppDataLocation
-        )
-        storage_path = os.path.join(base_path, "browser_data")
-        os.makedirs(storage_path, exist_ok=True)
+        if self.incognito:
+            # Ephemeral profile (no name, no storage path)
+            self.profile = QWebEngineProfile(self)
+        else:
+            # Persistent profile
+            base_path = QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.AppDataLocation
+            )
+            storage_path = os.path.join(base_path, "browser_data")
+            os.makedirs(storage_path, exist_ok=True)
 
-        self.profile = QWebEngineProfile("RiemannPersistentProfile", self)
-        self.profile.setPersistentStoragePath(storage_path)
-        self.profile.setPersistentCookiesPolicy(
-            QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
-        )
+            self.profile = QWebEngineProfile("RiemannPersistentProfile", self)
+            self.profile.setPersistentStoragePath(storage_path)
+            self.profile.setPersistentCookiesPolicy(
+                QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
+            )
+
         self.ad_interceptor = AdBlockInterceptor(self)
         self.profile.setUrlRequestInterceptor(self.ad_interceptor)
 
@@ -119,7 +127,25 @@ class BrowserTab(QWidget):
         self.completer = QCompleter()
         self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.completer.setCompletionMode(QCompleter.CompletionMode.InlineCompletion)
         self.txt_url.setCompleter(self.completer)
+
+        if self.incognito:
+            self.btn_incognito_icon = QPushButton("🙈")
+            self.btn_incognito_icon.setFlat(True)
+            self.btn_incognito_icon.setFixedWidth(30)
+            self.btn_incognito_icon.setToolTip(
+                "Incognito Mode: History will not be saved."
+            )
+            self.txt_url.setStyleSheet("""
+                QLineEdit { 
+                    border: 2px solid #6A0DAD; 
+                    background-color: #2D2D2D; 
+                    color: white; 
+                    border-radius: 4px;
+                    padding: 4px;
+                }
+            """)
 
         self.btn_bookmark = QPushButton("☆")
         self.btn_bookmark.setFixedWidth(30)
@@ -147,6 +173,10 @@ class BrowserTab(QWidget):
         tb_layout.addWidget(self.btn_back)
         tb_layout.addWidget(self.btn_fwd)
         tb_layout.addWidget(self.btn_reload)
+
+        if self.incognito:
+            tb_layout.addWidget(self.btn_incognito_icon)
+
         tb_layout.addWidget(self.txt_url)
         tb_layout.addWidget(self.btn_bookmark)
         tb_layout.addWidget(self.btn_music)
@@ -199,6 +229,11 @@ class BrowserTab(QWidget):
             "background-color: #333; color: white; padding: 10px; border-radius: 5px; font-weight: bold;"
         )
         self.lbl_toast.hide()
+
+        if self.incognito:
+            # visual indicator for incognito
+            self.txt_url.setStyleSheet("border: 1px solid #50a0ff;")
+            self.txt_url.setPlaceholderText("Incognito Mode")
 
         self.web = QWebEngineView()
         page = QWebEnginePage(self.profile, self.web)
@@ -268,6 +303,17 @@ class BrowserTab(QWidget):
         self.shortcut_devtools.activated.connect(self.open_devtools)
 
         self.apply_theme()
+
+        if self.incognito:
+            self.txt_url.setStyleSheet("""
+                QLineEdit { 
+                    border: 2px solid #6A0DAD; 
+                    background-color: #2D2D2D; 
+                    color: white; 
+                    border-radius: 4px;
+                    padding: 4px;
+                }
+            """)
 
         if self.window() and hasattr(self.window(), "history_model"):
             self.completer.setModel(self.window().history_model)
@@ -379,6 +425,17 @@ class BrowserTab(QWidget):
         self.toolbar.setStyleSheet(style)
         self.search_bar.setStyleSheet(style)
 
+        if self.incognito:
+            self.txt_url.setStyleSheet("""
+                QLineEdit { 
+                    border: 2px solid #6A0DAD; 
+                    background-color: #2D2D2D; 
+                    color: white; 
+                    border-radius: 4px;
+                    padding: 4px;
+                }
+            """)
+
     def modify_zoom(self, delta: float) -> None:
         """Increments or decrements the zoom factor and updates the label."""
         new_factor = max(0.1, min(self.web.zoomFactor() + delta, 5.0))
@@ -443,8 +500,12 @@ class BrowserTab(QWidget):
         self.txt_url.setText(s_url)
         self.txt_url.setCursorPosition(0)
 
-        if self.window() and hasattr(self.window(), "add_to_history"):
-            self.window().add_to_history(s_url)
+        if (
+            not self.incognito
+            and self.window()
+            and hasattr(self.window(), "add_to_history")
+        ):
+            self.window().add_to_history(s_url, "web")
 
         self._update_bookmark_icon(s_url)
 

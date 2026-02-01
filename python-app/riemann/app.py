@@ -64,10 +64,18 @@ class RiemannWindow(QMainWindow):
     Handles global state, split-view tabs, history, and shortcuts.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, incognito: bool = False, restore_session: bool = True) -> None:
         """Initializes the main application window."""
         super().__init__()
-        self.setWindowTitle("Riemann Reader")
+        self.incognito = incognito
+        self.restore_session = restore_session
+
+        if self.incognito:
+            self.setWindowTitle("Riemann Reader (Incognito)")
+            self.setProperty("incognito", True)
+        else:
+            self.setWindowTitle("Riemann Reader")
+
         self.resize(1200, 900)
 
         self.settings = QSettings("Riemann", "PDFReader")
@@ -96,39 +104,42 @@ class RiemannWindow(QMainWindow):
         self.setup_menu()
 
         self.shortcut_exit = QShortcut(QKeySequence("Ctrl+Q"), self)
-        self.shortcut_exit.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_exit.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_exit.activated.connect(self.close)
 
         self.shortcut_close = QShortcut(QKeySequence("Ctrl+W"), self)
-        self.shortcut_close.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_close.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_close.activated.connect(self.close_active_tab)
 
         self.shortcut_restore = QShortcut(QKeySequence("Ctrl+Shift+T"), self)
-        self.shortcut_restore.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_restore.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_restore.activated.connect(self.restore_last_closed_tab)
 
         self.shortcut_split = QShortcut(QKeySequence("Ctrl+\\"), self)
-        self.shortcut_split.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_split.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_split.activated.connect(self.toggle_split_view)
 
         self.shortcut_fullscreen = QShortcut(QKeySequence(Qt.Key.Key_F11), self)
-        self.shortcut_fullscreen.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_fullscreen.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_fullscreen.activated.connect(self.toggle_reader_fullscreen)
 
         self.shortcut_escape = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
-        self.shortcut_escape.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_escape.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_escape.activated.connect(self._handle_escape)
 
         self._restore_session()
 
-    def add_to_history(self, item: str) -> None:
+    def add_to_history(self, item: str, item_type: str = "web") -> None:
         """
         Adds item to history and updates the shared autocomplete model.
 
         Args:
             item: The URL or file path to add.
         """
-        self.history_manager.add(item)
+        if self.incognito:
+            return
+
+        self.history_manager.add(item, item_type)
         self.history_model.setStringList(self.history_manager.get_model_data())
 
     def _handle_escape(self) -> None:
@@ -138,8 +149,14 @@ class RiemannWindow(QMainWindow):
 
     def _restore_session(self) -> None:
         """Restores the window geometry and open tabs from the previous session."""
+        if self.incognito or not self.restore_session:
+            self.new_browser_tab()
+            self.resize(1200, 900)
+            return
+
         if self.settings.value("window/geometry"):
             self.restoreGeometry(self.settings.value("window/geometry"))
+
         self._restore_tabs_from_settings("session/main_tabs", self.tabs_main)
         self._restore_tabs_from_settings("session/side_tabs", self.tabs_side)
 
@@ -151,7 +168,7 @@ class RiemannWindow(QMainWindow):
             self.tabs_side.hide()
 
         if self.tabs_main.count() == 0:
-            self.new_tab()
+            self.new_pdf_tab()
 
     def _restore_tabs_from_settings(self, key: str, target_widget: QTabWidget) -> None:
         """
@@ -181,7 +198,7 @@ class RiemannWindow(QMainWindow):
         self, path: str, target_widget: QTabWidget, restore_state: bool = False
     ) -> None:
         """Adds a PDF Reader tab."""
-        self.add_to_history(path)
+        self.add_to_history(path, "pdf")
         reader = ReaderTab()
         reader.load_document(path, restore_state=restore_state)
         target_widget.addTab(reader, os.path.basename(path))
@@ -210,6 +227,14 @@ class RiemannWindow(QMainWindow):
         browser_action = file_menu.addAction("New Browser Tab")
         browser_action.setShortcut("Ctrl+B")
         browser_action.triggered.connect(lambda: self.new_browser_tab())
+
+        new_win_action = file_menu.addAction("New Window")
+        new_win_action.setShortcut("Ctrl+N")
+        new_win_action.triggered.connect(self.new_window)
+
+        incog_action = file_menu.addAction("New Incognito Tab")
+        incog_action.setShortcut("Ctrl+Shift+N")
+        incog_action.triggered.connect(self.new_incognito_window)
 
         file_menu.addSeparator()
 
@@ -247,7 +272,9 @@ class RiemannWindow(QMainWindow):
 
             self.toggle_auto_pdf(dlg.cb_auto_pdf.isChecked())
 
-    def new_tab(self, path: Optional[str] = None, restore_state: bool = False) -> None:
+    def new_pdf_tab(
+        self, path: Optional[str] = None, restore_state: bool = False
+    ) -> None:
         """Creates a new PDF tab."""
         if path:
             self._add_pdf_tab(path, self.tabs_main, restore_state)
@@ -256,16 +283,36 @@ class RiemannWindow(QMainWindow):
             self.tabs_main.addTab(reader, "New Tab")
             self.tabs_main.setCurrentWidget(reader)
 
-    def new_browser_tab(self, url: str = "https://www.google.com") -> None:
+    def new_browser_tab(
+        self, url: str = "https://www.google.com", incognito: bool = False
+    ) -> None:
         """Creates a new Browser tab."""
+        is_incognito = self.incognito or incognito
+
         target = self.tabs_main
         if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
             target = self.tabs_side
-        self._add_browser_tab(url, target)
-        new_tab = target.widget(target.count() - 1)
-        target.setCurrentWidget(new_tab)
-        new_tab.txt_url.setFocus()
-        new_tab.txt_url.selectAll()
+
+        browser = BrowserTab(url, dark_mode=self.dark_mode, incognito=is_incognito)
+        browser.completer.setModel(self.history_model)
+
+        label = "Incognito" if incognito else "Loading..."
+        target.addTab(browser, label)
+        new_pdf_tab = target.widget(target.count() - 1)
+        target.setCurrentWidget(new_pdf_tab)
+
+        new_pdf_tab.txt_url.setFocus()
+        new_pdf_tab.txt_url.selectAll()
+
+    def new_window(self) -> None:
+        """Spawns a new independent standard window."""
+        self._new_window_ref = RiemannWindow(incognito=False, restore_session=False)
+        self._new_window_ref.show()
+
+    def new_incognito_window(self) -> None:
+        """Spawns a new independent window in Incognito mode."""
+        self.incognito_window = RiemannWindow(incognito=True)
+        self.incognito_window.show()
 
     def open_pdf_smart(self) -> None:
         """Opens a Document (PDF/MD) in the current tab if empty, or a new tab otherwise."""
@@ -285,7 +332,7 @@ class RiemannWindow(QMainWindow):
                 self.tabs_main.currentIndex(), os.path.basename(path)
             )
         else:
-            self.new_tab(path)
+            self.new_pdf_tab(path)
 
     def toggle_split_view(self) -> None:
         """Toggles the split-screen view mode."""
@@ -352,6 +399,9 @@ class RiemannWindow(QMainWindow):
 
     def closeEvent(self, event: Any) -> None:
         """Saves session state before closing."""
+        if self.incognito or not self.restore_session:
+            super().closeEvent(event)
+            return
 
         def get_files(w):
             l = []
@@ -360,7 +410,8 @@ class RiemannWindow(QMainWindow):
                 if isinstance(wid, ReaderTab) and wid.current_path:
                     l.append({"type": "pdf", "data": wid.current_path})
                 elif isinstance(wid, BrowserTab):
-                    l.append({"type": "web", "data": wid.web.url().toString()})
+                    if not wid.incognito:
+                        l.append({"type": "web", "data": wid.web.url().toString()})
             return l
 
         self.settings.setValue("session/main_tabs", get_files(self.tabs_main))
@@ -454,12 +505,19 @@ class RiemannWindow(QMainWindow):
         dialog.resize(600, 400)
 
         layout = QVBoxLayout(dialog)
+        tabs = QTabWidget()
 
-        list_widget = QListWidget()
-        items = self.history_manager.history
-        list_widget.addItems(items)
+        def create_list(data):
+            lw = QListWidget()
+            lw.addItems(data)
+            return lw
 
-        layout.addWidget(list_widget)
+        list_web = create_list(self.history_manager.get_list("web"))
+        list_pdf = create_list(self.history_manager.get_list("pdf"))
+
+        tabs.addTab(list_web, "Web History")
+        tabs.addTab(list_pdf, "PDF History")
+        layout.addWidget(tabs)
 
         button_box = QDialogButtonBox(QDialogButtonBox.Open | QDialogButtonBox.Close)
         button_box.accepted.connect(dialog.accept)
@@ -467,20 +525,22 @@ class RiemannWindow(QMainWindow):
         layout.addWidget(button_box)
 
         def open_item() -> None:
-            item = list_widget.currentItem()
+            current_list = list_web if tabs.currentIndex() == 0 else list_pdf
+            item = current_list.currentItem()
             if not item:
                 return
 
             data = item.text()
             dialog.accept()
 
-            if os.path.exists(data):
-                current = self.tabs_main.currentWidget()
-                if isinstance(current, ReaderTab) and not current.current_path:
-                    current.load_document(data)
-                    self.tabs_main.setTabText(
-                        self.tabs_main.currentIndex(), os.path.basename(data)
-                    )
+            if tabs.currentIndex() == 1:
+                if os.path.exists(data):
+                    current = self.tabs_main.currentWidget()
+                    if isinstance(current, ReaderTab) and not current.current_path:
+                        current.load_document(data)
+                        self.tabs_main.setTabText(
+                            self.tabs_main.currentIndex(), os.path.basename(data)
+                        )
                 else:
                     self._add_pdf_tab(data, self.tabs_main)
             else:
@@ -488,7 +548,9 @@ class RiemannWindow(QMainWindow):
 
         button_box.accepted.disconnect()
         button_box.accepted.connect(open_item)
-        list_widget.itemDoubleClicked.connect(open_item)
+
+        list_web.itemDoubleClicked.connect(open_item)
+        list_pdf.itemDoubleClicked.connect(open_item)
 
         dialog.exec()
 
