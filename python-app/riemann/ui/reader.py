@@ -882,17 +882,29 @@ class ReaderTab(QWidget):
         visible = not self.search_bar.isVisible()
         self.search_bar.setVisible(visible)
         self.btn_search.setChecked(visible)
+
         if visible:
             self.txt_search.setFocus()
             self.txt_search.selectAll()
+        else:
+            self.search_result = None
+            self.update_view()
 
     def find_next(self) -> None:
         """Searches for the next occurrence of the text."""
-        self._find_text(direction=1)
+        if self.view_mode == ViewMode.REFLOW:
+            self.web.findText(self.txt_search.text())
+        else:
+            self._find_text(direction=1)
 
     def find_prev(self) -> None:
         """Searches for the previous occurrence of the text."""
-        self._find_text(direction=-1)
+        if self.view_mode == ViewMode.REFLOW:
+            self.web.findText(
+                self.txt_search.text(), QWebEngineView.FindFlag.FindBackward
+            )
+        else:
+            self._find_text(direction=-1)
 
     def _find_text(self, direction: int) -> None:
         """
@@ -927,7 +939,8 @@ class ReaderTab(QWidget):
                     self.update_view()
                     self.ensure_visible(idx)
                     return
-            except Exception:
+            except Exception as e:
+                print(f"Search error on page {idx}: {e}")
                 continue
 
     def on_page_input_return(self) -> None:

@@ -261,12 +261,34 @@ class BrowserTab(QWidget):
         self.shortcut_music = QShortcut(QKeySequence("Ctrl+M"), self)
         self.shortcut_music.activated.connect(self.btn_music.click)
 
+        self.shortcut_devtools = QShortcut(QKeySequence("Ctrl+Shift+I"), self)
+        self.shortcut_devtools.activated.connect(self.open_devtools)
+
         self.apply_theme()
 
         if self.window() and hasattr(self.window(), "history_model"):
             self.completer.setModel(self.window().history_model)
 
         self.web.load(QUrl(start_url))
+
+    def open_devtools(self) -> None:
+        """Opens the Web Inspector for the current page."""
+        if not hasattr(self, "_devtools_window"):
+            self._devtools_window = QWidget()
+            self._devtools_window.setWindowTitle("Inspector")
+            self._devtools_window.resize(800, 600)
+
+            layout = QVBoxLayout(self._devtools_window)
+            layout.setContentsMargins(0, 0, 0, 0)
+
+            self._devtools_view = QWebEngineView()
+            layout.addWidget(self._devtools_view)
+
+            # Link the inspector to the current page
+            self._devtools_view.page().setInspectedPage(self.web.page())
+
+        self._devtools_window.show()
+        self._devtools_window.raise_()
 
     def hard_reload(self) -> None:
         """Clears the HTTP cache and reloads the current page."""
@@ -473,7 +495,6 @@ class BrowserTab(QWidget):
             # Result: .../riemann/assets/audio_engine.js
             script_path = os.path.join(current_dir, "..", "assets", "audio_engine.js")
             script_path = os.path.abspath(script_path)  # Normalize path
-
 
             if not os.path.exists(script_path):
                 print(f"[Riemann Error] Audio Engine not found at: {script_path}")
