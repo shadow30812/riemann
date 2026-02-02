@@ -1062,7 +1062,7 @@ class ReaderTab(QWidget):
 
     def _find_text(self, direction: int) -> None:
         """
-        Executes text search logic.
+        Executes text search logic using Rust backend's search_page..
 
         Args:
             direction: 1 for forward, -1 for backward.
@@ -1070,7 +1070,7 @@ class ReaderTab(QWidget):
         if not self.current_doc:
             return
 
-        term = self.txt_search.text().strip().lower()
+        term = self.txt_search.text().strip()
         if not term:
             return
 
@@ -1080,9 +1080,12 @@ class ReaderTab(QWidget):
         for i in range(count):
             idx = (start_idx + (i * direction)) % count
             try:
-                text = self.current_doc.get_page_text(idx)
-                if term in text.lower():
+                rects = self.current_doc.search_page(idx, term)
+                if rects:
                     self.current_page_index = idx
+                    # Store results: (page_index, [rects])
+                    self.search_result = (idx, rects)
+
                     if self.continuous_scroll and self._virtual_enabled:
                         start, end = self._virtual_range
                         if idx < start or idx >= end:
@@ -1096,6 +1099,8 @@ class ReaderTab(QWidget):
             except Exception as e:
                 print(f"Search error on page {idx}: {e}")
                 continue
+
+        self.show_toast(f"No matches found for '{term}'")
 
     def on_page_input_return(self) -> None:
         """Handles user input in the page number text field."""
@@ -1572,6 +1577,23 @@ class ReaderTab(QWidget):
         else:
             self._pending_snip_image = None
             QMessageBox.critical(self, "Error", error_msg)
+
+    def show_toast(self, message: str) -> None:
+        """Displays a temporary notification overlay."""
+        self.lbl_toast = QLabel(self)
+        self.lbl_toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_toast.setStyleSheet(
+            "background-color: #333; color: white; padding: 10px; border-radius: 5px; font-weight: bold;"
+        )
+        self.lbl_toast.hide()
+        self.lbl_toast.setText(message)
+        self.lbl_toast.adjustSize()
+        self.lbl_toast.move(
+            (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
+        )
+        self.lbl_toast.show()
+        self.lbl_toast.raise_()
+        QTimer.singleShot(4000, self.lbl_toast.hide)
 
     def install_dependencies(self):
         """Starts the background installer."""
