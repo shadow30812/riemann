@@ -184,6 +184,56 @@ impl RiemannDocument {
 
         Ok(text)
     }
+
+    /// Searches for a string on a page and returns a list of bounding boxes.
+    /// Returns a list of (left, top, right, bottom) tuples.
+    fn search_page(&self, page_index: u16, term: String) -> PyResult<Vec<(f32, f32, f32, f32)>> {
+        let doc_guard = self.inner.lock().unwrap();
+        let pages = doc_guard.0.pages();
+
+        if (page_index as usize) >= (pages.len() as usize) {
+            return Ok(Vec::new());
+        }
+
+        let page = pages
+            .get(page_index)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+
+        let text_accessor = page
+            .text()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        // 1. Configure Search Options (Case-insensitive, default)
+        let search_options = PdfSearchOptions::new();
+
+        // 2. Execute Search
+        let search = text_accessor
+            .search(&term, &search_options)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        let mut rects = Vec::new();
+
+        // 3. Iterate Results (API Fix: iter requires a direction)
+        for segments in search.iter(PdfSearchDirection::SearchForward) {
+            // 4. Iterate Segments inside the result
+            for segment in segments.iter() {
+                // 5. Get Bounds
+                let rect = segment.bounds();
+
+                // Pdfium coordinates: (left, bottom, right, top) usually,
+                // but PdfRect usually provides left/bottom/right/top.
+                // We extract the raw f32 values.
+                rects.push((
+                    rect.left().value,
+                    rect.top().value,
+                    rect.right().value,
+                    rect.bottom().value,
+                ));
+            }
+        }
+
+        Ok(rects)
+    }
 }
 
 /// The main entry point for the PDF Engine.
