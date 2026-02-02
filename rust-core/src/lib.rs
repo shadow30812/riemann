@@ -50,6 +50,12 @@ fn generate_bitmap<'a>(page: &'a PdfPage<'a>, scale: f32) -> PyResult<PdfBitmap<
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
 }
 
+/// Type alias for form widget data: (index, bounds, field_type, value, checked)
+type FormWidget = (usize, (f32, f32, f32, f32), String, String, bool);
+
+/// Type alias for text segment data: (text, bounds)
+type TextSegment = (String, (f32, f32, f32, f32));
+
 /// Represents the result of a page render operation passed back to Python.
 #[pyclass]
 struct RenderResult {
@@ -233,6 +239,217 @@ impl RiemannDocument {
         }
 
         Ok(rects)
+    }
+    /// Retrieves all text segments and their bounding boxes for a specific page.
+    fn get_text_segments(&self, page_index: u16) -> PyResult<Vec<TextSegment>> {
+        let doc_guard = self.inner.lock().unwrap();
+        let pages = doc_guard.0.pages();
+
+        if (page_index as usize) >= (pages.len() as usize) {
+            return Ok(Vec::new());
+        }
+
+        let page = pages
+            .get(page_index)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>((e.to_string(),)))?;
+
+        let text_accessor = page.text().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                (format!("Text Access Error: {}", e),),
+            )
+        })?;
+
+        let mut segments = Vec::new();
+
+        for segment in text_accessor.segments().iter() {
+            // segment.bounds() returns PdfRect, not Result
+            let rect = segment.bounds();
+
+            segments.push((
+                segment.text(),
+                (
+                    rect.left().value,
+                    rect.top().value,
+                    rect.right().value,
+                    rect.bottom().value,
+                ),
+            ));
+        }
+
+        Ok(segments)
+    }
+
+    /// Creates a markup annotation (Highlight, Underline, Strikeout) using the provided rectangles.
+    fn create_markup_annotation(
+        &self,
+        page_index: u16,
+        rects: Vec<(f32, f32, f32, f32)>,
+        subtype: String,
+        color: (u8, u8, u8),
+    ) -> PyResult<()> {
+        let mut doc_guard = self.inner.lock().unwrap();
+        let pages = doc_guard.0.pages_mut();
+
+        let mut page = pages
+            .get(page_index)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>((e.to_string(),)))?;
+
+        let pdf_color = PdfColor::new(color.0, color.1, color.2, 255);
+
+        // Calculate union rect first
+        let mut union_rect: Option<PdfRect> = None;
+        for (left, top, right, bottom) in &rects {
+            let u = PdfRect::new_from_values(*left, *bottom, *right, *top);
+            if let Some(r) = union_rect {
+                let ul = r.left().value.min(*left);
+                let ub = r.bottom().value.min(*bottom);
+                let ur = r.right().value.max(*right);
+                let ut = r.top().value.max(*top);
+                union_rect = Some(PdfRect::new_from_values(ul, ub, ur, ut));
+            } else {
+                union_rect = Some(u);
+            }
+        }
+
+        // Helper to apply union bounds
+        let apply_bounds = |annot: &mut dyn PdfPageAnnotationCommon| -> PyResult<()> {
+            if let Some(u) = union_rect {
+                annot.set_bounds(u).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>((e.to_string(),))
+                })?;
+            }
+            Ok(())
+        };
+
+        match subtype.to_lowercase().as_str() {
+            "underline" => {
+                let mut annot = page
+                    .annotations_mut()
+                    .create_underline_annotation()
+                    .map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>((e.to_string(),))
+                    })?;
+
+                annot.set_stroke_color(pdf_color).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>((e.to_string(),))
+                })?;
+
+                for (left, top, right, bottom) in &rects {
+                    let rect = PdfRect::new_from_values(*left, *bottom, *right, *top);
+                    annot
+                        .attachment_points_mut()
+                        .create_attachment_point_at_end(PdfQuadPoints::from_rect(&rect))
+                        .map_err(|e| {
+                            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>((e.to_string(),))
+                        })?;
+                }
+                apply_bounds(&mut annot)?;
+            }
+            "strikeout" => {
+                let mut annot = page
+                    .annotations_mut()
+                    .create_strikeout_annotation()
+                    .map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>((e.to_string(),))
+                    })?;
+
+                annot.set_stroke_color(pdf_color).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>((e.to_string(),))
+                })?;
+
+                for (left, top, right, bottom) in &rects {
+                    let rect = PdfRect::new_from_values(*left, *bottom, *right, *top);
+                    annot
+                        .attachment_points_mut()
+                        .create_attachment_point_at_end(PdfQuadPoints::from_rect(&rect))
+                        .map_err(|e| {
+                            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>((e.to_string(),))
+                        })?;
+                }
+                apply_bounds(&mut annot)?;
+            }
+            _ => {
+                // Highlight
+                let mut annot = page
+                    .annotations_mut()
+                    .create_highlight_annotation()
+                    .map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>((e.to_string(),))
+                    })?;
+
+                annot.set_stroke_color(pdf_color).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>((e.to_string(),))
+                })?;
+
+                for (left, top, right, bottom) in &rects {
+                    let rect = PdfRect::new_from_values(*left, *bottom, *right, *top);
+                    annot
+                        .attachment_points_mut()
+                        .create_attachment_point_at_end(PdfQuadPoints::from_rect(&rect))
+                        .map_err(|e| {
+                            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>((e.to_string(),))
+                        })?;
+                }
+                apply_bounds(&mut annot)?;
+            }
+        };
+
+        Ok(())
+    }
+
+    /// Retrieves form field widgets for a page to support form filling.
+    fn get_form_widgets(&self, page_index: u16) -> PyResult<Vec<FormWidget>> {
+        let doc_guard = self.inner.lock().unwrap();
+        let pages = doc_guard.0.pages();
+
+        if (page_index as usize) >= (pages.len() as usize) {
+            return Ok(Vec::new());
+        }
+
+        let page = pages
+            .get(page_index)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>((e.to_string(),)))?;
+
+        let annotations = page.annotations();
+        let mut widgets = Vec::new();
+
+        for (idx, annotation) in annotations.iter().enumerate() {
+            if let Some(field) = annotation.as_form_field() {
+                let rect = annotation.bounds().map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>((e.to_string(),))
+                })?;
+
+                let f_type = format!("{:?}", field.field_type());
+
+                let value = if let Some(tf) = field.as_text_field() {
+                    tf.value().unwrap_or_default()
+                } else {
+                    String::new()
+                };
+
+                let checked = if let Some(cb) = field.as_checkbox_field() {
+                    cb.is_checked().unwrap_or(false)
+                } else if let Some(rb) = field.as_radio_button_field() {
+                    rb.is_checked().unwrap_or(false)
+                } else {
+                    false
+                };
+
+                widgets.push((
+                    idx,
+                    (
+                        rect.left().value,
+                        rect.top().value,
+                        rect.right().value,
+                        rect.bottom().value,
+                    ),
+                    f_type,
+                    value,
+                    checked,
+                ));
+            }
+        }
+        Ok(widgets)
     }
 }
 

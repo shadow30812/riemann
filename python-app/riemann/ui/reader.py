@@ -42,6 +42,7 @@ from PySide6.QtGui import (
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -80,6 +81,8 @@ class PageWidget(QLabel):
         super().__init__(parent)
         self.temp_points: List[QPoint] = []
         self.temp_pen = QPen()
+        self.markup_rects: List[QRect] = []
+        self.markup_color: QColor = QColor()
 
     def set_temp_stroke(
         self, points: List[QPoint], color_str: str, thickness: int, is_highlight: bool
@@ -102,20 +105,35 @@ class PageWidget(QLabel):
         )
         self.update()  # Triggers paintEvent, much faster than setPixmap
 
+    def set_markup_preview(self, rects: List[QRect], color: QColor):
+        """Updates the text selection preview rectangles."""
+        self.markup_rects = rects
+        self.markup_color = color
+        self.update()
+
     def clear_temp_stroke(self):
         self.temp_points = []
+        self.markup_rects = []
         self.update()
 
     def paintEvent(self, event):
         # 1. Draw the cached PDF image (fast)
         super().paintEvent(event)
+        painter = QPainter(self)
 
         # 2. Draw the live stroke on top (fast)
         if self.temp_points and len(self.temp_points) > 1:
-            painter = QPainter(self)
             painter.setPen(self.temp_pen)
             painter.drawPolyline(QPolygon(self.temp_points))
-            painter.end()
+
+        # 3. Draw Markup Preview (Sticky Selection)
+        if self.markup_rects:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self.markup_color)
+            for r in self.markup_rects:
+                painter.drawRect(r)
+
+        painter.end()
 
 
 class InstallerThread(QThread):
@@ -221,6 +239,14 @@ class ReaderTab(QWidget):
         self.is_snipping: bool = False
         self.snip_start: QPoint = QPoint()
         self.snip_band: Optional[QRubberBand] = None
+        self.form_widgets: Dict[int, List[QWidget]] = {}
+        self.form_values_cache: Dict[
+            Tuple[int, Tuple[float, float, float, float]], Any
+        ] = {}
+        self.text_segments_cache: Dict[
+            int, List[Tuple[str, Tuple[float, float, float, float]]]
+        ] = {}
+        self.current_markup_rects: List[Tuple[float, float, float, float]] = []
 
         self.latex_model = None
         self.loader_thread: Optional[LoaderThread] = None
@@ -255,6 +281,9 @@ class ReaderTab(QWidget):
 
         self.shortcut_find = QShortcut(QKeySequence("Ctrl+F"), self)
         self.shortcut_find.activated.connect(self.toggle_search_bar)
+
+        self.shortcut_anno = QShortcut(QKeySequence("Ctrl+A"), self)
+        self.shortcut_anno.activated.connect(self.btn_annotate.click)
 
         self.shortcut_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
         self.shortcut_undo.activated.connect(self.undo_annotation)
@@ -390,11 +419,6 @@ class ReaderTab(QWidget):
         self.search_bar = QWidget()
         self.search_bar.setVisible(False)
         self.search_bar.setFixedHeight(45)
-        self.search_bar.setStyleSheet(
-            "background-color: #2a2a2a;"
-            if self.dark_mode
-            else "background-color: #f0f0f0;"
-        )
 
         sb_layout = QHBoxLayout(self.search_bar)
         sb_layout.setContentsMargins(10, 5, 10, 5)
@@ -793,6 +817,96 @@ class ReaderTab(QWidget):
             logical_w = pix.width() / dpr
             logical_h = pix.height() / dpr
 
+            # --- FORM FILLING LAYER ---
+            # Clear previous form widgets for this page
+            if idx in self.form_widgets:
+                for w in self.form_widgets[idx]:
+                    w.deleteLater()
+                self.form_widgets[idx] = []
+            else:
+                self.form_widgets[idx] = []
+
+            # Load and overlay form widgets
+            try:
+                forms = self.current_doc.get_form_widgets(idx)
+                for f_idx, rect_tuple, f_type, value, is_checked in forms:
+                    cache_key = (idx, rect_tuple)
+                    if cache_key in self.form_values_cache:
+                        cached_val = self.form_values_cache[cache_key]
+                        if "Text" in f_type:
+                            value = cached_val
+                        elif "Checkbox" in f_type or "Radio" in f_type:
+                            is_checked = cached_val
+
+                    l, t, r, b = rect_tuple
+
+                    # Transform PDF coords (Bottom-Left origin) to View coords (Top-Left origin)
+                    # Note: Rust backend output is raw PDF coords.
+                    # PDF Y=0 is bottom.
+
+                    x = int(l * scale)
+                    w = int((r - l) * scale)
+                    h = int(
+                        (t - b) * scale
+                    )  # Height might be negative if top < bottom in raw data
+                    y = int(logical_h - (t * scale))
+
+                    # Normalize height/y
+                    if h < 0:
+                        y = y + h
+                        h = abs(h)
+
+                    ctrl = None
+                    if "Text" in f_type:
+                        ctrl = QLineEdit(self.page_widgets[idx])
+                        ctrl.setText(value)
+                        ctrl.setCursor(Qt.CursorShape.IBeamCursor)
+
+                        ctrl.setStyleSheet("""
+                            QLineEdit {
+                                background-color: rgba(0, 100, 255, 0.15);
+                                border: 1px solid #50a0ff;
+                                color: #ffce00; 
+                                font-weight: bold;
+                            }
+                            QLineEdit:focus {
+                                background-color: rgba(0, 100, 255, 0.3);
+                                border: 2px solid #50a0ff;
+                            }
+                        """)
+                        ctrl.textChanged.connect(
+                            lambda val, k=cache_key: self.form_values_cache.update(
+                                {k: val}
+                            )
+                        )
+
+                    elif "Checkbox" in f_type or "Radio" in f_type:
+                        ctrl = QCheckBox(self.page_widgets[idx])
+                        ctrl.setChecked(is_checked)
+                        ctrl.setStyleSheet("""
+                            QCheckBox::indicator {
+                                width: 20px; height: 20px;
+                                border: 2px solid #50a0ff;
+                                background: rgba(0, 100, 255, 0.1);
+                            }
+                            QCheckBox::indicator:checked {
+                                background: #50a0ff;
+                            }
+                        """)
+                        ctrl.stateChanged.connect(
+                            lambda val, k=cache_key: self.form_values_cache.update(
+                                {k: bool(val)}
+                            )
+                        )
+
+                    if ctrl:
+                        ctrl.setGeometry(x, y, w, h)
+                        ctrl.show()
+                        self.form_widgets[idx].append(ctrl)
+
+            except Exception as e:
+                print(f"Form load error page {idx}: {e}")
+
             if self.search_result and self.search_result[0] == idx:
                 painter = QPainter(pix)
                 color = (
@@ -807,7 +921,7 @@ class ReaderTab(QWidget):
                     x = int(left * scale)
                     w = int((right - left) * scale)
                     h = int((top - bottom) * scale)
-                    y = int(res.height - (top * scale))
+                    y = int(logical_h - (top * scale))
                     painter.drawRect(x, y, w, h)
 
                 painter.end()
@@ -884,7 +998,7 @@ class ReaderTab(QWidget):
                         pos = anno["rel_pos"]
                         cx, cy = int(pos[0] * logical_w), int(pos[1] * logical_h)
                         c = QColor(anno.get("color", "#00ff00"))
-                        size = 20
+                        # size = 20
                         pen = QPen(c, 3)
                         painter.setPen(pen)
 
@@ -1042,6 +1156,7 @@ class ReaderTab(QWidget):
             self.txt_search.selectAll()
         else:
             self.search_result = None
+            self.rendered_pages.clear()
             self.update_view()
 
     def find_next(self) -> None:
@@ -1070,7 +1185,8 @@ class ReaderTab(QWidget):
         if not self.current_doc:
             return
 
-        term = self.txt_search.text().strip()
+        raw_term = self.txt_search.text().strip()
+        term = raw_term.lower()
         if not term:
             return
 
@@ -1080,11 +1196,18 @@ class ReaderTab(QWidget):
         for i in range(count):
             idx = (start_idx + (i * direction)) % count
             try:
-                rects = self.current_doc.search_page(idx, term)
-                if rects:
+                text = self.current_doc.get_page_text(idx)
+                if term in text.lower():
                     self.current_page_index = idx
-                    # Store results: (page_index, [rects])
-                    self.search_result = (idx, rects)
+                    try:
+                        rects = self.current_doc.search_page(idx, raw_term)
+                        self.search_result = (idx, rects)
+                    except Exception as e:
+                        print(f"Highlight search failed: {e}")
+                        self.search_result = None
+
+                    if idx in self.rendered_pages:
+                        self.rendered_pages.remove(idx)
 
                     if self.continuous_scroll and self._virtual_enabled:
                         start, end = self._virtual_range
@@ -1093,9 +1216,11 @@ class ReaderTab(QWidget):
 
                     elif not self.continuous_scroll:
                         self.rebuild_layout()
+
                     self.update_view()
                     self.ensure_visible(idx)
                     return
+
             except Exception as e:
                 print(f"Search error on page {idx}: {e}")
                 continue
@@ -1296,7 +1421,7 @@ class ReaderTab(QWidget):
         ):
             page_idx = source.property("pageIndex")
 
-            # 1. Pointers / Stamps / Text (Click actions)
+            # 1. Pointers / Stamps / Text / Sticky Markup (Click actions)
             if event.type() == QEvent.Type.MouseButtonPress:
                 if self.current_tool == "note":
                     if self.handle_annotation_click(source, event):
@@ -1345,9 +1470,70 @@ class ReaderTab(QWidget):
                     self._handle_eraser_click(source, event.pos(), page_idx)
                     return True
 
+                elif self.current_tool.startswith("markup_"):
+                    self.active_drawing = [event.pos()]
+                    self.current_markup_rects = []
+                    return True
+
             # 2. Drawing (Move actions)
             elif event.type() == QEvent.Type.MouseMove:
-                if self.current_tool in ["pen", "highlight"] and self.active_drawing:
+                if self.current_tool.startswith("markup_") and self.active_drawing:
+                    # --- Sticky Text Selection Logic ---
+                    current_pos = event.pos()
+                    scale = self.calculate_scale()
+
+                    # Cache text segments if needed
+                    if page_idx not in self.text_segments_cache:
+                        try:
+                            self.text_segments_cache[page_idx] = (
+                                self.current_doc.get_text_segments(page_idx)
+                            )
+                        except Exception:
+                            self.text_segments_cache[page_idx] = []
+
+                    # Convert Mouse Selection Rect (Pixels) to PDF Points
+                    start_pos = self.active_drawing[0]
+                    sel_rect = QRect(start_pos, current_pos).normalized()
+
+                    pdf_h = source.height() / scale  # Approximation
+                    # Actually logical_h is better but source.height() is pixel height
+
+                    pdf_l = sel_rect.left() / scale
+                    pdf_r = sel_rect.right() / scale
+                    # Invert Y: Pixel Top = 0 -> PDF Top = H
+                    # PDF Y = (H_pixels - y_pixels) / scale
+                    pdf_top = (source.height() - sel_rect.top()) / scale
+                    pdf_bottom = (source.height() - sel_rect.bottom()) / scale
+
+                    # Find overlapping text segments
+                    snapped_rects_pdf = []  # (l, t, r, b)
+                    preview_rects_ui = []  # QRect
+
+                    for text, (l, t, r, b) in self.text_segments_cache[page_idx]:
+                        # AABB Intersection
+                        if l < pdf_r and r > pdf_l and b < pdf_top and t > pdf_bottom:
+                            snapped_rects_pdf.append((l, t, r, b))
+
+                            # Convert back to UI for preview
+                            ux = int(l * scale)
+                            uy = int(source.height() - (t * scale))
+                            uw = int((r - l) * scale)
+                            uh = int((t - b) * scale)
+                            preview_rects_ui.append(QRect(ux, uy, uw, uh))
+
+                    self.current_markup_rects = snapped_rects_pdf
+
+                    # Update Preview
+                    c = QColor(255, 255, 0, 100)  # Yellow for highlight
+                    if "underline" in self.current_tool:
+                        c = QColor(0, 0, 255, 50)
+                    elif "strikeout" in self.current_tool:
+                        c = QColor(255, 0, 0, 50)
+
+                    source.set_markup_preview(preview_rects_ui, c)
+                    return True
+
+                elif self.current_tool in ["pen", "highlight"] and self.active_drawing:
                     # Draw temp line on QLabel for feedback
                     self.active_drawing.append(event.pos())
                     source.set_temp_stroke(
@@ -1370,7 +1556,44 @@ class ReaderTab(QWidget):
 
             # 3. Finish Drawing (Release actions)
             elif event.type() == QEvent.Type.MouseButtonRelease:
-                if self.current_tool in ["pen", "highlight"] and self.active_drawing:
+                if self.current_tool.startswith("markup_"):
+                    if self.current_markup_rects:
+                        subtype = self.current_tool.split("_")[
+                            1
+                        ]  # highlight, underline, strikeout
+
+                        # Define colors
+                        c = (255, 255, 0)
+                        if subtype == "underline":
+                            c = (0, 0, 0) if not self.dark_mode else (255, 255, 255)
+                        if subtype == "strikeout":
+                            c = (255, 0, 0)
+
+                        try:
+                            self.current_doc.create_markup_annotation(
+                                page_idx, self.current_markup_rects, subtype, c
+                            )
+                            self._add_anno_data(
+                                page_idx,
+                                {
+                                    "type": "markup_placeholder",  # Just to trigger redraw/save
+                                    "subtype": subtype,
+                                    # Note: Actual annotation is baked into PDF by backend,
+                                    # but we might want to track it for Undo if we expanded backend API.
+                                    # For now, we just force a render update.
+                                },
+                            )
+                        except Exception as e:
+                            print(f"Markup Error: {e}")
+
+                    self.active_drawing = []
+                    self.current_markup_rects = []
+                    source.clear_temp_stroke()
+                    # Re-render to show the baked annotation
+                    self._render_single_page(page_idx, self.calculate_scale())
+                    return True
+
+                elif self.current_tool in ["pen", "highlight"] and self.active_drawing:
                     # Convert pixel points to relative points
                     w, h = source.width(), source.height()
                     rel_points = [(p.x() / w, p.y() / h) for p in self.active_drawing]
@@ -1858,6 +2081,24 @@ class ReaderTab(QWidget):
             QPushButton {{ border: none; padding: 6px; border-radius: 4px; }}
             QPushButton:hover {{ background: rgba(128,128,128,0.3); }}
             QPushButton:checked {{ background: rgba(80, 160, 255, 0.4); border: 1px solid #50a0ff; }}
+        """)
+
+        sb_bg = "#2a2a2a" if self.dark_mode else "#e0e0e0"
+        sb_fg = "#ddd" if self.dark_mode else "#111"
+        input_bg = "#1e1e1e" if self.dark_mode else "#ffffff"
+        input_border = "#555" if self.dark_mode else "#bbb"
+
+        self.search_bar.setStyleSheet(f"""
+            QWidget {{ background-color: {sb_bg}; color: {sb_fg}; }}
+            QLineEdit {{ 
+                background-color: {input_bg}; 
+                color: {sb_fg}; 
+                border: 1px solid {input_border}; 
+                border-radius: 4px; 
+                padding: 4px; 
+            }}
+            QPushButton {{ background: transparent; border: none; }}
+            QPushButton:hover {{ background: rgba(128,128,128,0.2); border-radius: 4px; }}
         """)
 
     def toggle_theme(self) -> None:

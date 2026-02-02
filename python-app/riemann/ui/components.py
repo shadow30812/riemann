@@ -154,6 +154,21 @@ class AnnotationToolbar(QWidget):
             "🖍️", "highlight", "Highlighter", layout
         )
 
+        self._add_separator(layout)
+
+        # --- Section 2.5: Text Markup (Sticky) ---
+        self.btn_markup_h = self._add_tool_btn(
+            "H", "markup_highlight", "Text Highlight", layout
+        )
+        self.btn_markup_u = self._add_tool_btn(
+            "U", "markup_underline", "Text Underline", layout
+        )
+        self.btn_markup_s = self._add_tool_btn(
+            "S", "markup_strikeout", "Text Strikeout", layout
+        )
+
+        self._add_separator(layout)
+
         # --- Section 3: Shapes (Dropdown) ---
         self.btn_shapes = QToolButton()
         self.btn_shapes.setText("□")

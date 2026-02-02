@@ -150,7 +150,7 @@
         startSmartLoop() {
             if (this.smartInterval) clearInterval(this.smartInterval);
 
-            // Run only 10 times per second (100ms) instead of 60 (16ms)
+            // Run only 25 times per second (40ms) instead of 60 (16ms)
             // This is huge for battery savings.
             this.smartInterval = setInterval(() => {
                 if (!this.smartMode || !this.initialized || !this.enabled) return;
@@ -160,7 +160,7 @@
                 this.nodes.analyser.getByteFrequencyData(dataArray);
 
                 this.runSmartLogic(dataArray);
-            }, 100);
+            }, 40);
         }
 
         runSmartLogic(dataArray) {
