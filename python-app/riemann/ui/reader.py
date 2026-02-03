@@ -472,8 +472,20 @@ class ReaderTab(QWidget):
 
         self.web = QWebEngineView()
         self.stack.addWidget(self.web)
+        self.web.installEventFilter(self)
 
         layout.addWidget(self.stack)
+
+    def showEvent(self, event: QEvent) -> None:
+        """Automatically grab focus when this tab becomes active."""
+        super().showEvent(event)
+
+        # This fixes the 'Ctrl+Tab' issue.
+        # We explicitly steal focus from the TabBar so arrow keys work immediately.
+        if self.view_mode == ViewMode.REFLOW:
+            self.web.setFocus()
+        else:
+            self.setFocus()
 
     def toggle_snip_mode(self, checked: bool) -> None:
         """Enables the rubberband selection mode for Math OCR."""
@@ -1555,6 +1567,16 @@ class ReaderTab(QWidget):
             self.keyPressEvent(event)
             return True
 
+        # [NEW] Web view handling (Reflow mode)
+        # We forward keys from the WebEngine to our own keyPressEvent
+        if event.type() == QEvent.Type.KeyPress and source == self.web:
+            self.keyPressEvent(event)
+            # Don't return True here unless we want to block the web view from receiving it.
+            # Usually, we let it propagate unless we consumed it, but for 'R' or 'N'
+            # we might want to let the browser handle it if we didn't use it.
+            # For safety in this hybrid app, we just let it pass through.
+            return False
+
         if isinstance(source, QLabel) and self.is_snipping:
             if event.type() == QEvent.Type.MouseButtonPress:
                 self.snip_start = event.pos()
@@ -2101,6 +2123,16 @@ class ReaderTab(QWidget):
             self.toggle_search_bar()
             return
 
+        if mod == Qt.KeyboardModifier.NoModifier:
+            if key == Qt.Key.Key_R:
+                self.toggle_view_mode()
+                event.accept()
+                return
+            elif key == Qt.Key.Key_N:
+                self.toggle_theme()
+                event.accept()
+                return
+
         if self.view_mode == ViewMode.IMAGE:
             if (
                 mod & Qt.KeyboardModifier.ControlModifier
@@ -2152,15 +2184,7 @@ class ReaderTab(QWidget):
                 return
 
             if mod == Qt.KeyboardModifier.NoModifier:
-                if key == Qt.Key.Key_N:
-                    self.toggle_theme()
-                    event.accept()
-                    return
-                elif key == Qt.Key.Key_R:
-                    self.toggle_view_mode()
-                    event.accept()
-                    return
-                elif key == Qt.Key.Key_C:
+                if key == Qt.Key.Key_C:
                     self.toggle_scroll_mode()
                     event.accept()
                     return
