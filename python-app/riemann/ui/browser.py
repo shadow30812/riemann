@@ -1,7 +1,7 @@
 import os
 from typing import Any, Optional
 
-from PySide6.QtCore import QStandardPaths, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QObject, QStandardPaths, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
@@ -127,7 +127,7 @@ class BrowserTab(QWidget):
         self.completer = QCompleter()
         self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        self.completer.setCompletionMode(QCompleter.CompletionMode.InlineCompletion)
+        self.completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self.txt_url.setCompleter(self.completer)
 
         if self.incognito:
@@ -303,6 +303,7 @@ class BrowserTab(QWidget):
         self.shortcut_devtools.activated.connect(self.open_devtools)
 
         self.apply_theme()
+        self.web.installEventFilter(self)
 
         if self.incognito:
             self.txt_url.setStyleSheet("""
@@ -406,7 +407,7 @@ class BrowserTab(QWidget):
         """
         Handles fullscreen requests from web content (e.g. YouTube 'f' key).
         Ensures the video occupies the entire physical screen by toggling the App Window.
-        Only occupies the window viewport if app is already in Full Screen. 
+        Only occupies the window viewport if app is already in Full Screen.
         Restores the App Window to its previous state upon exiting.
         """
         request.accept()
@@ -444,12 +445,14 @@ class BrowserTab(QWidget):
         settings = self.web.page().settings()
         if self.dark_mode:
             bg, fg, inp_bg, border = "#333", "#ddd", "#444", "#555"
-            settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, False)
             self.web.page().setBackgroundColor(QColor("#333"))
         else:
             bg, fg, inp_bg, border = "#f0f0f0", "#222", "#fff", "#ccc"
             settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, False)
             self.web.page().setBackgroundColor(QColor("#fff"))
+
+        self.inject_smart_dark_mode()
         style = f"QWidget {{ background: {bg}; color: {fg}; }} QLineEdit {{ background: {inp_bg}; border: 1px solid {border}; border-radius: 4px; padding: 4px; }}"
         self.toolbar.setStyleSheet(style)
         self.search_bar.setStyleSheet(style)
@@ -464,6 +467,105 @@ class BrowserTab(QWidget):
                     padding: 4px;
                 }
             """)
+
+    def inject_smart_dark_mode(self) -> None:
+        """
+        Injects CSS to invert light websites while preserving images.
+        Now checks if the site is already dark to avoid 'double dark' artifacts.
+        """
+        script = QWebEngineScript()
+        script.setName("RiemannSmartDark")
+        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.UserWorld)
+
+        if self.dark_mode:
+            # JavaScript to detect brightness and conditionally invert
+            js = """
+            (function() {
+                // 1. Cleanup existing style
+                var existing = document.getElementById('riemann-dark');
+                if (existing) existing.remove();
+
+                // 2. Helper to calculate perceived brightness (0-255)
+                function getBrightness(elem) {
+                    var style = window.getComputedStyle(elem);
+                    var color = style.backgroundColor;
+                    
+                    // Assume transparent backgrounds are white (default browser canvas)
+                    if (color === 'rgba(0, 0, 0, 0)' || color === 'transparent') return 255;
+                    
+                    var rgb = color.match(/\\d+/g);
+                    if (!rgb) return 255; // Fallback to white
+                    
+                    var r = parseInt(rgb[0]);
+                    var g = parseInt(rgb[1]);
+                    var b = parseInt(rgb[2]);
+                    
+                    // Standard Luminance Formula
+                    return (0.299 * r + 0.587 * g + 0.114 * b);
+                }
+
+                // 3. Check Body and HTML brightness
+                var bodyB = getBrightness(document.body);
+                var htmlB = getBrightness(document.documentElement);
+                
+                // If either is significantly dark (< 140), we consider the site "Dark Mode Native"
+                // This catches sites with dark bodies but transparent HTML, or vice versa.
+                var isAlreadyDark = (bodyB < 140) || (htmlB < 140);
+                
+                // 4. Invert only if it's a Light Mode site
+                if (!isAlreadyDark) {
+                    var css = `html { filter: invert(1) hue-rotate(180deg) !important; } 
+                               img, video, iframe, canvas, :fullscreen { filter: invert(1) hue-rotate(180deg) !important; }`;
+                    
+                    var style = document.createElement('style'); 
+                    style.id = 'riemann-dark'; 
+                    style.innerHTML = css; 
+                    document.head.appendChild(style);
+                }
+            })();
+            """
+        else:
+            # Remove the style if Dark Mode is disabled in Riemann
+            js = "var el = document.getElementById('riemann-dark'); if(el) el.remove();"
+
+        script.setSourceCode(js)
+
+        # Insert into profile (for future page loads)
+        # Note: setName ensures we update the existing script entry
+        self.profile.scripts().insert(script)
+
+        # Run immediately (for the current page)
+        self.web.page().runJavaScript(js)
+
+    # [NEW method] eventFilter for Shortcuts
+    def eventFilter(self, source: QObject, event: QEvent) -> bool:
+        """Captures keys before WebEngine swallows them."""
+        if source == self.web and event.type() == QEvent.Type.KeyPress:
+            # Check for Global Fullscreen (F11)
+            if event.key() == Qt.Key.Key_F11:
+                self.window().toggle_reader_fullscreen()
+                return True
+
+            # Check for YouTube specific overrides or Global shortcuts
+            # If the user is NOT typing in an input field:
+            # (Note: robust input detection in JS is hard from Python,
+            # but we can try to handle modifier keys generally)
+
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                # Let Ctrl shortcuts (Ctrl+T, Ctrl+W) bubble up to Main Window
+                # by IGNORING them here? No, WebEngine accepts them.
+                # We must explicitly trigger the window action.
+
+                key = event.key()
+                if key == Qt.Key.Key_T:
+                    self.window().open_pdf_smart()  # Maps to New Tab usually
+                    return True
+                if key == Qt.Key.Key_M:  # Music Mode override
+                    self.btn_music.click()
+                    return True
+
+        return super().eventFilter(source, event)
 
     def modify_zoom(self, delta: float) -> None:
         """Increments or decrements the zoom factor and updates the label."""

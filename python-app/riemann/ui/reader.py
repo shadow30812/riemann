@@ -312,6 +312,11 @@ class ReaderTab(QWidget):
         self.btn_save.setToolTip("Save Copy of PDF")
         self.btn_save.clicked.connect(self.save_document)
 
+        self.btn_export = QPushButton("📤")
+        self.btn_export.setToolTip("Export Annotations to Markdown")
+        self.btn_export.clicked.connect(self.export_annotations)
+        t_layout.insertWidget(1, self.btn_export)
+
         self.btn_reflow = QPushButton("📄/📝")
         self.btn_reflow.setToolTip("Toggle Text Reflow Mode")
         self.btn_reflow.setCheckable(True)
@@ -387,6 +392,7 @@ class ReaderTab(QWidget):
 
         widgets = [
             self.btn_save,
+            self.btn_export,
             self.btn_reflow,
             self.btn_facing,
             self.btn_scroll_mode,
@@ -481,6 +487,110 @@ class ReaderTab(QWidget):
             self.setCursor(Qt.CursorShape.ArrowCursor)
             if self.snip_band:
                 self.snip_band.hide()
+
+    # Add this helper method to ReaderTab class
+    def _get_text_under_rects(
+        self, page_idx: int, rects: List[Tuple[float, float, float, float]]
+    ) -> str:
+        """Extracts text intersecting with the given normalized PDF rectangles."""
+        if page_idx not in self.text_segments_cache:
+            try:
+                # Load segments if not already cached
+                self.text_segments_cache[page_idx] = self.current_doc.get_text_segments(
+                    page_idx
+                )
+            except Exception:
+                return ""
+
+        found_text = []
+        # Sort segments by vertical position (top to bottom) then horizontal
+        segments = self.text_segments_cache[page_idx]
+
+        # Simple AABB intersection check
+        for text, (l, t, r, b) in segments:
+            for rl, rt, rr, rb in rects:
+                # Check overlap (normalized coords)
+                # Note: Y-axis might need care depending on backend, but usually:
+                # Intersection = not (Left > Right or Right < Left or Top < Bottom or Bottom > Top)
+                # Using a permissive overlap threshold
+                if not (l > rr or r < rl or b > rt or t < rb):
+                    if text not in found_text:  # Avoid duplicates from multiple rects
+                        found_text.append(text)
+                    break
+
+        return " ".join(found_text).strip()
+
+    # Replace the previous export_annotations with this improved version
+    def export_annotations(self) -> None:
+        """Exports annotations to Markdown, extracting text for highlights."""
+        if not self.current_path or not self.annotations:
+            QMessageBox.information(self, "Export", "No annotations to export.")
+            return
+
+        default_name = (
+            os.path.splitext(os.path.basename(self.current_path))[0] + "_notes.md"
+        )
+        dest_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Notes", default_name, "Markdown (*.md)"
+        )
+
+        if not dest_path:
+            return
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            with open(dest_path, "w", encoding="utf-8") as f:
+                doc_title = os.path.basename(self.current_path)
+                f.write(f"# Notes: {doc_title}\n\n")
+
+                sorted_pages = sorted(self.annotations.keys(), key=lambda x: int(x))
+
+                for pid in sorted_pages:
+                    page_idx = int(pid)
+                    page_num = page_idx + 1
+                    f.write(f"## Page {page_num}\n\n")
+
+                    for anno in self.annotations[pid]:
+                        atype = anno.get("type")
+
+                        if atype == "note" or atype == "text":
+                            content = anno.get("text", "").replace("\n", "\n> ")
+                            if content:
+                                f.write(f"- **Note:** {content}\n")
+
+                        elif atype == "markup":
+                            subtype = anno.get("subtype", "highlight")
+                            rects = anno.get("rects", [])
+
+                            # EXTRACT TEXT HERE
+                            extracted_text = self._get_text_under_rects(page_idx, rects)
+
+                            if extracted_text:
+                                # Quote the highlighted text
+                                f.write(
+                                    f'- **{subtype.capitalize()}:** "{extracted_text}"\n'
+                                )
+                            else:
+                                # Fallback if text extraction fails
+                                f.write(
+                                    f"- *{subtype.capitalize()} (Image/No Text Detected)*\n"
+                                )
+
+                        elif atype == "drawing":
+                            f.write("- *(Handwritten Sketch)*\n")
+
+                        elif atype == "snip":
+                            # If you implement the math snip storage later
+                            f.write(f"- **Math Snip:** {anno.get('latex', '')}\n")
+
+                    f.write("\n---\n")
+
+            QApplication.restoreOverrideCursor()
+            self.show_toast(f"Exported to {os.path.basename(dest_path)}")
+
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, "Export Failed", str(e))
 
     def _init_latex_model(self):
         """Lazy loads the heavy Pix2Tex model only when needed."""
@@ -1747,7 +1857,7 @@ class ReaderTab(QWidget):
 
         candidates = self.annotations[pid]
         best_idx = -1
-        min_dist = 0.05  # Threshold (5% of page dimension)
+        min_dist = 0.08  # Threshold (8% of page dimension)
 
         for i, anno in enumerate(candidates):
             dist = 1.0
@@ -1758,13 +1868,21 @@ class ReaderTab(QWidget):
                 dist = ((rel_x - ax) ** 2 + (rel_y - ay) ** 2) ** 0.5
             elif anno.get("type") == "shape":
                 rx, ry, rw, rh = anno["rect"]
-                cx, cy = rx + rw / 2, ry + rh / 2
-                dist = ((rel_x - cx) ** 2 + (rel_y - cy) ** 2) ** 0.5
+                if rx <= rel_x <= rx + rw and ry <= rel_y <= ry + rh:
+                    dist = 0.0
+                else:
+                    cx, cy = rx + rw / 2, ry + rh / 2
+                    dist = ((rel_x - cx) ** 2 + (rel_y - cy) ** 2) ** 0.5
             elif anno.get("type") == "drawing":
-                # Check distance to first point (approximation)
-                if anno["points"]:
-                    ax, ay = anno["points"][0]
-                    dist = ((rel_x - ax) ** 2 + (rel_y - ay) ** 2) ** 0.5
+                points = anno.get("points", [])
+                if points:
+                    # Find the point in the stroke closest to the click
+                    min_stroke_dist = 100.0
+                    for px, py in points:
+                        d = ((rel_x - px) ** 2 + (rel_y - py) ** 2) ** 0.5
+                        if d < min_stroke_dist:
+                            min_stroke_dist = d
+                    dist = min_stroke_dist
             elif anno.get("type") == "markup":
                 # Use center of first rect as hit target
                 if anno.get("rects"):
