@@ -127,7 +127,7 @@ class BrowserTab(QWidget):
         self.completer = QCompleter()
         self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        self.completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.completer.setCompletionMode(QCompleter.CompletionMode.InlineCompletion)
         self.txt_url.setCompleter(self.completer)
 
         if self.incognito:
@@ -411,34 +411,25 @@ class BrowserTab(QWidget):
         Restores the App Window to its previous state upon exiting.
         """
         request.accept()
-
         main_win = self.window()
+
         if not hasattr(main_win, "toggle_reader_fullscreen"):
             return
 
-        # CHANGED: Use isFullScreen() as the source of truth.
-        # This fixes the bug where 'F' would shrink the window if it was
-        # already fullscreened via OS controls (F11/Maximize).
-        current_fs = main_win.isFullScreen()
+        current_app_fs = getattr(main_win, "_reader_fullscreen", False)
 
         if request.toggleOn():
-            # Entering Video Fullscreen
-            self._was_fs_before_video = current_fs
-            # Only force toggle if we aren't already fullscreen
-            if not current_fs:
+            self._was_app_fs_before_video = current_app_fs
+
+            if not current_app_fs:
                 main_win.toggle_reader_fullscreen()
         else:
-            # Exiting Video Fullscreen
-            was_fs_before = getattr(self, "_was_fs_before_video", False)
+            target_state_fs = getattr(self, "_was_app_fs_before_video", False)
 
-            # Restore logic:
-            if current_fs and not was_fs_before:
-                # We are FS, but started Normal -> Go Normal
+            if current_app_fs and not target_state_fs:
                 main_win.toggle_reader_fullscreen()
-            elif not current_fs and was_fs_before:
-                # We are Normal, but started FS -> Go FS
+            elif not current_app_fs and target_state_fs:
                 main_win.toggle_reader_fullscreen()
-            # If current_fs == was_fs_before, do nothing (preserve state)
 
     def apply_theme(self) -> None:
         """Applies colors based on the current Dark/Light mode setting."""
