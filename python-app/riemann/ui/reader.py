@@ -6,6 +6,8 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.request
+import zipfile
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import markdown
@@ -134,6 +136,41 @@ class PageWidget(QLabel):
                 painter.drawRect(r)
 
         painter.end()
+
+
+class ModelDownloader(QThread):
+    progress = Signal(int)
+    finished = Signal(bool)
+
+    def __init__(self, url, dest_folder):
+        super().__init__()
+        self.url = url
+        self.dest_folder = dest_folder
+
+    def run(self):
+        try:
+            os.makedirs(self.dest_folder, exist_ok=True)
+            zip_path = os.path.join(self.dest_folder, "latex_ocr.zip")
+
+            # 1. Download hook
+            def report(block_num, block_size, total_size):
+                if total_size > 0:
+                    percent = int((block_num * block_size * 100) / total_size)
+                    self.progress.emit(percent)
+
+            urllib.request.urlretrieve(self.url, zip_path, report)
+
+            # 2. Extract
+            self.progress.emit(99)  # Fake progress for extraction step
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(self.dest_folder)
+
+            # 3. Cleanup
+            os.remove(zip_path)
+            self.finished.emit(True)
+        except Exception as e:
+            print(f"Download/Extraction failed: {e}")
+            self.finished.emit(False)
 
 
 class InstallerThread(QThread):
@@ -880,6 +917,57 @@ class ReaderTab(QWidget):
         )
         lbl.installEventFilter(self)
         return lbl
+
+    def _get_external_module_dir(self) -> str:
+        base_path = (
+            os.getenv("APPDATA")
+            if os.name == "nt"
+            else os.path.expanduser("~/.local/share")
+        )
+        return os.path.join(base_path, "Riemann", "latex_modules")
+
+    # [NEW] Ensure external path is in sys.path if frozen
+    def _setup_external_env(self):
+        if getattr(sys, "frozen", False):
+            data_dir = self._get_external_module_dir()
+            if os.path.exists(data_dir) and data_dir not in sys.path:
+                sys.path.append(data_dir)
+
+    # [NEW] Start the download process
+    def start_model_download(self):
+        data_dir = self._get_external_module_dir()
+
+        # TODO: Replace with your actual GitHub Release Asset URL
+        MODEL_URL = "https://github.com/shadow30812/riemann/releases/download/latex_ocr_modules.zip"
+
+        self.downloader = ModelDownloader(MODEL_URL, data_dir)
+
+        self.dl_dialog = QProgressDialog(
+            "Downloading AI Models (~500MB)...", "Cancel", 0, 100, self
+        )
+        self.dl_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.dl_dialog.setAutoClose(True)
+
+        self.downloader.progress.connect(self.dl_dialog.setValue)
+        self.downloader.finished.connect(self.on_download_finished)
+
+        self.dl_dialog.show()
+        self.downloader.start()
+
+    # [NEW] Handle download completion
+    def on_download_finished(self, success):
+        if success:
+            QMessageBox.information(self, "Success", "Models installed successfully.")
+            # Ensure path is added now that files exist
+            self._setup_external_env()
+            # Retry the pending inference
+            if self._pending_snip_image:
+                self.run_latex_inference(self._pending_snip_image)
+        else:
+            QMessageBox.critical(
+                self, "Error", "Download failed. Please check your internet connection."
+            )
+            self._pending_snip_image = None
 
     def render_visible_pages(self) -> None:
         """
@@ -1964,6 +2052,8 @@ class ReaderTab(QWidget):
     def run_latex_inference(self, pil_image):
         """Checks model status and runs inference or triggers loading."""
 
+        self._setup_external_env()
+
         if self.latex_model:
             self._execute_inference(pil_image)
             return
@@ -2002,18 +2092,31 @@ class ReaderTab(QWidget):
         """Callback when thread loading fails."""
         self.progress.close()
         if "not found" in error_msg:
-            reply = QMessageBox.question(
-                self,
-                "Missing AI Components",
-                "The LaTeX OCR feature requires downloading additional AI libraries (~500MB).\n\n"
-                "Would you like to download and install them now?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-
-            if reply == QMessageBox.StandardButton.Yes:
-                self.install_dependencies()
+            is_frozen = getattr(sys, "frozen", False)
+            if is_frozen:
+                reply = QMessageBox.question(
+                    self,
+                    "Additional Component Required",
+                    "The Math Snip feature requires downloading AI models (~500MB). Download now?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self.start_model_download()
+                else:
+                    self._pending_snip_image = None
             else:
-                self._pending_snip_image = None
+                reply = QMessageBox.question(
+                    self,
+                    "Missing AI Components",
+                    "The LaTeX OCR feature requires downloading additional AI libraries.\n\n"
+                    "Would you like to download and install them now (via pip)?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+
+                if reply == QMessageBox.StandardButton.Yes:
+                    self.install_dependencies()
+                else:
+                    self._pending_snip_image = None
         else:
             self._pending_snip_image = None
             QMessageBox.critical(self, "Error", error_msg)

@@ -5,4 +5,6 @@ script*
 rough*
 build/
 dist/
-lib*
+# lib*
+*nstructions*
+releases/download/
