@@ -403,12 +403,41 @@ class BrowserTab(QWidget):
         self.txt_url.selectAll()
 
     def _handle_fullscreen_request(self, request: QWebEngineDownloadRequest) -> None:
-        """Handles fullscreen requests from web content."""
+        """
+        Handles fullscreen requests from web content (e.g. YouTube 'f' key).
+        Ensures the video occupies the entire physical screen by toggling the App Window.
+        Only occupies the window viewport if app is already in Full Screen. 
+        Restores the App Window to its previous state upon exiting.
+        """
         request.accept()
-        if self.window() and hasattr(self.window(), "toggle_reader_fullscreen"):
-            is_fs = getattr(self.window(), "_reader_fullscreen", False)
-            if request.toggleOn() != is_fs:
-                self.window().toggle_reader_fullscreen()
+
+        main_win = self.window()
+        if not hasattr(main_win, "toggle_reader_fullscreen"):
+            return
+
+        # CHANGED: Use isFullScreen() as the source of truth.
+        # This fixes the bug where 'F' would shrink the window if it was
+        # already fullscreened via OS controls (F11/Maximize).
+        current_fs = main_win.isFullScreen()
+
+        if request.toggleOn():
+            # Entering Video Fullscreen
+            self._was_fs_before_video = current_fs
+            # Only force toggle if we aren't already fullscreen
+            if not current_fs:
+                main_win.toggle_reader_fullscreen()
+        else:
+            # Exiting Video Fullscreen
+            was_fs_before = getattr(self, "_was_fs_before_video", False)
+
+            # Restore logic:
+            if current_fs and not was_fs_before:
+                # We are FS, but started Normal -> Go Normal
+                main_win.toggle_reader_fullscreen()
+            elif not current_fs and was_fs_before:
+                # We are Normal, but started FS -> Go FS
+                main_win.toggle_reader_fullscreen()
+            # If current_fs == was_fs_before, do nothing (preserve state)
 
     def apply_theme(self) -> None:
         """Applies colors based on the current Dark/Light mode setting."""

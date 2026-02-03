@@ -201,7 +201,8 @@ class RiemannWindow(QMainWindow):
         self.add_to_history(path, "pdf")
         reader = ReaderTab()
         reader.load_document(path, restore_state=restore_state)
-        target_widget.addTab(reader, os.path.basename(path))
+        idx = target_widget.addTab(reader, os.path.basename(path))
+        target_widget.setCurrentIndex(idx)
 
     def _add_browser_tab(self, url: str, target_widget: QTabWidget) -> None:
         """Adds a Web Browser tab."""
@@ -316,22 +317,30 @@ class RiemannWindow(QMainWindow):
 
     def open_pdf_smart(self) -> None:
         """Opens a Document (PDF/MD) in the current tab if empty, or a new tab otherwise."""
-        path, _ = QFileDialog.getOpenFileName(
+        paths, _ = QFileDialog.getOpenFileNames(
             self,
             "Open Document",
             "",
             "Documents (*.pdf *.md);;PDF Files (*.pdf);;Markdown (*.md)",
         )
-        if not path:
+        if not paths:
             return
-        self.add_to_history(path)
+
+        first_path = paths[0]
+        self.add_to_history(first_path)
         current = self.tabs_main.currentWidget()
+
         if isinstance(current, ReaderTab) and not current.current_path:
-            current.load_document(path)
+            current.load_document(first_path)
             self.tabs_main.setTabText(
-                self.tabs_main.currentIndex(), os.path.basename(path)
+                self.tabs_main.currentIndex(), os.path.basename(first_path)
             )
         else:
+            self.new_pdf_tab(first_path)
+
+        # Process remaining files (always new tabs)
+        for path in paths[1:]:
+            self.add_to_history(path)
             self.new_pdf_tab(path)
 
     def toggle_split_view(self) -> None:
