@@ -937,8 +937,7 @@ class ReaderTab(QWidget):
     def start_model_download(self):
         data_dir = self._get_external_module_dir()
 
-        # TODO: Replace with your actual GitHub Release Asset URL
-        MODEL_URL = "https://github.com/shadow30812/riemann/releases/download/latex_ocr_modules.zip"
+        MODEL_URL = "https://github.com/shadow30812/riemann/releases/download/v1.0/latex_ocr_modules.zip"
 
         self.downloader = ModelDownloader(MODEL_URL, data_dir)
 
