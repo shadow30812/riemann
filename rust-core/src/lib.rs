@@ -44,7 +44,8 @@ fn generate_bitmap<'a>(page: &'a PdfPage<'a>, scale: f32) -> PyResult<PdfBitmap<
     let render_config = PdfRenderConfig::new()
         .set_target_width(width)
         .set_target_height(height)
-        .rotate_if_landscape(PdfPageRenderRotation::None, true);
+        .rotate_if_landscape(PdfPageRenderRotation::None, true)
+        .render_annotations(true); // FIX 1: Enable annotation rendering
 
     page.render_with_config(&render_config)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
@@ -393,7 +394,12 @@ impl RiemannDocument {
                 apply_bounds(&mut annot)?;
             }
         };
-
+        page.flatten().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to flatten page: {}",
+                e
+            ))
+        })?;
         Ok(())
     }
 

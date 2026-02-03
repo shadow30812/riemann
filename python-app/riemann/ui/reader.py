@@ -802,6 +802,7 @@ class ReaderTab(QWidget):
             idx: The 0-based index of the page to render.
             scale: The logical zoom scale to apply.
         """
+        self.scale = scale
         try:
             dpr = self.devicePixelRatio()
             render_scale = scale * dpr
@@ -816,6 +817,7 @@ class ReaderTab(QWidget):
 
             logical_w = pix.width() / dpr
             logical_h = pix.height() / dpr
+            self.w, self.h = logical_w, logical_h
 
             # --- FORM FILLING LAYER ---
             # Clear previous form widgets for this page
@@ -1008,6 +1010,60 @@ class ReaderTab(QWidget):
                         elif anno["subtype"] == "stamp_cross":
                             painter.drawLine(cx - 10, cy - 10, cx + 10, cy + 10)
                             painter.drawLine(cx + 10, cy - 10, cx - 10, cy + 10)
+
+                    elif atype == "markup":
+                        rects = anno.get("rects", [])
+                        if not rects:
+                            continue
+
+                        subtype = anno.get("subtype", "highlight")
+                        if subtype == "underline":
+                            color = (
+                                QColor(255, 255, 255)
+                                if self.dark_mode
+                                else QColor(0, 0, 0)
+                            )
+                        elif isinstance(anno.get("color"), str):
+                            color = QColor(anno["color"])
+                        else:
+                            stored_color = anno.get("color", (255, 255, 0))
+                            color = QColor(*stored_color)
+
+                        for left, top, right, bottom in rects:
+                            x = int(left * scale)
+                            w = int((right - left) * scale)
+                            h = int((top - bottom) * scale)
+
+                            y = int(logical_h - (top * scale))
+                            if h < 0:
+                                y += h
+                                h = abs(h)
+
+                            # ─────────────────────────────────────────────
+                            # DIFFERENT BEHAVIOR PER TYPE
+                            # ─────────────────────────────────────────────
+
+                            if subtype == "highlight":
+                                color.setAlpha(120)
+                                painter.setBrush(color)
+                                painter.setPen(Qt.PenStyle.NoPen)
+                                painter.drawRect(x, y, w, h)
+
+                            elif subtype == "underline":
+                                pen = QPen(color)
+                                pen.setWidth(max(1, int(2 * scale)))
+                                painter.setPen(pen)
+
+                                baseline_y = y + int(1.25 * h) - int(2 * scale)
+                                painter.drawLine(x, baseline_y, x + w, baseline_y)
+
+                            elif subtype == "strikeout":
+                                pen = QPen(color)
+                                pen.setWidth(max(1, int(2 * scale)))
+                                painter.setPen(pen)
+
+                                mid_y = y + h // 2
+                                painter.drawLine(x, mid_y, x + w, mid_y)
 
                 painter.end()
 
@@ -1558,9 +1614,7 @@ class ReaderTab(QWidget):
             elif event.type() == QEvent.Type.MouseButtonRelease:
                 if self.current_tool.startswith("markup_"):
                     if self.current_markup_rects:
-                        subtype = self.current_tool.split("_")[
-                            1
-                        ]  # highlight, underline, strikeout
+                        subtype = self.current_tool.split("_")[1]
 
                         # Define colors
                         c = (255, 255, 0)
@@ -1576,11 +1630,10 @@ class ReaderTab(QWidget):
                             self._add_anno_data(
                                 page_idx,
                                 {
-                                    "type": "markup_placeholder",  # Just to trigger redraw/save
+                                    "type": "markup",
                                     "subtype": subtype,
-                                    # Note: Actual annotation is baked into PDF by backend,
-                                    # but we might want to track it for Undo if we expanded backend API.
-                                    # For now, we just force a render update.
+                                    "rects": list(self.current_markup_rects),
+                                    "color": c,
                                 },
                             )
                         except Exception as e:
@@ -1712,6 +1765,30 @@ class ReaderTab(QWidget):
                 if anno["points"]:
                     ax, ay = anno["points"][0]
                     dist = ((rel_x - ax) ** 2 + (rel_y - ay) ** 2) ** 0.5
+            elif anno.get("type") == "markup":
+                # Use center of first rect as hit target
+                if anno.get("rects"):
+                    hit = False
+                    for l, t, r, b in anno["rects"]:
+                        # Convert PDF → relative page coords
+                        rx1 = (l * self.scale) / self.w
+                        rx2 = (r * self.scale) / self.w
+
+                        ry1 = 1 - ((t * self.scale) / self.h)
+                        ry2 = 1 - ((b * self.scale) / self.h)
+
+                        left, right = min(rx1, rx2), max(rx1, rx2)
+                        top, bottom = min(ry1, ry2), max(ry1, ry2)
+
+                        PAD = 0.01
+                        if (
+                            left - PAD <= rel_x <= right + PAD
+                            and top - PAD <= rel_y <= bottom + PAD
+                        ):
+                            hit = True
+                            break
+
+                    dist = 0.0 if hit else 1.0  # 0 = perfect hit, 1 = miss
 
             if dist < min_dist:
                 min_dist = dist
