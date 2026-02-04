@@ -75,22 +75,22 @@ Riemann supports two primary operational modes: execution from source code for d
 
 ### **Method 1: Source Code Execution**
 
-**Prerequisites:** Python 3.11+, Rust Toolchain (Cargo), and Just.
+**Prerequisites:** Python 3.11, Rust Toolchain (Cargo), and Just.
 
 1. **Repository Cloning:**  
-   git clone <https://github.com/shadow30812/riemann.git>  
-   cd riemann
+   `git clone https://github.com/shadow30812/riemann.git`  
+   `cd riemann`
 
 2. **Environment Initialization:**  
-   python \-m venv .venv  
-   source .venv/bin/activate
+   `python \-m venv .venv`  
+   `source .venv/bin/activate`
 
 3. **Dependency Installation:**  
-   pip install \-r requirements.txt  
+   `pip install \-r requirements.txt`  
 
 4. **Compilation & Application Launch:**  
-   maturin develop \--release  
-   python \-m riemann
+   `maturin develop \--release`  
+   `python \-m riemann`
 
 or use `just run` for the last step.
 
