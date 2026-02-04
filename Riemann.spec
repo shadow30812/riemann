@@ -41,6 +41,12 @@ def collect_resources():
     binaries += q_binaries
     hiddenimports += q_hidden
 
+    icon_path = os.path.join('python-app', 'riemann', 'assets', 'icon.ico')
+    if os.path.exists(icon_path):
+        datas.append((icon_path, 'riemann/assets'))
+    else:
+        print(f"WARNING: Icon not found at {icon_path}")
+
     return datas, binaries, hiddenimports
 
 def get_pdfium_binary():
@@ -113,4 +119,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='python-app/riemann/assets/icon.ico',
 )

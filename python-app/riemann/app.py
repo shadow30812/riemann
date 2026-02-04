@@ -20,7 +20,7 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = bundle_dir
 
 from PySide6.QtCore import QSettings, QStringListModel, Qt
-from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
+from PySide6.QtGui import QCloseEvent, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -40,6 +40,16 @@ from .core.managers import BookmarksManager, DownloadManager, HistoryManager
 from .ui.browser import BrowserTab
 from .ui.components import DraggableTabWidget
 from .ui.reader import ReaderTab
+
+
+def get_resource_path(relative_path: str) -> str:
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base_path = getattr(sys, "_MEIPASS")
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+
+    return os.path.join(base_path, relative_path)
 
 
 class SettingsDialog(QDialog):
@@ -757,6 +767,10 @@ def run() -> None:
 
     app = QApplication(sys.argv)
     app.setApplicationName("Riemann")
+
+    icon_path = get_resource_path(os.path.join("assets", "icon.ico"))
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
 
     window = RiemannWindow()
     window.show()

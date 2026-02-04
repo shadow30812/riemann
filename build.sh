@@ -40,12 +40,12 @@ check_dependencies() {
     log_info "[1/5] Checking Environment..."
 
     if ! command -v maturin &> /dev/null; then
-        log_error "Error: maturin is not installed. Run 'pip install maturin'"
+        log_error "Error: maturin is not installed. Run 'pip install maturin' or change the working environment."
         exit 1
     fi
 
     if ! command -v pyinstaller &> /dev/null; then
-        log_error "Error: pyinstaller is not installed. Run 'pip install pyinstaller'"
+        log_error "Error: pyinstaller is not installed. Run 'pip install pyinstaller' or change the working environment."
         exit 1
     fi
 }
