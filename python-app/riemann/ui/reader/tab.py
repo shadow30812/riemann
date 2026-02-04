@@ -137,6 +137,31 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         for seq, slot in shortcuts:
             QShortcut(QKeySequence(seq), self).activated.connect(slot)
 
+        sc1 = QShortcut(QKeySequence("Ctrl+Tab"), self)
+        sc1.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        sc1.activated.connect(lambda: self.cycle_tab(1))
+
+        sc2 = QShortcut(QKeySequence("Ctrl+Shift+Tab"), self)
+        sc2.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        sc2.activated.connect(lambda: self.cycle_tab(-1))
+
+    def _get_tab_widget(self) -> Optional[QTabWidget]:
+        """Helper to find the parent QTabWidget."""
+        parent = self.parent()
+        while parent:
+            if isinstance(parent, QTabWidget):
+                return parent
+            parent = parent.parent()
+        return None
+
+    def cycle_tab(self, delta: int) -> None:
+        """Cycles to the next or previous tab."""
+        tw = self._get_tab_widget()
+        if tw:
+            count = tw.count()
+            next_idx = (tw.currentIndex() + delta) % count
+            tw.setCurrentIndex(next_idx)
+
     def _init_backend(self) -> None:
         """Initializes the Rust-based PDF engine backend."""
         try:
@@ -619,20 +644,6 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
 
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
         """Handles tool interactions on PageWidgets."""
-        if event.type() == QEvent.Type.KeyPress:
-            key = event.key()
-            mod = event.modifiers()
-
-            if key == Qt.Key.Key_Tab and (mod & Qt.KeyboardModifier.ControlModifier):
-                target = self
-                while target:
-                    parent = target.parent()
-                    if isinstance(parent, QTabWidget):
-                        QApplication.sendEvent(parent, event)
-                        return True
-                    target = parent
-                return False
-
         if isinstance(source, PageWidget):
             page_idx = source.property("pageIndex")
 
@@ -727,10 +738,6 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         """Handles keyboard navigation."""
         key = event.key()
         mod = event.modifiers()
-
-        if key == Qt.Key.Key_Tab and (mod & Qt.KeyboardModifier.ControlModifier):
-            event.ignore()
-            return
 
         if key == Qt.Key.Key_Escape:
             if getattr(self, "_reader_fullscreen", False):
