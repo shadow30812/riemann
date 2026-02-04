@@ -10,7 +10,7 @@ set -e
 # --- Configuration ---
 APP_NAME="Riemann"
 APP_EXEC="dist/Riemann"
-APP_ICON="python-app/riemann/assets/icon.ico"
+APP_ICON="python-app/riemann/assets/Icon.png"
 DESKTOP_FILE_NAME="Riemann.desktop"
 INSTALL_DIR="$HOME/.local/share/applications"
 

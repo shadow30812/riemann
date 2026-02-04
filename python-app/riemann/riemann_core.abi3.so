@@ -1,5 +1,0 @@
-from .riemann_core import *
-
-__doc__ = riemann_core.__doc__
-if hasattr(riemann_core, "__all__"):
-    __all__ = riemann_core.__all__

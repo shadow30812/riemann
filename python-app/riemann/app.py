@@ -8,7 +8,6 @@ application entry point. It orchestrates the UI layout, tab management
 
 import os
 import sys
-from typing import List, Optional
 
 # --- Environment Configuration ---
 # Must be set before QApplication is instantiated.
@@ -18,6 +17,10 @@ os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "9222")
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     bundle_dir = getattr(sys, "_MEIPASS")
     os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = bundle_dir
+
+import shutil
+from pathlib import Path
+from typing import List, Optional
 
 from PySide6.QtCore import QSettings, QStringListModel, Qt
 from PySide6.QtGui import QCloseEvent, QIcon, QKeySequence, QShortcut
@@ -765,6 +768,7 @@ def run() -> None:
     sys.argv.append("--disable-web-security")
     sys.argv.append("--autoplay-policy=no-user-gesture-required")
 
+    install_linux_integration()
     app = QApplication(sys.argv)
     app.setApplicationName("Riemann")
 
@@ -776,3 +780,58 @@ def run() -> None:
     window.show()
 
     sys.exit(app.exec())
+
+
+def install_linux_integration():
+    """
+    Detects if running as a frozen Linux executable and installs/updates
+    the .desktop shortcut and icon in the user's local share.
+    """
+    if not getattr(sys, "frozen", False) or not sys.platform.startswith("linux"):
+        return
+
+    try:
+        app_name = "Riemann"
+
+        home = Path.home()
+        apps_dir = home / ".local" / "share" / "applications"
+        icons_dir = home / ".local" / "share" / "icons"
+
+        apps_dir.mkdir(parents=True, exist_ok=True)
+        icons_dir.mkdir(parents=True, exist_ok=True)
+
+        if hasattr(sys, "_MEIPASS"):
+            base_path = getattr(sys, "_MEIPASS")
+            internal_icon_path = os.path.join(
+                base_path, "python-app", "riemann", "assets", "Icon.png"
+            )
+        else:
+            return
+
+        persistent_icon_path = icons_dir / "riemann.png"
+
+        if os.path.exists(internal_icon_path):
+            shutil.copy2(internal_icon_path, persistent_icon_path)
+
+        desktop_file_path = apps_dir / f"{app_name}.desktop"
+        exe_path = sys.executable
+
+        desktop_entry = f"""[Desktop Entry]
+            Type=Application
+            Name={app_name}
+            GenericName=PDF Reader
+            Comment=A standalone PDF reader and manager
+            Exec="{exe_path}"
+            Icon={persistent_icon_path}
+            Terminal=false
+            Categories=Office;Viewer;Utility;
+            StartupWMClass={app_name}
+            """
+
+        with open(desktop_file_path, "w") as f:
+            f.write(desktop_entry)
+
+        os.system(f"update-desktop-database {apps_dir} > /dev/null 2>&1")
+
+    except Exception as e:
+        print(f"Icon integration warning: {e}")

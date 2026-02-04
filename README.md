@@ -24,6 +24,18 @@ Riemann conceptualizes annotations as fundamental data structures rather than su
 
 To mitigate the cognitive load associated with context switching, Riemann integrates a fully functional web view embedded alongside the document. This feature allows for expedited citation retrieval and asset management (e.g., downloading datasets) without exiting the application environment.
 
+### **Integrated Music Mode**
+
+Riemann acknowledges that auditory inputs are as critical to concentration as visual ones. To support "Deep Work" methodologies, the application includes a native, high-performance Music Mode, activated via Ctrl + M.
+
+#### Architectural Integration
+
+Unlike standard media overlays, this feature is embedded directly into the application's core event loop. It utilizes the custom JavaScript audio bridge (audio_engine.js) to render soundscapes with minimal system resource overhead. This integration eliminates the need for external streaming applications, thereby reducing the temptation to interact with algorithmically distracting playlists or advertisements.
+
+#### Flow State Induction
+
+The Music Mode is engineered to induce flow states by providing a consistent, non-intrusive auditory environment. It supports local asset playback and utilizes a separate volume processing pipeline, allowing researchers to balance the audio mix against the Text-to-Speech engine. This ensures that users can listen to paper recitations (TTS) over a bed of ambient focus music without frequency clashing or auditory fatigue.
+
 ## **System Implementation and Codebase Structure**
 
 The Riemann codebase utilizes a sophisticated separation of concerns, employing a hybrid language approach to optimize for both developer ergonomics and runtime speed.
@@ -86,7 +98,7 @@ or use `just run` for the last step.
 
 A standalone executable is provided via the release pipeline.
 
-1. Navigate to the dist/ directory.  
+1. Navigate to <https://github.com/shadow30812/riemann/releases/download/v2.0/Riemann>.  
 2. Execute Riemann.
 
 ## **Keyboard Shortcuts**

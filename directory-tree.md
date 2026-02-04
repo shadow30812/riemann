@@ -1,28 +1,64 @@
-# Tree
-
-```markdown
-riemann/
-├── README.md
-├── LICENSE
+```
+.
+├── .editorconfig
+├── .github
+│   └── workflows
+│       └── release.yml
 ├── .gitignore
-├── Cargo.toml # workspace or top-level (optional)
-├── pyproject.toml # for maturin building the wheel/extension
-├── scripts/
-│ ├── build_native.sh
-│ └── build_python_dev.sh
-├── rust-core/
-│ ├── Cargo.toml # crate: riemann_core
-│ └── src/
-│ ├── lib.rs # PyO3 module exports
-│ └── pdfium_wrapper.rs # small wrapper around pdfium-render
-├── python-app/
-│ ├── pyproject.toml (optional) # for venv tooling, dev deps
-│ └── riemann/
-│ ├── __init__.py
-│ ├── main.py # Qt main app
-│ └── ui/ # optional: HTML/CSS/katex assets for QtWebEngine
-│ └── katex/ # KaTeX assets (css/js) or loaded from CDN
-├── .vscode/
-│ ├── tasks.json
-│ └── launch.json
-└── notes/ # design notes, OCR decisions, etc.```
+├── .vscode
+│   ├── settings.json
+│   └── tasks.json
+├── Cargo.lock
+├── Cargo.toml
+├── LICENSE
+├── README.md
+├── Riemann.spec
+├── build.sh
+├── build_entry.py
+├── create_model_pack.sh
+├── directory-tree.md
+├── install_icon.sh
+├── justfile
+├── libs
+│   └── libpdfium.so
+├── pyproject.toml
+├── python-app
+│   └── riemann
+│       ├── __init__.py
+│       ├── __main__.py
+│       ├── app.py
+│       ├── assets
+│       │   ├── Icon.png
+│       │   └── audio_engine.js
+│       ├── core
+│       │   ├── constants.py
+│       │   └── managers.py
+│       ├── riemann_core.abi3.so
+│       ├── riemann_core.pyi
+│       └── ui
+│           ├── browser.py
+│           ├── components.py
+│           ├── reader
+│           │   ├── __init__.py
+│           │   ├── mixins
+│           │   │   ├── ai.py
+│           │   │   ├── annotations.py
+│           │   │   ├── rendering.py
+│           │   │   └── search.py
+│           │   ├── tab.py
+│           │   ├── utils.py
+│           │   ├── widgets.py
+│           │   └── workers.py
+│           └── reader.py
+├── requirements.txt
+├── rust-core
+│   ├── Cargo.lock
+│   ├── Cargo.toml
+│   └── src
+│       └── lib.rs
+└── rust-ocr-worker
+    ├── Cargo.lock
+    ├── Cargo.toml
+    └── src
+        └── lib.rs
+```
