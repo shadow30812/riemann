@@ -7,6 +7,7 @@ import subprocess
 import sys
 import urllib.request
 import zipfile
+from typing import Any
 
 from PySide6.QtCore import QThread, Signal
 
@@ -84,3 +85,22 @@ class LoaderThread(QThread):
             self.error_occurred.emit("Module 'pix2tex' not found.")
         except Exception as e:
             self.error_occurred.emit(f"AI Initialization Failed:\n{str(e)}")
+
+
+class InferenceThread(QThread):
+    """Runs the LaTeX OCR inference in the background."""
+
+    finished_inference = Signal(str)
+    error_occurred = Signal(str)
+
+    def __init__(self, model: Any, image: Any) -> None:
+        super().__init__()
+        self.model = model
+        self.image = image
+
+    def run(self) -> None:
+        try:
+            code = self.model(self.image)
+            self.finished_inference.emit(code)
+        except Exception as e:
+            self.error_occurred.emit(f"Inference Error: {str(e)}")

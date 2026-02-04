@@ -155,6 +155,7 @@ class RiemannWindow(QMainWindow):
             ("Ctrl+W", self.close_active_tab),
             ("Ctrl+Shift+T", self.restore_last_closed_tab),
             ("Ctrl+\\", self.toggle_split_view),
+            ("N", self.toggle_theme),
             (Qt.Key.Key_F11, self.toggle_reader_fullscreen),
             (Qt.Key.Key_Escape, self._handle_escape),
         ]

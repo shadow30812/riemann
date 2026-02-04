@@ -15,7 +15,6 @@ from PySide6.QtGui import (
     QColor,
     QKeyEvent,
     QKeySequence,
-    QMouseEvent,
     QPalette,
     QShortcut,
     QWheelEvent,
@@ -23,7 +22,6 @@ from PySide6.QtGui import (
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -36,6 +34,7 @@ from PySide6.QtWidgets import (
     QScroller,
     QScrollerProperties,
     QStackedWidget,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -48,7 +47,6 @@ from .mixins.rendering import RenderingMixin
 from .mixins.search import SearchMixin
 from .utils import generate_markdown_html
 from .widgets import PageWidget
-from .workers import LoaderThread
 
 try:
     import riemann_core
@@ -621,9 +619,19 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
 
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
         """Handles tool interactions on PageWidgets."""
-        if event.type() == QEvent.Type.KeyPress and source in (self.scroll, self.web):
-            self.keyPressEvent(event)
-            return False
+        if event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            mod = event.modifiers()
+
+            if key == Qt.Key.Key_Tab and (mod & Qt.KeyboardModifier.ControlModifier):
+                target = self
+                while target:
+                    parent = target.parent()
+                    if isinstance(parent, QTabWidget):
+                        QApplication.sendEvent(parent, event)
+                        return True
+                    target = parent
+                return False
 
         if isinstance(source, PageWidget):
             page_idx = source.property("pageIndex")
@@ -720,9 +728,41 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         key = event.key()
         mod = event.modifiers()
 
+        if key == Qt.Key.Key_Tab and (mod & Qt.KeyboardModifier.ControlModifier):
+            event.ignore()
+            return
+
+        if key == Qt.Key.Key_Escape:
+            if getattr(self, "_reader_fullscreen", False):
+                self.toggle_reader_fullscreen()
+                event.accept()
+                return
+
         if key == Qt.Key.Key_F11:
             self.toggle_reader_fullscreen()
             return
+
+        if mod == Qt.KeyboardModifier.NoModifier:
+            if key == Qt.Key.Key_R:
+                self.toggle_view_mode()
+                event.accept()
+                return
+            elif key == Qt.Key.Key_C:
+                self.toggle_scroll_mode()
+                event.accept()
+                return
+            elif key == Qt.Key.Key_D:
+                self.toggle_facing_mode()
+                event.accept()
+                return
+            elif key == Qt.Key.Key_W:
+                self.apply_zoom_string("Fit Width")
+                event.accept()
+                return
+            elif key == Qt.Key.Key_H:
+                self.apply_zoom_string("Fit Height")
+                event.accept()
+                return
 
         if self.view_mode == ViewMode.IMAGE:
             if mod & Qt.KeyboardModifier.ControlModifier:
@@ -816,8 +856,8 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
     def apply_theme(self) -> None:
         """Updates colors for dark/light mode."""
         pal = self.palette()
-        c = QColor(30, 30, 30) if self.dark_mode else QColor(240, 240, 240)
-        pal.setColor(QPalette.ColorRole.Window, c)
+        color = QColor(30, 30, 30) if self.dark_mode else QColor(240, 240, 240)
+        pal.setColor(QPalette.ColorRole.Window, color)
         self.setPalette(pal)
 
         bg_scroll = "#222" if self.dark_mode else "#eee"
@@ -826,9 +866,46 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         )
 
         fg = "#ddd" if self.dark_mode else "#111"
-        self.toolbar.setStyleSheet(
-            f"QWidget {{ background: {c.name()}; color: {fg}; }} QPushButton {{ border: none; padding: 6px; }}"
+
+        checked_bg = (
+            "rgba(60, 140, 255, 0.3)" if self.dark_mode else "rgba(0, 100, 255, 0.2)"
         )
+        checked_border = "#50a0ff"
+
+        self.toolbar.setStyleSheet(f"""
+            QWidget {{ background: {color.name()}; color: {fg}; }}
+            QPushButton {{ 
+                border: 1px solid transparent; 
+                padding: 6px; 
+                border-radius: 4px; 
+                background: transparent;
+            }}
+            QPushButton:hover {{ 
+                background: rgba(128, 128, 128, 0.2); 
+            }}
+            QPushButton:checked {{ 
+                background-color: {checked_bg}; 
+                border: 1px solid {checked_border}; 
+            }}
+        """)
+
+        sb_bg = "#2a2a2a" if self.dark_mode else "#e0e0e0"
+        sb_fg = "#ddd" if self.dark_mode else "#111"
+        input_bg = "#1e1e1e" if self.dark_mode else "#ffffff"
+        input_border = "#555" if self.dark_mode else "#bbb"
+
+        self.search_bar.setStyleSheet(f"""
+            QWidget {{ background-color: {sb_bg}; color: {sb_fg}; }}
+            QLineEdit {{
+                background-color: {input_bg};
+                color: {sb_fg};
+                border: 1px solid {input_border};
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QPushButton {{ background: transparent; border: none; }}
+            QPushButton:hover {{ background: rgba(128,128,128,0.2); border-radius: 4px; }}
+        """)
 
     def toggle_theme(self) -> None:
         """Switches theme."""

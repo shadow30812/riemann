@@ -5,7 +5,7 @@ Handles layout calculation, virtualization, and PDF page rendering.
 """
 
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, Tuple
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygon

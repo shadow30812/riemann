@@ -14,7 +14,7 @@ from PySide6.QtCore import QBuffer, QRect, Qt
 from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox, QProgressDialog
 
 from ..widgets import PageWidget
-from ..workers import InstallerThread, LoaderThread, ModelDownloader
+from ..workers import InferenceThread, InstallerThread, LoaderThread, ModelDownloader
 
 
 class AiMixin:
@@ -166,17 +166,27 @@ class AiMixin:
             self._pending_snip_image = None
 
     def _execute_inference(self, img: Image.Image) -> None:
-        """Runs inference."""
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            code = self.latex_model(img)
-        except Exception as e:
-            code = f"Error: {e}"
-        finally:
-            QApplication.restoreOverrideCursor()
+        """Runs inference in a background thread to prevent UI freezing."""
+        self.progress = QProgressDialog("Processing...", "Cancel", 0, 0, self)
+        self.progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress.show()
 
+        self.inference_thread = InferenceThread(self.latex_model, img)
+        self.inference_thread.finished_inference.connect(self._on_inference_finished)
+        self.inference_thread.error_occurred.connect(self._on_inference_error)
+        self.inference_thread.start()
+
+    def _on_inference_finished(self, code: str) -> None:
+        """Callback when inference completes successfully."""
+        self.progress.close()
         self.toggle_snip_mode(False)
         QInputDialog.getMultiLineText(self, "LaTeX Result", "Code:", code)
+
+    def _on_inference_error(self, error_msg: str) -> None:
+        """Callback when inference fails."""
+        self.progress.close()
+        self.toggle_snip_mode(False)
+        QMessageBox.critical(self, "Inference Error", error_msg)
 
     def _get_external_module_dir(self) -> str:
         """Returns the path for external models."""
