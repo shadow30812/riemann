@@ -1,43 +1,77 @@
 # -*- mode: python ; coding: utf-8 -*-
+"""
+PyInstaller Specification for Riemann.
+
+This configuration file defines the build process for creating the standalone
+Riemann executable. It handles:
+1. Resource collection (riemann package, PySide6).
+2. Binary dependency management (libpdfium).
+3. Exclusion of heavyweight machine learning libraries (torch, cv2) to keep
+   the core executable lightweight.
+"""
+
 import sys
 import os
 from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 
-# --- CONFIGURATION ---
-datas = []
-binaries = []
-hiddenimports = []
+# --- Configuration & Resource Collection ---
 
-# 1. Collect your app resources
-tmp_ret = collect_all('riemann')
-datas += tmp_ret[0]
-binaries += tmp_ret[1]
-hiddenimports += tmp_ret[2]
+def collect_resources():
+    """
+    Collects necessary data, binaries, and hidden imports for the application.
 
-# 2. Collect QtWebEngine
-qt_ret = collect_all('PySide6')
-datas += qt_ret[0]
-binaries += qt_ret[1]
-hiddenimports += qt_ret[2]
+    Returns:
+        tuple: A tuple containing lists of (datas, binaries, hiddenimports).
+    """
+    datas = []
+    binaries = []
+    hiddenimports = []
 
-# 3. Bundle PDFium (Cross-Platform Logic)
-# Determine the correct filename for the current OS
-pdfium_filename = "libpdfium.so"
-if sys.platform == "win32":
-    pdfium_filename = "pdfium.dll"
-elif sys.platform == "darwin":
-    pdfium_filename = "libpdfium.dylib"
+    # Collect main application resources
+    r_datas, r_binaries, r_hidden = collect_all('riemann')
+    datas += r_datas
+    binaries += r_binaries
+    hiddenimports += r_hidden
 
-# We assume the CI/Script placed it in 'libs/'
-pdfium_path = os.path.abspath(os.path.join("libs", pdfium_filename))
+    # Collect QtWebEngine resources
+    q_datas, q_binaries, q_hidden = collect_all('PySide6')
+    datas += q_datas
+    binaries += q_binaries
+    hiddenimports += q_hidden
 
-if os.path.exists(pdfium_path):
-    # This puts it at the root of the temp folder at runtime
-    binaries.append((pdfium_path, "."))
-else:
-    print(f"WARNING: {pdfium_filename} not found in libs/ folder!")
+    return datas, binaries, hiddenimports
+
+def get_pdfium_binary():
+    """
+    Determines the path and filename of the platform-specific PDFium library.
+
+    Returns:
+        tuple or None: A tuple (source_path, dest_folder) if found, else None.
+    """
+    pdfium_filename = "libpdfium.so"
+    if sys.platform == "win32":
+        pdfium_filename = "pdfium.dll"
+    elif sys.platform == "darwin":
+        pdfium_filename = "libpdfium.dylib"
+
+    # The build script is expected to place the library in 'libs/'
+    pdfium_path = os.path.abspath(os.path.join("libs", pdfium_filename))
+
+    if os.path.exists(pdfium_path):
+        return (pdfium_path, ".")
+    else:
+        print(f"WARNING: {pdfium_filename} not found in libs/ folder!")
+        return None
+
+# --- Build Analysis ---
+
+datas, binaries, hiddenimports = collect_resources()
+pdfium_bin = get_pdfium_binary()
+
+if pdfium_bin:
+    binaries.append(pdfium_bin)
 
 a = Analysis(
     ['build_entry.py'],
@@ -55,6 +89,8 @@ a = Analysis(
     noarchive=False,
 )
 
+# --- Packaging ---
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
@@ -71,7 +107,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False, # Set to True if debugging crashes
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

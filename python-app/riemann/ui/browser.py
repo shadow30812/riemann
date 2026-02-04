@@ -1,3 +1,11 @@
+"""
+Web Browser Component.
+
+This module implements a full-featured web browser tab based on QWebEngineView.
+It includes support for persistent profiles, ad-blocking, dark mode injection,
+audio processing injection (Riemann Audio), and download management.
+"""
+
 import os
 from typing import Any, Optional
 
@@ -29,10 +37,11 @@ from PySide6.QtWidgets import (
 
 class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
     """
-    Intercepts network requests and blocks known ad/tracking domains.
+    Intercepts network requests to block known advertising and tracking domains.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Optional[QObject] = None) -> None:
+        """Initializes the interceptor with a list of blocked domains."""
         super().__init__(parent)
         self.blocked_domains = [
             "doubleclick.net",
@@ -47,7 +56,13 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
             "google-analytics.com",
         ]
 
-    def interceptRequest(self, info: QWebEngineUrlRequestInfo):
+    def interceptRequest(self, info: QWebEngineUrlRequestInfo) -> None:
+        """
+        Blocks the request if the URL contains a blacklisted domain.
+
+        Args:
+            info: Information about the URL request.
+        """
         url = info.requestUrl().toString().lower()
         if any(domain in url for domain in self.blocked_domains):
             info.block(True)
@@ -55,10 +70,14 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
 
 class BrowserTab(QWidget):
     """
-    A full-featured web browser tab using QWebEngineView.
+    A comprehensive web browser widget.
 
-    Includes navigation controls, dark mode support, ad-blocking,
-    history autocomplete, and download management integration.
+    Features:
+    - Persistent or Incognito profiles.
+    - Custom Ad-Blocking and script injection.
+    - Integrated 'Riemann Audio' engine.
+    - Smart Dark Mode for web content.
+    - Fullscreen video handling.
     """
 
     def __init__(
@@ -75,16 +94,15 @@ class BrowserTab(QWidget):
             start_url: The initial URL to load.
             parent: The parent widget.
             dark_mode: Initial theme state (True for dark mode).
+            incognito: Whether to use an ephemeral, in-memory profile.
         """
         super().__init__(parent)
         self.dark_mode = dark_mode
         self.incognito = incognito
 
         if self.incognito:
-            # Ephemeral profile (no name, no storage path)
             self.profile = QWebEngineProfile(self)
         else:
-            # Persistent profile
             base_path = QStandardPaths.writableLocation(
                 QStandardPaths.StandardLocation.AppDataLocation
             )
@@ -231,7 +249,6 @@ class BrowserTab(QWidget):
         self.lbl_toast.hide()
 
         if self.incognito:
-            # visual indicator for incognito
             self.txt_url.setStyleSheet("border: 1px solid #50a0ff;")
             self.txt_url.setPlaceholderText("Incognito Mode")
 
@@ -322,7 +339,7 @@ class BrowserTab(QWidget):
         self.web.load(QUrl(start_url))
 
     def open_devtools(self) -> None:
-        """Opens the Web Inspector for the current page."""
+        """Opens the Web Inspector for the current page in a separate window."""
         if not hasattr(self, "_devtools_window"):
             self._devtools_window = QWidget()
             self._devtools_window.setWindowTitle("Inspector")
@@ -334,7 +351,6 @@ class BrowserTab(QWidget):
             self._devtools_view = QWebEngineView()
             layout.addWidget(self._devtools_view)
 
-            # Link the inspector to the current page
             self._devtools_view.page().setInspectedPage(self.web.page())
 
         self._devtools_window.show()
@@ -346,7 +362,10 @@ class BrowserTab(QWidget):
         self.web.reload()
 
     def inject_ad_skipper(self) -> None:
-        """Injects JavaScript to automatically skip video advertisements."""
+        """
+        Injects JavaScript to automatically skip video advertisements.
+        Runs primarily on video platforms like YouTube.
+        """
         js_code = """
         (function() {
             const clearAds = () => {
@@ -374,7 +393,11 @@ class BrowserTab(QWidget):
         self.profile.scripts().insert(script)
 
     def inject_backspace_handler(self) -> None:
-        """Injects JavaScript to handle Backspace navigation logic."""
+        """
+        Injects JavaScript to handle Backspace navigation logic.
+        Prevents the browser from going back when backspace is pressed
+        inside input fields.
+        """
         js_code = """
         document.addEventListener("keydown", function(e) {
             if (e.key === "Backspace" && !e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
@@ -405,10 +428,8 @@ class BrowserTab(QWidget):
 
     def _handle_fullscreen_request(self, request: QWebEngineDownloadRequest) -> None:
         """
-        Handles fullscreen requests from web content (e.g. YouTube 'f' key).
-        Ensures the video occupies the entire physical screen by toggling the App Window.
-        Only occupies the window viewport if app is already in Full Screen.
-        Restores the App Window to its previous state upon exiting.
+        Handles fullscreen requests from web content.
+        Toggles the main application window's fullscreen state to match.
         """
         request.accept()
         main_win = self.window()
@@ -461,8 +482,8 @@ class BrowserTab(QWidget):
 
     def inject_smart_dark_mode(self) -> None:
         """
-        Injects CSS to invert light websites while preserving images.
-        Now checks if the site is already dark to avoid 'double dark' artifacts.
+        Injects CSS and JS to invert light websites while preserving images.
+        Uses heuristics to avoid inverting sites that are already dark.
         """
         script = QWebEngineScript()
         script.setName("RiemannSmartDark")
@@ -470,41 +491,32 @@ class BrowserTab(QWidget):
         script.setWorldId(QWebEngineScript.ScriptWorldId.UserWorld)
 
         if self.dark_mode:
-            # JavaScript to detect brightness and conditionally invert
             js = """
             (function() {
-                // 1. Cleanup existing style
                 var existing = document.getElementById('riemann-dark');
                 if (existing) existing.remove();
 
-                // 2. Helper to calculate perceived brightness (0-255)
                 function getBrightness(elem) {
                     var style = window.getComputedStyle(elem);
                     var color = style.backgroundColor;
                     
-                    // Assume transparent backgrounds are white (default browser canvas)
                     if (color === 'rgba(0, 0, 0, 0)' || color === 'transparent') return 255;
                     
                     var rgb = color.match(/\\d+/g);
-                    if (!rgb) return 255; // Fallback to white
+                    if (!rgb) return 255;
                     
                     var r = parseInt(rgb[0]);
                     var g = parseInt(rgb[1]);
                     var b = parseInt(rgb[2]);
                     
-                    // Standard Luminance Formula
                     return (0.299 * r + 0.587 * g + 0.114 * b);
                 }
 
-                // 3. Check Body and HTML brightness
                 var bodyB = getBrightness(document.body);
                 var htmlB = getBrightness(document.documentElement);
                 
-                // If either is significantly dark (< 140), we consider the site "Dark Mode Native"
-                // This catches sites with dark bodies but transparent HTML, or vice versa.
                 var isAlreadyDark = (bodyB < 140) || (htmlB < 140);
                 
-                // 4. Invert only if it's a Light Mode site
                 if (!isAlreadyDark) {
                     var css = `html { filter: invert(1) hue-rotate(180deg) !important; } 
                                img, video, iframe, canvas, :fullscreen { filter: invert(1) hue-rotate(180deg) !important; }`;
@@ -517,42 +529,27 @@ class BrowserTab(QWidget):
             })();
             """
         else:
-            # Remove the style if Dark Mode is disabled in Riemann
             js = "var el = document.getElementById('riemann-dark'); if(el) el.remove();"
 
         script.setSourceCode(js)
-
-        # Insert into profile (for future page loads)
-        # Note: setName ensures we update the existing script entry
         self.profile.scripts().insert(script)
-
-        # Run immediately (for the current page)
         self.web.page().runJavaScript(js)
 
-    # [NEW method] eventFilter for Shortcuts
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
-        """Captures keys before WebEngine swallows them."""
+        """
+        Filters events to handle specific shortcuts before the WebEngine consumes them.
+        """
         if source == self.web and event.type() == QEvent.Type.KeyPress:
-            # Check for Global Fullscreen (F11)
             if event.key() == Qt.Key.Key_F11:
                 self.window().toggle_reader_fullscreen()
                 return True
 
-            # Check for YouTube specific overrides or Global shortcuts
-            # If the user is NOT typing in an input field:
-            # (Note: robust input detection in JS is hard from Python,
-            # but we can try to handle modifier keys generally)
-
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-                # Let Ctrl shortcuts (Ctrl+T, Ctrl+W) bubble up to Main Window
-                # by IGNORING them here? No, WebEngine accepts them.
-                # We must explicitly trigger the window action.
-
                 key = event.key()
                 if key == Qt.Key.Key_T:
-                    self.window().open_pdf_smart()  # Maps to New Tab usually
+                    self.window().open_pdf_smart()
                     return True
-                if key == Qt.Key.Key_M:  # Music Mode override
+                if key == Qt.Key.Key_M:
                     self.btn_music.click()
                     return True
 
@@ -598,7 +595,7 @@ class BrowserTab(QWidget):
         self.web.load(url)
 
     def resizeEvent(self, event: Any) -> None:
-        """Handles window resize events."""
+        """Handles window resize events to center the toast notification."""
         super().resizeEvent(event)
         if self.lbl_toast.isVisible():
             self.lbl_toast.move(
@@ -617,7 +614,7 @@ class BrowserTab(QWidget):
         QTimer.singleShot(3000, self.lbl_toast.hide)
 
     def _update_url_bar(self, url: QUrl) -> None:
-        """Updates URL bar and adds the URL to history."""
+        """Updates URL bar text and adds the URL to history."""
         s_url = url.toString()
         self.txt_url.setText(s_url)
         self.txt_url.setCursorPosition(0)
@@ -668,19 +665,15 @@ class BrowserTab(QWidget):
                 break
             parent = parent.parent()
 
-    def get_audio_script(self):
+    def get_audio_script(self) -> str:
         """
-        Robustly loads the audio_engine.js file.
-        Anchors the path relative to this browser.py file.
+        Loads the audio_engine.js file from the assets directory.
+        Returns the script content as a string.
         """
         try:
-            # 1. Get the directory containing browser.py (riemann/ui)
             current_dir = os.path.dirname(os.path.abspath(__file__))
-
-            # 2. Go up one level to 'riemann', then into 'assets'
-            # Result: .../riemann/assets/audio_engine.js
             script_path = os.path.join(current_dir, "..", "assets", "audio_engine.js")
-            script_path = os.path.abspath(script_path)  # Normalize path
+            script_path = os.path.abspath(script_path)
 
             if not os.path.exists(script_path):
                 print(f"[Riemann Error] Audio Engine not found at: {script_path}")
@@ -699,14 +692,12 @@ class BrowserTab(QWidget):
         """Toggles the Audio Engine state based on button check status."""
         is_active = self.btn_music.isChecked()
 
-        # 1. Prepare Script
         base_js = self.get_audio_script()
         if not base_js:
             print("[ERROR] Aborting injection: Script content is empty.")
             self.btn_music.setChecked(False)
             return
 
-        # 2. Command: Enable or Disable
         if is_active:
             command = "if(window.RiemannAudio) window.RiemannAudio.enable();"
             self.show_toast("Music Mode ON")
@@ -714,19 +705,16 @@ class BrowserTab(QWidget):
             command = "if(window.RiemannAudio) window.RiemannAudio.disable();"
             self.show_toast("Music Mode OFF")
 
-        # 3. Inject (Base + Command)
-        # We inject the base engine every time just in case it wasn't loaded
         full_script = base_js + "\n" + command
         self.web.page().runJavaScript(full_script)
 
     def _restore_music_mode(self) -> None:
         """Re-enables music mode after page navigation if button is checked."""
         if self.btn_music.isChecked():
-            # Wait briefly for DOM to settle, then inject
             QTimer.singleShot(1000, self.toggle_music_mode)
 
     def _handle_download(self, download_item: QWebEngineDownloadRequest) -> None:
-        """Handles file download requests."""
+        """Handles file download requests via a file dialog."""
         default_dir = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.DownloadLocation
         )

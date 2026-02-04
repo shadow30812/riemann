@@ -1,16 +1,43 @@
+/**
+ * @fileoverview Riemann Audio Engine.
+ * * This script injects a high-fidelity audio processing graph into web pages.
+ * It features:
+ * - 6-band parametric EQ and saturation DSP.
+ * - Convolution reverb for spatialization.
+ * - Dynamic compression and limiting.
+ * - "Smart Mode" for adaptive loudness normalization.
+ * - Canvas-based frequency visualizer.
+ */
+
 (function () {
     if (window.RiemannAudio) return;
 
+    /**
+     * The main controller for the Riemann Audio DSP graph.
+     */
     class RiemannAudio {
+        /**
+         * Initializes the audio engine state and configuration presets.
+         */
         constructor() {
+            /** @type {AudioContext} */
             this.ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
+
+            /** @type {MediaElementAudioSourceNode|null} */
             this.sourceNode = null;
+
+            /** @type {Object<string, AudioNode>} Collection of DSP nodes. */
             this.nodes = {};
+
             this.initialized = false;
             this.enabled = false;
             this.smartMode = false;
+
+            /** @type {HTMLMediaElement|null} The currently attached media element. */
             this.mediaElement = null;
-            this.smartInterval = null; // [NEW] Timer for efficient background logic
+
+            /** @type {number|null} Interval ID for the smart logic loop. */
+            this.smartInterval = null;
 
             this.presets = {
                 'universal': { name: '✨ Universal Hi-Fi', gain: 1.2, sat: 40, width: 1.2, bass: 3.5, treble: 2.5, air: 0.15 },
@@ -25,20 +52,31 @@
 
             this.initUI();
             this.startObserver();
+            this.setupFallbackUnlocker();
+        }
 
-            // [NEW] Fallback Unlocker
+        /**
+         * Sets up a listener to resume the AudioContext on user interaction.
+         * Browsers often block autoplaying audio contexts until a gesture occurs.
+         */
+        setupFallbackUnlocker() {
             document.addEventListener('click', () => {
                 if (this.ctx.state === 'suspended') this.ctx.resume();
             }, { once: false, passive: true });
         }
 
+        /**
+         * Builds the Web Audio API graph.
+         * Creates and connects impulse responses, saturation, EQ, and compression nodes.
+         * @returns {Promise<void>}
+         */
         async initAudio() {
             if (this.initialized) return;
 
-            // 1. DSP: Impulse Response
             const sampleRate = this.ctx.sampleRate;
             const length = sampleRate * 0.5;
             const impulse = this.ctx.createBuffer(2, length, sampleRate);
+
             for (let ch = 0; ch < 2; ch++) {
                 const data = impulse.getChannelData(ch);
                 for (let i = 0; i < length; i++) {
@@ -46,10 +84,9 @@
                 }
             }
 
-            // 2. DSP: Create Nodes
             this.nodes.preAmp = this.ctx.createGain();
             this.nodes.saturator = this.ctx.createWaveShaper();
-            this.nodes.saturator.oversample = '4x'; // High quality saturation
+            this.nodes.saturator.oversample = '4x';
 
             this.nodes.splitter = this.ctx.createChannelSplitter(2);
             this.nodes.midGain = this.ctx.createGain();
@@ -85,7 +122,7 @@
             this.nodes.analyser.fftSize = 512;
             this.nodes.analyser.smoothingTimeConstant = 0.85;
 
-            // 3. Connect Graph
+            // Connect Graph
             this.nodes.preAmp.connect(this.nodes.saturator);
             this.nodes.saturator.connect(this.nodes.splitter);
 
@@ -109,11 +146,14 @@
 
             this.initialized = true;
             this.loadPreset(this.currentPreset);
-
-            // [NEW] Start the Efficient Smart Loop (Detached from Visualizer)
             this.startSmartLoop();
         }
 
+        /**
+         * Generates a sigmoid distortion curve for the wave shaper node.
+         * @param {number} amount - Intensity of the distortion (0-100+).
+         * @returns {Float32Array} The computed curve.
+         */
         makeDistortionCurve(amount) {
             const k = typeof amount === 'number' ? amount : 50;
             const n_samples = 44100;
@@ -126,6 +166,10 @@
             return curve;
         }
 
+        /**
+         * Observes the DOM for new video or audio elements to attach to.
+         * Checks every 1 second.
+         */
         startObserver() {
             const attach = () => {
                 const media = document.querySelector('video, audio');
@@ -137,7 +181,7 @@
                         this.initAudio().then(() => {
                             if (this.sourceNode) this.sourceNode.disconnect();
                             this.sourceNode = this.ctx.createMediaElementSource(media);
-                            if (this.enabled) this.enable(); // Re-attach logic
+                            if (this.enabled) this.enable();
                             else this.sourceNode.connect(this.ctx.destination);
                         });
                     } catch (e) { console.error("Riemann Attach Error:", e); }
@@ -146,12 +190,13 @@
             setInterval(attach, 1000);
         }
 
-        // [NEW] Efficient Background Loop for Smart Logic
+        /**
+         * Starts the background loop for adaptive audio processing.
+         * Runs at 25Hz to balance responsiveness and battery life.
+         */
         startSmartLoop() {
             if (this.smartInterval) clearInterval(this.smartInterval);
 
-            // Run only 25 times per second (40ms) instead of 60 (16ms)
-            // This is huge for battery savings.
             this.smartInterval = setInterval(() => {
                 if (!this.smartMode || !this.initialized || !this.enabled) return;
 
@@ -163,8 +208,11 @@
             }, 40);
         }
 
+        /**
+         * Analyzes frequency data and adjusts gain/EQ dynamically.
+         * @param {Uint8Array} dataArray - Frequency data from the analyser node.
+         */
         runSmartLogic(dataArray) {
-            // 1. Calculate Energy
             const bufferLength = dataArray.length;
             let bassSum = 0, midSum = 0, highSum = 0;
 
@@ -178,12 +226,10 @@
             const midAvg = midSum / 56;
             const highAvg = highSum / (bufferLength - 60);
 
-            // 2. Target Curve
             const targetBass = midAvg * 1.2;
             const targetHigh = midAvg * 0.9;
             const targetLoudness = 140;
 
-            // 3. Adjust (Gentle Nudge)
             let newGain = this.params.gain;
             if (midAvg > 10) {
                 const gainCorrection = (targetLoudness - midAvg) * 0.001;
@@ -196,17 +242,21 @@
             const highCorrection = (targetHigh - highAvg) * 0.05;
             let newTreble = Math.max(-2, Math.min(6, this.params.treble + highCorrection));
 
-            // Apply
             this.setParam('preAmp', 'gain', newGain);
             this.setParam('lowShelf', 'gain', newBass);
             this.setParam('highShelf', 'gain', newTreble);
 
-            // Only update UI if it's actually visible
             if (this.ui && this.ui.style.display !== 'none') {
                 this.updateUISliders();
             }
         }
 
+        /**
+         * Updates a specific parameter on a DSP node.
+         * @param {string} node - The key in `this.nodes`.
+         * @param {string|null} param - The AudioParam property name (or null for specialized nodes).
+         * @param {number} value - The new value to set.
+         */
         setParam(node, param, value) {
             if (!this.initialized) return;
 
@@ -227,6 +277,10 @@
             }
         }
 
+        /**
+         * Loads a predefined audio profile.
+         * @param {string} key - The preset key (e.g., 'universal', 'bass').
+         */
         loadPreset(key) {
             const p = this.presets[key];
             if (!p) return;
@@ -246,6 +300,9 @@
             if (select) select.value = key;
         }
 
+        /**
+         * Toggles the adaptive Smart Mode on or off.
+         */
         toggleSmartMode() {
             if (!this.smartMode) {
                 this.loadPreset('flat');
@@ -256,6 +313,9 @@
             this.updateSmartButton();
         }
 
+        /**
+         * Updates the visual state of the Smart Mode button.
+         */
         updateSmartButton() {
             if (!this.ui) return;
             const btn = this.ui.querySelector('#riemann-smart-btn');
@@ -266,6 +326,9 @@
             }
         }
 
+        /**
+         * Synchronizes the UI sliders with current parameter values.
+         */
         updateUISliders() {
             if (!this.ui) return;
             const set = (id, val) => {
@@ -280,6 +343,9 @@
             set('air', this.params.air);
         }
 
+        /**
+         * Connects the audio source to the DSP graph and shows the UI.
+         */
         enable() {
             if (!this.initialized || !this.sourceNode) return;
 
@@ -294,6 +360,9 @@
             this.ui.style.display = 'flex';
         }
 
+        /**
+         * Bypasses the DSP graph and hides the UI.
+         */
         disable() {
             if (!this.initialized || !this.sourceNode) return;
             this.enabled = false;
@@ -303,6 +372,9 @@
             this.ui.style.display = 'none';
         }
 
+        /**
+         * Constructs the UI overlay and injects it into the DOM.
+         */
         initUI() {
             const container = document.createElement('div');
             container.id = 'riemann-overlay';
@@ -315,7 +387,7 @@
                 display: 'none', flexDirection: 'column', gap: '10px'
             });
 
-            // HEADER
+            // Header Section
             const header = document.createElement('div');
             header.style.display = 'flex';
             header.style.justifyContent = 'space-between';
@@ -351,7 +423,7 @@
             header.appendChild(closeBtn);
             container.appendChild(header);
 
-            // PRESET SELECTOR
+            // Preset Selector
             const presetRow = document.createElement('div');
             presetRow.style.display = 'flex';
             const select = document.createElement('select');
@@ -370,7 +442,7 @@
             presetRow.appendChild(select);
             container.appendChild(presetRow);
 
-            // SLIDERS
+            // Slider Factory
             const createSlider = (label, id, min, max, val, callback) => {
                 const row = document.createElement('div');
                 row.style.display = 'flex';
@@ -410,7 +482,7 @@
             createSlider('TREBLE', 'treble', -20, 20, p.treble, v => this.setParam('highShelf', 'gain', v));
             createSlider('AIR', 'air', 0, 1, p.air, v => this.setParam('reverbGain', 'gain', v));
 
-            // VISUALIZER
+            // Visualizer Canvas
             const canvas = document.createElement('canvas');
             canvas.width = 250; canvas.height = 60;
             canvas.style.marginTop = '8px';
@@ -425,11 +497,13 @@
             this.drawVisualizer();
         }
 
+        /**
+         * Animation loop for the frequency visualizer.
+         * Pauses rendering if the UI is hidden to conserve resources.
+         */
         drawVisualizer() {
             requestAnimationFrame(() => this.drawVisualizer());
-            // [FIX] Strict Battery Check
-            // If the UI is hidden, we STOP rendering pixels completely.
-            // This allows the GPU to sleep.
+
             if (!this.initialized || this.ui.style.display === 'none') return;
 
             const bufferLength = this.nodes.analyser.frequencyBinCount;

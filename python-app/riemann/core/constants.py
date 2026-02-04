@@ -1,14 +1,21 @@
+"""
+Application Constants and Enumerations.
+
+This module defines shared constant values and Enum classes used throughout
+the application, specifically for PDF rendering and view modes.
+"""
+
 from enum import Enum
 
 
 class ZoomMode(Enum):
     """
-    Enumeration defining the zoom behavior of the PDF viewer.
+    Defines the zoom behavior strategy for the PDF viewer.
 
     Attributes:
-        MANUAL: Zoom level is set explicitly by the user.
-        FIT_WIDTH: Zoom level automatically adjusts to fit the page width to the viewport.
-        FIT_HEIGHT: Zoom level automatically adjusts to fit the page height to the viewport.
+        MANUAL (0): Zoom level is set explicitly by the user (e.g., 100%, 150%).
+        FIT_WIDTH (1): Zoom level automatically calculates to fit the page width.
+        FIT_HEIGHT (2): Zoom level automatically calculates to fit the page height.
     """
 
     MANUAL = 0
@@ -18,11 +25,13 @@ class ZoomMode(Enum):
 
 class ViewMode(Enum):
     """
-    Enumeration defining the rendering mode of the document.
+    Defines the rendering pipeline mode for the document.
 
     Attributes:
-        IMAGE: Standard PDF rendering where pages are drawn as images.
-        REFLOW: Text extraction mode rendered via HTML for easier reading on small screens.
+        IMAGE (0): Standard PDF rendering where pages are rasterized as images.
+                   Best for layout fidelity.
+        REFLOW (1): Text extraction mode where content is reflowed via HTML.
+                    Best for accessibility and small screens.
     """
 
     IMAGE = 0

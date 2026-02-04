@@ -1,3 +1,15 @@
+//! # Riemann Core
+//!
+//! This module provides the Python bindings for the Riemann PDF engine.
+//! It acts as a bridge between the high-level Python UI and the low-level
+//! PDFium rendering library.
+//!
+//! Key responsibilities:
+//! - Rendering PDF pages to image buffers.
+//! - Extracting text and searching within documents.
+//! - Managing annotations and form data.
+//! - Interfacing with the OCR worker for text recognition.
+
 use once_cell::sync::OnceCell;
 use pdfium_render::prelude::*;
 use pyo3::prelude::*;
@@ -5,22 +17,37 @@ use pyo3::types::PyBytes;
 use riemann_ocr_worker::OcrEngine;
 use std::sync::Mutex;
 
-/// Wrapper to ensure Pdfium is treated as thread-safe (Send + Sync) for PyO3.
+/// A thread-safe wrapper for the `Pdfium` library instance.
+///
+/// required because `pdfium_render::Pdfium` does not implement `Send` or `Sync`
+/// by default, but we need to store it in a global static `OnceCell` and access
+/// it across Python threads.
 struct PdfiumWrapper(Pdfium);
 unsafe impl Send for PdfiumWrapper {}
 unsafe impl Sync for PdfiumWrapper {}
 
-/// Wrapper to ensure PdfDocument is treated as thread-safe (Send + Sync) for PyO3.
+/// A thread-safe wrapper for a specific `PdfDocument`.
+///
+/// Allows the document to be shared across threads, guarded by a Mutex in the
+/// `RiemannDocument` struct.
 struct DocumentWrapper(PdfDocument<'static>);
 unsafe impl Send for DocumentWrapper {}
 unsafe impl Sync for DocumentWrapper {}
 
+/// Global singleton instance of the Pdfium library.
 static PDFIUM: OnceCell<PdfiumWrapper> = OnceCell::new();
 
 /// Initializes and retrieves the static Pdfium instance.
 ///
-/// Attempts to bind to the system library first, falling back to a local
-/// binary if necessary. Panics if the library cannot be loaded.
+/// This function attempts to load the Pdfium shared library from the system
+/// path first. If that fails, it falls back to looking for a local binary
+/// in the current working directory.
+///
+/// # Panics
+/// Panics if the library cannot be located or loaded.
+///
+/// # Returns
+/// A static reference to the initialized `Pdfium` instance.
 fn get_pdfium() -> &'static Pdfium {
     &PDFIUM
         .get_or_init(|| {
@@ -34,9 +61,17 @@ fn get_pdfium() -> &'static Pdfium {
         .0
 }
 
-/// Helper function to generate a bitmap from a specific page at a given scale.
+/// Generates a bitmap for a specific PDF page.
 ///
-/// Encapsulates the configuration logic shared between standard rendering and OCR.
+/// Configures the renderer to respect the target dimensions and rotate
+/// landscape pages automatically. It also enables annotation rendering.
+///
+/// # Arguments
+/// * `page` - Reference to the `PdfPage` to render.
+/// * `scale` - Scaling factor for the output bitmap (e.g., 2.0 for HiDPI).
+///
+/// # Returns
+/// A `PyResult` containing the generated `PdfBitmap`, or an error if rendering fails.
 fn generate_bitmap<'a>(page: &'a PdfPage<'a>, scale: f32) -> PyResult<PdfBitmap<'a>> {
     let width = (page.width().value * scale) as i32;
     let height = (page.height().value * scale) as i32;
@@ -45,52 +80,64 @@ fn generate_bitmap<'a>(page: &'a PdfPage<'a>, scale: f32) -> PyResult<PdfBitmap<
         .set_target_width(width)
         .set_target_height(height)
         .rotate_if_landscape(PdfPageRenderRotation::None, true)
-        .render_annotations(true); // FIX 1: Enable annotation rendering
+        .render_annotations(true);
 
     page.render_with_config(&render_config)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
 }
 
-/// Type alias for form widget data: (index, bounds, field_type, value, checked)
+/// Type definition for form widget data.
+/// Tuple structure: `(index, bounds_tuple, field_type, value, is_checked)`.
 type FormWidget = (usize, (f32, f32, f32, f32), String, String, bool);
 
-/// Type alias for text segment data: (text, bounds)
+/// Type definition for text segment data.
+/// Tuple structure: `(text_content, bounds_tuple)`.
 type TextSegment = (String, (f32, f32, f32, f32));
 
-/// Represents the result of a page render operation passed back to Python.
+/// Encapsulates the output of a page render operation.
+///
+/// This struct is exposed to Python to provide the raw pixel data along with
+/// the dimensions necessary to construct a Qt QImage or similar object.
 #[pyclass]
 struct RenderResult {
+    /// The width of the rendered image in pixels.
     #[pyo3(get)]
     width: u32,
+    /// The height of the rendered image in pixels.
     #[pyo3(get)]
     height: u32,
+    /// The raw BGRA pixel data as a Python bytes object.
     #[pyo3(get)]
     data: Py<PyBytes>,
 }
 
-/// A thread-safe wrapper around a PDF document.
+/// A Python-compatible wrapper around a loaded PDF document.
 ///
-/// Manages the underlying Pdfium document state and provides methods for
-/// rendering, text extraction, and OCR.
+/// This struct manages the lifetime and thread-safe access to the underlying
+/// PDFium document. It exposes methods for rendering, text extraction, and
+/// interaction.
 #[pyclass]
 struct RiemannDocument {
     inner: Mutex<DocumentWrapper>,
+    /// The total number of pages in the document.
     #[pyo3(get)]
     page_count: usize,
 }
 
 #[pymethods]
 impl RiemannDocument {
-    /// Renders a specific page to a byte buffer.
+    /// Renders a specific page into a byte buffer.
     ///
-    /// Args:
-    ///     py (Python): The Python GIL token.
-    ///     page_index (u16): The index of the page to render.
-    ///     scale (f32): The zoom scale factor.
-    ///     dark_mode_int (u8): 1 to invert colors for dark mode, 0 for standard.
+    /// This method handles scaling and optional dark mode inversion.
     ///
-    /// Returns:
-    ///     RenderResult: Object containing width, height, and raw BGRA bytes.
+    /// # Arguments
+    /// * `py` - The Python GIL token.
+    /// * `page_index` - Zero-based index of the page to render.
+    /// * `scale` - Zoom level/scaling factor.
+    /// * `dark_mode_int` - Integer flag (1 for dark mode, 0 for light).
+    ///
+    /// # Returns
+    /// A `RenderResult` object containing the image data.
     fn render_page(
         &self,
         py: Python,
@@ -127,13 +174,14 @@ impl RiemannDocument {
         })
     }
 
-    /// Extracts plain text from a specific page.
+    /// Extracts all plain text from a specific page.
     ///
-    /// Args:
-    ///     page_index (u16): The index of the page.
+    /// # Arguments
+    /// * `page_index` - Zero-based index of the page.
     ///
-    /// Returns:
-    ///     String: The extracted text content, or an empty string if bounds are exceeded.
+    /// # Returns
+    /// A string containing the text of the page. Returns an empty string
+    /// if the page index is out of bounds or the page contains no text.
     fn get_page_text(&self, page_index: u16) -> PyResult<String> {
         let doc_guard = self.inner.lock().unwrap();
         let pages = doc_guard.0.pages();
@@ -157,14 +205,17 @@ impl RiemannDocument {
         Ok(text_accessor.all())
     }
 
-    /// Runs OCR on the specified page and returns the recognized text.
+    /// Performs Optical Character Recognition (OCR) on a page.
     ///
-    /// Args:
-    ///     page_index (u16): The page to process.
-    ///     scale (f32): Resolution multiplier (2.0 or 3.0 recommended for best OCR).
+    /// Renders the page to a bitmap, converts the color channels from BGR to RGB
+    /// (required by Tesseract), and processes the image using the OCR engine.
     ///
-    /// Returns:
-    ///     String: The text extracted by Tesseract.
+    /// # Arguments
+    /// * `page_index` - Zero-based index of the page.
+    /// * `scale` - Scale factor for the image. Higher scales (2.0+) improve accuracy.
+    ///
+    /// # Returns
+    /// The recognized text string.
     fn ocr_page(&self, page_index: u16, scale: f32) -> PyResult<String> {
         let doc_guard = self.inner.lock().unwrap();
 
@@ -192,8 +243,14 @@ impl RiemannDocument {
         Ok(text)
     }
 
-    /// Searches for a string on a page and returns a list of bounding boxes.
-    /// Returns a list of (left, top, right, bottom) tuples.
+    /// Searches the page for a specific text term.
+    ///
+    /// # Arguments
+    /// * `page_index` - Zero-based index of the page.
+    /// * `term` - The string to search for.
+    ///
+    /// # Returns
+    /// A list of bounding boxes `(left, top, right, bottom)` for all occurrences.
     fn search_page(&self, page_index: u16, term: String) -> PyResult<Vec<(f32, f32, f32, f32)>> {
         let doc_guard = self.inner.lock().unwrap();
         let pages = doc_guard.0.pages();
@@ -210,26 +267,17 @@ impl RiemannDocument {
             .text()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
-        // 1. Configure Search Options (Case-insensitive, default)
         let search_options = PdfSearchOptions::new();
 
-        // 2. Execute Search
         let search = text_accessor
             .search(&term, &search_options)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
         let mut rects = Vec::new();
 
-        // 3. Iterate Results (API Fix: iter requires a direction)
         for segments in search.iter(PdfSearchDirection::SearchForward) {
-            // 4. Iterate Segments inside the result
             for segment in segments.iter() {
-                // 5. Get Bounds
                 let rect = segment.bounds();
-
-                // Pdfium coordinates: (left, bottom, right, top) usually,
-                // but PdfRect usually provides left/bottom/right/top.
-                // We extract the raw f32 values.
                 rects.push((
                     rect.left().value,
                     rect.top().value,
@@ -241,7 +289,17 @@ impl RiemannDocument {
 
         Ok(rects)
     }
-    /// Retrieves all text segments and their bounding boxes for a specific page.
+
+    /// Retrieves granular text segments and their positions from a page.
+    ///
+    /// Useful for features that need to know the exact location of specific words
+    /// or lines on the page.
+    ///
+    /// # Arguments
+    /// * `page_index` - Zero-based index of the page.
+    ///
+    /// # Returns
+    /// A list of `TextSegment` tuples containing text and bounding boxes.
     fn get_text_segments(&self, page_index: u16) -> PyResult<Vec<TextSegment>> {
         let doc_guard = self.inner.lock().unwrap();
         let pages = doc_guard.0.pages();
@@ -263,9 +321,7 @@ impl RiemannDocument {
         let mut segments = Vec::new();
 
         for segment in text_accessor.segments().iter() {
-            // segment.bounds() returns PdfRect, not Result
             let rect = segment.bounds();
-
             segments.push((
                 segment.text(),
                 (
@@ -280,7 +336,17 @@ impl RiemannDocument {
         Ok(segments)
     }
 
-    /// Creates a markup annotation (Highlight, Underline, Strikeout) using the provided rectangles.
+    /// Adds a markup annotation (highlight, underline, or strikeout) to the page.
+    ///
+    /// This function calculates the union rectangle of all passed `rects` to set
+    /// the annotation's outer bounds, and then creates specific attachment points
+    /// for the individual highlighted areas.
+    ///
+    /// # Arguments
+    /// * `page_index` - Zero-based index of the page.
+    /// * `rects` - List of bounding boxes to annotate.
+    /// * `subtype` - Type of annotation: "underline", "strikeout", or "highlight".
+    /// * `color` - RGB color tuple `(r, g, b)`.
     fn create_markup_annotation(
         &self,
         page_index: u16,
@@ -297,7 +363,6 @@ impl RiemannDocument {
 
         let pdf_color = PdfColor::new(color.0, color.1, color.2, 255);
 
-        // Calculate union rect first
         let mut union_rect: Option<PdfRect> = None;
         for (left, top, right, bottom) in &rects {
             let u = PdfRect::new_from_values(*left, *bottom, *right, *top);
@@ -312,7 +377,6 @@ impl RiemannDocument {
             }
         }
 
-        // Helper to apply union bounds
         let apply_bounds = |annot: &mut dyn PdfPageAnnotationCommon| -> PyResult<()> {
             if let Some(u) = union_rect {
                 annot.set_bounds(u).map_err(|e| {
@@ -370,7 +434,6 @@ impl RiemannDocument {
                 apply_bounds(&mut annot)?;
             }
             _ => {
-                // Highlight
                 let mut annot = page
                     .annotations_mut()
                     .create_highlight_annotation()
@@ -403,7 +466,16 @@ impl RiemannDocument {
         Ok(())
     }
 
-    /// Retrieves form field widgets for a page to support form filling.
+    /// Extracts interactive form field widgets from the page.
+    ///
+    /// Identifies text fields, checkboxes, and radio buttons, retrieving their
+    /// bounds, current values, and checked states.
+    ///
+    /// # Arguments
+    /// * `page_index` - Zero-based index of the page.
+    ///
+    /// # Returns
+    /// A list of `FormWidget` tuples.
     fn get_form_widgets(&self, page_index: u16) -> PyResult<Vec<FormWidget>> {
         let doc_guard = self.inner.lock().unwrap();
         let pages = doc_guard.0.pages();
@@ -460,6 +532,8 @@ impl RiemannDocument {
 }
 
 /// The main entry point for the PDF Engine.
+///
+/// This struct acts as the factory for loading documents.
 #[pyclass]
 struct PdfEngine;
 
@@ -471,13 +545,13 @@ impl PdfEngine {
         PdfEngine
     }
 
-    /// Loads a PDF document from the file system.
+    /// Loads a PDF document from the local file system.
     ///
-    /// Args:
-    ///     path (String): The file path to the PDF.
+    /// # Arguments
+    /// * `path` - The absolute or relative path to the PDF file.
     ///
-    /// Returns:
-    ///     RiemannDocument: The loaded document instance.
+    /// # Returns
+    /// A `RiemannDocument` instance ready for rendering and interaction.
     fn load_document(&self, path: String) -> PyResult<RiemannDocument> {
         let doc = get_pdfium()
             .load_pdf_from_file(&path, None)
@@ -490,6 +564,9 @@ impl PdfEngine {
     }
 }
 
+/// The Python module initializer.
+///
+/// Registers the classes and functions exported by this extension module.
 #[pymodule]
 fn riemann_core(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PdfEngine>()?;

@@ -1,21 +1,33 @@
-# Run the Python app (builds rust extension first)
+# **Justfile**
+
+# **Description: Task runner configuration for the Riemann project.**
+
+# **Run the Python application.**
+
+# **Prerequisite: Builds the Rust extension first.**
 
 run: build
  PYTHONPATH=python-app python3 -m riemann
 
-# Build and install the Rust extension into the current venv
+# **Build and install the Rust extension into the current virtual environment.**
+
+# **Uses maturin in development mode.**
 
 build:
  maturin develop
 
-# Run Rust tests
+# **Run the Rust unit test suite.**
+
+# **Targets the 'riemann\_core' package.**
 
 test-rust:
- cargo test -p riemann_core
+ cargo test \-p riemann\_core
 
-# Clean build artifacts
+# **Clean build artifacts.**
+
+# **Removes Cargo target directory, compiled shared objects, and Python bytecode caches.**
 
 clean:
  cargo clean
- find . -name "*.so" -delete
- find . -name "__pycache__" -type d -exec rm -rf {} +
+ find . \-name "\*.so" \-delete
+ find . \-name "**pycache**" \-type d \-exec rm \-rf {} \+

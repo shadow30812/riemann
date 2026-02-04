@@ -1,14 +1,26 @@
+"""
+Reusable UI Components.
+
+This module provides custom Qt widgets used throughout the Riemann application,
+including a draggable tab system and a specialized annotation toolbar.
+"""
+
 import os
 from typing import Optional
 
-from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QDrag, QIcon, QMouseEvent
+from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
+from PySide6.QtGui import (
+    QAction,
+    QDrag,
+    QDragEnterEvent,
+    QDropEvent,
+    QMouseEvent,
+)
 from PySide6.QtWidgets import (
     QButtonGroup,
     QColorDialog,
     QFrame,
     QHBoxLayout,
-    QLabel,
     QMenu,
     QSpinBox,
     QTabBar,
@@ -20,25 +32,40 @@ from PySide6.QtWidgets import (
 
 class DraggableTabWidget(QTabWidget):
     """
-    A QTabWidget subclass that allows reordering and dragging tabs.
-    Supports dropping file paths to create new ReaderTabs.
+    A QTabWidget subclass that supports reordering tabs via drag-and-drop
+    and accepts file drops to open new documents.
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
+        """Initialize the draggable tab widget."""
         super().__init__(parent)
         self.setAcceptDrops(True)
         self.setMovable(True)
         self.setTabBar(DraggableTabBar(self))
 
-    def dragEnterEvent(self, e) -> None:
-        """Accepts drag events that contain text (file paths)."""
+    def dragEnterEvent(self, e: QDragEnterEvent) -> None:
+        """
+        Accepts drag events that contain text (file paths).
+
+        Args:
+            e: The drag enter event.
+        """
         if e.mimeData().hasText():
             e.accept()
         else:
             e.ignore()
 
-    def dropEvent(self, event) -> None:
-        """Handles dropping a file path to create a new tab."""
+    def dropEvent(self, event: QDropEvent) -> None:
+        """
+        Handles dropping a file path to create a new tab.
+
+        Note:
+            Imports ReaderTab locally to avoid circular dependencies, as
+            ReaderTab imports DraggableTabWidget via its parent modules.
+
+        Args:
+            event: The drop event containing the file path.
+        """
         file_path = event.mimeData().text()
         if os.path.exists(file_path):
             from .reader import ReaderTab
@@ -51,10 +78,18 @@ class DraggableTabWidget(QTabWidget):
 
 
 class DraggableTabBar(QTabBar):
-    """A QTabBar that supports dragging tabs out of the window."""
+    """
+    A custom QTabBar that allows dragging tabs out of the window or
+    reordering them visually.
+    """
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        """Initiates a drag operation when a tab is dragged."""
+        """
+        Initiates a drag operation when a tab is dragged.
+
+        Args:
+            event: The mouse move event.
+        """
         if event.buttons() != Qt.MouseButton.LeftButton:
             return
 
@@ -89,48 +124,56 @@ class AnnotationToolbar(QWidget):
     """
     A context-aware toolbar for PDF annotation tools.
     Emits signals when tools are selected or properties change.
+
+    Attributes:
+        tool_changed (Signal): Emitted with tool ID string when selected.
+        color_changed (Signal): Emitted with hex color code string.
+        thickness_changed (Signal): Emitted with integer thickness.
+        undo_requested (Signal): Emitted when undo is clicked.
+        redo_requested (Signal): Emitted when redo is clicked.
     """
 
-    # Signals to notify the ReaderTab
-    tool_changed = Signal(str)  # e.g., 'pen', 'eraser', 'rect'
-    color_changed = Signal(str)  # Hex code e.g., '#ff0000'
-    thickness_changed = Signal(int)  # Line width 1-10
+    tool_changed = Signal(str)
+    color_changed = Signal(str)
+    thickness_changed = Signal(int)
     undo_requested = Signal()
     redo_requested = Signal()
 
+    STYLESHEET = """
+        QWidget { 
+            background-color: #e0e0e0; 
+            border-bottom: 1px solid #ccc; 
+            color: #000000; 
+        }
+        QToolButton { 
+            border: none; 
+            padding: 4px; 
+            border-radius: 4px; 
+            font-size: 16px; 
+            color: #000000;
+        }
+        QToolButton:hover { background-color: #d0d0d0; }
+        QToolButton:checked { background-color: #b0b0b0; border: 1px solid #888; }
+        QToolButton::menu-indicator { image: none; }
+        QMenu { 
+            background-color: #f0f0f0; 
+            color: #000000; 
+            border: 1px solid #888;
+        }
+        QMenu::item:selected { background-color: #d0d0d0; color: #000000; }
+        QSpinBox { 
+            background-color: #ffffff; 
+            color: #000000; 
+            selection-background-color: #50a0ff;
+            selection-color: #ffffff;
+        }
+    """
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
+        """Initialize the annotation toolbar."""
         super().__init__(parent)
         self.setFixedHeight(45)
-        # Background styling to differentiate it from the main toolbar
-        self.setStyleSheet("""
-            QWidget { 
-                background-color: #e0e0e0; 
-                border-bottom: 1px solid #ccc; 
-                color: #000000; 
-            }
-            QToolButton { 
-                border: none; 
-                padding: 4px; 
-                border-radius: 4px; 
-                font-size: 16px; 
-                color: #000000;
-            }
-            QToolButton:hover { background-color: #d0d0d0; }
-            QToolButton:checked { background-color: #b0b0b0; border: 1px solid #888; }
-            QToolButton::menu-indicator { image: none; }
-            QMenu { 
-                background-color: #f0f0f0; 
-                color: #000000; 
-                border: 1px solid #888;
-            }
-            QMenu::item:selected { background-color: #d0d0d0; color: #000000; }
-            QSpinBox { 
-                background-color: #ffffff; 
-                color: #000000; 
-                selection-background-color: #50a0ff;
-                selection-color: #ffffff;
-            }
-        """)
+        self.setStyleSheet(self.STYLESHEET)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 2, 5, 2)
@@ -139,14 +182,12 @@ class AnnotationToolbar(QWidget):
         self.btn_group = QButtonGroup(self)
         self.btn_group.setExclusive(True)
 
-        # --- Section 1: Pointers ---
         self.btn_nav = self._add_tool_btn(
             "🖱️", "nav", "Navigate / Select", layout, checked=True
         )
 
         self._add_separator(layout)
 
-        # --- Section 2: Core Tools ---
         self.btn_note = self._add_tool_btn("📝", "note", "Sticky Note", layout)
         self.btn_text = self._add_tool_btn("🔤", "text", "Text Label", layout)
         self.btn_pen = self._add_tool_btn("🖊️", "pen", "Freehand Pen", layout)
@@ -156,7 +197,6 @@ class AnnotationToolbar(QWidget):
 
         self._add_separator(layout)
 
-        # --- Section 2.5: Text Markup (Sticky) ---
         self.btn_markup_h = self._add_tool_btn(
             "H", "markup_highlight", "Text Highlight", layout
         )
@@ -169,7 +209,6 @@ class AnnotationToolbar(QWidget):
 
         self._add_separator(layout)
 
-        # --- Section 3: Shapes (Dropdown) ---
         self.btn_shapes = QToolButton()
         self.btn_shapes.setText("□")
         self.btn_shapes.setToolTip("Shapes")
@@ -181,7 +220,6 @@ class AnnotationToolbar(QWidget):
         self.btn_shapes.setMenu(shape_menu)
         layout.addWidget(self.btn_shapes)
 
-        # --- Section 4: Stamps (Dropdown) ---
         self.btn_stamps = QToolButton()
         self.btn_stamps.setText("✅")
         self.btn_stamps.setToolTip("Stamps")
@@ -195,7 +233,6 @@ class AnnotationToolbar(QWidget):
 
         self._add_separator(layout)
 
-        # --- Section 5: Edit ---
         self.btn_eraser = self._add_tool_btn("⌫", "eraser", "Eraser", layout)
 
         self.btn_undo = QToolButton()
@@ -212,15 +249,12 @@ class AnnotationToolbar(QWidget):
 
         self._add_separator(layout)
 
-        # --- Section 6: Properties ---
-        # Color Picker
         self.btn_color = QToolButton()
         self.btn_color.setText("🎨")
         self.btn_color.setToolTip("Change Color")
         self.btn_color.clicked.connect(self._pick_color)
         layout.addWidget(self.btn_color)
 
-        # Thickness Spinner
         self.spin_thick = QSpinBox()
         self.spin_thick.setRange(1, 20)
         self.spin_thick.setValue(3)
@@ -231,7 +265,15 @@ class AnnotationToolbar(QWidget):
 
         layout.addStretch()
 
-    def _add_tool_btn(self, icon, tool_id, tooltip, layout, checked=False):
+    def _add_tool_btn(
+        self,
+        icon: str,
+        tool_id: str,
+        tooltip: str,
+        layout: QHBoxLayout,
+        checked: bool = False,
+    ) -> QToolButton:
+        """Helper to create and add a standard checkable tool button."""
         btn = QToolButton()
         btn.setText(icon)
         btn.setCheckable(True)
@@ -242,36 +284,37 @@ class AnnotationToolbar(QWidget):
         layout.addWidget(btn)
         return btn
 
-    def _add_menu_action(self, menu, text, tool_id, parent_btn):
+    def _add_menu_action(
+        self, menu: QMenu, text: str, tool_id: str, parent_btn: QToolButton
+    ) -> None:
+        """Helper to add actions to dropdown menus (shapes, stamps)."""
         action = QAction(text, self)
-        # When menu action is clicked, we visually select the parent button
-        # and emit the specific tool ID
         action.triggered.connect(
             lambda: self._set_menu_tool(parent_btn, tool_id, text.split(" ")[0])
         )
         menu.addAction(action)
 
-    def _set_menu_tool(self, btn, tool_id, icon):
+    def _set_menu_tool(self, btn: QToolButton, tool_id: str, icon: str) -> None:
+        """Updates the parent dropdown button to reflect the selected sub-tool."""
         btn.setText(icon)
-        # We manually check the parent button in the exclusive group
-        # because the menu action itself isn't a checkable button
+
         if not btn.isChecked():
             btn.setChecked(True)
-            # Add to group temporarily if needed, or just rely on manual management
-            # but simplest is to manually ensure other buttons uncheck if we forced this one
             for b in self.btn_group.buttons():
                 if b != btn:
                     b.setChecked(False)
 
         self.tool_changed.emit(tool_id)
 
-    def _add_separator(self, layout):
+    def _add_separator(self, layout: QHBoxLayout) -> None:
+        """Adds a visual vertical line separator."""
         line = QFrame()
         line.setFrameShape(QFrame.Shape.VLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(line)
 
-    def _pick_color(self):
+    def _pick_color(self) -> None:
+        """Opens a color picker dialog and emits the selected color."""
         color = QColorDialog.getColor(Qt.GlobalColor.red, self, "Select Tool Color")
         if color.isValid():
             self.color_changed.emit(color.name())

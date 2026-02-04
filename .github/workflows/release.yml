@@ -3,7 +3,7 @@ name: Build and Release
 on:
   push:
     tags:
-      - "v*" # Triggers only when you push a tag like v0.1.0
+      - "v*"
 
 jobs:
   build-and-release:
@@ -28,6 +28,8 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      # --- Language Setup ---
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -44,6 +46,8 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install maturin pyinstaller pyside6
+
+      # --- PDFium Asset Retrieval ---
 
       - name: Download and Extract PDFium
         shell: python
@@ -66,6 +70,8 @@ jobs:
                       tar.extract(member, path="libs")
                       print(f"Extracted {member.name} to libs/")
 
+      # --- Compilation Steps ---
+
       - name: Build Rust Backend
         run: maturin develop --release
 
@@ -85,6 +91,8 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller Riemann.spec --clean --noconfirm
 
+      # --- Artifact Packaging ---
+
       - name: Zip Artifact (Windows/Linux)
         if: matrix.os != 'macos-latest'
         run: |
@@ -101,6 +109,8 @@ jobs:
         run: |
           cd dist
           zip -r ../${{ matrix.asset_name }}.zip Riemann
+
+      # --- GitHub Release Publishing ---
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1

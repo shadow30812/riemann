@@ -1,3 +1,7 @@
-# riemann/__init__.py
-# Expose the version and main entry point convenience
-__version__ = "0.1.0"
+"""
+Riemann Package Initialization.
+
+Exposes version information and entry points for the package.
+"""
+
+__version__ = "2.1.0"

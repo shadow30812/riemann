@@ -1,3 +1,9 @@
+//! # Riemann OCR Worker
+//!
+//! A specialized worker module for performing Optical Character Recognition (OCR).
+//! It interfaces with the `tesseract` command-line utility to extract text from
+//! raw image data.
+
 use anyhow::{Context, Result};
 use image::{ImageBuffer, Rgba};
 use std::io::Write;
@@ -17,6 +23,9 @@ impl Default for OcrEngine {
 
 impl OcrEngine {
     /// Creates a new instance of the OCR engine.
+    ///
+    /// This is a lightweight operation as the heavy lifting is done by the
+    /// spawned processes during `recognize_text`.
     pub fn new() -> Self {
         OcrEngine
     }
@@ -36,6 +45,8 @@ impl OcrEngine {
     ///
     /// # Returns
     /// A `Result` containing the extracted String or an error if the process fails.
+    /// Errors may occur if `tesseract` is missing from the PATH, if the image encoding
+    /// fails, or if the process exits with a non-zero status.
     pub fn recognize_text(&self, width: u32, height: u32, data: &[u8]) -> Result<String> {
         let buffer: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(width, height, data)
             .context("Failed to create image buffer from raw pixel data")?;
