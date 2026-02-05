@@ -803,7 +803,7 @@ def install_linux_integration():
         if hasattr(sys, "_MEIPASS"):
             base_path = getattr(sys, "_MEIPASS")
             internal_icon_path = os.path.join(
-                base_path, "python-app", "riemann", "assets", "Icon.png"
+                base_path, "riemann", "assets", "Icon.png"
             )
         else:
             return

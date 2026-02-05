@@ -42,10 +42,14 @@ def collect_resources():
     hiddenimports += q_hidden
 
     icon_path = os.path.join('python-app', 'riemann', 'assets', 'icon.ico')
+    png_path = os.path.join('python-app', 'riemann', 'assets', 'Icon.png')
+
     if os.path.exists(icon_path):
         datas.append((icon_path, 'riemann/assets'))
+    elif os.path.exists(png_path):
+        datas.append((png_path, 'riemann/assets'))
     else:
-        print(f"WARNING: Icon not found at {icon_path}")
+        print(f"WARNING: Icon not found at {icon_path} or {png_path}")
 
     return datas, binaries, hiddenimports
 
