@@ -123,6 +123,8 @@ class HistoryManager:
             "google.com",
             "monkeytype.com",
             "erp.iitkgp.ac.in",
+            "gmail.com",
+            "mail.google.com",
             "youtube.com",
             "keep.google.com",
             "linkedin.com",
