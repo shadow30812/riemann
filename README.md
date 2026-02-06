@@ -4,7 +4,7 @@
 
 Riemann transcends the functionality of conventional PDF viewers, operating as a specialized workspace engineered to address the complexities inherent in contemporary research. In an environment characterized by information saturation, traditional software—predominantly designed for passive consumption or administrative tasks—often proves inadequate for rigorous inquiry.
 
-Constructed upon an advanced hybrid architecture that leverages **Python (PyQt6)** for interface flexibility and **Rust** for computational performance and memory safety, Riemann provides a unified environment. It integrates processing speed, absolute data sovereignty, and local-first Artificial Intelligence into a cohesive tool designed to respect both user attention and data integrity.
+Constructed upon an advanced hybrid architecture that leverages **Python (PySide6)** for interface flexibility and **Rust** for computational performance and memory safety, Riemann provides a unified environment. It integrates processing speed, absolute data sovereignty, and local-first Artificial Intelligence into a cohesive tool designed to respect both user attention and data integrity.
 
 ## **Key Features and Architectural Philosophy**
 

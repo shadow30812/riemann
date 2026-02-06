@@ -7,6 +7,7 @@ audio processing injection (Riemann Audio), and download management.
 """
 
 import os
+import sys  # Added sys import
 from typing import Any, Optional
 
 from PySide6.QtCore import QEvent, QObject, QStandardPaths, Qt, QTimer, QUrl
@@ -99,6 +100,9 @@ class BrowserTab(QWidget):
         super().__init__(parent)
         self.dark_mode = dark_mode
         self.incognito = incognito
+
+        # [FIX] Allow the widget to accept focus so focusInEvent triggers
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         if self.incognito:
             self.profile = QWebEngineProfile(self)
@@ -337,6 +341,15 @@ class BrowserTab(QWidget):
             self.completer.setModel(self.window().history_model)
 
         self.web.load(QUrl(start_url))
+
+    # [FIX] Automatically forward focus to web view when tab is selected
+    def focusInEvent(self, event: Any) -> None:
+        """
+        Handles the event when the Tab widget itself receives focus.
+        Immediately forwards focus to the web view to enable page shortcuts.
+        """
+        self.web.setFocus()
+        super().focusInEvent(event)
 
     def open_devtools(self) -> None:
         """Opens the Web Inspector for the current page in a separate window."""
@@ -671,18 +684,35 @@ class BrowserTab(QWidget):
         Returns the script content as a string.
         """
         try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            script_path = os.path.join(current_dir, "..", "assets", "audio_engine.js")
-            script_path = os.path.abspath(script_path)
+            if hasattr(sys, "frozen"):
+                base_path = os.path.dirname(sys.executable)
+                if hasattr(sys, "nuitka_python_exe"):
+                    base_path = os.path.dirname(__file__)
+            else:
+                base_path = os.path.dirname(os.path.abspath(__file__))
 
-            if not os.path.exists(script_path):
-                print(f"[Riemann Error] Audio Engine not found at: {script_path}")
+            candidate_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..",
+                "assets",
+                "audio_engine.js",
+            )
+
+            if not os.path.exists(candidate_path):
+                candidate_path = os.path.join(
+                    os.path.dirname(sys.executable),
+                    "riemann",
+                    "assets",
+                    "audio_engine.js",
+                )
+
+            if not os.path.exists(candidate_path):
+                print(f"[Riemann Error] Audio Engine not found at: {candidate_path}")
                 self.show_toast("Error: Missing audio_engine.js")
                 return ""
 
-            with open(script_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                return content
+            with open(candidate_path, "r", encoding="utf-8") as f:
+                return f.read()
 
         except Exception as e:
             print(f"[ERROR] Failed to load audio script: {e}")

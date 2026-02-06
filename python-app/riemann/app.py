@@ -802,9 +802,8 @@ def install_linux_integration():
 
         if hasattr(sys, "_MEIPASS"):
             base_path = getattr(sys, "_MEIPASS")
-            internal_icon_path = os.path.join(
-                base_path, "riemann", "assets", "Icon.png"
-            )
+            # [FIX] Removed "riemann" dir, usually assets are at root of _MEIPASS in PyInstaller
+            internal_icon_path = os.path.join(base_path, "assets", "Icon.png")
         else:
             return
 
