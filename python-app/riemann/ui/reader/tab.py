@@ -771,6 +771,11 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
                 event.accept()
                 return
 
+            elif key == Qt.Key.Key_F:
+                self.toggle_reader_fullscreen()
+                event.accept()
+                return
+
         if self.view_mode == ViewMode.IMAGE:
             if mod & Qt.KeyboardModifier.ControlModifier:
                 if key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
@@ -785,13 +790,21 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
                 self.prev_view()
             elif key == Qt.Key.Key_Space:
                 self.scroll_page(-1 if mod & Qt.KeyboardModifier.ShiftModifier else 1)
+
+            elif key == Qt.Key.Key_Up:
+                self.scroll.verticalScrollBar().setValue(
+                    self.scroll.verticalScrollBar().value() - 50
+                )
             elif key == Qt.Key.Key_Down:
                 self.scroll.verticalScrollBar().setValue(
                     self.scroll.verticalScrollBar().value() + 50
                 )
-            elif key == Qt.Key.Key_Up:
+
+            elif key == Qt.Key.Key_Home:
+                self.scroll.verticalScrollBar().setValue(0)
+            elif key == Qt.Key.Key_End:
                 self.scroll.verticalScrollBar().setValue(
-                    self.scroll.verticalScrollBar().value() - 50
+                    self.scroll.verticalScrollBar().maximum()
                 )
 
     def wheelEvent(self, event: QWheelEvent) -> None:

@@ -75,31 +75,116 @@ Riemann supports two primary operational modes: execution from source code for d
 
 ### **Method 1: Source Code Execution**
 
-**Prerequisites:** Python 3.11, Rust Toolchain (Cargo), and Just.
+**Prerequisites:** Python 3.11, Rust Toolchain (Cargo), Just, and `libpdfium`.
 
-1. **Repository Cloning:**  
-   `git clone https://github.com/shadow30812/riemann.git`  
-   `cd riemann`
+1. **Repository Cloning:**
 
-2. **Environment Initialization:**  
-   `python \-m venv .venv`  
-   `source .venv/bin/activate`
+   ```bash
+   git clone https://github.com/shadow30812/riemann.git
+   cd riemann
+   ```
 
-3. **Dependency Installation:**  
-   `pip install \-r requirements.txt`  
+2. **External Library Setup:** Riemann requires the pdfium binary to be placed manually.
 
-4. **Compilation & Application Launch:**  
-   `maturin develop \--release`  
-   `python \-m riemann`
+   * Download **pdfium-linux-x64.tgz** (Version >= 7643) from [pdfium-binaries releases](https://github.com/bblanchon/pdfium-binaries/releases).
+   * Extract the archive.
+   * Copy lib/libpdfium.so into the libs/ directory in the project root:
 
-or use `just run` for the last step.
+   ```bash
+   mkdir -p libs
+   cp path_to_extracted_lib/libpdfium.so libs/
+   ```
 
-### **Method 2: Executable Deployment**
+3. **Environment Initialization:**
 
-A standalone executable is provided via the release pipeline.
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   ```
 
-1. Navigate to <https://github.com/shadow30812/riemann/releases/download/v2.0/Riemann>.  
-2. Execute Riemann.
+4. **Compilation & Application Launch:**
+
+   ```bash
+   maturin develop --release
+   python -m riemann
+   ```
+
+5. **Developer Workflow (Using Just):**  
+   We use just to manage build tasks and environment hygiene.  
+   Step 4 can be replaced by `just run` after installing the required dependencies.  
+   * **Run Application:** Compiles Rust changes and launches the Python app.  
+
+   ```bash
+   just run
+   ```
+
+   * **Build Extension:** Only compiles the Rust backend (useful for debugging).  
+
+   ```bash
+   just build
+   ```
+
+   * **Clean Project:** Removes all compiled artifacts (Python cache and Rust target).  
+
+   ```bash
+   just clean
+   ```
+
+### **Method 2: Building a Standalone Binary**
+
+Riemann offers two build pipelines. The **Nuitka** build is recommended for performance and smaller binary size.
+
+#### **Option A: Optimized Build (Nuitka) — Recommended**
+
+This method compiles Python code into C instructions, resulting in faster startup. It automatically handles icon integration for Linux environments.
+
+##### Ensure nuitka and patchelf are installed
+
+   ```bash
+   pip install nuitka patchelf
+   ```
+
+##### Run the optimized build script
+
+   ```bash
+   ./nbuild.sh
+   ```
+
+*The resulting binary will be located at dist/Riemann.*
+
+#### **Option B: Standard Build (PyInstaller)**
+
+The legacy build method is available for compatibility.  
+Some features like audio engine or an app icon may be missing in this build.
+
+   ```bash
+   pip install pyinstaller  
+   ./build.sh
+   ```
+
+### **Method 3: Running the pre-compiled binary**
+
+A pre-compiled and optimised version of the binary is available in the releases section of the GitHub page. You may choose to use it for the sake of convenience, but it may not run equally well on all distributions of Linux. It is compiled and tested on Ubuntu 24.04.02 LTS with Linux Kernel 6.8.0-94-generic on an x86_64 architecture machine.
+
+At the time of writing this README, the latest pre-compiled binary is available on [this](https://github.com/shadow30812/riemann/releases/download/v2.1/Riemann) page of the GitHub repository.
+
+## **AI & OCR Configuration**
+
+Riemann's AI features are strictly local-first and modular.
+
+### **Dynamic Model Loading**
+
+To keep the application lightweight, heavy Machine Learning libraries (Torch, Transformers) are **not** bundled directly into the core executable. Instead, they are loaded dynamically at runtime.
+
+* **Source Users:** Necessary libraries are in requirements.txt. If you do not use AI/OCR, you can remove torch and related ML packages to save space.  
+* **Binary Users:** The application loads models from the local environment or cache when the OCR worker is started. If not found, it downloads the models from the source repository. Download is triggered by clicking the OCR button (eye icon in the toolbar of the PDF Viewer), so take care to do it ahead of time in case of urgent use.
+
+### **Initializing Model Packs**
+
+Before using AI features, you must generate the local model package structure (if you are running from source) to ensure the inference engine has access to weights locally.
+
+./create\_model\_pack.sh
 
 ## **Keyboard Shortcuts**
 
@@ -112,7 +197,8 @@ Riemann prioritizes keyboard-centric workflows. The following mapping describes 
 | Ctrl \+ O | Open PDF Document |
 | Ctrl \+ Q | Quit Application |
 | Ctrl \+ , | Open Settings / Preferences |
-| F11 | Toggle Fullscreen Mode |
+| F | Toggle Fullscreen Mode |
+| Esc | Exit Fullscreen Mode |
 
 ### **Navigation and Viewing**
 
@@ -120,22 +206,22 @@ Riemann prioritizes keyboard-centric workflows. The following mapping describes 
 | :---- | :---- |
 | Up Arrow | Scroll Up |
 | Down Arrow | Scroll Down |
-| Page Up | Previous Page Viewport |
-| Page Down | Next Page Viewport |
+| Left Arrow | Previous Page |
+| Right Arrow | Next Page |
 | Ctrl \+ \+ | Zoom In |
 | Ctrl \+ \- | Zoom Out |
 | Ctrl \+ 0 | Reset Zoom to Fit |
-| Home | Jump to First Page |
-| End | Jump to Last Page |
 
 ### **Tools and Search**
 
 | Shortcut | Action |
 | :---- | :---- |
 | Ctrl \+ F | Focus Search Bar |
-| F3 or Enter | Find Next Occurrence |
-| Shift \+ F3 | Find Previous Occurrence |
-| Ctrl \+ Space | Trigger AI Context Menu |
+| Enter | Find Next Occurrence |
+| Home | Go to the first page |
+| End | Go to the last page |
+
+*Home and End might not work well for larger documents or e-books (>40 pages).*
 
 ### **Browser and Tabs**
 
@@ -145,9 +231,10 @@ Riemann prioritizes keyboard-centric workflows. The following mapping describes 
 | Ctrl \+ W | Close Current Tab |
 | Ctrl \+ Tab | Switch to Next Tab |
 | Ctrl \+ Shift \+ Tab | Switch to Previous Tab |
+| Backspace | Browser Back (if not in text field) |
 | Alt \+ Left Arrow | Browser Back |
 | Alt \+ Right Arrow | Browser Forward |
-| Ctrl \+ L | Focus Address Bar |
+| F6 | Focus Address Bar |
 
 ## **Licensing**
 
