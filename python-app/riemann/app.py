@@ -800,37 +800,45 @@ def install_linux_integration():
         apps_dir.mkdir(parents=True, exist_ok=True)
         icons_dir.mkdir(parents=True, exist_ok=True)
 
-        if hasattr(sys, "_MEIPASS"):
-            base_path = getattr(sys, "_MEIPASS")
-            # [FIX] Removed "riemann" dir, usually assets are at root of _MEIPASS in PyInstaller
-            internal_icon_path = os.path.join(base_path, "assets", "Icon.png")
-        else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        internal_icon_path = os.path.join(base_path, "assets", "Icon.png")
+
+        if not os.path.exists(internal_icon_path) and hasattr(sys, "_MEIPASS"):
+            internal_icon_path = os.path.join(
+                sys._MEIPASS,  # pyright: ignore[reportAttributeAccessIssue]
+                "riemann",
+                "assets",
+                "Icon.png",
+            )
+
+        if not os.path.exists(internal_icon_path):
+            print(f"Warning: Could not find internal icon at {internal_icon_path}")
             return
 
         persistent_icon_path = icons_dir / "riemann.png"
-
-        if os.path.exists(internal_icon_path):
-            shutil.copy2(internal_icon_path, persistent_icon_path)
+        shutil.copy2(internal_icon_path, persistent_icon_path)
 
         desktop_file_path = apps_dir / f"{app_name}.desktop"
         exe_path = sys.executable
 
         desktop_entry = f"""[Desktop Entry]
-            Type=Application
-            Name={app_name}
-            GenericName=PDF Reader
-            Comment=A standalone PDF reader and manager
-            Exec="{exe_path}"
-            Icon={persistent_icon_path}
-            Terminal=false
-            Categories=Office;Viewer;Utility;
-            StartupWMClass={app_name}
-            """
+Type=Application
+Name={app_name}
+GenericName=PDF Reader
+Comment=A standalone PDF reader and manager
+Exec="{exe_path}" %f
+Icon={persistent_icon_path}
+Terminal=false
+Categories=Office;Viewer;Utility;
+StartupWMClass={app_name}
+MimeType=application/pdf;
+"""
 
         with open(desktop_file_path, "w") as f:
             f.write(desktop_entry)
 
         os.system(f"update-desktop-database {apps_dir} > /dev/null 2>&1")
+        print(f"[Riemann] Integrated to desktop menu: {desktop_file_path}")
 
     except Exception as e:
         print(f"Icon integration warning: {e}")
