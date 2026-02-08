@@ -9,11 +9,8 @@ application entry point. It orchestrates the UI layout, tab management
 import os
 import sys
 
-# --- Environment Configuration ---
-# Must be set before QApplication is instantiated.
 os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "9222")
 
-# Handle PyInstaller paths for dynamic libraries (PDFium)
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     bundle_dir = getattr(sys, "_MEIPASS")
     os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = bundle_dir
@@ -22,8 +19,17 @@ import shutil
 from pathlib import Path
 from typing import List, Optional
 
-from PySide6.QtCore import QEvent, QObject, QSettings, QStringListModel, Qt, QTimer
+from PySide6.QtCore import (
+    QEvent,
+    QObject,
+    QSettings,
+    QStandardPaths,
+    QStringListModel,
+    Qt,
+    QTimer,
+)
 from PySide6.QtGui import QCloseEvent, QCursor, QIcon, QKeySequence, QShortcut
+from PySide6.QtWebEngineCore import QWebEngineProfile
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -78,19 +84,16 @@ class SettingsDialog(QDialog):
         form_layout = QFormLayout(self)
         self.setLayout(form_layout)
 
-        # Dark Mode Toggle
         self.cb_dark = QCheckBox()
         self.cb_dark.setChecked(parent.dark_mode)
         form_layout.addRow("Dark Mode:", self.cb_dark)
 
-        # Auto-Open PDF Toggle
         self.cb_auto_pdf = QCheckBox()
         self.cb_auto_pdf.setChecked(
             parent.settings.value("browser/auto_open_pdf", False, type=bool)
         )
         form_layout.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
 
-        # Dialog Buttons
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -119,29 +122,40 @@ class RiemannWindow(QMainWindow):
         self.incognito = incognito
         self.restore_session = restore_session
 
-        # Window Setup
         if self.incognito:
             self.setWindowTitle("Riemann Reader (Incognito)")
             self.setProperty("incognito", True)
+            self.web_profile = QWebEngineProfile()
         else:
             self.setWindowTitle("Riemann Reader")
+            self.web_profile = QWebEngineProfile("RiemannPersistentProfile", self)
+
+            base_path = QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.AppDataLocation
+            )
+            storage_path = os.path.join(base_path, "web_profile")
+            os.makedirs(storage_path, exist_ok=True)
+
+            self.web_profile.setPersistentStoragePath(storage_path)
+            self.web_profile.setCachePath(storage_path)
+            self.web_profile.setPersistentCookiesPolicy(
+                QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
+            )
+
+        user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        self.web_profile.setHttpUserAgent(user_agent)
 
         self.resize(1200, 900)
 
-        # Settings & State
         self.settings = QSettings("Riemann", "PDFReader")
         self.dark_mode: bool = self.settings.value("darkMode", True, type=bool)
 
-        # Managers
         self.download_manager_dialog = DownloadManager(self)
         self.history_manager = HistoryManager()
         self.history_model = QStringListModel(self.history_manager.get_model_data())
         self.bookmarks_manager = BookmarksManager()
 
-        # Tab Management State
         self.closed_tabs_stack: List[dict] = []
-
-        # UI Layout
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(self.splitter)
 
@@ -156,7 +170,6 @@ class RiemannWindow(QMainWindow):
         self.tabs_side.hide()
         self.splitter.addWidget(self.tabs_side)
 
-        # Initialization
         self.setup_menu()
         self._init_shortcuts()
         self._restore_session()
@@ -187,6 +200,24 @@ class RiemannWindow(QMainWindow):
             shortcut.activated.connect(slot)
 
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            modifiers = event.modifiers()
+
+            if modifiers & Qt.KeyboardModifier.ControlModifier:
+                if key == Qt.Key.Key_Tab:
+                    if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                        self.prev_tab()
+                    else:
+                        self.next_tab()
+                    return True
+
+            if key == Qt.Key.Key_Escape:
+                if self.isFullScreen():
+                    self.toggle_fullscreen()
+                    return True
+
+                return False
         if (
             getattr(self, "_reader_fullscreen", False)
             and event.type() == QEvent.Type.MouseMove
@@ -197,6 +228,20 @@ class RiemannWindow(QMainWindow):
                 self.hover_timer.start()
 
         return super().eventFilter(source, event)
+
+    def next_tab(self):
+        idx = self.tabs_main.currentIndex()
+        if idx < self.tabs_main.count() - 1:
+            self.tabs_main.setCurrentIndex(idx + 1)
+        else:
+            self.tabs_main.setCurrentIndex(0)
+
+    def prev_tab(self):
+        idx = self.tabs_main.currentIndex()
+        if idx > 0:
+            self.tabs_main.setCurrentIndex(idx - 1)
+        else:
+            self.tabs_main.setCurrentIndex(self.tabs_main.count() - 1)
 
     def _reveal_controls(self, show: bool):
         """Helper to show/hide the tab bar and menu bar."""
@@ -307,14 +352,28 @@ class RiemannWindow(QMainWindow):
     def _add_browser_tab(self, url: str, target_widget: QTabWidget) -> None:
         """
         Internal helper to instantiate and add a BrowserTab.
+        Passing the shared profile to avoid database locking.
 
         Args:
             url: The URL to load.
             target_widget: The tab widget to add the tab to.
         """
-        browser = BrowserTab(url, dark_mode=self.dark_mode)
+        if self.incognito:
+            use_profile = self.web_profile
+        else:
+            use_profile = self.web_profile
+
+        browser = BrowserTab(url, profile=use_profile, dark_mode=self.dark_mode)
         browser.completer.setModel(self.history_model)
+
         target_widget.addTab(browser, "Loading...")
+        i = target_widget.addTab(browser, "New Tab")
+        target_widget.setCurrentIndex(i)
+
+        browser.web.urlChanged.connect(
+            lambda qurl: self._update_tab_title(browser, qurl)
+        )
+        browser.web.loadFinished.connect(lambda ok: self._update_tab_title(browser))
 
     # --- UI Setup ---
 
@@ -407,7 +466,14 @@ class RiemannWindow(QMainWindow):
         if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
             target = self.tabs_side
 
-        browser = BrowserTab(url, dark_mode=self.dark_mode, incognito=is_incognito)
+        if incognito and not self.incognito:
+            tab_profile = QWebEngineProfile()
+        else:
+            tab_profile = self.web_profile
+
+        browser = BrowserTab(
+            url, profile=tab_profile, dark_mode=self.dark_mode, incognito=is_incognito
+        )
         browser.completer.setModel(self.history_model)
 
         label = "Incognito" if incognito else "Loading..."
@@ -415,7 +481,6 @@ class RiemannWindow(QMainWindow):
         new_tab = target.widget(target.count() - 1)
         target.setCurrentWidget(new_tab)
 
-        # Focus URL bar
         if hasattr(new_tab, "txt_url"):
             new_tab.txt_url.setFocus()
             new_tab.txt_url.selectAll()
@@ -802,8 +867,12 @@ def run() -> None:
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
         "--disable-web-security "
         "--autoplay-policy=no-user-gesture-required "
+        "--no-sandbox "
+        "--disable-setuid-sandbox "
         "--disable-features=AudioServiceOutOfProcess"
+        "--enable-features=WebEngineProprietaryCodecs"
     )
+    sys.argv.append("--no-sandbox")
     sys.argv.append("--disable-web-security")
     sys.argv.append("--autoplay-policy=no-user-gesture-required")
 

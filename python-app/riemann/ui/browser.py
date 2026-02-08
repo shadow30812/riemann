@@ -36,6 +36,29 @@ from PySide6.QtWidgets import (
 )
 
 
+class WebPage(QWebEnginePage):
+    def __init__(self, profile, parent=None):
+        super().__init__(profile, parent)
+
+    def createWindow(self, _type):
+        """
+        Handles popups (like Google Login) by creating a temporary view
+        that shares the same profile/session.
+        """
+        popup_view = QWebEngineView()
+        popup_view.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        popup_view.resize(800, 600)
+
+        page = WebPage(self.profile(), popup_view)
+        popup_view.setPage(page)
+        popup_view.show()
+        return page
+
+    def javaScriptConsoleMessage(self, level, message, line, source):
+        """Print web errors to your Python terminal"""
+        print(f"[JS] {message} (Line {line} in {source})\n\nlevel- {level}")
+
+
 class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
     """
     Intercepts network requests to block known advertising and tracking domains.
@@ -85,6 +108,7 @@ class BrowserTab(QWidget):
         self,
         start_url: str = "https://www.google.com",
         parent: Optional[QWidget] = None,
+        profile: Optional[QWebEngineProfile] = None,
         dark_mode: bool = True,
         incognito: bool = False,
     ) -> None:
@@ -101,25 +125,12 @@ class BrowserTab(QWidget):
         self.dark_mode = dark_mode
         self.incognito = incognito
 
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-
-        if self.incognito:
-            self.profile = QWebEngineProfile(self)
+        if profile:
+            self.profile = profile
         else:
-            base_path = QStandardPaths.writableLocation(
-                QStandardPaths.StandardLocation.AppDataLocation
-            )
-            storage_path = os.path.join(base_path, "browser_data")
-            os.makedirs(storage_path, exist_ok=True)
+            self.profile = QWebEngineProfile(self)
 
-            self.profile = QWebEngineProfile("RiemannPersistentProfile", self)
-            self.profile.setPersistentStoragePath(storage_path)
-            self.profile.setPersistentCookiesPolicy(
-                QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
-            )
-
-        user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        QWebEngineProfile.defaultProfile().setHttpUserAgent(user_agent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.ad_interceptor = AdBlockInterceptor(self)
         self.profile.setUrlRequestInterceptor(self.ad_interceptor)
@@ -259,7 +270,7 @@ class BrowserTab(QWidget):
             self.txt_url.setPlaceholderText("Incognito Mode")
 
         self.web = QWebEngineView()
-        page = QWebEnginePage(self.profile, self.web)
+        page = WebPage(self.profile, self.web)
         page.settings().setAttribute(
             QWebEngineSettings.WebAttribute.PdfViewerEnabled, False
         )
