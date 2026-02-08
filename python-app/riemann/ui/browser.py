@@ -7,7 +7,7 @@ audio processing injection (Riemann Audio), and download management.
 """
 
 import os
-import sys  # Added sys import
+import sys
 from typing import Any, Optional
 
 from PySide6.QtCore import QEvent, QObject, QStandardPaths, Qt, QTimer, QUrl
@@ -101,7 +101,6 @@ class BrowserTab(QWidget):
         self.dark_mode = dark_mode
         self.incognito = incognito
 
-        # [FIX] Allow the widget to accept focus so focusInEvent triggers
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         if self.incognito:
@@ -118,6 +117,9 @@ class BrowserTab(QWidget):
             self.profile.setPersistentCookiesPolicy(
                 QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
             )
+
+        user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        QWebEngineProfile.defaultProfile().setHttpUserAgent(user_agent)
 
         self.ad_interceptor = AdBlockInterceptor(self)
         self.profile.setUrlRequestInterceptor(self.ad_interceptor)
@@ -264,6 +266,10 @@ class BrowserTab(QWidget):
         page.settings().setAttribute(
             QWebEngineSettings.WebAttribute.FullScreenSupportEnabled, True
         )
+        page.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard, True
+        )
+        page.featurePermissionRequested.connect(self._on_feature_permission_requested)
         page.fullScreenRequested.connect(self._handle_fullscreen_request)
         self.web.setPage(page)
         layout.addWidget(self.web)
@@ -342,7 +348,6 @@ class BrowserTab(QWidget):
 
         self.web.load(QUrl(start_url))
 
-    # [FIX] Automatically forward focus to web view when tab is selected
     def focusInEvent(self, event: Any) -> None:
         """
         Handles the event when the Tab widget itself receives focus.
@@ -350,6 +355,24 @@ class BrowserTab(QWidget):
         """
         self.web.setFocus()
         super().focusInEvent(event)
+
+    def _on_feature_permission_requested(
+        self, url: QUrl, feature: QWebEnginePage.Feature
+    ) -> None:
+        """
+        Auto-grants permissions for Clipboard access so 'Copy' buttons work.
+        """
+        if feature in (
+            QWebEnginePage.Feature.ClipboardReadWrite,
+            QWebEnginePage.Feature.ClipboardWrite,
+        ):
+            self.web.page().setFeaturePermission(
+                url, feature, QWebEnginePage.PermissionPolicy.PermissionGrantedByUser
+            )
+        else:
+            self.web.page().setFeaturePermission(
+                url, feature, QWebEnginePage.PermissionPolicy.PermissionDeniedByUser
+            )
 
     def open_devtools(self) -> None:
         """Opens the Web Inspector for the current page in a separate window."""

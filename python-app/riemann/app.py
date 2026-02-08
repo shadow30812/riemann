@@ -22,8 +22,8 @@ import shutil
 from pathlib import Path
 from typing import List, Optional
 
-from PySide6.QtCore import QSettings, QStringListModel, Qt
-from PySide6.QtGui import QCloseEvent, QIcon, QKeySequence, QShortcut
+from PySide6.QtCore import QEvent, QObject, QSettings, QStringListModel, Qt, QTimer
+from PySide6.QtGui import QCloseEvent, QCursor, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -161,6 +161,14 @@ class RiemannWindow(QMainWindow):
         self._init_shortcuts()
         self._restore_session()
 
+        self.setMouseTracking(True)
+        self.installEventFilter(self)
+
+        self.hover_timer = QTimer(self)
+        self.hover_timer.setInterval(500)
+        self.hover_timer.setSingleShot(True)
+        self.hover_timer.timeout.connect(self._check_auto_hide)
+
     def _init_shortcuts(self) -> None:
         """Initializes global keyboard shortcuts."""
         shortcuts = [
@@ -177,6 +185,37 @@ class RiemannWindow(QMainWindow):
             shortcut = QShortcut(QKeySequence(seq), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(slot)
+
+    def eventFilter(self, source: QObject, event: QEvent) -> bool:
+        if (
+            getattr(self, "_reader_fullscreen", False)
+            and event.type() == QEvent.Type.MouseMove
+        ):
+            if event.pos().y() < 10:
+                self._reveal_controls(True)
+            elif event.pos().y() > 100:
+                self.hover_timer.start()
+
+        return super().eventFilter(source, event)
+
+    def _reveal_controls(self, show: bool):
+        """Helper to show/hide the tab bar and menu bar."""
+        if show:
+            self.menuBar().show()
+            self.tabs_main.tabBar().show()
+            if self.tabs_side.isVisible():
+                self.tabs_side.tabBar().show()
+        else:
+            self.menuBar().hide()
+            self.tabs_main.tabBar().hide()
+            if self.tabs_side.isVisible():
+                self.tabs_side.tabBar().hide()
+
+    def _check_auto_hide(self):
+        """Hides controls if mouse is not at the top."""
+        mouse_pos = self.mapFromGlobal(QCursor.pos())
+        if mouse_pos.y() > 100 and getattr(self, "_reader_fullscreen", False):
+            self._reveal_controls(False)
 
     # --- History & Session Management ---
 
