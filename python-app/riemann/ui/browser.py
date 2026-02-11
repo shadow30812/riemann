@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 class WebPage(QWebEnginePage):
     def __init__(self, profile, parent=None):
         super().__init__(profile, parent)
+        self._popups = []
 
     def createWindow(self, _type):
         """
@@ -49,19 +50,29 @@ class WebPage(QWebEnginePage):
         popup_view.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         popup_view.resize(800, 600)
 
+        self._popups.append(popup_view)
+        popup_view.destroyed.connect(lambda: self._cleanup_popup(popup_view))
+
         page = WebPage(self.profile(), popup_view)
         popup_view.setPage(page)
         popup_view.show()
         return page
 
+    def _cleanup_popup(self, popup):
+        if popup in self._popups:
+            self._popups.remove(popup)
+
     def javaScriptConsoleMessage(self, level, message, line, source):
         """Print web errors to your Python terminal"""
+        self.level = level
         print(f"[JS] {message} (Line {line} in {source})\n\nlevel- {level}")
 
 
-class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
+class RequestInterceptor(QWebEngineUrlRequestInterceptor):
     """
-    Intercepts network requests to block known advertising and tracking domains.
+    Handles AdBlocking by intercepting network requests to known advertising
+    and tracking domains, User Agent spoofing for WhatsApp,
+    and surgical Header injection for Monkeytype/Firebase auth.
     """
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
@@ -79,6 +90,7 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
             "youtube.com/pagead",
             "google-analytics.com",
         ]
+        self.spoofed_ua = b"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.7559.59 Safari/537.36"
 
     def interceptRequest(self, info: QWebEngineUrlRequestInfo) -> None:
         """
@@ -90,6 +102,27 @@ class AdBlockInterceptor(QWebEngineUrlRequestInterceptor):
         url = info.requestUrl().toString().lower()
         if any(domain in url for domain in self.blocked_domains):
             info.block(True)
+            return
+
+        if "whatsapp.com" in url:
+            info.setHttpHeader(b"User-Agent", self.spoofed_ua)
+
+        should_inject_referer = (
+            "monkeytype.com" in url or "googleapis.com" in url
+        ) and "accounts.google.com" not in url
+
+        if should_inject_referer:
+            r_type = info.resourceType()
+
+            target_types = [
+                QWebEngineUrlRequestInfo.ResourceType.ResourceTypeMainFrame,
+                QWebEngineUrlRequestInfo.ResourceType.ResourceTypeXhr,
+                QWebEngineUrlRequestInfo.ResourceType.ResourceTypeSubFrame,
+            ]
+
+            if r_type in target_types:
+                info.setHttpHeader(b"Referer", b"https://monkeytype.com/")
+                info.setHttpHeader(b"Origin", b"https://monkeytype.com")
 
 
 class BrowserTab(QWidget):
@@ -132,8 +165,8 @@ class BrowserTab(QWidget):
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        self.ad_interceptor = AdBlockInterceptor(self)
-        self.profile.setUrlRequestInterceptor(self.ad_interceptor)
+        self.request_interceptor = RequestInterceptor(self)
+        self.profile.setUrlRequestInterceptor(self.request_interceptor)
 
         self.profile.downloadRequested.connect(self._handle_download)
         self.inject_ad_skipper()
@@ -162,7 +195,7 @@ class BrowserTab(QWidget):
         self.completer = QCompleter()
         self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        self.completer.setCompletionMode(QCompleter.CompletionMode.InlineCompletion)
+        self.completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self.txt_url.setCompleter(self.completer)
 
         if self.incognito:

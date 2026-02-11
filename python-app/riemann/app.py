@@ -9,7 +9,7 @@ application entry point. It orchestrates the UI layout, tab management
 import os
 import sys
 
-os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "9222")
+# os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "9222")
 
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     bundle_dir = getattr(sys, "_MEIPASS")
@@ -123,11 +123,11 @@ class RiemannWindow(QMainWindow):
         self.restore_session = restore_session
 
         if self.incognito:
-            self.setWindowTitle("Riemann Reader (Incognito)")
+            self.setWindowTitle("Riemann (Incognito)")
             self.setProperty("incognito", True)
             self.web_profile = QWebEngineProfile()
         else:
-            self.setWindowTitle("Riemann Reader")
+            self.setWindowTitle("Riemann")
             self.web_profile = QWebEngineProfile("RiemannPersistentProfile", self)
 
             base_path = QStandardPaths.writableLocation(
@@ -142,8 +142,8 @@ class RiemannWindow(QMainWindow):
                 QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
             )
 
-        user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        self.web_profile.setHttpUserAgent(user_agent)
+        # user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+        # self.web_profile.setHttpUserAgent(user_agent)
 
         self.resize(1200, 900)
 
@@ -855,6 +855,23 @@ class RiemannWindow(QMainWindow):
         self._add_pdf_tab(path, target)
         target.setCurrentIndex(target.count() - 1)
 
+    def _update_tab_title(self, browser, *args):
+        """
+        Updates the tab title when the web page title changes.
+        """
+        title = browser.web.title()
+        display_title = (title[:20] + "..") if len(title) > 20 else title
+
+        idx = self.tabs_main.indexOf(browser)
+        if idx != -1:
+            self.tabs_main.setTabText(idx, display_title)
+            return
+
+        if self.tabs_side.isVisible():
+            idx = self.tabs_side.indexOf(browser)
+            if idx != -1:
+                self.tabs_side.setTabText(idx, display_title)
+
 
 def run() -> None:
     """
@@ -863,16 +880,15 @@ def run() -> None:
     Sets required Chromium flags for the QtWebEngine, initializes the QApplication,
     and starts the main event loop.
     """
-    # Security flags required for local file access and autoplay in the browser component
+
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
         "--disable-web-security "
         "--autoplay-policy=no-user-gesture-required "
-        "--no-sandbox "
         "--disable-setuid-sandbox "
         "--disable-features=AudioServiceOutOfProcess"
+        "--referrer-policy=no-referrer-when-downgrade "
         "--enable-features=WebEngineProprietaryCodecs"
     )
-    sys.argv.append("--no-sandbox")
     sys.argv.append("--disable-web-security")
     sys.argv.append("--autoplay-policy=no-user-gesture-required")
 
