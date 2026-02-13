@@ -47,8 +47,8 @@
                 'flat': { name: '➖ Flat / Reference', gain: 1.0, sat: 0, width: 1.0, bass: 0.0, treble: 0.0, air: 0.0 }
             };
 
-            this.currentPreset = 'universal';
-            this.params = { ...this.presets['universal'] };
+            this.currentPreset = 'flat';
+            this.params = { ...this.presets['flat'] };
 
             this.initUI();
             this.startObserver();
