@@ -130,7 +130,9 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         """Initializes keyboard shortcuts."""
         shortcuts = [
             ("Ctrl+F", self.toggle_search_bar),
-            ("Ctrl+A", self.btn_annotate.click),
+            ("Ctrl+I", self.toggle_ai_search_bar),
+            ("Ctrl+Shift+A", self.btn_annotate.click),
+            ("Ctrl+A", self.select_all_text),
             ("Ctrl+Z", self.undo_annotation),
             ("Ctrl+Shift+Z", self.redo_annotation),
         ]
@@ -194,6 +196,9 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
 
         self._setup_search_bar()
         layout.addWidget(self.search_bar)
+
+        self._setup_ai_search_bar()
+        layout.addWidget(self.ai_search_bar)
 
         self.stack = QStackedWidget()
         self._setup_scroll_area()
@@ -277,6 +282,14 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         self.btn_search.setCheckable(True)
         self.btn_search.clicked.connect(self.toggle_search_bar)
 
+        self.btn_ai_search = QPushButton("✨")
+        self.btn_ai_search.setToolTip("AI Semantic Search (Ctrl+I)")
+        self.btn_ai_search.setCheckable(True)
+        self.btn_ai_search.setStyleSheet(
+            "color: #9b59b6; font-weight: bold; font-size: 16px;"
+        )
+        self.btn_ai_search.clicked.connect(self.toggle_ai_search_bar)
+
         widgets = [
             self.btn_save,
             self.btn_export,
@@ -284,6 +297,7 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
             self.btn_facing,
             self.btn_scroll_mode,
             self.btn_search,
+            self.btn_ai_search,
             self.btn_annotate,
             self.btn_snip,
             self.btn_ocr,
@@ -327,6 +341,58 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         sb_layout.addWidget(self.btn_find_next)
         sb_layout.addWidget(self.btn_close_search)
 
+    def _setup_ai_search_bar(self) -> None:
+        """Initializes the visually distinct AI Semantic Search widget."""
+        self.ai_search_bar = QWidget()
+        self.ai_search_bar.setVisible(False)
+        self.ai_search_bar.setFixedHeight(45)
+
+        self.ai_search_bar.setStyleSheet("background-color: #2b1d3d; color: #e6d0ff;")
+
+        sb_layout = QHBoxLayout(self.ai_search_bar)
+        sb_layout.setContentsMargins(10, 5, 10, 5)
+
+        self.txt_ai_search = QLineEdit()
+        self.txt_ai_search.setPlaceholderText(
+            "Ask AI to find concepts, meanings, or subjects..."
+        )
+        self.txt_ai_search.setStyleSheet(
+            "background-color: #1a1025; border: 1px solid #7b4bce; "
+            "border-radius: 4px; padding: 4px; color: white;"
+        )
+        self.txt_ai_search.returnPressed.connect(
+            lambda: self.ai_search(self.txt_ai_search.text())
+        )
+
+        self.btn_ai_find = QPushButton("Ask AI ✨")
+        self.btn_ai_find.setStyleSheet(
+            "background-color: #7b4bce; color: white; border-radius: 4px; padding: 4px 10px;"
+        )
+        self.btn_ai_find.clicked.connect(
+            lambda: self.ai_search(self.txt_ai_search.text())
+        )
+
+        self.btn_close_ai_search = QPushButton("✕")
+        self.btn_close_ai_search.setFlat(True)
+        self.btn_close_ai_search.setStyleSheet("color: #e6d0ff; font-weight: bold;")
+        self.btn_close_ai_search.clicked.connect(self.toggle_ai_search_bar)
+
+        sb_layout.addWidget(QLabel("✨ AI Search:"))
+        sb_layout.addWidget(self.txt_ai_search)
+        sb_layout.addWidget(self.btn_ai_find)
+        sb_layout.addWidget(self.btn_close_ai_search)
+
+    def select_all_text(self) -> None:
+        """Selects all text on the page."""
+        if self.view_mode == ViewMode.REFLOW:
+            from PySide6.QtWebEngineCore import QWebEnginePage
+
+            self.web.page().triggerAction(QWebEnginePage.WebAction.SelectAll)
+        else:
+            self.show_toast(
+                "Select All is currently only supported in Reflow (Web/Markdown) mode."
+            )
+
     def _setup_scroll_area(self) -> None:
         """Initializes the scroll area and virtualization container."""
         self.scroll = QScrollArea()
@@ -366,6 +432,8 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
             self.current_path = path
             self.settings.setValue("lastFile", path)
             self.load_annotations()
+
+            # QTimer.singleShot(1000, self.index_pdf_for_ai)
 
             if restore_state:
                 saved_page = self.settings.value("lastPage", 0, type=int)

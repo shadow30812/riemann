@@ -633,6 +633,15 @@ class BrowserTab(QWidget):
                     self.btn_music.click()
                     return True
 
+                if key == Qt.Key.Key_Tab:
+                    if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                        if hasattr(self.window(), "prev_tab"):
+                            self.window().prev_tab()
+                    else:
+                        if hasattr(self.window(), "next_tab"):
+                            self.window().next_tab()
+                    return True
+
         return super().eventFilter(source, event)
 
     def modify_zoom(self, delta: float) -> None:

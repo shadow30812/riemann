@@ -162,11 +162,13 @@ class RiemannWindow(QMainWindow):
         self.tabs_main = DraggableTabWidget()
         self.tabs_main.setTabsClosable(True)
         self.tabs_main.tabCloseRequested.connect(self.close_tab)
+        self.tabs_main.currentChanged.connect(self._update_window_title)
         self.splitter.addWidget(self.tabs_main)
 
         self.tabs_side = DraggableTabWidget()
         self.tabs_side.setTabsClosable(True)
         self.tabs_side.tabCloseRequested.connect(self.close_side_tab)
+        self.tabs_side.currentChanged.connect(self._update_window_title)
         self.tabs_side.hide()
         self.splitter.addWidget(self.tabs_side)
 
@@ -218,6 +220,7 @@ class RiemannWindow(QMainWindow):
                     return True
 
                 return False
+
         if (
             getattr(self, "_reader_fullscreen", False)
             and event.type() == QEvent.Type.MouseMove
@@ -261,6 +264,22 @@ class RiemannWindow(QMainWindow):
         mouse_pos = self.mapFromGlobal(QCursor.pos())
         if mouse_pos.y() > 100 and getattr(self, "_reader_fullscreen", False):
             self._reveal_controls(False)
+
+    def _update_window_title(self, index: int = -1) -> None:
+        """Updates the main window title to reflect the active tab."""
+        target = (
+            self.tabs_side
+            if (self.tabs_side.isVisible() and self.tabs_side.hasFocus())
+            else self.tabs_main
+        )
+        idx = target.currentIndex()
+        prefix = "Riemann (Incognito)" if self.incognito else "Riemann"
+
+        if idx != -1:
+            tab_title = target.tabText(idx)
+            self.setWindowTitle(f"{prefix} - {tab_title}")
+        else:
+            self.setWindowTitle(prefix)
 
     # --- History & Session Management ---
 
@@ -380,8 +399,6 @@ class RiemannWindow(QMainWindow):
     def setup_menu(self) -> None:
         """Configures the main window menu bar actions."""
         menubar = self.menuBar()
-
-        # File Menu
         file_menu = menubar.addMenu("File")
 
         actions = [
@@ -510,22 +527,18 @@ class RiemannWindow(QMainWindow):
         if not paths:
             return
 
-        # Handle the first file
         first_path = paths[0]
         self.add_to_history(first_path)
         current = self.tabs_main.currentWidget()
 
         if isinstance(current, ReaderTab) and not current.current_path:
-            # Reuse empty tab
             current.load_document(first_path)
             self.tabs_main.setTabText(
                 self.tabs_main.currentIndex(), os.path.basename(first_path)
             )
         else:
-            # New tab
             self.new_pdf_tab(first_path)
 
-        # Handle remaining files (always new tabs)
         for path in paths[1:]:
             self.add_to_history(path)
             self.new_pdf_tab(path)
@@ -712,7 +725,6 @@ class RiemannWindow(QMainWindow):
         target = None
         curr = focus_widget
 
-        # Traverse up to find the parent TabWidget
         while curr:
             if curr == self.tabs_main:
                 target = self.tabs_main
@@ -722,7 +734,6 @@ class RiemannWindow(QMainWindow):
                 break
             curr = curr.parent()
 
-        # Default to main tabs if no specific parent found
         if not target:
             target = (
                 self.tabs_main
@@ -865,12 +876,14 @@ class RiemannWindow(QMainWindow):
         idx = self.tabs_main.indexOf(browser)
         if idx != -1:
             self.tabs_main.setTabText(idx, display_title)
+            self._update_window_title()
             return
 
         if self.tabs_side.isVisible():
             idx = self.tabs_side.indexOf(browser)
             if idx != -1:
                 self.tabs_side.setTabText(idx, display_title)
+                self._update_window_title()
 
 
 def run() -> None:

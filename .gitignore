@@ -11,3 +11,9 @@ releases/download/
 them/
 flexibility.java
 *crash-report*
+riemann_ai_engine/
+riemann_core.abi3.so
+build_ai/
+*debug.log
+*.build
+*.dist

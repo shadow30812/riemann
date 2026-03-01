@@ -4,8 +4,10 @@ Annotations Mixin.
 Handles annotation tools (pen, note), undo/redo stacks, and file persistence.
 """
 
+import hashlib
 import json
 import os
+from pathlib import Path
 from typing import Any, Dict
 
 from PySide6.QtCore import Qt
@@ -18,11 +20,20 @@ from ..widgets import PageWidget
 class AnnotationsMixin:
     """Methods for managing user annotations."""
 
+    def _get_annotation_path(self) -> str:
+        """Generates a centralized system path for storing the PDF's annotations."""
+        if not self.current_path:
+            return ""
+        path_hash = hashlib.sha256(self.current_path.encode("utf-8")).hexdigest()
+        base_dir = Path.home() / ".local" / "share" / "riemann" / "annotations"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        return str(base_dir / f"{path_hash}.json")
+
     def load_annotations(self) -> None:
         """Loads annotations from JSON."""
         if not self.current_path:
             return
-        p = str(self.current_path) + ".riemann.json"
+        p = self._get_annotation_path()
         if os.path.exists(p):
             with open(p, "r") as f:
                 self.annotations = json.load(f)
@@ -33,7 +44,8 @@ class AnnotationsMixin:
         """Saves annotations to JSON."""
         if not self.current_path:
             return
-        with open(str(self.current_path) + ".riemann.json", "w") as f:
+        p = self._get_annotation_path()
+        with open(p, "w") as f:
             json.dump(self.annotations, f)
 
     def toggle_annotation_mode(self, checked: bool) -> None:
