@@ -232,10 +232,15 @@ class AiMixin:
                 base_path = os.path.abspath(os.path.join(base_path, "..", "..", ".."))
 
             ai_dir = os.path.join(base_path, "assets", "riemann_ai_engine")
-            exe_name = "main.exe" if sys.platform == "win32" else "main.bin"
-            ai_exe = os.path.join(ai_dir, exe_name)
 
-            if not os.path.exists(ai_exe):
+            if sys.platform == "win32":
+                python_exe = os.path.join(ai_dir, "env", "python.exe")
+            else:
+                python_exe = os.path.join(ai_dir, "env", "bin", "python")
+
+            ai_script = os.path.join(ai_dir, "main.py")
+
+            if not os.path.exists(python_exe) or not os.path.exists(ai_script):
                 dev_script = os.path.join(
                     base_path, "..", "..", "riemann-ai", "main.py"
                 )
@@ -249,7 +254,7 @@ class AiMixin:
                     atexit.register(self._kill_ai_engine)
                     return
                 else:
-                    print(f"AI Engine not found at {ai_exe}")
+                    print(f"AI Engine not found at {python_exe}")
                     return
 
             startupinfo = None
@@ -259,10 +264,9 @@ class AiMixin:
 
             log_path = os.path.join(base_path, "assets", "ai_engine_debug.log")
             self.ai_log_file = open(log_path, "w")
-            print(f"AI Engine startup initiated. Logging output to: {log_path}")
 
             self.ai_process = subprocess.Popen(
-                [ai_exe],
+                [python_exe, ai_script],  # Call bundled python with main.py
                 cwd=ai_dir,
                 startupinfo=startupinfo,
                 stdout=self.ai_log_file,
@@ -270,7 +274,6 @@ class AiMixin:
                 close_fds=True,
             )
             atexit.register(self._kill_ai_engine)
-            print("AI Engine startup initiated. Check terminal for Uvicorn logs.")
 
         except Exception as e:
             print(f"Failed to start AI Engine: {e}")

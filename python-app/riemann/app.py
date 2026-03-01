@@ -19,6 +19,7 @@ import shutil
 from pathlib import Path
 from typing import List, Optional
 
+import fitz
 from PySide6.QtCore import (
     QEvent,
     QObject,
@@ -37,8 +38,10 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QInputDialog,
     QListWidget,
     QMainWindow,
+    QMessageBox,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
@@ -281,6 +284,115 @@ class RiemannWindow(QMainWindow):
         else:
             self.setWindowTitle(prefix)
 
+    def split_pdf(self) -> None:
+        """Utility to extract specific pages into a new PDF."""
+        current = self.tabs_main.currentWidget()
+        source_path = ""
+        if isinstance(current, ReaderTab) and current.current_path:
+            source_path = current.current_path
+        else:
+            source_path, _ = QFileDialog.getOpenFileName(
+                self, "Select PDF to Split", "", "PDF Files (*.pdf)"
+            )
+
+        if not source_path:
+            return
+
+        pages_str, ok = QInputDialog.getText(
+            self, "Split PDF", "Enter page ranges to extract (e.g., 1-5, 8, 11-15):"
+        )
+        if not ok or not pages_str.strip():
+            return
+
+        dest_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Split PDF As", "", "PDF Files (*.pdf)"
+        )
+        if not dest_path:
+            return
+
+        try:
+            src_doc = fitz.open(source_path)
+            new_doc = fitz.open()
+            max_idx = src_doc.page_count - 1
+
+            for part in pages_str.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+
+                if "-" in part:
+                    start, end = map(int, part.split("-"))
+                    start_idx = min(max(0, start - 1), max_idx)
+                    end_idx = min(max(0, end - 1), max_idx)
+
+                    if start_idx <= end_idx:
+                        new_doc.insert_pdf(
+                            src_doc, from_page=start_idx, to_page=end_idx
+                        )
+                else:
+                    page_idx = int(part) - 1
+                    if 0 <= page_idx <= max_idx:
+                        new_doc.insert_pdf(
+                            src_doc, from_page=page_idx, to_page=page_idx
+                        )
+
+            new_doc.save(dest_path)
+            new_doc.close()
+            src_doc.close()
+
+            if (
+                QMessageBox.question(
+                    self, "Success", f"Saved to {dest_path}.\nOpen in new tab?"
+                )
+                == QMessageBox.StandardButton.Yes
+            ):
+                self.new_pdf_tab(dest_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to split PDF: {e}")
+
+    def join_pdfs(self) -> None:
+        """Utility to merge multiple PDFs into one."""
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select PDFs to Merge", "", "PDF Files (*.pdf)"
+        )
+        if not paths or len(paths) < 2:
+            if paths:
+                QMessageBox.warning(
+                    self, "Merge PDFs", "Please select at least two PDF files."
+                )
+            return
+
+        dest_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Merged PDF As", "merged.pdf", "PDF Files (*.pdf)"
+        )
+        if not dest_path:
+            return
+
+        # Ensure consistent order (Alphabetical) across all operating systems
+        paths.sort()
+
+        try:
+            merged_doc = fitz.open()
+            for path in paths:
+                doc = fitz.open(path)
+                merged_doc.insert_pdf(doc)
+                doc.close()
+
+            merged_doc.save(dest_path)
+            merged_doc.close()
+
+            if (
+                QMessageBox.question(
+                    self,
+                    "Success",
+                    f"Merged PDF saved to {dest_path}.\nOpen in new tab?",
+                )
+                == QMessageBox.StandardButton.Yes
+            ):
+                self.new_pdf_tab(dest_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to merge PDFs: {e}")
+
     # --- History & Session Management ---
 
     def add_to_history(self, item: str, item_type: str = "web") -> None:
@@ -405,6 +517,9 @@ class RiemannWindow(QMainWindow):
             ("Open PDF", "Ctrl+O", self.open_pdf_smart),
             ("Open New PDF Tab", "Ctrl+T", self.open_pdf_smart),
             (None, None, None),  # Separator
+            ("Split Current PDF", None, self.split_pdf),
+            ("Merge PDFs", None, self.join_pdfs),
+            (None, None, None),  # Separator
             ("New Browser Tab", "Ctrl+B", lambda: self.new_browser_tab()),
             ("New Window", "Ctrl+N", self.new_window),
             ("New Incognito Tab", "Ctrl+Shift+N", self.new_incognito_window),
@@ -467,8 +582,11 @@ class RiemannWindow(QMainWindow):
             self.tabs_main.setCurrentWidget(reader)
 
     def new_browser_tab(
-        self, url: str = "https://www.google.com", incognito: bool = False
-    ) -> None:
+        self,
+        url: str = "https://www.google.com",
+        incognito: bool = False,
+        background: bool = False,
+    ) -> BrowserTab:
         """
         Creates a new Web Browser tab.
         Prioritizes the focused side tab widget if active.
@@ -476,17 +594,19 @@ class RiemannWindow(QMainWindow):
         Args:
             url: The URL to navigate to.
             incognito: Whether to enable incognito mode for this tab.
+            background: Open tab in background or foreground
         """
         is_incognito = self.incognito or incognito
-
         target = self.tabs_main
+
         if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
             target = self.tabs_side
 
-        if incognito and not self.incognito:
-            tab_profile = QWebEngineProfile()
-        else:
-            tab_profile = self.web_profile
+        tab_profile = (
+            QWebEngineProfile()
+            if (incognito and not self.incognito)
+            else self.web_profile
+        )
 
         browser = BrowserTab(
             url, profile=tab_profile, dark_mode=self.dark_mode, incognito=is_incognito
@@ -496,11 +616,14 @@ class RiemannWindow(QMainWindow):
         label = "Incognito" if incognito else "Loading..."
         target.addTab(browser, label)
         new_tab = target.widget(target.count() - 1)
-        target.setCurrentWidget(new_tab)
 
-        if hasattr(new_tab, "txt_url"):
-            new_tab.txt_url.setFocus()
-            new_tab.txt_url.selectAll()
+        if not background:
+            target.setCurrentWidget(new_tab)
+            if hasattr(new_tab, "txt_url") and not url:
+                new_tab.txt_url.setFocus()
+                new_tab.txt_url.selectAll()
+
+        return browser
 
     def new_window(self) -> None:
         """Spawns a new independent standard application window."""

@@ -43,9 +43,22 @@ class WebPage(QWebEnginePage):
 
     def createWindow(self, _type):
         """
-        Handles popups (like Google Login) by creating a temporary view
-        that shares the same profile/session.
+        Handles background tab opening and popups (like Google Login) by
+        creating a temporary view that shares the same profile/session.
         """
+        view = self.parent()
+        main_win = view.window() if view else None
+
+        if _type == QWebEnginePage.WebWindowType.WebBrowserBackgroundTab:
+            if hasattr(main_win, "new_browser_tab"):
+                new_tab = main_win.new_browser_tab(url="", background=True)
+                return new_tab.web.page()
+
+        elif _type == QWebEnginePage.WebWindowType.WebBrowserTab:
+            if hasattr(main_win, "new_browser_tab"):
+                new_tab = main_win.new_browser_tab(url="", background=False)
+                return new_tab.web.page()
+
         popup_view = QWebEngineView()
         popup_view.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         popup_view.resize(800, 600)
