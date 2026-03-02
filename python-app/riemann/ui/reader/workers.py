@@ -104,3 +104,88 @@ class InferenceThread(QThread):
             self.finished_inference.emit(code)
         except Exception as e:
             self.error_occurred.emit(f"Inference Error: {str(e)}")
+
+
+class SignatureValidationWorker(QThread):
+    """Runs pyHanko validation in the background to prevent UI freezing."""
+
+    finished_validation = Signal(str, str, list)
+
+    def __init__(self, pdf_path: str, trusted_hashes: list, parent=None):
+        super().__init__(parent)
+        self.pdf_path = pdf_path
+        self.trusted_hashes = trusted_hashes or []
+
+    def run(self):
+        try:
+            from pyhanko.pdf_utils.reader import PdfFileReader
+            from pyhanko.sign.validation import validate_pdf_signature
+        except ImportError:
+            self.finished_validation.emit(
+                "ERROR",
+                "pyHanko is not installed. Run: pip install pyhanko cryptography",
+                [],
+            )
+            return
+
+        try:
+            with open(self.pdf_path, "rb") as f:
+                reader = PdfFileReader(f)
+                embedded_sigs = reader.embedded_signatures
+
+                if not embedded_sigs:
+                    self.finished_validation.emit("NONE", "No signatures.", [])
+                    return
+
+                all_valid = True
+                all_trusted = True
+                sig_details = []
+
+                for sig in embedded_sigs:
+                    status = validate_pdf_signature(sig)
+                    valid = status.bottom_line
+                    all_valid = all_valid and valid
+
+                    cert = status.signer_info.signing_cert
+                    # Generate a unique hash for the certificate
+                    cert_hash = cert.dump().hex()[:40] if cert else ""
+                    subject = (
+                        cert.subject.human_friendly if cert else "Unknown Identity"
+                    )
+
+                    is_trusted = cert_hash in self.trusted_hashes
+                    all_trusted = all_trusted and is_trusted
+
+                    sig_details.append(
+                        {
+                            "field_name": sig.field_name,
+                            "subject": subject,
+                            "valid": valid,
+                            "cert_hash": cert_hash,
+                            "is_trusted": is_trusted,
+                        }
+                    )
+
+                if not all_valid:
+                    self.finished_validation.emit(
+                        "INVALID",
+                        "🟥 Signature is INVALID. Document modified.",
+                        sig_details,
+                    )
+                elif all_valid and all_trusted:
+                    self.finished_validation.emit(
+                        "VALID",
+                        "🟩 Signed and all signatures are valid and trusted.",
+                        sig_details,
+                    )
+                else:
+                    self.finished_validation.emit(
+                        "UNKNOWN_IDENTITY",
+                        "🟨 Signed, but certificate validity is unknown.",
+                        sig_details,
+                    )
+
+        except Exception as e:
+            self.finished_validation.emit(
+                "ERROR", f"Error reading signatures: {str(e)}", []
+            )

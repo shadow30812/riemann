@@ -44,6 +44,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSplitter,
     QTabWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -174,6 +176,10 @@ class RiemannWindow(QMainWindow):
         self.tabs_side.currentChanged.connect(self._update_window_title)
         self.tabs_side.hide()
         self.splitter.addWidget(self.tabs_side)
+
+        self.tree_signatures = QTreeWidget()
+        self.tree_signatures.setHeaderLabels(["Identity", "Details"])
+        self.tabs_side.addTab(self.tree_signatures, "🖊️ Signatures")
 
         self.setup_menu()
         self._init_shortcuts()
@@ -461,6 +467,39 @@ class RiemannWindow(QMainWindow):
                 elif item.get("type") == "web" and item.get("data"):
                     self._add_browser_tab(item["data"], target_widget)
 
+    def update_signatures_sidebar(self, signatures: list) -> None:
+        self.tree_signatures.clear()
+
+        if not signatures:
+            item = QTreeWidgetItem(self.tree_signatures)
+            item.setText(0, "No digital signatures found.")
+            return
+
+        for sig in signatures:
+            # Checkmark if valid AND trusted, else Warning icon
+            icon = (
+                "✔️"
+                if (sig["valid"] and sig["is_trusted"])
+                else ("🟨" if sig["valid"] else "❌")
+            )
+
+            item = QTreeWidgetItem(self.tree_signatures)
+            item.setText(0, f"{icon} {sig['subject']}")
+            item.setText(1, sig["field_name"])
+
+            child_cert = QTreeWidgetItem(item)
+            child_cert.setText(0, f"Cert Hash: {sig['cert_hash'][:15]}...")
+
+            if not sig["is_trusted"] and sig["valid"]:
+                child_warn = QTreeWidgetItem(item)
+                child_warn.setText(0, "Identity Unknown (Not in Trust Store)")
+
+            if not sig["valid"]:
+                child_err = QTreeWidgetItem(item)
+                child_err.setText(0, "CRITICAL: Document Altered!")
+
+        self.tree_signatures.expandAll()
+
     # --- Tab Creation Helpers ---
 
     def _add_pdf_tab(
@@ -476,6 +515,7 @@ class RiemannWindow(QMainWindow):
         """
         self.add_to_history(path, "pdf")
         reader = ReaderTab()
+        reader.signatures_detected.connect(self.update_signatures_sidebar)
         reader.load_document(path, restore_state=restore_state)
         idx = target_widget.addTab(reader, os.path.basename(path))
         target_widget.setCurrentIndex(idx)
@@ -578,6 +618,7 @@ class RiemannWindow(QMainWindow):
             self._add_pdf_tab(path, self.tabs_main, restore_state)
         else:
             reader = ReaderTab()
+            reader.signatures_detected.connect(self.update_signatures_sidebar)
             self.tabs_main.addTab(reader, "New Tab")
             self.tabs_main.setCurrentWidget(reader)
 

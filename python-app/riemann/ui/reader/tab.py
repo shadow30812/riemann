@@ -10,7 +10,10 @@ import shutil
 import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSettings, Qt, QTimer
+from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+from pyhanko.sign import signers
+from pyhanko.sign.fields import SigFieldSpec, append_signature_field
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QKeyEvent,
@@ -35,6 +38,7 @@ from PySide6.QtWidgets import (
     QScrollerProperties,
     QStackedWidget,
     QTabWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -47,6 +51,7 @@ from .mixins.rendering import RenderingMixin
 from .mixins.search import SearchMixin
 from .utils import generate_markdown_html
 from .widgets import PageWidget
+from .workers import SignatureValidationWorker
 
 try:
     import riemann_core
@@ -60,6 +65,8 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
     A self-contained PDF Viewer Widget.
     Inherits functional logic from mixins.
     """
+
+    signatures_detected = Signal(list)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         """Initializes the ReaderTab."""
@@ -194,6 +201,28 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         self.anno_toolbar.redo_requested.connect(self.redo_annotation)
         layout.addWidget(self.anno_toolbar)
 
+        self.signature_banner = QWidget()
+        self.signature_banner.setVisible(False)
+        self.signature_banner.setFixedHeight(40)
+        banner_layout = QHBoxLayout(self.signature_banner)
+
+        self.lbl_sig_status = QLabel("Signature Status")
+        self.btn_view_cert = QPushButton("View Certificate")
+        self.btn_trust_cert = QPushButton("Trust Certificate")
+        self.btn_trust_cert.clicked.connect(self.trust_current_certificate)
+        self.btn_close_banner = QPushButton("✕")
+        self.btn_close_banner.setFlat(True)
+        self.btn_close_banner.clicked.connect(
+            lambda: self.signature_banner.setVisible(False)
+        )
+
+        banner_layout.addWidget(self.lbl_sig_status)
+        banner_layout.addStretch()
+        banner_layout.addWidget(self.btn_view_cert)
+        banner_layout.addWidget(self.btn_trust_cert)
+        banner_layout.addWidget(self.btn_close_banner)
+        layout.addWidget(self.signature_banner)
+
         self._setup_search_bar()
         layout.addWidget(self.search_bar)
 
@@ -290,9 +319,14 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         )
         self.btn_ai_search.clicked.connect(self.toggle_ai_search_bar)
 
+        self.btn_sign = QPushButton("🖋️")
+        self.btn_sign.setToolTip("Sign Document (PKCS#12)")
+        self.btn_sign.clicked.connect(self.initiate_signing_flow)
+
         widgets = [
             self.btn_save,
             self.btn_export,
+            self.btn_sign,
             self.btn_reflow,
             self.btn_facing,
             self.btn_scroll_mode,
@@ -442,7 +476,7 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
             self.current_path = path
             self.settings.setValue("lastFile", path)
             self.load_annotations()
-
+            self._validate_signatures(path)
             QTimer.singleShot(1000, self.index_pdf_for_ai)
 
             if restore_state:
@@ -463,6 +497,91 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
 
         except Exception as e:
             sys.stderr.write(f"Load error: {e}\n")
+
+    def _validate_signatures(self, path: str) -> None:
+        """Starts the background signature verification worker."""
+        if hasattr(self, "signature_banner"):
+            self.signature_banner.setVisible(False)
+
+        trusted_hashes = self.settings.value("trusted_certs", [], type=list)
+
+        self.sig_worker = SignatureValidationWorker(path, trusted_hashes)
+        self.sig_worker.finished_validation.connect(self._on_signatures_validated)
+        self.sig_worker.start()
+
+    def _on_signatures_validated(
+        self, status: str, message: str, signatures: list
+    ) -> None:
+        """Callback when pyHanko finishes checking the file."""
+        if status == "NONE":
+            self.signature_banner.setVisible(False)
+            self.signatures_detected.emit([])
+            return
+
+        self.signature_banner.setVisible(True)
+        self.lbl_sig_status.setText(message)
+        self.btn_trust_cert.setVisible(False)
+        self.current_untrusted_hash = None
+
+        if status == "VALID":
+            self.signature_banner.setStyleSheet(
+                "background-color: #2e7d32; color: white;"
+            )
+        elif status == "UNKNOWN_IDENTITY":
+            self.signature_banner.setStyleSheet(
+                "background-color: #f57f17; color: white;"
+            )
+            # Find the first untrusted hash to bind to the Trust button
+            untrusted = next((s for s in signatures if not s["is_trusted"]), None)
+            if untrusted:
+                self.current_untrusted_hash = untrusted["cert_hash"]
+                self.btn_trust_cert.setVisible(True)
+        elif status == "INVALID" or status == "ERROR":
+            self.signature_banner.setStyleSheet(
+                "background-color: #c62828; color: white;"
+            )
+
+        # Send data to the main window's sidebar
+        self.signatures_detected.emit(signatures)
+
+    def trust_current_certificate(self) -> None:
+        """Saves the current certificate hash to the local Trust Store."""
+        if not self.current_untrusted_hash:
+            return
+
+        trusted = self.settings.value("trusted_certs", [], type=list)
+        if self.current_untrusted_hash not in trusted:
+            trusted.append(self.current_untrusted_hash)
+            self.settings.setValue("trusted_certs", trusted)
+            self.show_toast("Certificate added to Trust Store.")
+
+            # Re-run validation to update the UI to green
+            if self.current_path:
+                self._validate_signatures(self.current_path)
+
+    def _populate_signatures_panel(self, signatures: list) -> None:
+        """Populates the sidebar tree with signature details."""
+        if not hasattr(self, "tree_signatures"):
+            print("Warning: tree_signatures widget not found in ReaderTab UI.")
+            return
+
+        self.tree_signatures.clear()
+
+        for sig in signatures:
+            icon = "✔️" if sig["valid"] else "❌"
+            item = QTreeWidgetItem(self.tree_signatures)
+            item.setText(0, f"{icon} {sig['subject']}")
+            item.setText(1, sig["field_name"])
+
+            # Add child nodes for detailed inspection
+            child_cert = QTreeWidgetItem(item)
+            child_cert.setText(0, f"Cert Hash: {sig['cert_hash']}")
+
+            if not sig["valid"]:
+                child_warn = QTreeWidgetItem(item)
+                child_warn.setText(0, "Warning: Document Altered!")
+
+        self.tree_signatures.expandAll()
 
     def _load_markdown(self, path: str) -> None:
         """Internal handler for Markdown files."""
@@ -611,6 +730,92 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
             self.scroll.verticalScrollBar().setValue(
                 max(0, int(y - self.scroll.viewport().height() / 2))
             )
+
+    def initiate_signing_flow(self) -> None:
+        """Prompts user for a PKCS#12 certificate to sign the document."""
+        if not self.current_path:
+            QMessageBox.warning(self, "Sign Error", "No document loaded.")
+            return
+
+        cert_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Certificate", "", "PKCS#12 Files (*.pfx *.p12)"
+        )
+
+        if cert_path:
+            from PySide6.QtWidgets import QInputDialog
+
+            password, ok = QInputDialog.getText(
+                self,
+                "Certificate Password",
+                "Enter password for the certificate:",
+                QLineEdit.EchoMode.Password,
+            )
+            if ok and password:
+                self.show_toast("Initiating pyHanko signing flow...")
+                self.execute_pyhanko_signing(cert_path, password)
+
+    def execute_pyhanko_signing(self, cert_path: str, password: str) -> None:
+        """Performs the actual cryptographic signing using pyHanko."""
+        try:
+            # 1. Load the PKCS#12 certificate
+            signer = signers.SimpleSigner.load_pkcs12(cert_path, password.encode())
+            output_path = self.current_path.replace(".pdf", "_signed.pdf")
+
+            # 2. Open PDF incrementally (Crucial to preserve previous signatures)
+            with open(self.current_path, "rb") as doc:
+                writer = IncrementalPdfFileWriter(doc)
+
+                # Create a hidden or visual signature field (using a generic name for now)
+                field_name = f"Signature_{os.urandom(4).hex()}"
+                append_signature_field(
+                    writer,
+                    SigFieldSpec(
+                        sig_field_name=field_name,
+                        on_page=0,
+                        box=(10, 10, 200, 60),  # Coordinates for visual stamp
+                    ),
+                )
+
+                # 3. Apply the cryptographic hash and write to file
+                with open(output_path, "wb") as out_f:
+                    signers.sign_pdf(
+                        writer,
+                        signers.PdfSignatureMetadata(field_name=field_name),
+                        signer=signer,
+                        out=out_f,
+                    )
+
+            self.show_toast(
+                f"Document securely signed! Saved as {os.path.basename(output_path)}"
+            )
+            # Automatically load the newly signed document
+            self.load_document(output_path)
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Signing Error", f"Failed to sign document:\n{str(e)}"
+            )
+
+    def update_signature_banner(self, status: str, message: str) -> None:
+        """Updates the banner based on pyHanko verification results."""
+        self.signature_banner.setVisible(True)
+        self.lbl_sig_status.setText(message)
+
+        if status == "VALID":
+            self.signature_banner.setStyleSheet(
+                "background-color: #2e7d32; color: white;"
+            )  # Green
+            self.btn_trust_cert.setVisible(False)
+        elif status == "UNKNOWN_IDENTITY":
+            self.signature_banner.setStyleSheet(
+                "background-color: #f57f17; color: white;"
+            )  # Yellow
+            self.btn_trust_cert.setVisible(True)
+        elif status == "INVALID":
+            self.signature_banner.setStyleSheet(
+                "background-color: #c62828; color: white;"
+            )  # Red
+            self.btn_trust_cert.setVisible(False)
 
     def next_view(self) -> None:
         """Next page."""
