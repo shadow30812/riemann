@@ -26,7 +26,10 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -38,6 +41,7 @@ from PySide6.QtWidgets import (
     QScrollerProperties,
     QStackedWidget,
     QTabWidget,
+    QTextEdit,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -58,6 +62,44 @@ try:
 except ImportError as e:
     print(f"CRITICAL: Could not import riemann_core backend.\nError: {e}")
     sys.exit(1)
+
+
+class CertificateViewerDialog(QDialog):
+    """A dialog to display parsed X.509 Certificate details."""
+
+    def __init__(self, cert_details, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Certificate Viewer")
+        self.resize(500, 400)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        form.addRow("Subject:", QLabel(cert_details.get("subject", "N/A")))
+        form.addRow("Issuer:", QLabel(cert_details.get("issuer", "N/A")))
+        form.addRow("Serial Number:", QLabel(cert_details.get("serial", "N/A")))
+        form.addRow("Valid From:", QLabel(cert_details.get("not_before", "N/A")))
+        form.addRow("Valid To:", QLabel(cert_details.get("not_after", "N/A")))
+
+        hash_text = QTextEdit(cert_details.get("cert_hash", "N/A"))
+        hash_text.setReadOnly(True)
+        hash_text.setFixedHeight(50)
+        form.addRow("SHA-256 Fingerprint:", hash_text)
+
+        layout.addLayout(form)
+
+        self.btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+
+        # Add a trust button right inside the dialog if it's currently untrusted
+        if not cert_details.get("is_trusted"):
+            self.btn_trust = QPushButton("Trust this Certificate")
+            self.btn_box.addButton(
+                self.btn_trust, QDialogButtonBox.ButtonRole.ActionRole
+            )
+
+        self.btn_box.rejected.connect(self.reject)
+        self.btn_box.accepted.connect(self.accept)
+        layout.addWidget(self.btn_box)
 
 
 class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin):
@@ -208,6 +250,7 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
 
         self.lbl_sig_status = QLabel("Signature Status")
         self.btn_view_cert = QPushButton("View Certificate")
+        self.btn_view_cert.clicked.connect(self.view_certificate)
         self.btn_trust_cert = QPushButton("Trust Certificate")
         self.btn_trust_cert.clicked.connect(self.trust_current_certificate)
         self.btn_close_banner = QPushButton("✕")
@@ -513,6 +556,8 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         self, status: str, message: str, signatures: list
     ) -> None:
         """Callback when pyHanko finishes checking the file."""
+        self.current_signatures = signatures
+
         if status == "NONE":
             self.signature_banner.setVisible(False)
             self.signatures_detected.emit([])
@@ -541,8 +586,72 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
                 "background-color: #c62828; color: white;"
             )
 
-        # Send data to the main window's sidebar
         self.signatures_detected.emit(signatures)
+        self._apply_signature_overlays()
+
+    def view_certificate(self) -> None:
+        """Opens the Certificate Viewer dialog for the current signature."""
+        if not getattr(self, "current_signatures", None):
+            self.show_toast("No signature data available.")
+            return
+
+        # Prioritize showing the untrusted certificate if there is one
+        target_cert = next(
+            (s for s in self.current_signatures if not s["is_trusted"]),
+            self.current_signatures[0],
+        )
+
+        dialog = CertificateViewerDialog(target_cert, self)
+
+        # If the trust button was added to the dialog, wire it to the main trust function
+        if hasattr(dialog, "btn_trust"):
+            dialog.btn_trust.clicked.connect(
+                lambda: [self.trust_current_certificate(), dialog.accept()]
+            )
+
+        dialog.exec()
+
+    def _apply_signature_overlays(self) -> None:
+        """Matches signature data to Rust's embedded form widgets and maps coordinates."""
+        if not self.current_doc or not getattr(self, "current_signatures", None):
+            return
+
+        scale = self.calculate_scale() if hasattr(self, "calculate_scale") else 1.0
+
+        for page_idx, widget in self.page_widgets.items():
+            try:
+                widgets = self.current_doc.get_form_widgets(page_idx)
+            except Exception:
+                continue
+
+            overlays = []
+            for _, bounds, f_type, value, _ in widgets:
+                if "Signature" in f_type:
+                    left, top, right, bottom = bounds
+
+                    # Convert PDF Cartesian bounds to Qt Screen bounds
+                    page_height_pt = widget.height() / scale if scale > 0 else 1000
+                    x = left * scale
+                    w = (right - left) * scale
+                    y = (page_height_pt - top) * scale
+                    h = (top - bottom) * scale
+
+                    rect = QRect(int(x), int(y), int(w), int(h))
+
+                    sig_data = self.current_signatures[0]  # Grab the signature
+                    if not sig_data["valid"]:
+                        status = "INVALID"
+                    elif sig_data["is_trusted"]:
+                        status = "VALID"
+                    else:
+                        status = "UNKNOWN"
+
+                    overlays.append(
+                        {"rect": rect, "status": status, "subject": sig_data["subject"]}
+                    )
+
+            if hasattr(widget, "set_signature_overlays"):
+                widget.set_signature_overlays(overlays)
 
     def trust_current_certificate(self) -> None:
         """Saves the current certificate hash to the local Trust Store."""
@@ -714,6 +823,7 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
                 self.ensure_visible(self.current_page_index)
 
         self.render_visible_pages()
+        self._apply_signature_overlays()
 
     def ensure_visible(self, index: int) -> None:
         """Scrolls to make the page visible."""

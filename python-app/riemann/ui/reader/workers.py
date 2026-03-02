@@ -2,6 +2,7 @@
 Background Workers for the Reader Module.
 """
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -9,6 +10,10 @@ import urllib.request
 import zipfile
 from typing import Any
 
+from pyhanko.pdf_utils.reader import PdfFileReader
+from pyhanko.sign.validation import validate_pdf_signature
+from pyhanko_certvalidator import ValidationContext
+from pyhanko_certvalidator.policy_decl import DisallowWeakAlgorithmsPolicy
 from PySide6.QtCore import QThread, Signal
 
 
@@ -118,19 +123,18 @@ class SignatureValidationWorker(QThread):
 
     def run(self):
         try:
-            from pyhanko.pdf_utils.reader import PdfFileReader
-            from pyhanko.sign.validation import validate_pdf_signature
-        except ImportError:
-            self.finished_validation.emit(
-                "ERROR",
-                "pyHanko is not installed. Run: pip install pyhanko cryptography",
-                [],
+            # 1. Create a relaxed cryptographic policy that explicitly allows MD5 and SHA-1
+            relaxed_policy = DisallowWeakAlgorithmsPolicy(
+                weak_hash_algos=set(), weak_signature_algos=set()
             )
-            return
 
-        try:
+            # 2. Attach it to a custom Validation Context
+            vc = ValidationContext(
+                allow_fetching=False, algorithm_usage_policy=relaxed_policy
+            )
+
             with open(self.pdf_path, "rb") as f:
-                reader = PdfFileReader(f)
+                reader = PdfFileReader(f, strict=False)
                 embedded_sigs = reader.embedded_signatures
 
                 if not embedded_sigs:
@@ -142,16 +146,44 @@ class SignatureValidationWorker(QThread):
                 sig_details = []
 
                 for sig in embedded_sigs:
-                    status = validate_pdf_signature(sig)
-                    valid = status.bottom_line
-                    all_valid = all_valid and valid
+                    try:
+                        # 3. Pass the custom context into the validator
+                        status = validate_pdf_signature(
+                            sig, signer_validation_context=vc
+                        )
+                        valid = status.bottom_line
+                        cert = status.signer_info.signing_cert
+                    except Exception as e:
+                        # Fail-safe: If crypto is totally broken, mark invalid but STILL grab the cert!
+                        print(f"Validation strictly failed: {e}")
+                        valid = False
+                        cert = getattr(sig, "signer_cert", None)
 
-                    cert = status.signer_info.signing_cert
-                    # Generate a unique hash for the certificate
-                    cert_hash = cert.dump().hex()[:40] if cert else ""
-                    subject = (
-                        cert.subject.human_friendly if cert else "Unknown Identity"
-                    )
+                    if cert:
+                        # Get a secure full hash for trusting/fingerprinting
+                        cert_hash = hashlib.sha256(cert.dump()).hexdigest()
+                        subject = cert.subject.human_friendly
+                        issuer = getattr(cert.issuer, "human_friendly", "Unknown")
+                        serial = hex(cert.serial_number)
+
+                        try:
+                            validity = cert["tbs_certificate"]["validity"]
+                            not_before = validity["not_before"].native.strftime(
+                                "%Y-%m-%d %H:%M:%S Z"
+                            )
+                            not_after = validity["not_after"].native.strftime(
+                                "%Y-%m-%d %H:%M:%S Z"
+                            )
+                        except Exception:
+                            not_before = "N/A"
+                            not_after = "N/A"
+                    else:
+                        cert_hash = ""
+                        subject = "Unknown Identity"
+                        issuer = "Unknown"
+                        serial = "N/A"
+                        not_before = "N/A"
+                        not_after = "N/A"
 
                     is_trusted = cert_hash in self.trusted_hashes
                     all_trusted = all_trusted and is_trusted
@@ -160,6 +192,10 @@ class SignatureValidationWorker(QThread):
                         {
                             "field_name": sig.field_name,
                             "subject": subject,
+                            "issuer": issuer,
+                            "serial": serial,
+                            "not_before": not_before,
+                            "not_after": not_after,
                             "valid": valid,
                             "cert_hash": cert_hash,
                             "is_trusted": is_trusted,

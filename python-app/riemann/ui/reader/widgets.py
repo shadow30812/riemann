@@ -22,6 +22,7 @@ class PageWidget(QLabel):
         self.temp_pen = QPen()
         self.markup_rects: List[QRect] = []
         self.markup_color: QColor = QColor()
+        self.signature_overlays: List[dict] = []
 
     def set_temp_stroke(
         self, points: List[QPoint], color_str: str, thickness: int, is_highlight: bool
@@ -71,4 +72,47 @@ class PageWidget(QLabel):
             for r in self.markup_rects:
                 painter.drawRect(r)
 
+        for overlay in getattr(self, "signature_overlays", []):
+            rect = overlay["rect"]
+            status = overlay["status"]
+            subject = overlay["subject"]
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 220))  # White out the '?' underneath
+            painter.drawRect(rect)
+
+            if status == "VALID":
+                color = QColor(46, 125, 50)  # Green
+                icon = "✔️"
+                msg = "Signature Valid"
+            elif status == "UNKNOWN":
+                color = QColor(245, 127, 23)  # Yellow
+                icon = "🟨"
+                msg = "Identity Unknown"
+            else:
+                color = QColor(198, 40, 40)  # Red
+                icon = "❌"
+                msg = "Invalid / Modified"
+
+            painter.setPen(QPen(color, 3))
+            painter.drawRect(rect)
+
+            painter.setPen(color)
+            font = painter.font()
+            font.setPointSize(max(8, int(rect.height() / 6)))  # Scale text to box
+            font.setBold(True)
+            painter.setFont(font)
+
+            text_rect = rect.adjusted(5, 5, -5, -5)
+            painter.drawText(
+                text_rect,
+                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
+                f"{icon} {msg}\n{subject}",
+            )
+
         painter.end()
+
+    def set_signature_overlays(self, overlays: List[dict]) -> None:
+        """Updates the Adobe-style signature visual bounds."""
+        self.signature_overlays = overlays
+        self.update()
