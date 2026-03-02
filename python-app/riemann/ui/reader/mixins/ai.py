@@ -15,11 +15,24 @@ from typing import Any
 
 import requests
 from PIL import Image
-from PySide6.QtCore import QBuffer, QRect, Qt
-from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox, QProgressDialog
+from PySide6.QtCore import QBuffer, QObject, QRect, Qt, QTimer, Signal
+from PySide6.QtWidgets import (
+    QApplication,
+    QInputDialog,
+    QLabel,
+    QMessageBox,
+    QProgressDialog,
+)
 
 from ..widgets import PageWidget
 from ..workers import InferenceThread, InstallerThread, LoaderThread, ModelDownloader
+
+
+class AIEngineBridge(QObject):
+    """Thread-safe bridge to pass data from background threads to the main UI thread."""
+
+    toast_requested = Signal(str)
+    search_results_ready = Signal(list)
 
 
 class AiMixin:
@@ -278,31 +291,61 @@ class AiMixin:
         except Exception as e:
             print(f"Failed to start AI Engine: {e}")
 
+    def show_toast(self, msg: str) -> None:
+        """Shows temporary message."""
+        self.lbl_toast = QLabel(self)
+        self.lbl_toast.setStyleSheet(
+            "background: #333; color: white; padding: 10px; border-radius: 5px;"
+        )
+        self.lbl_toast.setText(msg)
+        self.lbl_toast.adjustSize()
+        self.lbl_toast.move(
+            (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
+        )
+        self.lbl_toast.show()
+        QTimer.singleShot(4000, self.lbl_toast.hide)
+
     def index_pdf_for_ai(self) -> None:
         """Sends the current PDF to the AI sidecar in a background thread."""
         if not hasattr(self, "current_path") or not self.current_path:
             return
 
         pdf_path = self.current_path
+        self._ai_bridge = AIEngineBridge()
+        self._ai_bridge.toast_requested.connect(
+            self.show_toast, Qt.ConnectionType.QueuedConnection
+        )
 
         def _indexing_task():
             self._start_ai_engine()
 
-            # Allow the FastAPI server 2 seconds to boot up before sending requests
-            time.sleep(2)
+            server_ready = False
+            for _ in range(15):
+                try:
+                    # A quick GET request to see if Uvicorn is accepting connections
+                    requests.get(f"{self.ai_base_url}/docs", timeout=1)
+                    server_ready = True
+                    break
+                except requests.exceptions.RequestException:
+                    time.sleep(1)
+
+            if not server_ready:
+                print("AI Engine took too long to start.")
+                return
 
             try:
                 res = requests.post(
                     f"{self.ai_base_url}/index",
                     json={"pdf_path": pdf_path},
-                    timeout=30,  # Indexing large PDFs can take a moment
+                    timeout=120,  # High timeout: large PDFs take time to index
                 )
                 if res.status_code == 200:
                     print("PDF successfully indexed for semantic search.")
+                    self._ai_bridge.toast_requested.emit("AI Engine is ready! ✨")
                 else:
-                    print(f"AI Engine indexing failed with status: {res.status_code}")
+                    self._ai_bridge.toast_requested.emit("AI Indexing failed.")
             except requests.exceptions.RequestException:
-                print("AI Engine is not responding. Is it running?")
+                self._ai_bridge.toast_requested.emit("AI Engine disconnected.")
 
         # Run completely off the UI thread so the app stays buttery smooth
         threading.Thread(target=_indexing_task, daemon=True).start()
@@ -310,6 +353,14 @@ class AiMixin:
     def ai_search(self, query: str) -> None:
         """Queries the AI engine and returns matches (runs in background)."""
         self._start_ai_engine()
+
+        self._ai_search_bridge = AIEngineBridge()
+        self._ai_search_bridge.search_results_ready.connect(
+            self._handle_ai_search_results, Qt.ConnectionType.QueuedConnection
+        )
+        self._ai_search_bridge.toast_requested.connect(
+            self.show_toast, Qt.ConnectionType.QueuedConnection
+        )
 
         def _search_task():
             try:
@@ -319,15 +370,11 @@ class AiMixin:
                     timeout=10,
                 )
                 if res.status_code == 200:
-                    results = res.json()
-                    # THREAD SAFE UI UPDATE: We must use QTimer to push UI updates back to the main thread!
-                    QTimer.singleShot(
-                        0, lambda: self._handle_ai_search_results(results)
-                    )
+                    self._ai_search_bridge.search_results_ready.emit(res.json())
                 else:
-                    print("Failed to process search query.")
+                    self._ai_search_bridge.toast_requested.emit("Search failed.")
             except requests.exceptions.RequestException:
-                print("AI Engine is unreachable.")
+                self._ai_search_bridge.toast_requested.emit("AI Engine is unreachable.")
 
         threading.Thread(target=_search_task, daemon=True).start()
 
@@ -337,14 +384,49 @@ class AiMixin:
             self.show_toast("No semantic matches found.")
             return
 
-        best_match = results[0]
-        page_idx = best_match["page"]
+        self.ai_results = results
+        self.ai_result_idx = 0
+        self._render_ai_result()
 
-        if hasattr(self, "current_page_index"):
-            self.current_page_index = page_idx
-            self.rebuild_layout()
-            self.ensure_visible(page_idx)
-            self.show_toast(f"AI Match found on page {page_idx + 1}")
+    def ai_find_next(self) -> None:
+        """Cycles to the next AI search result."""
+        if hasattr(self, "ai_results") and self.ai_results:
+            self.ai_result_idx = (self.ai_result_idx + 1) % len(self.ai_results)
+            self._render_ai_result()
+
+    def ai_find_prev(self) -> None:
+        """Cycles to the previous AI search result."""
+        if hasattr(self, "ai_results") and self.ai_results:
+            self.ai_result_idx = (self.ai_result_idx - 1) % len(self.ai_results)
+            self._render_ai_result()
+
+    def _render_ai_result(self) -> None:
+        """Jumps to the page and highlights the AI-matched chunk."""
+        match = self.ai_results[self.ai_result_idx]
+
+        page_idx = match["page"] - 1
+        self.current_page_index = page_idx
+
+        words = match["text"].split()
+        snippet = " ".join(words[:5]) if len(words) >= 5 else match["text"]
+
+        try:
+            rects = self.current_doc.search_page(page_idx, snippet)
+            self.search_result = (page_idx, rects)
+        except Exception:
+            self.search_result = None
+
+        if page_idx in self.rendered_pages:
+            self.rendered_pages.remove(page_idx)
+
+        self.rebuild_layout()
+        self.update_view()
+        self.ensure_visible(page_idx)
+
+        score_pct = int(match["score"] * 100)
+        self.show_toast(
+            f"AI Match {self.ai_result_idx + 1} of {len(self.ai_results)} (Confidence: {score_pct}%)"
+        )
 
     def _kill_ai_engine(self) -> None:
         """Cleans up the subprocess when the app closes."""

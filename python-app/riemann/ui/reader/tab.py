@@ -372,6 +372,14 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
             lambda: self.ai_search(self.txt_ai_search.text())
         )
 
+        self.btn_ai_prev = QPushButton("▲")
+        self.btn_ai_prev.setStyleSheet("color: #e6d0ff; font-weight: bold;")
+        self.btn_ai_prev.clicked.connect(self.ai_find_prev)
+
+        self.btn_ai_next = QPushButton("▼")
+        self.btn_ai_next.setStyleSheet("color: #e6d0ff; font-weight: bold;")
+        self.btn_ai_next.clicked.connect(self.ai_find_next)
+
         self.btn_close_ai_search = QPushButton("✕")
         self.btn_close_ai_search.setFlat(True)
         self.btn_close_ai_search.setStyleSheet("color: #e6d0ff; font-weight: bold;")
@@ -380,6 +388,8 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         sb_layout.addWidget(QLabel("✨ AI Search:"))
         sb_layout.addWidget(self.txt_ai_search)
         sb_layout.addWidget(self.btn_ai_find)
+        sb_layout.addWidget(self.btn_ai_prev)
+        sb_layout.addWidget(self.btn_ai_next)
         sb_layout.addWidget(self.btn_close_ai_search)
 
     def select_all_text(self) -> None:
@@ -433,7 +443,7 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
             self.settings.setValue("lastFile", path)
             self.load_annotations()
 
-            # QTimer.singleShot(1000, self.index_pdf_for_ai)
+            QTimer.singleShot(1000, self.index_pdf_for_ai)
 
             if restore_state:
                 saved_page = self.settings.value("lastPage", 0, type=int)

@@ -3,7 +3,7 @@ import re
 from contextlib import asynccontextmanager
 
 import faiss
-import fitz  
+import fitz
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -61,7 +61,6 @@ def chunk_text(text: str, page_num: int, chunk_size: int, overlap: int):
 async def lifespan(app: FastAPI):
     global model
     print(f"Loading embedding model '{MODEL_NAME}' onto CPU...")
-    # Force CPU to prevent massive GPU VRAM spikes and CUDA compilation bloat
     model = SentenceTransformer(MODEL_NAME, device="cpu")
     print("Model loaded successfully.")
     yield
@@ -84,7 +83,6 @@ async def index_pdf(req: IndexRequest):
         doc = fitz.open(req.pdf_path)
         all_chunks = []
 
-        # Extract and chunk text per page
         for page_num in range(len(doc)):
             page = doc[page_num]
             text = clean_text(page.get_text("text"))
@@ -103,16 +101,15 @@ async def index_pdf(req: IndexRequest):
 
         print(f"Extracted {len(all_chunks)} chunks. Generating embeddings...")
 
-        # Generate embeddings
         texts = [c["text"] for c in all_chunks]
-        embeddings = model.encode(texts, convert_to_numpy=True)
+        embeddings = model.encode(
+            texts, convert_to_numpy=True, normalize_embeddings=True
+        )
 
-        # Initialize or reset FAISS index
         embedding_dim = embeddings.shape[1]
-        vector_index = faiss.IndexFlatL2(embedding_dim)
+        vector_index = faiss.IndexFlatIP(embedding_dim)
         vector_index.add(embeddings)
 
-        # Store metadata
         chunk_metadata = all_chunks
 
         return {"status": "success", "chunks_indexed": len(all_chunks)}
@@ -129,23 +126,21 @@ async def search_pdf(req: SearchRequest):
         raise HTTPException(status_code=400, detail="No PDF is currently indexed.")
 
     try:
-        # Embed the search query
-        query_embedding = model.encode([req.query], convert_to_numpy=True)
+        query_embedding = model.encode(
+            [req.query], convert_to_numpy=True, normalize_embeddings=True
+        )
 
-        # Search FAISS (returns distances and indices)
         distances, indices = vector_index.search(query_embedding, req.top_k)
-
         results = []
+
         for i in range(req.top_k):
             idx = indices[0][i]
-            if idx != -1 and idx < len(chunk_metadata):  # Ensure valid index
+            score = float(distances[0][i])
+
+            if idx != -1 and idx < len(chunk_metadata) and score >= 0.35:
                 meta = chunk_metadata[idx]
                 results.append(
-                    SearchResult(
-                        page=meta["page"],
-                        text=meta["text"],
-                        score=float(distances[0][i]),
-                    )
+                    SearchResult(page=meta["page"], text=meta["text"], score=score)
                 )
         return results
 
