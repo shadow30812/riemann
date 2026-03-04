@@ -136,7 +136,7 @@ class SignatureValidationWorker(QThread):
                     pass
 
             vc = ValidationContext(
-                trust_roots=trust_roots,
+                extra_trust_roots=trust_roots,
                 allow_fetching=True,
                 algorithm_usage_policy=relaxed_policy,
             )

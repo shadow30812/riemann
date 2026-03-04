@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QScroller,
     QScrollerProperties,
+    QSizePolicy,
     QStackedWidget,
     QTabWidget,
     QTextEdit,
@@ -69,9 +70,11 @@ class CertificateViewerDialog(QDialog):
 
     def __init__(self, cert_details, parent=None):
         super().__init__(parent)
+        self.cert_details = cert_details
         self.setWindowTitle("Certificate Viewer")
-        self.resize(500, 400)
+        self.resize(500, 250)
 
+        self.setSizeGripEnabled(True)
         layout = QVBoxLayout(self)
         form = QFormLayout()
 
@@ -83,14 +86,17 @@ class CertificateViewerDialog(QDialog):
 
         hash_text = QTextEdit(cert_details.get("cert_hash", "N/A"))
         hash_text.setReadOnly(True)
-        hash_text.setFixedHeight(50)
-        form.addRow("SHA-256 Fingerprint:", hash_text)
+        hash_text.setMinimumHeight(50)
+        hash_text.setMinimumWidth(50)
+        hash_text.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
 
+        form.addRow("SHA-256 Fingerprint:", hash_text)
         layout.addLayout(form)
 
         self.btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
 
-        # Add a trust button right inside the dialog if it's currently untrusted
         if not cert_details.get("is_trusted"):
             self.btn_trust = QPushButton("Trust this Certificate")
             self.btn_box.addButton(
@@ -100,6 +106,36 @@ class CertificateViewerDialog(QDialog):
         self.btn_box.rejected.connect(self.reject)
         self.btn_box.accepted.connect(self.accept)
         layout.addWidget(self.btn_box)
+
+        self.btn_export = QPushButton("Export (.pem)")
+        self.btn_export.clicked.connect(self.export_cert)
+        self.btn_box.addButton(self.btn_export, QDialogButtonBox.ButtonRole.ActionRole)
+
+        if not cert_details.get("is_trusted"):
+            self.btn_trust = QPushButton("Trust this Certificate")
+            self.btn_box.addButton(
+                self.btn_trust, QDialogButtonBox.ButtonRole.ActionRole
+            )
+
+        self.btn_box.rejected.connect(self.reject)
+        self.btn_box.accepted.connect(self.accept)
+        layout.addWidget(self.btn_box)
+
+    def export_cert(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Certificate", "certificate.pem", "PEM Files (*.pem)"
+        )
+        if path:
+            try:
+                with open(path, "w") as f:
+                    f.write(self.cert_details.get("cert_pem", ""))
+                # Optional: trigger a toast notification on the parent
+                if hasattr(self.parent(), "show_toast"):
+                    self.parent().show_toast("Certificate exported successfully!")
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Export Error", f"Could not save certificate: {e}"
+                )
 
 
 class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin):
@@ -629,42 +665,9 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         if not self.current_doc or not getattr(self, "current_signatures", None):
             return
 
-        scale = self.calculate_scale() if hasattr(self, "calculate_scale") else 1.0
-
-        for page_idx, widget in self.page_widgets.items():
-            try:
-                widgets = self.current_doc.get_form_widgets(page_idx)
-            except Exception:
-                continue
-
-            overlays = []
-            for _, bounds, f_type, value, _ in widgets:
-                if "Signature" in f_type:
-                    left, top, right, bottom = bounds
-
-                    # Convert PDF Cartesian bounds to Qt Screen bounds
-                    page_height_pt = widget.height() / scale if scale > 0 else 1000
-                    x = left * scale
-                    w = (right - left) * scale
-                    y = (page_height_pt - top) * scale
-                    h = (top - bottom) * scale
-
-                    rect = QRect(int(x), int(y), int(w), int(h))
-
-                    sig_data = self.current_signatures[0]  # Grab the signature
-                    if not sig_data["valid"]:
-                        status = "INVALID"
-                    elif sig_data["is_trusted"]:
-                        status = "VALID"
-                    else:
-                        status = "UNKNOWN"
-
-                    overlays.append(
-                        {"rect": rect, "status": status, "subject": sig_data["subject"]}
-                    )
-
+        for widget in getattr(self, "page_widgets", {}).values():
             if hasattr(widget, "set_signature_overlays"):
-                widget.set_signature_overlays(overlays)
+                widget.set_signature_overlays([])
 
     def _populate_signatures_panel(self, signatures: list) -> None:
         """Populates the sidebar tree with signature details."""

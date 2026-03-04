@@ -78,7 +78,7 @@ class PageWidget(QLabel):
             subject = overlay["subject"]
 
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(255, 255, 255, 220))
+            painter.setBrush(QColor(255, 255, 255, 255))
             painter.drawRect(rect)
 
             if status == "VALID":
