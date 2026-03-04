@@ -10,6 +10,7 @@ import urllib.request
 import zipfile
 from typing import Any
 
+from asn1crypto import pem, x509
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign.validation import validate_pdf_signature
 from pyhanko_certvalidator import ValidationContext
@@ -112,25 +113,32 @@ class InferenceThread(QThread):
 
 
 class SignatureValidationWorker(QThread):
-    """Runs pyHanko validation in the background to prevent UI freezing."""
-
     finished_validation = Signal(str, str, list)
 
-    def __init__(self, pdf_path: str, trusted_hashes: list, parent=None):
+    def __init__(self, pdf_path: str, trusted_certs: list, parent=None):
         super().__init__(parent)
         self.pdf_path = pdf_path
-        self.trusted_hashes = trusted_hashes or []
+        self.trusted_certs = trusted_certs or []
 
     def run(self):
         try:
-            # 1. Create a relaxed cryptographic policy that explicitly allows MD5 and SHA-1
             relaxed_policy = DisallowWeakAlgorithmsPolicy(
                 weak_hash_algos=set(), weak_signature_algos=set()
             )
 
-            # 2. Attach it to a custom Validation Context
+            trust_roots = []
+            for cert_str in self.trusted_certs:
+                try:
+                    if isinstance(cert_str, str) and "BEGIN CERTIFICATE" in cert_str:
+                        _, _, der_bytes = pem.unarmor(cert_str.encode("utf-8"))
+                        trust_roots.append(x509.Certificate.load(der_bytes))
+                except Exception:
+                    pass
+
             vc = ValidationContext(
-                allow_fetching=False, algorithm_usage_policy=relaxed_policy
+                trust_roots=trust_roots,
+                allow_fetching=True,
+                algorithm_usage_policy=relaxed_policy,
             )
 
             with open(self.pdf_path, "rb") as f:
@@ -146,25 +154,35 @@ class SignatureValidationWorker(QThread):
                 sig_details = []
 
                 for sig in embedded_sigs:
+                    cert = getattr(sig, "signer_cert", None)
+                    valid = False
+                    is_trusted = False
+
                     try:
-                        # 3. Pass the custom context into the validator
                         status = validate_pdf_signature(
                             sig, signer_validation_context=vc
                         )
-                        valid = status.bottom_line
-                        cert = status.signer_info.signing_cert
-                    except Exception as e:
-                        # Fail-safe: If crypto is totally broken, mark invalid but STILL grab the cert!
-                        print(f"Validation strictly failed: {e}")
-                        valid = False
-                        cert = getattr(sig, "signer_cert", None)
+                        valid = getattr(status, "intact", False)
+                        is_trusted = getattr(status, "trusted", False)
+                    except Exception:
+                        try:
+                            fallback = validate_pdf_signature(sig)
+                            valid = getattr(fallback, "intact", False)
+                        except Exception:
+                            valid = False
 
                     if cert:
-                        # Get a secure full hash for trusting/fingerprinting
                         cert_hash = hashlib.sha256(cert.dump()).hexdigest()
+                        cert_pem_str = pem.armor("CERTIFICATE", cert.dump()).decode(
+                            "ascii"
+                        )
                         subject = cert.subject.human_friendly
                         issuer = getattr(cert.issuer, "human_friendly", "Unknown")
                         serial = hex(cert.serial_number)
+
+                        # Direct trust override for end-entity certs lacking issuers
+                        if not is_trusted and cert_pem_str in self.trusted_certs:
+                            is_trusted = True
 
                         try:
                             validity = cert["tbs_certificate"]["validity"]
@@ -179,18 +197,19 @@ class SignatureValidationWorker(QThread):
                             not_after = "N/A"
                     else:
                         cert_hash = ""
+                        cert_pem_str = ""
                         subject = "Unknown Identity"
                         issuer = "Unknown"
                         serial = "N/A"
                         not_before = "N/A"
                         not_after = "N/A"
 
-                    is_trusted = cert_hash in self.trusted_hashes
+                    all_valid = all_valid and valid
                     all_trusted = all_trusted and is_trusted
 
                     sig_details.append(
                         {
-                            "field_name": sig.field_name,
+                            "field_name": getattr(sig, "field_name", "Unknown"),
                             "subject": subject,
                             "issuer": issuer,
                             "serial": serial,
@@ -198,6 +217,7 @@ class SignatureValidationWorker(QThread):
                             "not_after": not_after,
                             "valid": valid,
                             "cert_hash": cert_hash,
+                            "cert_pem": cert_pem_str,
                             "is_trusted": is_trusted,
                         }
                     )
@@ -220,7 +240,6 @@ class SignatureValidationWorker(QThread):
                         "🟨 Signed, but certificate validity is unknown.",
                         sig_details,
                     )
-
         except Exception as e:
             self.finished_validation.emit(
                 "ERROR", f"Error reading signatures: {str(e)}", []

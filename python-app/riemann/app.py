@@ -480,7 +480,7 @@ class RiemannWindow(QMainWindow):
             icon = (
                 "✔️"
                 if (sig["valid"] and sig["is_trusted"])
-                else ("🟨" if sig["valid"] else "❌")
+                else ("❓" if sig["valid"] else "❌")
             )
 
             item = QTreeWidgetItem(self.tree_signatures)

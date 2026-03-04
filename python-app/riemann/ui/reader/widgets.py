@@ -78,7 +78,7 @@ class PageWidget(QLabel):
             subject = overlay["subject"]
 
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(255, 255, 255, 220))  # White out the '?' underneath
+            painter.setBrush(QColor(255, 255, 255, 220))
             painter.drawRect(rect)
 
             if status == "VALID":
@@ -87,7 +87,7 @@ class PageWidget(QLabel):
                 msg = "Signature Valid"
             elif status == "UNKNOWN":
                 color = QColor(245, 127, 23)  # Yellow
-                icon = "🟨"
+                icon = "❓"
                 msg = "Identity Unknown"
             else:
                 color = QColor(198, 40, 40)  # Red

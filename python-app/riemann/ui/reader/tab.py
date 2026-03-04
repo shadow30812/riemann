@@ -542,22 +542,20 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
             sys.stderr.write(f"Load error: {e}\n")
 
     def _validate_signatures(self, path: str) -> None:
-        """Starts the background signature verification worker."""
         if hasattr(self, "signature_banner"):
             self.signature_banner.setVisible(False)
 
-        trusted_hashes = self.settings.value("trusted_certs", [], type=list)
+        # Use a completely new key to abandon the corrupted hash list permanently
+        trusted_pems = self.settings.value("trusted_certs_pem", [], type=list)
 
-        self.sig_worker = SignatureValidationWorker(path, trusted_hashes)
+        self.sig_worker = SignatureValidationWorker(path, trusted_pems)
         self.sig_worker.finished_validation.connect(self._on_signatures_validated)
         self.sig_worker.start()
 
     def _on_signatures_validated(
         self, status: str, message: str, signatures: list
     ) -> None:
-        """Callback when pyHanko finishes checking the file."""
         self.current_signatures = signatures
-
         if status == "NONE":
             self.signature_banner.setVisible(False)
             self.signatures_detected.emit([])
@@ -566,7 +564,7 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         self.signature_banner.setVisible(True)
         self.lbl_sig_status.setText(message)
         self.btn_trust_cert.setVisible(False)
-        self.current_untrusted_hash = None
+        self.current_untrusted_pem = None
 
         if status == "VALID":
             self.signature_banner.setStyleSheet(
@@ -576,10 +574,9 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
             self.signature_banner.setStyleSheet(
                 "background-color: #f57f17; color: white;"
             )
-            # Find the first untrusted hash to bind to the Trust button
             untrusted = next((s for s in signatures if not s["is_trusted"]), None)
             if untrusted:
-                self.current_untrusted_hash = untrusted["cert_hash"]
+                self.current_untrusted_pem = untrusted.get("cert_pem")
                 self.btn_trust_cert.setVisible(True)
         elif status == "INVALID" or status == "ERROR":
             self.signature_banner.setStyleSheet(
@@ -588,6 +585,22 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
 
         self.signatures_detected.emit(signatures)
         self._apply_signature_overlays()
+
+    def trust_current_certificate(self) -> None:
+        if getattr(self, "current_untrusted_pem", None) is None:
+            return
+
+        # Write to the clean key
+        trusted_pems = self.settings.value("trusted_certs_pem", [], type=list)
+
+        if self.current_untrusted_pem not in trusted_pems:
+            trusted_pems.append(self.current_untrusted_pem)
+            self.settings.setValue("trusted_certs_pem", trusted_pems)
+            self.show_toast("Certificate added to Trust Store.")
+
+        # Always force re-validation
+        if getattr(self, "current_path", None):
+            self._validate_signatures(self.current_path)
 
     def view_certificate(self) -> None:
         """Opens the Certificate Viewer dialog for the current signature."""
@@ -652,21 +665,6 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
 
             if hasattr(widget, "set_signature_overlays"):
                 widget.set_signature_overlays(overlays)
-
-    def trust_current_certificate(self) -> None:
-        """Saves the current certificate hash to the local Trust Store."""
-        if not self.current_untrusted_hash:
-            return
-
-        trusted = self.settings.value("trusted_certs", [], type=list)
-        if self.current_untrusted_hash not in trusted:
-            trusted.append(self.current_untrusted_hash)
-            self.settings.setValue("trusted_certs", trusted)
-            self.show_toast("Certificate added to Trust Store.")
-
-            # Re-run validation to update the UI to green
-            if self.current_path:
-                self._validate_signatures(self.current_path)
 
     def _populate_signatures_panel(self, signatures: list) -> None:
         """Populates the sidebar tree with signature details."""
