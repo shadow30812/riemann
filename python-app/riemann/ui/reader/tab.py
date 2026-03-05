@@ -1211,6 +1211,28 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
             self.on_zoom_changed_internal()
             event.accept()
         else:
+            if not self.continuous_scroll and self.view_mode == ViewMode.IMAGE:
+                vbar = self.scroll.verticalScrollBar()
+                if vbar.maximum() == 0:
+                    if not hasattr(self, "_scroll_accumulator"):
+                        self._scroll_accumulator = 0
+
+                    delta = event.angleDelta().y()
+                    self._scroll_accumulator += delta
+
+                    # 120 is the standard delta for one physical mouse wheel "click".
+                    # For trackpads, this accumulates the micro-scrolls into a deliberate swipe.
+                    if self._scroll_accumulator >= 200:
+                        self.prev_view()
+                        self._scroll_accumulator = 0
+                    elif self._scroll_accumulator <= -200:
+                        self.next_view()
+                        self._scroll_accumulator = 0
+                    event.accept()
+                    return
+
+            if hasattr(self, "_scroll_accumulator"):
+                self._scroll_accumulator = 0
             super().wheelEvent(event)
 
     def on_zoom_selected(self, idx: int) -> None:

@@ -56,7 +56,14 @@ class SearchMixin:
             idx = (start + i * direction) % count
             try:
                 text = self.current_doc.get_page_text(idx).lower()
-                if term in text:
+                anno_match = False
+                if hasattr(self, "annotations") and str(idx) in self.annotations:
+                    for anno in self.annotations[str(idx)]:
+                        if anno.get("type") in ("note", "text") and "text" in anno:
+                            if term in anno["text"].lower():
+                                anno_match = True
+                                break
+                if term in text or anno_match:
                     self.current_page_index = idx
                     try:
                         rects = self.current_doc.search_page(
