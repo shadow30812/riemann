@@ -7,10 +7,21 @@ audio processing injection (Riemann Audio), and download management.
 """
 
 import os
+import re
+import subprocess
 import sys
 from typing import Any, Optional
 
-from PySide6.QtCore import QEvent, QObject, QStandardPaths, Qt, QTimer, QUrl
+from PySide6.QtCore import (
+    QEvent,
+    QObject,
+    QStandardPaths,
+    Qt,
+    QThread,
+    QTimer,
+    QUrl,
+    Signal,
+)
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
@@ -34,6 +45,73 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+class YtDlpWorker(QThread):
+    progress = Signal(int)
+    finished = Signal(bool, str)
+
+    def __init__(self, url: str, download_dir: str) -> None:
+        super().__init__()
+        self.url = url
+        self.download_dir = download_dir
+        self.process: Optional[subprocess.Popen] = None
+        self.is_cancelled = False
+
+    def run(self) -> None:
+        try:
+            cmd = [
+                "yt-dlp",
+                "--newline",
+                "--write-subs",
+                "--write-auto-subs",
+                "--sub-langs",
+                "en.*",
+                "--embed-subs",
+                "--merge-output-format",
+                "mp4",
+                "-o",
+                os.path.join(self.download_dir, "%(title)s.%(ext)s"),
+                self.url,
+            ]
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+
+            if self.process.stdout is None:
+                self.finished.emit(False, "Failed to start yt-dlp")
+                return
+
+            for line in self.process.stdout:
+                if self.is_cancelled:
+                    break
+                match = re.search(r"\[download\]\s+([\d\.]+)%", line)
+                if match:
+                    val = float(match.group(1))
+                    self.progress.emit(int(val))
+
+            self.process.wait()
+
+            if self.is_cancelled:
+                self.finished.emit(False, "Download cancelled.")
+            elif self.process.returncode == 0:
+                self.finished.emit(True, "Download complete!")
+            else:
+                self.finished.emit(False, "Download failed.")
+        except FileNotFoundError:
+            self.finished.emit(False, "Error: yt-dlp is not installed or not in PATH.")
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
+    def stop(self) -> None:
+        """Terminates the active yt-dlp subprocess."""
+        self.is_cancelled = True
+        if self.process:
+            self.process.terminate()
 
 
 class WebPage(QWebEnginePage):
@@ -102,6 +180,8 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
             "youtube.com/ptracking",
             "youtube.com/pagead",
             "google-analytics.com",
+            "dmxleo.com",
+            "geo.dailymotion.com",
         ]
         self.spoofed_ua = b"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.7559.59 Safari/537.36"
 
@@ -247,6 +327,11 @@ class BrowserTab(QWidget):
             }
         """)
 
+        self.btn_download = QPushButton("⬇")
+        self.btn_download.setFixedWidth(30)
+        self.btn_download.setToolTip("Download Video via yt-dlp")
+        self.btn_download.clicked.connect(self.download_video)
+
         self.lbl_zoom = QLabel("100%")
         self.lbl_zoom.setFixedWidth(40)
         self.lbl_zoom.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -261,6 +346,7 @@ class BrowserTab(QWidget):
         tb_layout.addWidget(self.txt_url)
         tb_layout.addWidget(self.btn_bookmark)
         tb_layout.addWidget(self.btn_music)
+        tb_layout.addWidget(self.btn_download)
         tb_layout.addWidget(self.lbl_zoom)
 
         layout.addWidget(self.toolbar)
@@ -773,13 +859,6 @@ class BrowserTab(QWidget):
         Returns the script content as a string.
         """
         try:
-            if hasattr(sys, "frozen"):
-                base_path = os.path.dirname(sys.executable)
-                if hasattr(sys, "nuitka_python_exe"):
-                    base_path = os.path.dirname(__file__)
-            else:
-                base_path = os.path.dirname(os.path.abspath(__file__))
-
             candidate_path = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)),
                 "..",
@@ -873,3 +952,62 @@ class BrowserTab(QWidget):
             and hasattr(self.window(), "open_pdf_in_new_tab")
         ):
             self.window().open_pdf_in_new_tab(path)
+
+    def download_video(self) -> None:
+        url = self.web.url().toString()
+        if not url or "http" not in url:
+            self.show_toast("Invalid URL for download.")
+            return
+
+        default_dir = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DownloadLocation
+        )
+        dest_dir = QFileDialog.getExistingDirectory(
+            self, "Select Download Directory", default_dir
+        )
+        if not dest_dir:
+            return
+
+        self.show_toast("Starting download...")
+        self.progress.setValue(0)
+
+        # Transform the download button into a Cancel button
+        self.btn_download.setText("⏹")
+        self.btn_download.setStyleSheet("color: #FF4500; font-weight: bold;")
+        self.btn_download.setToolTip("Cancel Download")
+        try:
+            self.btn_download.clicked.disconnect()
+        except RuntimeError:
+            pass
+        self.btn_download.clicked.connect(self.cancel_download)
+
+        # Initialize and start the background thread
+        self.dl_worker = YtDlpWorker(url, dest_dir)
+        self.dl_worker.progress.connect(self.progress.setValue)
+        self.dl_worker.finished.connect(self._on_download_finished)
+        self.dl_worker.start()
+
+    def cancel_download(self) -> None:
+        """Triggered when the user clicks the Stop button."""
+        if hasattr(self, "dl_worker") and self.dl_worker.isRunning():
+            self.show_toast("Cancelling download...")
+            self.dl_worker.stop()
+
+    def _on_download_finished(self, success: bool, message: str) -> None:
+        # Revert the Cancel button back to a Download button
+        self.btn_download.setText("⬇")
+        self.btn_download.setStyleSheet("")
+        self.btn_download.setToolTip("Download Video via yt-dlp")
+        try:
+            self.btn_download.clicked.disconnect()
+        except RuntimeError:
+            pass
+        self.btn_download.clicked.connect(self.download_video)
+
+        if success:
+            self.progress.setValue(100)
+            QTimer.singleShot(2000, lambda: self.progress.setValue(0))
+        else:
+            self.progress.setValue(0)
+
+        self.show_toast(message)

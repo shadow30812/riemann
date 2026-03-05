@@ -38,10 +38,12 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QInputDialog,
     QListWidget,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QSplitter,
     QTabWidget,
     QTreeWidget,
@@ -83,12 +85,15 @@ class SettingsDialog(QDialog):
             parent: The main window instance, used to retrieve current settings.
         """
         super().__init__(parent)
+        self.parent_win = parent
         self.setWindowTitle("Settings")
-        self.resize(400, 200)
+        self.resize(400, 400)
 
-        form_layout = QFormLayout(self)
-        self.setLayout(form_layout)
+        # Main layout
+        layout = QVBoxLayout(self)
 
+        # --- Preferences Section ---
+        form_layout = QFormLayout()
         self.cb_dark = QCheckBox()
         self.cb_dark.setChecked(parent.dark_mode)
         form_layout.addRow("Dark Mode:", self.cb_dark)
@@ -98,13 +103,95 @@ class SettingsDialog(QDialog):
             parent.settings.value("browser/auto_open_pdf", False, type=bool)
         )
         form_layout.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
+        layout.addLayout(form_layout)
 
+        # --- Data Management Section ---
+        group = QGroupBox("Data Management")
+        group_layout = QVBoxLayout(group)
+
+        btn_clear_history = QPushButton("Clear Browsing History")
+        btn_clear_history.clicked.connect(self.clear_history)
+
+        btn_clear_downloads = QPushButton("Clear Download History")
+        btn_clear_downloads.clicked.connect(self.clear_downloads)
+
+        btn_clear_cookies = QPushButton("Clear Cookies")
+        btn_clear_cookies.clicked.connect(self.clear_cookies)
+
+        btn_clear_cache = QPushButton("Clear Cache")
+        btn_clear_cache.clicked.connect(self.clear_cache)
+
+        btn_clear_all = QPushButton("Clear All Data")
+        btn_clear_all.setStyleSheet("color: #d32f2f; font-weight: bold;")
+        btn_clear_all.clicked.connect(self.clear_all_data)
+
+        group_layout.addWidget(btn_clear_history)
+        group_layout.addWidget(btn_clear_downloads)
+        group_layout.addWidget(btn_clear_cookies)
+        group_layout.addWidget(btn_clear_cache)
+        group_layout.addWidget(btn_clear_all)
+        layout.addWidget(group)
+
+        # --- Dialog Buttons ---
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
-        form_layout.addRow(self.button_box)
+        layout.addWidget(self.button_box)
+
+    def clear_history(self) -> None:
+        self.parent_win.history_manager.history["web"] = []
+        self.parent_win.history_manager.save()
+        self.parent_win.history_model.setStringList(
+            self.parent_win.history_manager.get_model_data()
+        )
+        QMessageBox.information(self, "Success", "Browsing history cleared.")
+
+    def clear_downloads(self) -> None:
+        dl_manager = self.parent_win.download_manager_dialog
+        dl_manager.table.setRowCount(0)
+        dl_manager.downloads.clear()
+        dl_manager._persist_entries()
+        QMessageBox.information(self, "Success", "Download history cleared.")
+
+    def clear_cookies(self) -> None:
+        if not self.parent_win.incognito:
+            self.parent_win.web_profile.cookieStore().deleteAllCookies()
+        QMessageBox.information(self, "Success", "Cookies cleared.")
+
+    def clear_cache(self) -> None:
+        if not self.parent_win.incognito:
+            self.parent_win.web_profile.clearHttpCache()
+        QMessageBox.information(self, "Success", "Cache cleared.")
+
+    def clear_all_data(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Confirm",
+            "Are you sure you want to clear all browsing data, downloads, cookies, and cache?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            # Clear History
+            self.parent_win.history_manager.history["web"] = []
+            self.parent_win.history_manager.save()
+            self.parent_win.history_model.setStringList(
+                self.parent_win.history_manager.get_model_data()
+            )
+
+            # Clear Downloads
+            dl_manager = self.parent_win.download_manager_dialog
+            dl_manager.table.setRowCount(0)
+            dl_manager.downloads.clear()
+            dl_manager._persist_entries()
+
+            # Clear Cookies and Cache
+            if not self.parent_win.incognito:
+                self.parent_win.web_profile.cookieStore().deleteAllCookies()
+                self.parent_win.web_profile.clearHttpCache()
+
+            QMessageBox.information(self, "Success", "All data has been cleared.")
 
 
 class RiemannWindow(QMainWindow):
@@ -179,7 +266,7 @@ class RiemannWindow(QMainWindow):
 
         self.tree_signatures = QTreeWidget()
         self.tree_signatures.setHeaderLabels(["Identity", "Details"])
-        self.tabs_side.addTab(self.tree_signatures, "🖊️ Signatures")
+        # self.tabs_side.addTab(self.tree_signatures, "🖊️ Signatures")
 
         self.setup_menu()
         self._init_shortcuts()
@@ -289,6 +376,8 @@ class RiemannWindow(QMainWindow):
             self.setWindowTitle(f"{prefix} - {tab_title}")
         else:
             self.setWindowTitle(prefix)
+
+        self.refresh_signature_panel()
 
     def split_pdf(self) -> None:
         """Utility to extract specific pages into a new PDF."""
@@ -467,38 +556,58 @@ class RiemannWindow(QMainWindow):
                 elif item.get("type") == "web" and item.get("data"):
                     self._add_browser_tab(item["data"], target_widget)
 
-    def update_signatures_sidebar(self, signatures: list) -> None:
-        self.tree_signatures.clear()
+    def refresh_signature_panel(self) -> None:
+        """Dynamically shows or hides the signature dock based on the active tab."""
+        active_widget = self.tabs_main.currentWidget()
 
-        if not signatures:
-            item = QTreeWidgetItem(self.tree_signatures)
-            item.setText(0, "No digital signatures found.")
-            return
+        # If the user is interacting with a split-view document on the side, use that context
+        if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
+            side_widget = self.tabs_side.currentWidget()
+            if side_widget and side_widget != self.tree_signatures:
+                active_widget = side_widget
 
-        for sig in signatures:
-            # Checkmark if valid AND trusted, else Warning icon
-            icon = (
-                "✔️"
-                if (sig["valid"] and sig["is_trusted"])
-                else ("❓" if sig["valid"] else "❌")
-            )
+        # Get signatures from the active widget, defaulting to an empty list
+        signatures = (
+            getattr(active_widget, "current_signatures", [])
+            if hasattr(active_widget, "current_signatures")
+            else []
+        )
 
-            item = QTreeWidgetItem(self.tree_signatures)
-            item.setText(0, f"{icon} {sig['subject']}")
-            item.setText(1, sig["field_name"])
+        sig_idx = self.tabs_side.indexOf(self.tree_signatures)
 
-            child_cert = QTreeWidgetItem(item)
-            child_cert.setText(0, f"Cert Hash: {sig['cert_hash'][:15]}...")
+        if signatures:
+            self.tree_signatures.clear()
+            for sig in signatures:
+                icon = (
+                    "✔️"
+                    if (sig.get("valid") and sig.get("is_trusted"))
+                    else ("❓" if sig.get("valid") else "❌")
+                )
+                item = QTreeWidgetItem(self.tree_signatures)
+                item.setText(0, f"{icon} {sig.get('subject', 'Unknown')}")
+                item.setText(1, sig.get("field_name", "Unknown"))
+                child_cert = QTreeWidgetItem(item)
+                child_cert.setText(0, f"Cert Hash: {sig.get('cert_hash', '')[:15]}...")
+                if not sig.get("is_trusted") and sig.get("valid"):
+                    child_warn = QTreeWidgetItem(item)
+                    child_warn.setText(0, "Identity Unknown (Not in Trust Store)")
+                if not sig.get("valid"):
+                    child_err = QTreeWidgetItem(item)
+                    child_err.setText(0, "CRITICAL: Document Altered!")
+            self.tree_signatures.expandAll()
 
-            if not sig["is_trusted"] and sig["valid"]:
-                child_warn = QTreeWidgetItem(item)
-                child_warn.setText(0, "Identity Unknown (Not in Trust Store)")
-
-            if not sig["valid"]:
-                child_err = QTreeWidgetItem(item)
-                child_err.setText(0, "CRITICAL: Document Altered!")
-
-        self.tree_signatures.expandAll()
+            # Make sure it's docked in the side tab widget
+            if sig_idx == -1:
+                self.tabs_side.addTab(self.tree_signatures, "🖊️ Signatures")
+            if self.tabs_side.isHidden():
+                self.tabs_side.show()
+        else:
+            # If no signatures (or it's a browser tab), quietly remove the dock
+            if sig_idx != -1:
+                self.tabs_side.removeTab(sig_idx)
+            # Hide the side view completely if there's nothing else left in it
+            if self.tabs_side.count() == 0:
+                self.tabs_side.hide()
 
     # --- Tab Creation Helpers ---
 
@@ -515,7 +624,7 @@ class RiemannWindow(QMainWindow):
         """
         self.add_to_history(path, "pdf")
         reader = ReaderTab()
-        reader.signatures_detected.connect(self.update_signatures_sidebar)
+        reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
         reader.load_document(path, restore_state=restore_state)
         idx = target_widget.addTab(reader, os.path.basename(path))
         target_widget.setCurrentIndex(idx)
@@ -618,7 +727,7 @@ class RiemannWindow(QMainWindow):
             self._add_pdf_tab(path, self.tabs_main, restore_state)
         else:
             reader = ReaderTab()
-            reader.signatures_detected.connect(self.update_signatures_sidebar)
+            reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
             self.tabs_main.addTab(reader, "New Tab")
             self.tabs_main.setCurrentWidget(reader)
 

@@ -99,7 +99,7 @@ class PageWidget(QLabel):
 
             painter.setPen(color)
             font = painter.font()
-            font.setPointSize(max(8, int(rect.height() / 6)))  # Scale text to box
+            font.setPointSize(max(8, int(rect.height() / 6)))
             font.setBold(True)
             painter.setFont(font)
 
