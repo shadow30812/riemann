@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from contextlib import asynccontextmanager
@@ -5,7 +6,7 @@ from contextlib import asynccontextmanager
 import faiss
 import fitz
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
@@ -146,6 +147,107 @@ async def search_pdf(req: SearchRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.websocket("/ws/ai")
+async def ai_websocket(websocket: WebSocket):
+    await websocket.accept()
+    global vector_index, chunk_metadata, model
+    try:
+        while True:
+            data = await websocket.receive_text()
+            req = json.loads(data)
+            action = req.get("action")
+
+            if action == "index":
+                pdf_path = req.get("pdf_path")
+                chunk_size = req.get("chunk_size", 200)
+                chunk_overlap = req.get("chunk_overlap", 50)
+
+                await websocket.send_text(
+                    json.dumps(
+                        {"status": "progress", "msg": f"Opening PDF: {pdf_path}"}
+                    )
+                )
+
+                if not os.path.exists(pdf_path):
+                    await websocket.send_text(
+                        json.dumps({"status": "error", "msg": "PDF file not found."})
+                    )
+                    continue
+
+                doc = fitz.open(pdf_path)
+                all_chunks = []
+                for page_num in range(len(doc)):
+                    page = doc[page_num]
+                    text = clean_text(page.get_text("text"))
+                    if text:
+                        all_chunks.extend(
+                            chunk_text(text, page_num + 1, chunk_size, chunk_overlap)
+                        )
+                doc.close()
+
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "status": "progress",
+                            "msg": f"Extracted {len(all_chunks)} chunks. Generating embeddings...",
+                        }
+                    )
+                )
+
+                texts = [c["text"] for c in all_chunks]
+                embeddings = model.encode(
+                    texts, convert_to_numpy=True, normalize_embeddings=True
+                )
+                embedding_dim = embeddings.shape[1]
+                vector_index = faiss.IndexFlatIP(embedding_dim)
+                vector_index.add(embeddings)
+                chunk_metadata = all_chunks
+
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "status": "success",
+                            "msg": "Indexing complete",
+                            "chunks": len(all_chunks),
+                        }
+                    )
+                )
+
+            elif action == "search":
+                query = req.get("query")
+                top_k = req.get("top_k", 5)
+
+                if vector_index is None or not chunk_metadata:
+                    await websocket.send_text(
+                        json.dumps({"status": "error", "msg": "No PDF indexed."})
+                    )
+                    continue
+
+                query_embedding = model.encode(
+                    [query], convert_to_numpy=True, normalize_embeddings=True
+                )
+                distances, indices = vector_index.search(query_embedding, top_k)
+
+                results = []
+                for i in range(top_k):
+                    idx = indices[0][i]
+                    score = float(distances[0][i])
+                    if idx != -1 and idx < len(chunk_metadata) and score >= 0.35:
+                        meta = chunk_metadata[idx]
+                        results.append(
+                            {"page": meta["page"], "text": meta["text"], "score": score}
+                        )
+
+                await websocket.send_text(
+                    json.dumps({"status": "results", "data": results})
+                )
+
+    except WebSocketDisconnect:
+        print("WebSocket client disconnected")
+    except Exception as e:
+        await websocket.send_text(json.dumps({"status": "error", "msg": str(e)}))
 
 
 if __name__ == "__main__":

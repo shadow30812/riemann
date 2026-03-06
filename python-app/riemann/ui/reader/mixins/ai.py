@@ -6,6 +6,7 @@ Handles OCR (Tesseract) and Math Snipping (Pix2Tex) logic.
 
 import atexit
 import io
+import json
 import os
 import subprocess
 import sys
@@ -15,7 +16,8 @@ from typing import Any
 
 import requests
 from PIL import Image
-from PySide6.QtCore import QBuffer, QObject, QRect, Qt, QTimer, Signal
+from PySide6.QtCore import QBuffer, QObject, QRect, Qt, QTimer, QUrl, Signal
+from PySide6.QtWebSockets import QWebSocket
 from PySide6.QtWidgets import (
     QApplication,
     QInputDialog,
@@ -306,87 +308,53 @@ class AiMixin:
         QTimer.singleShot(4000, self.lbl_toast.hide)
 
     def index_pdf_for_ai(self) -> None:
-        """Sends the current PDF to the AI sidecar in a background thread."""
         if not hasattr(self, "current_path") or not self.current_path:
             return
 
-        pdf_path = self.current_path
-        self._ai_bridge = AIEngineBridge()
-        self._ai_bridge.toast_requested.connect(
-            self.show_toast, Qt.ConnectionType.QueuedConnection
+        self._start_ai_engine()
+        self._setup_websocket()
+
+        # Wait slightly for engine spin-up before sending
+        QTimer.singleShot(
+            2000,
+            lambda: self._ws_client.sendTextMessage(
+                json.dumps({"action": "index", "pdf_path": self.current_path})
+            ),
         )
-
-        def _indexing_task():
-            self._start_ai_engine()
-
-            server_ready = False
-            for _ in range(15):
-                try:
-                    # A quick GET request to see if Uvicorn is accepting connections
-                    requests.get(f"{self.ai_base_url}/docs", timeout=1)
-                    server_ready = True
-                    break
-                except requests.exceptions.RequestException:
-                    time.sleep(1)
-
-            if not server_ready:
-                print("AI Engine took too long to start.")
-                return
-
-            try:
-                res = requests.post(
-                    f"{self.ai_base_url}/index",
-                    json={"pdf_path": pdf_path},
-                    timeout=120,  # High timeout: large PDFs take time to index
-                )
-                if res.status_code == 200:
-                    print("PDF successfully indexed for semantic search.")
-                    self._ai_bridge.toast_requested.emit("AI Engine is ready! ✨")
-                else:
-                    self._ai_bridge.toast_requested.emit("AI Indexing failed.")
-            except requests.exceptions.RequestException:
-                self._ai_bridge.toast_requested.emit("AI Engine disconnected.")
-
-        # Run completely off the UI thread so the app stays buttery smooth
-        threading.Thread(target=_indexing_task, daemon=True).start()
 
     def ai_search(self, query: str) -> None:
-        """Queries the AI engine and returns matches (runs in background)."""
         self._start_ai_engine()
-
-        self._ai_search_bridge = AIEngineBridge()
-        self._ai_search_bridge.search_results_ready.connect(
-            self._handle_ai_search_results, Qt.ConnectionType.QueuedConnection
-        )
-        self._ai_search_bridge.toast_requested.connect(
-            self.show_toast, Qt.ConnectionType.QueuedConnection
+        self._setup_websocket()
+        self._ws_client.sendTextMessage(
+            json.dumps({"action": "search", "query": query, "top_k": 5})
         )
 
-        def _search_task():
-            try:
-                res = requests.post(
-                    f"{self.ai_base_url}/search",
-                    json={"query": query, "top_k": 5},
-                    timeout=10,
-                )
-                if res.status_code == 200:
-                    self._ai_search_bridge.search_results_ready.emit(res.json())
-                else:
-                    self._ai_search_bridge.toast_requested.emit("Search failed.")
-            except requests.exceptions.RequestException:
-                self._ai_search_bridge.toast_requested.emit("AI Engine is unreachable.")
+    def _setup_websocket(self) -> None:
+        if not hasattr(self, "_ws_client"):
+            self._ws_client = QWebSocket()
+            self._ws_client.textMessageReceived.connect(self._on_ws_message)
+            self._ws_client.open(QUrl("ws://localhost:8080/ws/ai"))
 
-        threading.Thread(target=_search_task, daemon=True).start()
-
-    def _handle_ai_search_results(self, results: list) -> None:
-        """Processes the JSON results from the AI sidecar (Runs on Main Thread)."""
-        if not results:
-            self.show_toast("No semantic matches found.")
-            return
-
-        self.ai_results = results
-        self.ai_result_idx = 0
-        self._render_ai_result()
+    def _on_ws_message(self, message: str) -> None:
+        try:
+            res = json.loads(message)
+            status = res.get("status")
+            if status == "progress":
+                self.show_toast(f"AI: {res.get('msg')}")
+            elif status == "success":
+                self.show_toast("AI Engine is ready! ✨")
+            elif status == "error":
+                self.show_toast(f"AI Error: {res.get('msg')}")
+            elif status == "results":
+                data = res.get("data", [])
+                if not data:
+                    self.show_toast("No semantic matches found.")
+                    return
+                self.ai_results = data
+                self.ai_result_idx = 0
+                self._render_ai_result()
+        except json.JSONDecodeError:
+            pass
 
     def ai_find_next(self) -> None:
         """Cycles to the next AI search result."""

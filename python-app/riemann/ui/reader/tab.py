@@ -10,10 +10,16 @@ import shutil
 import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
-from pyhanko.sign import signers
-from pyhanko.sign.fields import SigFieldSpec, append_signature_field
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSettings, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QEvent,
+    QObject,
+    QPoint,
+    QRect,
+    QSettings,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QKeyEvent,
@@ -26,10 +32,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -39,11 +42,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QScroller,
     QScrollerProperties,
-    QSizePolicy,
     QStackedWidget,
     QTabWidget,
-    QTextEdit,
-    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -54,9 +54,9 @@ from .mixins.ai import AiMixin
 from .mixins.annotations import AnnotationsMixin
 from .mixins.rendering import RenderingMixin
 from .mixins.search import SearchMixin
+from .mixins.signatures import SignaturesMixin
 from .utils import generate_markdown_html
 from .widgets import PageWidget
-from .workers import SignatureValidationWorker
 
 try:
     import riemann_core
@@ -65,80 +65,9 @@ except ImportError as e:
     sys.exit(1)
 
 
-class CertificateViewerDialog(QDialog):
-    """A dialog to display parsed X.509 Certificate details."""
-
-    def __init__(self, cert_details, parent=None):
-        super().__init__(parent)
-        self.cert_details = cert_details
-        self.setWindowTitle("Certificate Viewer")
-        self.resize(500, 250)
-
-        self.setSizeGripEnabled(True)
-        layout = QVBoxLayout(self)
-        form = QFormLayout()
-
-        form.addRow("Subject:", QLabel(cert_details.get("subject", "N/A")))
-        form.addRow("Issuer:", QLabel(cert_details.get("issuer", "N/A")))
-        form.addRow("Serial Number:", QLabel(cert_details.get("serial", "N/A")))
-        form.addRow("Valid From:", QLabel(cert_details.get("not_before", "N/A")))
-        form.addRow("Valid To:", QLabel(cert_details.get("not_after", "N/A")))
-
-        hash_text = QTextEdit(cert_details.get("cert_hash", "N/A"))
-        hash_text.setReadOnly(True)
-        hash_text.setMinimumHeight(50)
-        hash_text.setMinimumWidth(50)
-        hash_text.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-
-        form.addRow("SHA-256 Fingerprint:", hash_text)
-        layout.addLayout(form)
-
-        self.btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-
-        if not cert_details.get("is_trusted"):
-            self.btn_trust = QPushButton("Trust this Certificate")
-            self.btn_box.addButton(
-                self.btn_trust, QDialogButtonBox.ButtonRole.ActionRole
-            )
-
-        self.btn_box.rejected.connect(self.reject)
-        self.btn_box.accepted.connect(self.accept)
-        layout.addWidget(self.btn_box)
-
-        self.btn_export = QPushButton("Export (.pem)")
-        self.btn_export.clicked.connect(self.export_cert)
-        self.btn_box.addButton(self.btn_export, QDialogButtonBox.ButtonRole.ActionRole)
-
-        if not cert_details.get("is_trusted"):
-            self.btn_trust = QPushButton("Trust this Certificate")
-            self.btn_box.addButton(
-                self.btn_trust, QDialogButtonBox.ButtonRole.ActionRole
-            )
-
-        self.btn_box.rejected.connect(self.reject)
-        self.btn_box.accepted.connect(self.accept)
-        layout.addWidget(self.btn_box)
-
-    def export_cert(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Certificate", "certificate.pem", "PEM Files (*.pem)"
-        )
-        if path:
-            try:
-                with open(path, "w") as f:
-                    f.write(self.cert_details.get("cert_pem", ""))
-                # Optional: trigger a toast notification on the parent
-                if hasattr(self.parent(), "show_toast"):
-                    self.parent().show_toast("Certificate exported successfully!")
-            except Exception as e:
-                QMessageBox.critical(
-                    self, "Export Error", f"Could not save certificate: {e}"
-                )
-
-
-class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin):
+class ReaderTab(
+    QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin, SignaturesMixin
+):
     """
     A self-contained PDF Viewer Widget.
     Inherits functional logic from mixins.
@@ -577,122 +506,6 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
         except Exception as e:
             sys.stderr.write(f"Load error: {e}\n")
 
-    def _validate_signatures(self, path: str) -> None:
-        if hasattr(self, "signature_banner"):
-            self.signature_banner.setVisible(False)
-
-        # Use a completely new key to abandon the corrupted hash list permanently
-        trusted_pems = self.settings.value("trusted_certs_pem", [], type=list)
-
-        self.sig_worker = SignatureValidationWorker(path, trusted_pems)
-        self.sig_worker.finished_validation.connect(self._on_signatures_validated)
-        self.sig_worker.start()
-
-    def _on_signatures_validated(
-        self, status: str, message: str, signatures: list
-    ) -> None:
-        self.current_signatures = signatures
-        if status == "NONE":
-            self.signature_banner.setVisible(False)
-            self.signatures_detected.emit([])
-            return
-
-        self.signature_banner.setVisible(True)
-        self.lbl_sig_status.setText(message)
-        self.btn_trust_cert.setVisible(False)
-        self.current_untrusted_pem = None
-
-        if status == "VALID":
-            self.signature_banner.setStyleSheet(
-                "background-color: #2e7d32; color: white;"
-            )
-        elif status == "UNKNOWN_IDENTITY":
-            self.signature_banner.setStyleSheet(
-                "background-color: #f57f17; color: white;"
-            )
-            untrusted = next((s for s in signatures if not s["is_trusted"]), None)
-            if untrusted:
-                self.current_untrusted_pem = untrusted.get("cert_pem")
-                self.btn_trust_cert.setVisible(True)
-        elif status == "INVALID" or status == "ERROR":
-            self.signature_banner.setStyleSheet(
-                "background-color: #c62828; color: white;"
-            )
-
-        self.signatures_detected.emit(signatures)
-        self._apply_signature_overlays()
-
-    def trust_current_certificate(self) -> None:
-        if getattr(self, "current_untrusted_pem", None) is None:
-            return
-
-        # Write to the clean key
-        trusted_pems = self.settings.value("trusted_certs_pem", [], type=list)
-
-        if self.current_untrusted_pem not in trusted_pems:
-            trusted_pems.append(self.current_untrusted_pem)
-            self.settings.setValue("trusted_certs_pem", trusted_pems)
-            self.show_toast("Certificate added to Trust Store.")
-
-        # Always force re-validation
-        if getattr(self, "current_path", None):
-            self._validate_signatures(self.current_path)
-
-    def view_certificate(self) -> None:
-        """Opens the Certificate Viewer dialog for the current signature."""
-        if not getattr(self, "current_signatures", None):
-            self.show_toast("No signature data available.")
-            return
-
-        # Prioritize showing the untrusted certificate if there is one
-        target_cert = next(
-            (s for s in self.current_signatures if not s["is_trusted"]),
-            self.current_signatures[0],
-        )
-
-        dialog = CertificateViewerDialog(target_cert, self)
-
-        # If the trust button was added to the dialog, wire it to the main trust function
-        if hasattr(dialog, "btn_trust"):
-            dialog.btn_trust.clicked.connect(
-                lambda: [self.trust_current_certificate(), dialog.accept()]
-            )
-
-        dialog.exec()
-
-    def _apply_signature_overlays(self) -> None:
-        """Matches signature data to Rust's embedded form widgets and maps coordinates."""
-        if not self.current_doc or not getattr(self, "current_signatures", None):
-            return
-
-        for widget in getattr(self, "page_widgets", {}).values():
-            if hasattr(widget, "set_signature_overlays"):
-                widget.set_signature_overlays([])
-
-    def _populate_signatures_panel(self, signatures: list) -> None:
-        """Populates the sidebar tree with signature details."""
-        if not hasattr(self, "tree_signatures"):
-            print("Warning: tree_signatures widget not found in ReaderTab UI.")
-            return
-
-        self.tree_signatures.clear()
-
-        for sig in signatures:
-            icon = "✔️" if sig["valid"] else "❌"
-            item = QTreeWidgetItem(self.tree_signatures)
-            item.setText(0, f"{icon} {sig['subject']}")
-            item.setText(1, sig["field_name"])
-
-            # Add child nodes for detailed inspection
-            child_cert = QTreeWidgetItem(item)
-            child_cert.setText(0, f"Cert Hash: {sig['cert_hash']}")
-
-            if not sig["valid"]:
-                child_warn = QTreeWidgetItem(item)
-                child_warn.setText(0, "Warning: Document Altered!")
-
-        self.tree_signatures.expandAll()
-
     def _load_markdown(self, path: str) -> None:
         """Internal handler for Markdown files."""
         self.current_path = path
@@ -841,92 +654,6 @@ class ReaderTab(QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin)
             self.scroll.verticalScrollBar().setValue(
                 max(0, int(y - self.scroll.viewport().height() / 2))
             )
-
-    def initiate_signing_flow(self) -> None:
-        """Prompts user for a PKCS#12 certificate to sign the document."""
-        if not self.current_path:
-            QMessageBox.warning(self, "Sign Error", "No document loaded.")
-            return
-
-        cert_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Certificate", "", "PKCS#12 Files (*.pfx *.p12)"
-        )
-
-        if cert_path:
-            from PySide6.QtWidgets import QInputDialog
-
-            password, ok = QInputDialog.getText(
-                self,
-                "Certificate Password",
-                "Enter password for the certificate:",
-                QLineEdit.EchoMode.Password,
-            )
-            if ok and password:
-                self.show_toast("Initiating pyHanko signing flow...")
-                self.execute_pyhanko_signing(cert_path, password)
-
-    def execute_pyhanko_signing(self, cert_path: str, password: str) -> None:
-        """Performs the actual cryptographic signing using pyHanko."""
-        try:
-            # 1. Load the PKCS#12 certificate
-            signer = signers.SimpleSigner.load_pkcs12(cert_path, password.encode())
-            output_path = self.current_path.replace(".pdf", "_signed.pdf")
-
-            # 2. Open PDF incrementally (Crucial to preserve previous signatures)
-            with open(self.current_path, "rb") as doc:
-                writer = IncrementalPdfFileWriter(doc)
-
-                # Create a hidden or visual signature field (using a generic name for now)
-                field_name = f"Signature_{os.urandom(4).hex()}"
-                append_signature_field(
-                    writer,
-                    SigFieldSpec(
-                        sig_field_name=field_name,
-                        on_page=0,
-                        box=(10, 10, 200, 60),  # Coordinates for visual stamp
-                    ),
-                )
-
-                # 3. Apply the cryptographic hash and write to file
-                with open(output_path, "wb") as out_f:
-                    signers.sign_pdf(
-                        writer,
-                        signers.PdfSignatureMetadata(field_name=field_name),
-                        signer=signer,
-                        out=out_f,
-                    )
-
-            self.show_toast(
-                f"Document securely signed! Saved as {os.path.basename(output_path)}"
-            )
-            # Automatically load the newly signed document
-            self.load_document(output_path)
-
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Signing Error", f"Failed to sign document:\n{str(e)}"
-            )
-
-    def update_signature_banner(self, status: str, message: str) -> None:
-        """Updates the banner based on pyHanko verification results."""
-        self.signature_banner.setVisible(True)
-        self.lbl_sig_status.setText(message)
-
-        if status == "VALID":
-            self.signature_banner.setStyleSheet(
-                "background-color: #2e7d32; color: white;"
-            )  # Green
-            self.btn_trust_cert.setVisible(False)
-        elif status == "UNKNOWN_IDENTITY":
-            self.signature_banner.setStyleSheet(
-                "background-color: #f57f17; color: white;"
-            )  # Yellow
-            self.btn_trust_cert.setVisible(True)
-        elif status == "INVALID":
-            self.signature_banner.setStyleSheet(
-                "background-color: #c62828; color: white;"
-            )  # Red
-            self.btn_trust_cert.setVisible(False)
 
     def next_view(self) -> None:
         """Next page."""

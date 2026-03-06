@@ -46,6 +46,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .browser_handlers import ScriptInjector
+
 
 class YtDlpWorker(QThread):
     progress = Signal(int)
@@ -260,10 +262,11 @@ class BrowserTab(QWidget):
 
         self.request_interceptor = RequestInterceptor(self)
         self.profile.setUrlRequestInterceptor(self.request_interceptor)
-
         self.profile.downloadRequested.connect(self._handle_download)
-        self.inject_ad_skipper()
-        self.inject_backspace_handler()
+
+        self.script_injector = ScriptInjector(self.profile)
+        self.script_injector.inject_ad_skipper()
+        self.script_injector.inject_backspace_handler()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -540,66 +543,6 @@ class BrowserTab(QWidget):
         self.profile.clearHttpCache()
         self.web.reload()
 
-    def inject_ad_skipper(self) -> None:
-        """
-        Injects JavaScript to automatically skip video advertisements.
-        Runs primarily on video platforms like YouTube.
-        """
-        js_code = """
-        (function() {
-            const clearAds = () => {
-                const skipBtns = document.querySelectorAll('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .videoAdUiSkipButton');
-                skipBtns.forEach(b => { b.click(); });
-                const overlays = document.querySelectorAll('.ytp-ad-overlay-close-button');
-                overlays.forEach(b => { b.click(); });
-                const video = document.querySelector('video');
-                const adShowing = document.querySelector('.ad-showing');
-                if (video && adShowing) {
-                    video.playbackRate = 16.0;
-                    video.muted = true;
-                    if(isFinite(video.duration)) video.currentTime = video.duration;
-                }
-            };
-            setInterval(clearAds, 50);
-        })();
-        """
-        script = QWebEngineScript()
-        script.setName("RiemannAdBlock")
-        script.setSourceCode(js_code)
-        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
-        script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
-        script.setRunsOnSubFrames(True)
-        self.profile.scripts().insert(script)
-
-    def inject_backspace_handler(self) -> None:
-        """
-        Injects JavaScript to handle Backspace navigation logic.
-        Prevents the browser from going back when backspace is pressed
-        inside input fields.
-        """
-        js_code = """
-        document.addEventListener("keydown", function(e) {
-            if (e.key === "Backspace" && !e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
-                const tag = document.activeElement.tagName;
-                const type = document.activeElement.type;
-                const isInput = (tag === "INPUT" && type !== "button" && type !== "submit" && type !== "checkbox" && type !== "radio") 
-                                || tag === "TEXTAREA" 
-                                || document.activeElement.isContentEditable;
-                if (!isInput) {
-                    e.preventDefault();
-                    window.history.back();
-                }
-            }
-        });
-        """
-        script = QWebEngineScript()
-        script.setName("RiemannBackspace")
-        script.setSourceCode(js_code)
-        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
-        script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
-        script.setRunsOnSubFrames(True)
-        self.profile.scripts().insert(script)
-
     def focus_url_bar(self) -> None:
         """Focuses and selects all text in the URL bar."""
         self.txt_url.setFocus()
@@ -643,7 +586,7 @@ class BrowserTab(QWidget):
             settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, False)
             self.web.page().setBackgroundColor(QColor("#fff"))
 
-        self.inject_smart_dark_mode()
+        self.script_injector.inject_smart_dark_mode(self.web.page(), self.dark_mode)
         style = f"QWidget {{ background: {bg}; color: {fg}; }} QLineEdit {{ background: {inp_bg}; border: 1px solid {border}; border-radius: 4px; padding: 4px; }}"
         self.toolbar.setStyleSheet(style)
         self.search_bar.setStyleSheet(style)
@@ -658,61 +601,6 @@ class BrowserTab(QWidget):
                     padding: 4px;
                 }
             """)
-
-    def inject_smart_dark_mode(self) -> None:
-        """
-        Injects CSS and JS to invert light websites while preserving images.
-        Uses heuristics to avoid inverting sites that are already dark.
-        """
-        script = QWebEngineScript()
-        script.setName("RiemannSmartDark")
-        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
-        script.setWorldId(QWebEngineScript.ScriptWorldId.UserWorld)
-
-        if self.dark_mode:
-            js = """
-            (function() {
-                var existing = document.getElementById('riemann-dark');
-                if (existing) existing.remove();
-
-                function getBrightness(elem) {
-                    var style = window.getComputedStyle(elem);
-                    var color = style.backgroundColor;
-                    
-                    if (color === 'rgba(0, 0, 0, 0)' || color === 'transparent') return 255;
-                    
-                    var rgb = color.match(/\\d+/g);
-                    if (!rgb) return 255;
-                    
-                    var r = parseInt(rgb[0]);
-                    var g = parseInt(rgb[1]);
-                    var b = parseInt(rgb[2]);
-                    
-                    return (0.299 * r + 0.587 * g + 0.114 * b);
-                }
-
-                var bodyB = getBrightness(document.body);
-                var htmlB = getBrightness(document.documentElement);
-                
-                var isAlreadyDark = (bodyB < 140) || (htmlB < 140);
-                
-                if (!isAlreadyDark) {
-                    var css = `html { filter: invert(1) hue-rotate(180deg) !important; } 
-                               img, video, iframe, canvas, :fullscreen { filter: invert(1) hue-rotate(180deg) !important; }`;
-                    
-                    var style = document.createElement('style'); 
-                    style.id = 'riemann-dark'; 
-                    style.innerHTML = css; 
-                    document.head.appendChild(style);
-                }
-            })();
-            """
-        else:
-            js = "var el = document.getElementById('riemann-dark'); if(el) el.remove();"
-
-        script.setSourceCode(js)
-        self.profile.scripts().insert(script)
-        self.web.page().runJavaScript(js)
 
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
         """
