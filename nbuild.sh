@@ -55,7 +55,7 @@ export PYTHONPATH=$PYTHONPATH:$(pwd)/python-app
 # Excluding these saves massive space (~400MB+) and prevents crashes.
 EXCLUDES="--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow-import-to=cv2 --nofollow-import-to=pix2tex"
 EXCLUDES="$EXCLUDES --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas"
-EXCLUDES="$EXCLUDES --nofollow-import-to=nvidia" 
+EXCLUDES="$EXCLUDES --nofollow-import-to=nvidia --nofollow-import-to=fitz --nofollow-import-to=pymupdf" 
 
 python3 -m nuitka \
     --onefile \

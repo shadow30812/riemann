@@ -167,7 +167,7 @@ Some features like audio engine or an app icon may be missing in this build.
 
 A pre-compiled and optimised version of the binary is available in the releases section of the GitHub page. You may choose to use it for the sake of convenience, but it may not run equally well on all distributions of Linux. It is compiled and tested on Ubuntu 24.04.02 LTS with Linux Kernel 6.8.0-94-generic on an x86_64 architecture machine.
 
-At the time of writing this README, the latest pre-compiled binary is available on [this](https://github.com/shadow30812/riemann/releases/download/v2.1/Riemann) page of the GitHub repository.
+At the time of writing this README, the latest pre-compiled binary is available on [this](https://github.com/shadow30812/riemann/releases/download/v3.0/Riemann) page of the GitHub repository.
 
 ## **AI & OCR Configuration**
 

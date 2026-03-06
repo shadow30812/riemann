@@ -19,7 +19,7 @@ import shutil
 from pathlib import Path
 from typing import List, Optional
 
-import fitz
+from pypdf import PdfReader, PdfWriter
 from PySide6.QtCore import (
     QEvent,
     QObject,
@@ -380,7 +380,7 @@ class RiemannWindow(QMainWindow):
         self.refresh_signature_panel()
 
     def split_pdf(self) -> None:
-        """Utility to extract specific pages into a new PDF."""
+        """Utility to extract specific pages into a new PDF using pypdf."""
         current = self.tabs_main.currentWidget()
         source_path = ""
         if isinstance(current, ReaderTab) and current.current_path:
@@ -389,7 +389,6 @@ class RiemannWindow(QMainWindow):
             source_path, _ = QFileDialog.getOpenFileName(
                 self, "Select PDF to Split", "", "PDF Files (*.pdf)"
             )
-
         if not source_path:
             return
 
@@ -406,34 +405,28 @@ class RiemannWindow(QMainWindow):
             return
 
         try:
-            src_doc = fitz.open(source_path)
-            new_doc = fitz.open()
-            max_idx = src_doc.page_count - 1
+            reader = PdfReader(source_path)
+            writer = PdfWriter()
+            max_idx = len(reader.pages) - 1
 
             for part in pages_str.split(","):
                 part = part.strip()
                 if not part:
                     continue
-
                 if "-" in part:
                     start, end = map(int, part.split("-"))
                     start_idx = min(max(0, start - 1), max_idx)
                     end_idx = min(max(0, end - 1), max_idx)
-
                     if start_idx <= end_idx:
-                        new_doc.insert_pdf(
-                            src_doc, from_page=start_idx, to_page=end_idx
-                        )
+                        for p_idx in range(start_idx, end_idx + 1):
+                            writer.add_page(reader.pages[p_idx])
                 else:
                     page_idx = int(part) - 1
                     if 0 <= page_idx <= max_idx:
-                        new_doc.insert_pdf(
-                            src_doc, from_page=page_idx, to_page=page_idx
-                        )
+                        writer.add_page(reader.pages[page_idx])
 
-            new_doc.save(dest_path)
-            new_doc.close()
-            src_doc.close()
+            with open(dest_path, "wb") as f_out:
+                writer.write(f_out)
 
             if (
                 QMessageBox.question(
@@ -446,7 +439,7 @@ class RiemannWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to split PDF: {e}")
 
     def join_pdfs(self) -> None:
-        """Utility to merge multiple PDFs into one."""
+        """Utility to merge multiple PDFs into one using pypdf."""
         paths, _ = QFileDialog.getOpenFileNames(
             self, "Select PDFs to Merge", "", "PDF Files (*.pdf)"
         )
@@ -463,18 +456,16 @@ class RiemannWindow(QMainWindow):
         if not dest_path:
             return
 
-        # Ensure consistent order (Alphabetical) across all operating systems
         paths.sort()
-
         try:
-            merged_doc = fitz.open()
+            writer = PdfWriter()
             for path in paths:
-                doc = fitz.open(path)
-                merged_doc.insert_pdf(doc)
-                doc.close()
+                reader = PdfReader(path)
+                for page in reader.pages:
+                    writer.add_page(page)
 
-            merged_doc.save(dest_path)
-            merged_doc.close()
+            with open(dest_path, "wb") as f_out:
+                writer.write(f_out)
 
             if (
                 QMessageBox.question(

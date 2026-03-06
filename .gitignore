@@ -1,5 +1,6 @@
 target/
 __pycache__/
+.vscode
 !tasks.json
 script*
 rough*
@@ -12,7 +13,7 @@ them/
 flexibility.java
 *crash-report*
 riemann_ai_engine/
-riemann_core.abi3.so
+# riemann_core.abi3.so
 build_ai/
 *debug.log
 *.build
