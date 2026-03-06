@@ -27,7 +27,6 @@ from PySide6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
     QWebEnginePage,
     QWebEngineProfile,
-    QWebEngineScript,
     QWebEngineSettings,
     QWebEngineUrlRequestInfo,
     QWebEngineUrlRequestInterceptor,

@@ -1159,14 +1159,12 @@ def run() -> None:
     """
 
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
-        "--disable-web-security "
         "--autoplay-policy=no-user-gesture-required "
         "--disable-setuid-sandbox "
         "--disable-features=AudioServiceOutOfProcess"
         "--referrer-policy=no-referrer-when-downgrade "
         "--enable-features=WebEngineProprietaryCodecs"
     )
-    sys.argv.append("--disable-web-security")
     sys.argv.append("--autoplay-policy=no-user-gesture-required")
 
     install_linux_integration()
