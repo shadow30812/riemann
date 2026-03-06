@@ -52,7 +52,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .core.managers import BookmarksManager, DownloadManager, HistoryManager
+from .core.managers import (
+    BookmarksManager,
+    DownloadManager,
+    HistoryManager,
+    LibraryManager,
+)
 from .ui.browser import BrowserTab
 from .ui.components import DraggableTabWidget
 from .ui.reader import ReaderTab
@@ -266,7 +271,8 @@ class RiemannWindow(QMainWindow):
 
         self.tree_signatures = QTreeWidget()
         self.tree_signatures.setHeaderLabels(["Identity", "Details"])
-        # self.tabs_side.addTab(self.tree_signatures, "🖊️ Signatures")
+
+        self.library_manager = LibraryManager()
 
         self.setup_menu()
         self._init_shortcuts()

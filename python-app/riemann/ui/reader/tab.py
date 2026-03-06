@@ -52,11 +52,13 @@ from ...core.constants import ViewMode, ZoomMode
 from ..components import AnnotationToolbar
 from .mixins.ai import AiMixin
 from .mixins.annotations import AnnotationsMixin
+from .mixins.metadata import MetadataMixin
 from .mixins.rendering import RenderingMixin
 from .mixins.search import SearchMixin
 from .mixins.signatures import SignaturesMixin
 from .utils import generate_markdown_html
 from .widgets import PageWidget
+from .workers import SignatureValidationWorker
 
 try:
     import riemann_core
@@ -66,7 +68,13 @@ except ImportError as e:
 
 
 class ReaderTab(
-    QWidget, RenderingMixin, AnnotationsMixin, AiMixin, SearchMixin, SignaturesMixin
+    QWidget,
+    RenderingMixin,
+    AnnotationsMixin,
+    AiMixin,
+    SearchMixin,
+    SignaturesMixin,
+    MetadataMixin,
 ):
     """
     A self-contained PDF Viewer Widget.
@@ -484,7 +492,7 @@ class ReaderTab(
             self.current_path = path
             self.settings.setValue("lastFile", path)
             self.load_annotations()
-            self._validate_signatures(path)
+            QTimer.singleShot(500, lambda: self._validate_signatures(path))
             QTimer.singleShot(1000, self.index_pdf_for_ai)
 
             if restore_state:
@@ -502,6 +510,8 @@ class ReaderTab(
                 self.current_page_index = 0
                 self.rebuild_layout()
                 self.update_view()
+
+            self.extract_document_metadata()
 
         except Exception as e:
             sys.stderr.write(f"Load error: {e}\n")

@@ -4,12 +4,14 @@ Background Workers for the Reader Module.
 
 import hashlib
 import os
+import re
 import subprocess
 import sys
 import urllib.request
 import zipfile
 from typing import Any
 
+import requests
 from asn1crypto import pem, x509
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign.validation import validate_pdf_signature
@@ -244,3 +246,79 @@ class SignatureValidationWorker(QThread):
             self.finished_validation.emit(
                 "ERROR", f"Error reading signatures: {str(e)}", []
             )
+
+
+class MetadataExtractionWorker(QThread):
+    finished_extraction = Signal(dict)
+
+    def __init__(self, text_chunk: str, parent=None):
+        super().__init__()
+        self.text_chunk = text_chunk
+        self.headers = {"User-Agent": "RiemannReader/1.0"}
+
+    def run(self) -> None:
+        metadata = {}
+
+        # FIX: Use a Session block to aggressively release sockets/CPU
+        with requests.Session() as session:
+            doi_match = re.search(
+                r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", self.text_chunk, re.IGNORECASE
+            )
+            if doi_match:
+                doi = doi_match.group(0).rstrip(".")
+                metadata["doi"] = doi
+                try:
+                    # FIX: Strict (Connect, Read) timeout tuple prevents indefinite hanging
+                    res = session.get(
+                        f"https://api.crossref.org/works/{doi}",
+                        headers=self.headers,
+                        timeout=(3.0, 5.0),
+                    )
+                    if res.status_code == 200:
+                        data = res.json().get("message", {})
+                        metadata["title"] = data.get("title", [""])[0]
+                        authors = [
+                            f"{a.get('given', '')} {a.get('family', '')}".strip()
+                            for a in data.get("author", [])
+                        ]
+                        metadata["authors"] = ", ".join(filter(None, authors))
+                        self.finished_extraction.emit(metadata)
+                        self.quit()
+                        return
+                except Exception:
+                    pass
+
+            arxiv_match = re.search(
+                r"arXiv:(\d{4}\.\d{4,5})", self.text_chunk, re.IGNORECASE
+            )
+            if arxiv_match:
+                arxiv_id = arxiv_match.group(1)
+                metadata["arxiv_id"] = arxiv_id
+                try:
+                    res = session.get(
+                        f"https://api.openalex.org/works/arxiv:{arxiv_id}",
+                        headers=self.headers,
+                        timeout=(3.0, 5.0),
+                    )
+                    if res.status_code == 200:
+                        data = res.json()
+                        metadata["title"] = data.get("title", "")
+                        metadata["year"] = str(data.get("publication_year", ""))
+                        authors = [
+                            a.get("author", {}).get("display_name", "")
+                            for a in data.get("authorships", [])
+                        ]
+                        metadata["authors"] = ", ".join(filter(None, authors))
+                        self.finished_extraction.emit(metadata)
+                        self.quit()
+                        return
+                except Exception:
+                    pass
+
+        lines = [line.strip() for line in self.text_chunk.split("\n") if line.strip()]
+        if len(lines) >= 2:
+            metadata["title"] = lines[0]
+            metadata["authors"] = lines[1]
+
+        self.finished_extraction.emit(metadata)
+        self.quit()  # Explicitly kill the thread loop

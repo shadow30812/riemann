@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QColorDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QMenu,
     QSpinBox,
     QTabBar,
@@ -118,6 +119,53 @@ class DraggableTabBar(QTabBar):
             self.parent().removeTab(tab_index)
 
         super().mouseMoveEvent(event)
+
+    def contextMenuEvent(self, event):
+        tab_index = self.tabAt(event.pos())
+        if tab_index < 0:
+            return
+
+        widget = self.parent().widget(tab_index)
+        menu = QMenu(self)
+
+        rename_action = menu.addAction("Rename Tab (Custom)")
+        revert_action = menu.addAction("Revert to Original Name")
+        meta_action = None
+
+        # Check if it's a PDF and has extracted metadata title
+        if hasattr(widget, "document_metadata") and widget.document_metadata.get(
+            "title"
+        ):
+            meta_title = widget.document_metadata["title"]
+            # Truncate for the menu display so it doesn't stretch across the screen
+            meta_action = menu.addAction(f"Rename to '{meta_title[:30]}...'")
+
+        action = menu.exec(event.globalPos())
+
+        if action == rename_action:
+            current_name = self.tabText(tab_index)
+            new_name, ok = QInputDialog.getText(
+                self, "Rename Tab", "Enter new tab name:", text=current_name
+            )
+            if ok and new_name.strip():
+                self.setTabText(tab_index, new_name.strip())
+
+        elif action == revert_action:
+            # If it's a ReaderTab (PDF)
+            if hasattr(widget, "current_path") and widget.current_path:
+                original_name = os.path.basename(widget.current_path)
+                self.setTabText(tab_index, original_name)
+            # If it's a BrowserTab
+            elif hasattr(widget, "view") and hasattr(widget.view, "title"):
+                original_name = widget.view.title()
+                if not original_name:
+                    original_name = "New Tab"
+                self.setTabText(tab_index, original_name)
+
+        elif meta_action and action == meta_action:
+            title = widget.document_metadata["title"]
+            display_title = (title[:25] + "..") if len(title) > 25 else title
+            self.setTabText(tab_index, display_title)
 
 
 class AnnotationToolbar(QWidget):

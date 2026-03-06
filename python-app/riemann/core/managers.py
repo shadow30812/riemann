@@ -6,8 +6,10 @@ including bookmarks, browsing history, and file downloads. It handles serializat
 to the local filesystem (JSON) and provides models for UI consumption.
 """
 
+import hashlib
 import json
 import os
+import sqlite3
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QStandardPaths, QUrl
@@ -25,6 +27,102 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+class LibraryManager:
+    """Manages the local SQLite database for PDF metadata."""
+
+    def __init__(self) -> None:
+        base = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.AppDataLocation
+        )
+        self.db_path = os.path.join(base, "riemann_library.db")
+        self._init_db()
+
+    def _init_db(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS metadata (
+                    file_hash TEXT PRIMARY KEY,
+                    file_path TEXT,
+                    title TEXT,
+                    authors TEXT,
+                    year TEXT,
+                    doi TEXT,
+                    arxiv_id TEXT
+                )
+            """)
+
+    def get_file_hash(self, file_path: str) -> str:
+        """Creates a unique hash based on the file path to use as a DB key."""
+        return hashlib.sha256(file_path.encode("utf-8")).hexdigest()
+
+    def get_metadata(self, file_path: str) -> dict:
+        file_hash = self.get_file_hash(file_path)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM metadata WHERE file_hash = ?", (file_hash,))
+            row = cur.fetchone()
+            return dict(row) if row else {}
+
+    def save_metadata(self, file_path: str, data: dict) -> None:
+        file_hash = self.get_file_hash(file_path)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO metadata 
+                (file_hash, file_path, title, authors, year, doi, arxiv_id) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    file_hash,
+                    file_path,
+                    data.get("title", ""),
+                    data.get("authors", ""),
+                    data.get("year", ""),
+                    data.get("doi", ""),
+                    data.get("arxiv_id", ""),
+                ),
+            )
+
+    def search_library(self, query: str) -> list:
+        """Parses queries like 'author:Smith year:2020' and executes the SQL search."""
+        import re
+
+        # Extract specific tags
+        author_match = re.search(r'author:\s*"?([^"\s]+)"?', query, re.IGNORECASE)
+        year_match = re.search(r"year:\s*(\d{4})", query, re.IGNORECASE)
+
+        conditions = []
+        params = []
+
+        if author_match:
+            conditions.append("authors LIKE ?")
+            params.append(f"%{author_match.group(1)}%")
+            query = query.replace(author_match.group(0), "")
+
+        if year_match:
+            conditions.append("year = ?")
+            params.append(year_match.group(1))
+            query = query.replace(year_match.group(0), "")
+
+        # Any remaining text is treated as a general keyword search
+        keywords = query.strip()
+        if keywords:
+            conditions.append("(title LIKE ? OR authors LIKE ? OR file_path LIKE ?)")
+            kw_param = f"%{keywords}%"
+            params.extend([kw_param, kw_param, kw_param])
+
+        sql = "SELECT * FROM metadata"
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            return [dict(row) for row in cur.fetchall()]
 
 
 class BookmarksManager:
