@@ -42,7 +42,6 @@ class CertificateViewerDialog(QDialog):
         hash_text = QTextEdit(cert_details.get("cert_hash", "N/A"))
         hash_text.setReadOnly(True)
         hash_text.setMinimumHeight(50)
-        hash_text.setMinimumWidth(50)
         hash_text.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
@@ -51,17 +50,6 @@ class CertificateViewerDialog(QDialog):
         layout.addLayout(form)
 
         self.btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-
-        if not cert_details.get("is_trusted"):
-            self.btn_trust = QPushButton("Trust this Certificate")
-            self.btn_box.addButton(
-                self.btn_trust, QDialogButtonBox.ButtonRole.ActionRole
-            )
-
-        self.btn_box.rejected.connect(self.reject)
-        self.btn_box.accepted.connect(self.accept)
-        layout.addWidget(self.btn_box)
-
         self.btn_export = QPushButton("Export (.pem)")
         self.btn_export.clicked.connect(self.export_cert)
         self.btn_box.addButton(self.btn_export, QDialogButtonBox.ButtonRole.ActionRole)
@@ -84,7 +72,6 @@ class CertificateViewerDialog(QDialog):
             try:
                 with open(path, "w") as f:
                     f.write(self.cert_details.get("cert_pem", ""))
-                # Optional: trigger a toast notification on the parent
                 if hasattr(self.parent(), "show_toast"):
                     self.parent().show_toast("Certificate exported successfully!")
             except Exception as e:

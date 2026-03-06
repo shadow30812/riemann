@@ -252,7 +252,7 @@ class MetadataExtractionWorker(QThread):
     finished_extraction = Signal(dict)
 
     def __init__(self, text_chunk: str, parent=None):
-        super().__init__()
+        super().__init__(parent)
         self.text_chunk = text_chunk
         self.headers = {"User-Agent": "RiemannReader/1.0"}
 
@@ -321,4 +321,3 @@ class MetadataExtractionWorker(QThread):
             metadata["authors"] = lines[1]
 
         self.finished_extraction.emit(metadata)
-        self.quit()  # Explicitly kill the thread loop

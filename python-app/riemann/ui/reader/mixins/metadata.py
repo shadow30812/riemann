@@ -7,6 +7,9 @@ class MetadataMixin:
         if not self.current_path or not self.current_doc:
             return
 
+        if hasattr(self, "metadata_worker") and self.metadata_worker.isRunning():
+            return
+
         self.document_metadata = {}
 
         # 1. Check if we already have it in the local database

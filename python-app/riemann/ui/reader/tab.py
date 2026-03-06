@@ -492,7 +492,7 @@ class ReaderTab(
             self.current_path = path
             self.settings.setValue("lastFile", path)
             self.load_annotations()
-            QTimer.singleShot(500, lambda: self._validate_signatures(path))
+            QTimer.singleShot(500, lambda: self._detect_signatures(path))
             QTimer.singleShot(1000, self.index_pdf_for_ai)
 
             if restore_state:
@@ -511,7 +511,7 @@ class ReaderTab(
                 self.rebuild_layout()
                 self.update_view()
 
-            self.extract_document_metadata()
+            QTimer.singleShot(2000, self.extract_document_metadata)
 
         except Exception as e:
             sys.stderr.write(f"Load error: {e}\n")
