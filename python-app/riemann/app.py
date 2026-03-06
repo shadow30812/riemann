@@ -966,22 +966,15 @@ class RiemannWindow(QMainWindow):
                     w.toolbar.setVisible(visible)
 
     def toggle_theme(self) -> None:
-        """Toggles the application-wide Dark/Light mode."""
-        self.dark_mode = not self.dark_mode
-        self.settings.setValue("darkMode", self.dark_mode)
+        target_widget = self.tabs_main.currentWidget()
+        if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
+            target_widget = self.tabs_side.currentWidget()
 
-        def update_widget_theme(w: QWidget) -> None:
-            if hasattr(w, "dark_mode"):
-                setattr(w, "dark_mode", self.dark_mode)
-                if hasattr(w, "apply_theme"):
-                    w.apply_theme()  # type: ignore
-            if isinstance(w, ReaderTab):
-                w.rendered_pages.clear()
-                w.update_view()
-
-        for tab_widget in [self.tabs_main, self.tabs_side]:
-            for i in range(tab_widget.count()):
-                update_widget_theme(tab_widget.widget(i))
+        if hasattr(target_widget, "toggle_theme"):
+            target_widget.toggle_theme()
+        else:
+            self.dark_mode = not self.dark_mode
+            self.settings.setValue("darkMode", self.dark_mode)
 
     def close_active_tab(self) -> None:
         """Closes the tab currently holding focus."""

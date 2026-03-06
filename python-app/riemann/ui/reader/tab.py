@@ -1072,14 +1072,12 @@ class ReaderTab(
 
     def toggle_theme(self) -> None:
         """Switches theme."""
-        from ...app import RiemannWindow
-
-        if self.window() and isinstance(self.window(), RiemannWindow):
-            main = self.window()
-            if main.dark_mode == self.dark_mode:
-                main.toggle_theme()
-                return
         self.dark_mode = not self.dark_mode
+        self.settings.setValue("darkMode", self.dark_mode)
+
+        if hasattr(self.window(), "dark_mode"):
+            self.window().dark_mode = self.dark_mode
+
         self.apply_theme()
         self.rendered_pages.clear()
         self.update_view()

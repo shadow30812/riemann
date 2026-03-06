@@ -601,6 +601,15 @@ class BrowserTab(QWidget):
                 }
             """)
 
+    def toggle_theme(self) -> None:
+        self.dark_mode = not self.dark_mode
+        if hasattr(self.window(), "settings"):
+            self.window().settings.setValue("darkMode", self.dark_mode)
+        if hasattr(self.window(), "dark_mode"):
+            self.window().dark_mode = self.dark_mode
+
+        self.apply_theme()
+
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
         """
         Filters events to handle specific shortcuts before the WebEngine consumes them.
