@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 import faiss
 import fitz
+import numpy as np
 import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -16,6 +17,21 @@ MODEL_NAME = "all-MiniLM-L6-v2"
 model = None
 vector_index = None
 chunk_metadata = []  # List to store dicts: {"page": int, "text": str}
+
+
+AVAILABLE_TAGS = [
+    "Analog Circuits",
+    "Signal Processing",
+    "Optimization Theory",
+    "Competitive Programming",
+    "Economics",
+    "Machine Learning",
+    "Probability Theory",
+    "Electrical Machines",
+    "Artificial Intelligence",
+    "Digital Circuits",
+]
+tag_embeddings = None
 
 
 # --- Pydantic Models ---
@@ -34,6 +50,11 @@ class SearchResult(BaseModel):
     page: int
     text: str
     score: float
+
+
+class TagRequest(BaseModel):
+    text_chunk: str
+    threshold: float = 0.25
 
 
 # --- Helper Functions ---
@@ -248,6 +269,38 @@ async def ai_websocket(websocket: WebSocket):
         print("WebSocket client disconnected")
     except Exception as e:
         await websocket.send_text(json.dumps({"status": "error", "msg": str(e)}))
+
+
+@app.post("/tag")
+async def generate_tags(req: TagRequest):
+    global tag_embeddings, model
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model not loaded yet.")
+
+    if tag_embeddings is None:
+        # Compute these once and cache them
+        tag_embeddings = model.encode(
+            AVAILABLE_TAGS, convert_to_numpy=True, normalize_embeddings=True
+        )
+
+    try:
+        chunk_emb = model.encode(
+            [req.text_chunk], convert_to_numpy=True, normalize_embeddings=True
+        )
+        similarities = np.dot(chunk_emb, tag_embeddings.T)[0]
+
+        assigned_tags = []
+        for idx, score in enumerate(similarities):
+            if score > req.threshold:
+                assigned_tags.append(
+                    {"tag": AVAILABLE_TAGS[idx], "score": float(score)}
+                )
+
+        assigned_tags = sorted(assigned_tags, key=lambda x: x["score"], reverse=True)
+        return {"tags": [t["tag"] for t in assigned_tags[:3]]}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

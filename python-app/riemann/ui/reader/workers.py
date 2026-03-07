@@ -282,6 +282,21 @@ class MetadataExtractionWorker(QThread):
                             for a in data.get("author", [])
                         ]
                         metadata["authors"] = ", ".join(filter(None, authors))
+
+                        try:
+                            bib_res = session.get(
+                                f"https://api.crossref.org/works/{doi}",
+                                headers={
+                                    "Accept": "application/x-bibtex",
+                                    "User-Agent": "RiemannReader/1.0",
+                                },
+                                timeout=(3.0, 5.0),
+                            )
+                            if bib_res.status_code == 200:
+                                metadata["bibtex"] = bib_res.text
+                        except Exception:
+                            pass
+
                         self.finished_extraction.emit(metadata)
                         self.quit()
                         return
@@ -319,5 +334,16 @@ class MetadataExtractionWorker(QThread):
         if len(lines) >= 2:
             metadata["title"] = lines[0]
             metadata["authors"] = lines[1]
+
+        try:
+            tag_res = requests.post(
+                "http://127.0.0.1:8080/tag",
+                json={"text_chunk": self.text_chunk[:1500]},
+                timeout=2.0,
+            )
+            if tag_res.status_code == 200:
+                metadata["tags"] = tag_res.json().get("tags", [])
+        except Exception:
+            pass
 
         self.finished_extraction.emit(metadata)

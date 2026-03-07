@@ -39,12 +39,16 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QGroupBox,
+    QHeaderView,
     QInputDialog,
+    QLineEdit,
     QListWidget,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
@@ -197,6 +201,76 @@ class SettingsDialog(QDialog):
                 self.parent_win.web_profile.clearHttpCache()
 
             QMessageBox.information(self, "Success", "All data has been cleared.")
+
+
+from PySide6.QtWidgets import (
+    QDialog,
+    QHeaderView,
+    QLineEdit,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+)
+
+
+class LibrarySearchDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Search Library")
+        self.resize(800, 500)
+
+        layout = QVBoxLayout(self)
+
+        # Search Bar
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText(
+            "Search by keyword, or use tags like author:Smith year:2024"
+        )
+        self.search_input.returnPressed.connect(self.execute_search)
+        layout.addWidget(self.search_input)
+
+        # Results Table
+        self.results_table = QTableWidget(0, 4)
+        self.results_table.setHorizontalHeaderLabels(
+            ["Title", "Authors", "Year", "Path"]
+        )
+        self.results_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self.results_table.itemDoubleClicked.connect(self.open_selected_pdf)
+        layout.addWidget(self.results_table)
+
+    def execute_search(self):
+        query = self.search_input.text().strip()
+        # Call the method you already built in managers.py!
+        results = self.parent().library_manager.search_library(query)
+
+        self.results_table.setRowCount(0)
+        for row_idx, row_data in enumerate(results):
+            self.results_table.insertRow(row_idx)
+            self.results_table.setItem(
+                row_idx, 0, QTableWidgetItem(row_data.get("title", ""))
+            )
+            self.results_table.setItem(
+                row_idx, 1, QTableWidgetItem(row_data.get("authors", ""))
+            )
+            self.results_table.setItem(
+                row_idx, 2, QTableWidgetItem(row_data.get("year", ""))
+            )
+
+            # Store the file path but make it non-editable
+            path_item = QTableWidgetItem(row_data.get("file_path", ""))
+            path_item.setFlags(path_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
+            self.results_table.setItem(row_idx, 3, path_item)
+
+    def open_selected_pdf(self, item):
+        row = item.row()
+        file_path = self.results_table.item(row, 3).text()
+
+        if file_path:
+            self.accept()  # Close dialog
+            # Hook right back into your existing tab logic
+            self.parent().new_pdf_tab(file_path)
 
 
 class RiemannWindow(QMainWindow):
@@ -682,6 +756,7 @@ class RiemannWindow(QMainWindow):
         view_actions = [
             ("Bookmarks", "Ctrl+K", self.show_bookmarks),
             ("Downloads", "Ctrl+J", self.show_downloads),
+            ("Search Library", "Ctrl+L", self.show_library_search),
             ("History", "Ctrl+H", self.show_history),
             ("Settings", "Ctrl+,", self.show_settings),
             ("Toggle Theme", "Ctrl+D", self.toggle_theme),
@@ -1104,6 +1179,10 @@ class RiemannWindow(QMainWindow):
         """Shows the non-modal download manager dialog."""
         self.download_manager_dialog.show()
         self.download_manager_dialog.raise_()
+
+    def show_library_search(self) -> None:
+        dialog = LibrarySearchDialog(self)
+        dialog.exec()
 
     def toggle_auto_pdf(self, checked: bool) -> None:
         """Updates the auto-open PDF setting."""

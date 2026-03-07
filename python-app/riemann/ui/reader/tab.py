@@ -264,6 +264,10 @@ class ReaderTab(
         self.btn_export.setToolTip("Export Annotations to Markdown")
         self.btn_export.clicked.connect(self.export_annotations)
 
+        self.btn_cite = QPushButton("📑")
+        self.btn_cite.setToolTip("Copy BibTeX Citation")
+        self.btn_cite.clicked.connect(self.copy_citation)
+
         self.btn_reflow = QPushButton("📄/📝")
         self.btn_reflow.setToolTip("Toggle Text Reflow Mode")
         self.btn_reflow.setCheckable(True)
@@ -349,6 +353,7 @@ class ReaderTab(
             self.btn_search,
             self.btn_ai_search,
             self.btn_annotate,
+            self.btn_cite,
             self.btn_snip,
             self.btn_ocr,
             self.btn_prev,

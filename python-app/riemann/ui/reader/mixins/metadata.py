@@ -1,3 +1,8 @@
+import os
+import re
+
+from PySide6.QtWidgets import QApplication, QMessageBox
+
 from ..workers import MetadataExtractionWorker
 
 
@@ -57,3 +62,51 @@ class MetadataMixin:
         but tab is no longer auto-renamed here.
         """
         pass
+
+    def rename_current_pdf(self) -> None:
+        if not self.current_path or not self.document_metadata:
+            return
+
+        year = self.document_metadata.get("year", "UnknownYear")
+        authors = self.document_metadata.get("authors", "UnknownAuthor").split(",")[
+            0
+        ]  # Just grab first author
+        title = self.document_metadata.get("title", "UnknownTitle")
+
+        # Sanitize string to prevent OS errors
+        safe_title = re.sub(r'[\\/*?:"<>|]', "", title)[:50]
+        safe_author = re.sub(r'[\\/*?:"<>|]', "", authors)[:20]
+
+        new_filename = f"[{year}] - {safe_author} - {safe_title}.pdf"
+        new_path = os.path.join(os.path.dirname(self.current_path), new_filename)
+
+        if new_path != self.current_path and not os.path.exists(new_path):
+            try:
+                os.rename(self.current_path, new_path)
+
+                # Update internal state
+                old_path = self.current_path
+                self.current_path = new_path
+                self.settings.setValue("lastFile", new_path)
+
+                # Update Library Database
+                if hasattr(self.window(), "library_manager"):
+                    self.window().library_manager.save_metadata(
+                        new_path, self.document_metadata
+                    )
+
+                self.show_toast(f"Renamed to: {new_filename}")
+                self._update_tab_title_with_metadata()
+
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Rename Failed", f"Could not rename file:\n{e}"
+                )
+
+    def copy_citation(self) -> None:
+        bibtex = getattr(self, "document_metadata", {}).get("bibtex")
+        if bibtex:
+            QApplication.clipboard().setText(bibtex)
+            self.show_toast("BibTeX copied to clipboard! 📋")
+        else:
+            self.show_toast("Citation data not available.")
