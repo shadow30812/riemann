@@ -28,6 +28,7 @@ from PySide6.QtGui import (
     QShortcut,
     QWheelEvent,
 )
+from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
@@ -58,7 +59,6 @@ from .mixins.search import SearchMixin
 from .mixins.signatures import SignaturesMixin
 from .utils import generate_markdown_html
 from .widgets import PageWidget
-from .workers import SignatureValidationWorker
 
 try:
     import riemann_core
@@ -445,8 +445,6 @@ class ReaderTab(
     def select_all_text(self) -> None:
         """Selects all text on the page."""
         if self.view_mode == ViewMode.REFLOW:
-            from PySide6.QtWebEngineCore import QWebEnginePage
-
             self.web.page().triggerAction(QWebEnginePage.WebAction.SelectAll)
         else:
             self.show_toast(
@@ -716,6 +714,7 @@ class ReaderTab(
 
     def toggle_reader_fullscreen(self) -> None:
         """Toggles app fullscreen."""
+        # Import only within function to prevent circular import
         from ...app import RiemannWindow
 
         if self.window() and isinstance(self.window(), RiemannWindow):

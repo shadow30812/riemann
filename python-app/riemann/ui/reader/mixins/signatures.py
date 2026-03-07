@@ -1,6 +1,7 @@
 import os
 
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign import signers
 from pyhanko.sign.fields import SigFieldSpec, append_signature_field
 from PySide6.QtWidgets import (
@@ -8,6 +9,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QInputDialog,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -27,14 +29,16 @@ class CertificateViewerDialog(QDialog):
         super().__init__(parent)
         self.cert_details = cert_details
         self.setWindowTitle("Certificate Viewer")
-        self.resize(500, 250)
+        self.resize(1000, 300)
 
         self.setSizeGripEnabled(True)
         layout = QVBoxLayout(self)
         form = QFormLayout()
 
-        form.addRow("Subject:", QLabel(cert_details.get("subject", "N/A")))
-        form.addRow("Issuer:", QLabel(cert_details.get("issuer", "N/A")))
+        form.addRow(
+            "Subject:", QLabel(cert_details.get("subject", "N/A"), wordWrap=True)
+        )
+        form.addRow("Issuer:", QLabel(cert_details.get("issuer", "N/A"), wordWrap=True))
         form.addRow("Serial Number:", QLabel(cert_details.get("serial", "N/A")))
         form.addRow("Valid From:", QLabel(cert_details.get("not_before", "N/A")))
         form.addRow("Valid To:", QLabel(cert_details.get("not_after", "N/A")))
@@ -81,11 +85,45 @@ class CertificateViewerDialog(QDialog):
 
 
 class SignaturesMixin:
-    def _validate_signatures(self, path: str) -> None:
-        if hasattr(self, "signature_banner"):
-            self.signature_banner.setVisible(False)
+    def _detect_signatures(self, path: str) -> None:
+        """Fast check to see if signatures exist without cryptographically validating them."""
+        try:
+            with open(path, "rb") as f:
+                reader = PdfFileReader(f, strict=False)
+                sigs = reader.embedded_signatures
+                if not sigs:
+                    self.signature_banner.setVisible(False)
+                    return
 
-        # Use a completely new key to abandon the corrupted hash list permanently
+            self.signature_banner.setVisible(True)
+            self.lbl_sig_status.setText(
+                f"ℹ️ Document contains {len(sigs)} signature(s)."
+            )
+            self.signature_banner.setStyleSheet(
+                "background-color: #1976D2; color: white;"
+            )  # Blue banner
+
+            # Repurpose the trust button to be the verify button initially
+            self.btn_trust_cert.setVisible(True)
+            self.btn_trust_cert.setText("Verify Signatures")
+
+            # Disconnect any previous connections to avoid double-firing
+            try:
+                self.btn_trust_cert.clicked.disconnect()
+            except Exception:
+                pass
+
+            self.btn_trust_cert.clicked.connect(
+                lambda: self._validate_signatures(self.current_path)
+            )
+        except Exception as e:
+            print(f"Fast signature detection failed: {e}")
+
+    def _validate_signatures(self, path: str) -> None:
+        self.lbl_sig_status.setText("⏳ Verifying signatures... Please wait.")
+        self.signature_banner.setStyleSheet("background-color: #424242; color: white;")
+        self.btn_trust_cert.setVisible(False)
+
         trusted_pems = self.settings.value("trusted_certs_pem", [], type=list)
 
         self.sig_worker = SignatureValidationWorker(path, trusted_pems)
@@ -118,6 +156,12 @@ class SignaturesMixin:
             if untrusted:
                 self.current_untrusted_pem = untrusted.get("cert_pem")
                 self.btn_trust_cert.setVisible(True)
+                self.btn_trust_cert.setText("Trust Certificate")
+                try:
+                    self.btn_trust_cert.clicked.disconnect()
+                except Exception:
+                    pass
+                self.btn_trust_cert.clicked.connect(self.trust_current_certificate)
         elif status == "INVALID" or status == "ERROR":
             self.signature_banner.setStyleSheet(
                 "background-color: #c62828; color: white;"
@@ -208,8 +252,6 @@ class SignaturesMixin:
         )
 
         if cert_path:
-            from PySide6.QtWidgets import QInputDialog
-
             password, ok = QInputDialog.getText(
                 self,
                 "Certificate Password",

@@ -405,7 +405,7 @@ class RiemannWindow(QMainWindow):
             return
 
         dest_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Split PDF As", "", "PDF Files (*.pdf)"
+            self, "Save Split PDF As", "split.pdf", "PDF Files (*.pdf)"
         )
         if not dest_path:
             return
@@ -556,23 +556,20 @@ class RiemannWindow(QMainWindow):
     def refresh_signature_panel(self) -> None:
         """Dynamically shows or hides the signature dock based on the active tab."""
         active_widget = self.tabs_main.currentWidget()
-
-        # If the user is interacting with a split-view document on the side, use that context
         if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
             side_widget = self.tabs_side.currentWidget()
             if side_widget and side_widget != self.tree_signatures:
                 active_widget = side_widget
 
-        # Get signatures from the active widget, defaulting to an empty list
+        dismissed = getattr(active_widget, "_sig_panel_dismissed", False)
         signatures = (
             getattr(active_widget, "current_signatures", [])
             if hasattr(active_widget, "current_signatures")
             else []
         )
-
         sig_idx = self.tabs_side.indexOf(self.tree_signatures)
 
-        if signatures:
+        if signatures and not dismissed:
             self.tree_signatures.clear()
             for sig in signatures:
                 icon = (
@@ -592,17 +589,13 @@ class RiemannWindow(QMainWindow):
                     child_err = QTreeWidgetItem(item)
                     child_err.setText(0, "CRITICAL: Document Altered!")
             self.tree_signatures.expandAll()
-
-            # Make sure it's docked in the side tab widget
             if sig_idx == -1:
                 self.tabs_side.addTab(self.tree_signatures, "🖊️ Signatures")
             if self.tabs_side.isHidden():
                 self.tabs_side.show()
         else:
-            # If no signatures (or it's a browser tab), quietly remove the dock
             if sig_idx != -1:
                 self.tabs_side.removeTab(sig_idx)
-            # Hide the side view completely if there's nothing else left in it
             if self.tabs_side.count() == 0:
                 self.tabs_side.hide()
 
@@ -887,12 +880,16 @@ class RiemannWindow(QMainWindow):
         widget = self.tabs_side.widget(index)
         if widget:
             self._record_closed_tab(widget)
-            widget.deleteLater()
-        self.tabs_side.removeTab(index)
+            if widget == getattr(self, "tree_signatures", None):
+                active_main = self.tabs_main.currentWidget()
+                if active_main:
+                    active_main._sig_panel_dismissed = True
+            else:
+                widget.deleteLater()
 
+        self.tabs_side.removeTab(index)
         if self.tabs_side.count() == 0:
             self.tabs_side.hide()
-
         self._check_all_tabs_closed()
 
     def _check_all_tabs_closed(self) -> None:
