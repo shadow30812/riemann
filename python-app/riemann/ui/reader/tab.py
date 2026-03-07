@@ -188,6 +188,16 @@ class ReaderTab(
             next_idx = (tw.currentIndex() + delta) % count
             tw.setCurrentIndex(next_idx)
 
+    def _update_tab_title(self, title: str) -> None:
+        tw = self._get_tab_widget()
+        if tw:
+            idx = tw.indexOf(self)
+            if idx != -1:
+                display_title = (title[:25] + "..") if len(title) > 25 else title
+                tw.setTabText(idx, display_title)
+                if hasattr(self.window(), "_update_window_title"):
+                    self.window()._update_window_title()
+
     def _init_backend(self) -> None:
         """Initializes the Rust-based PDF engine backend."""
         try:
@@ -269,6 +279,10 @@ class ReaderTab(
         self.btn_save = QPushButton("💾")
         self.btn_save.setToolTip("Save Copy of PDF")
         self.btn_save.clicked.connect(self.save_document)
+
+        self.btn_rename = QPushButton("🏷️")
+        self.btn_rename.setToolTip("Auto-Rename File using Metadata")
+        self.btn_rename.clicked.connect(self.rename_current_pdf)
 
         self.btn_export = QPushButton("📤")
         self.btn_export.setToolTip("Export Annotations to Markdown")
@@ -355,6 +369,7 @@ class ReaderTab(
 
         widgets = [
             self.btn_save,
+            self.btn_rename,
             self.btn_export,
             self.btn_sign,
             self.btn_reflow,
@@ -522,6 +537,7 @@ class ReaderTab(
             self.current_doc = self.engine.load_document(path)
             self._probe_base_page_size()
             self.current_path = path
+            self._update_tab_title(os.path.basename(path))
 
             self.toolbar.show()
             self.stack.setCurrentIndex(0)
@@ -559,6 +575,8 @@ class ReaderTab(
         """Internal handler for Markdown files."""
         self.current_path = path
         self.settings.setValue("lastFile", path)
+        self._update_tab_title(os.path.basename(path))
+
         try:
             with open(path, "r", encoding="utf-8") as f:
                 text = f.read()
