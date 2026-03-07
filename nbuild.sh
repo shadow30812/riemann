@@ -46,6 +46,10 @@ else
     exit 1
 fi
 
+LEECH="python-app/riemann/assets/riemann_ai_engine/env/lib/libgcc_s.so"
+rm -f $LEECH
+echo "Troublemaker binary file pointer out of way"
+
 # 4. Compile with Nuitka (Optimized for Size)
 log_info "[4/4] Compiling with Nuitka..."
 
