@@ -627,9 +627,10 @@ class RiemannWindow(QMainWindow):
     def _restore_session(self) -> None:
         """
         Restores the window geometry and open tabs from the previous session.
-        Defaults to a single browser tab if no session exists or incognito is active.
+        Defaults to opening both PDF and browser homepages if no session exists or incognito is active.
         """
         if self.incognito or not self.restore_session:
+            self.new_pdf_tab()
             self.new_browser_tab()
             self.resize(1200, 900)
             return
@@ -647,8 +648,9 @@ class RiemannWindow(QMainWindow):
         else:
             self.tabs_side.hide()
 
-        if self.tabs_main.count() == 0:
+        if self.tabs_main.count() == 0 and self.tabs_side.count() == 0:
             self.new_pdf_tab()
+            self.new_browser_tab()
 
     def _restore_tabs_from_settings(self, key: str, target_widget: QTabWidget) -> None:
         """
@@ -1053,6 +1055,7 @@ class RiemannWindow(QMainWindow):
         def get_files(tab_widget: QTabWidget) -> List[dict]:
             """
             Extracts serializable session data from the provided tab widget.
+            Omits empty PDF tabs and browser homepages to ensure clean session restoration.
 
             Args:
                 tab_widget (QTabWidget): The tab widget containing open browser or PDF tabs.
@@ -1063,13 +1066,17 @@ class RiemannWindow(QMainWindow):
             tabs_data = []
             for i in range(tab_widget.count()):
                 wid = tab_widget.widget(i)
-                if isinstance(wid, ReaderTab) and wid.current_path:
+                if isinstance(wid, ReaderTab) and getattr(wid, "current_path", None):
                     tabs_data.append({"type": "pdf", "data": wid.current_path})
                 elif isinstance(wid, BrowserTab):
-                    if not wid.incognito:
-                        tabs_data.append(
-                            {"type": "web", "data": wid.web.url().toString()}
-                        )
+                    if not getattr(wid, "incognito", False):
+                        url_str = wid.web.url().toString()
+                        if (
+                            "homepage.html" not in url_str
+                            and url_str != "about:blank"
+                            and url_str
+                        ):
+                            tabs_data.append({"type": "web", "data": url_str})
             return tabs_data
 
         self.settings.setValue("session/main_tabs", get_files(self.tabs_main))
