@@ -18,10 +18,20 @@ from ..widgets import PageWidget
 
 
 class AnnotationsMixin:
-    """Methods for managing user annotations."""
+    """
+    Provides methods for managing user annotations on PDF documents.
+    This mixin is intended to be integrated into the main reader component,
+    managing state for active tools, persistence, and undo/redo stacks.
+    """
 
     def _get_annotation_path(self) -> str:
-        """Generates a centralized system path for storing the PDF's annotations."""
+        """
+        Generates a centralized system file path for storing the current PDF's annotations.
+
+        Returns:
+            str: The absolute path to the JSON annotation storage file, or an empty string
+                 if no document is currently loaded.
+        """
         if not self.current_path:
             return ""
         path_hash = hashlib.sha256(self.current_path.encode("utf-8")).hexdigest()
@@ -30,7 +40,10 @@ class AnnotationsMixin:
         return str(base_dir / f"{path_hash}.json")
 
     def load_annotations(self) -> None:
-        """Loads annotations from JSON."""
+        """
+        Loads the annotation data from the persistent JSON storage into memory.
+        If the file does not exist, initializes an empty annotation dictionary.
+        """
         if not self.current_path:
             return
         p = self._get_annotation_path()
@@ -41,7 +54,9 @@ class AnnotationsMixin:
             self.annotations = {}
 
     def save_annotations(self) -> None:
-        """Saves annotations to JSON."""
+        """
+        Serializes the current in-memory annotation dictionary and saves it to the persistent JSON storage.
+        """
         if not self.current_path:
             return
         p = self._get_annotation_path()
@@ -49,7 +64,12 @@ class AnnotationsMixin:
             json.dump(self.annotations, f)
 
     def toggle_annotation_mode(self, checked: bool) -> None:
-        """Shows/hides annotation toolbar."""
+        """
+        Toggles the visibility and operational state of the annotation toolbar and tools.
+
+        Args:
+            checked (bool): True to enable annotation mode and display the toolbar; False to disable.
+        """
         self.anno_toolbar.setVisible(checked)
         self.btn_annotate.setChecked(checked)
         if not checked:
@@ -60,7 +80,12 @@ class AnnotationsMixin:
             self.anno_toolbar.btn_nav.setChecked(True)
 
     def set_tool(self, tool_id: str) -> None:
-        """Selects annotation tool."""
+        """
+        Selects the active annotation tool and updates the UI cursor accordingly.
+
+        Args:
+            tool_id (str): The identifier of the tool to activate (e.g., 'nav', 'eraser').
+        """
         self.current_tool = tool_id
         if tool_id == "nav":
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -70,13 +95,28 @@ class AnnotationsMixin:
             self.setCursor(Qt.CursorShape.CrossCursor)
 
     def set_color(self, c: str) -> None:
+        """
+        Sets the active color for annotation drawing tools.
+
+        Args:
+            c (str): The hexadecimal color string.
+        """
         self.pen_color = c
 
     def set_thickness(self, v: int) -> None:
+        """
+        Sets the active line thickness for annotation drawing tools.
+
+        Args:
+            v (int): The thickness value in pixels.
+        """
         self.pen_thickness = v
 
     def undo_annotation(self) -> None:
-        """Undoes last annotation."""
+        """
+        Reverts the most recently recorded annotation action, moving it to the redo stack,
+        and triggers a visual refresh.
+        """
         if not self.undo_stack:
             return
         _, p_idx, _ = self.undo_stack.pop()
@@ -88,7 +128,10 @@ class AnnotationsMixin:
             self.refresh_page_render(p_idx)
 
     def redo_annotation(self) -> None:
-        """Redoes last undone annotation."""
+        """
+        Re-applies the most recently undone annotation action from the redo stack,
+        and triggers a visual refresh.
+        """
         if not self.redo_stack:
             return
         pid, item = self.redo_stack.pop()
@@ -100,7 +143,17 @@ class AnnotationsMixin:
         self.refresh_page_render(int(pid))
 
     def handle_annotation_click(self, label: PageWidget, event: QMouseEvent) -> bool:
-        """Checks for clicks on existing annotations."""
+        """
+        Evaluates a mouse click event to determine if an existing interactive annotation (e.g., a note)
+        was targeted, and triggers its associated interface if so.
+
+        Args:
+            label (PageWidget): The page widget receiving the click.
+            event (QMouseEvent): The mouse event details.
+
+        Returns:
+            bool: True if an annotation was clicked and handled; False otherwise.
+        """
         pid = str(label.property("pageIndex"))
         x, y = event.pos().x(), event.pos().y()
         for i, anno in enumerate(self.annotations.get(pid, [])):
@@ -113,7 +166,14 @@ class AnnotationsMixin:
         return False
 
     def show_annotation_popup(self, data: Dict, p_idx: int, idx: int) -> None:
-        """Shows edit dialog for annotation."""
+        """
+        Displays an input dialog to edit or delete an existing text annotation.
+
+        Args:
+            data (Dict): The dictionary containing the annotation data.
+            p_idx (int): The index of the page containing the annotation.
+            idx (int): The index of the annotation within the page's annotation list.
+        """
         txt, ok = QInputDialog.getText(
             self, "Edit Note", "Text (Empty to delete):", text=data.get("text", "")
         )
@@ -128,7 +188,15 @@ class AnnotationsMixin:
     def create_new_annotation(
         self, p_idx: int, rx: float, ry: float, type: str = "note"
     ) -> None:
-        """Adds new note annotation."""
+        """
+        Prompts the user for input to create a new textual annotation at the specified relative coordinates.
+
+        Args:
+            p_idx (int): The index of the target page.
+            rx (float): The relative X coordinate (0.0 to 1.0).
+            ry (float): The relative Y coordinate (0.0 to 1.0).
+            type (str): The type classification of the annotation. Defaults to "note".
+        """
         txt, ok = QInputDialog.getText(self, "Add Note", "Text:")
         if ok and txt:
             self._add_anno_data(
@@ -142,7 +210,13 @@ class AnnotationsMixin:
             )
 
     def _add_anno_data(self, page_idx: int, data: Dict) -> None:
-        """Adds annotation and saves."""
+        """
+        Internal helper to append new annotation data, update the undo stack, and serialize the state.
+
+        Args:
+            page_idx (int): The index of the target page.
+            data (Dict): The new annotation data payload.
+        """
         pid = str(page_idx)
         if pid not in self.annotations:
             self.annotations[pid] = []
@@ -153,7 +227,15 @@ class AnnotationsMixin:
         self.refresh_page_render(page_idx)
 
     def _handle_eraser_click(self, label: PageWidget, pos: Any, page_idx: int) -> None:
-        """Deletes annotation nearest to click."""
+        """
+        Processes an eraser tool click by calculating the distance to all annotations on the page
+        and deleting the closest one within an interaction threshold.
+
+        Args:
+            label (PageWidget): The target page widget.
+            pos (Any): The local coordinate position of the click event.
+            page_idx (int): The index of the target page.
+        """
         pid = str(page_idx)
         if pid not in self.annotations:
             return
@@ -183,7 +265,12 @@ class AnnotationsMixin:
             self.refresh_page_render(page_idx)
 
     def refresh_page_render(self, p_idx: int) -> None:
-        """Forces page re-render."""
+        """
+        Forces a page to be re-rendered to visually reflect annotation state changes.
+
+        Args:
+            p_idx (int): The index of the page to invalidate and re-render.
+        """
         if p_idx in self.rendered_pages:
             self.rendered_pages.remove(p_idx)
         self.render_visible_pages()

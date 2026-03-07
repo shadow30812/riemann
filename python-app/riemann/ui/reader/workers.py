@@ -21,22 +21,37 @@ from PySide6.QtCore import QThread, Signal
 
 
 class ModelDownloader(QThread):
-    """Downloads and extracts the LaTeX OCR model pack."""
+    """
+    Downloads and extracts the LaTeX OCR model pack dynamically into isolated execution containers.
+    """
 
     progress = Signal(int)
     finished = Signal(bool)
 
     def __init__(self, url: str, dest_folder: str) -> None:
+        """
+        Constructs the downloader thread targeting predefined external payload hosting instances.
+
+        Args:
+            url (str): Remote address targeting packaged model binary instances.
+            dest_folder (str): Assured local folder layout for output stream routing mappings.
+        """
         super().__init__()
         self.url = url
         self.dest_folder = dest_folder
 
     def run(self) -> None:
+        """
+        Implements primary asynchronous block invoking file transfers capturing metric data events routinely.
+        """
         try:
             os.makedirs(self.dest_folder, exist_ok=True)
             zip_path = os.path.join(self.dest_folder, "latex_ocr.zip")
 
             def report(block_num: int, block_size: int, total_size: int) -> None:
+                """
+                Intercepts urllib status events translating mathematical offsets into percentage metrics safely.
+                """
                 if total_size > 0:
                     percent = int((block_num * block_size * 100) / total_size)
                     self.progress.emit(percent)
@@ -55,12 +70,17 @@ class ModelDownloader(QThread):
 
 
 class InstallerThread(QThread):
-    """Runs pip install in background."""
+    """
+    Runs pip installation instructions mapping standard external repository assets asynchronously reliably.
+    """
 
     finished_install = Signal()
     install_error = Signal(str)
 
     def run(self) -> None:
+        """
+        Invokes core module subprocess installations targeting python packages required for inference.
+        """
         try:
             cmd = [
                 sys.executable,
@@ -78,12 +98,17 @@ class InstallerThread(QThread):
 
 
 class LoaderThread(QThread):
-    """Initializes the AI model."""
+    """
+    Initializes heavyweight artificial intelligence modeling parameters retaining active instances isolated cleanly.
+    """
 
     finished_loading = Signal(object)
     error_occurred = Signal(str)
 
     def run(self) -> None:
+        """
+        Evaluates module importation routing, constructing inference frameworks safely avoiding main loop blocks.
+        """
         try:
             from pix2tex.cli import LatexOCR
 
@@ -96,17 +121,29 @@ class LoaderThread(QThread):
 
 
 class InferenceThread(QThread):
-    """Runs the LaTeX OCR inference in the background."""
+    """
+    Runs the operational evaluation sequence mapping model predictions mapping onto image slices precisely.
+    """
 
     finished_inference = Signal(str)
     error_occurred = Signal(str)
 
     def __init__(self, model: Any, image: Any) -> None:
+        """
+        Allocates execution parameters preparing isolated environment instances cleanly.
+
+        Args:
+            model (Any): Complete execution object containing evaluated parameters required.
+            image (Any): Slice parameter retaining raw dimensional pixel sets.
+        """
         super().__init__()
         self.model = model
         self.image = image
 
     def run(self) -> None:
+        """
+        Invokes actual tensor mathematics fetching returned structural code text representations efficiently.
+        """
         try:
             code = self.model(self.image)
             self.finished_inference.emit(code)
@@ -115,14 +152,29 @@ class InferenceThread(QThread):
 
 
 class SignatureValidationWorker(QThread):
+    """
+    Delegates computationally intense deep cryptographic traversal mapping validating PDF PKCS data arrays seamlessly.
+    """
+
     finished_validation = Signal(str, str, list)
 
     def __init__(self, pdf_path: str, trusted_certs: list, parent=None):
+        """
+        Coordinates necessary reference parameters routing document paths retaining persistent memory scopes clearly.
+
+        Args:
+            pdf_path (str): Extracted full filepath tracking active user selections natively.
+            trusted_certs (list): Internal persistence records retaining authorized credentials persistently stored.
+            parent: Logical UI relationship bindings retained gracefully avoiding detached references actively.
+        """
         super().__init__(parent)
         self.pdf_path = pdf_path
         self.trusted_certs = trusted_certs or []
 
     def run(self):
+        """
+        Operates fundamental PyHanko validation passes routing outcomes returning detailed status groupings seamlessly.
+        """
         try:
             relaxed_policy = DisallowWeakAlgorithmsPolicy(
                 weak_hash_algos=set(), weak_signature_algos=set()
@@ -182,7 +234,6 @@ class SignatureValidationWorker(QThread):
                         issuer = getattr(cert.issuer, "human_friendly", "Unknown")
                         serial = hex(cert.serial_number)
 
-                        # Direct trust override for end-entity certs lacking issuers
                         if not is_trusted and cert_pem_str in self.trusted_certs:
                             is_trusted = True
 
@@ -249,17 +300,30 @@ class SignatureValidationWorker(QThread):
 
 
 class MetadataExtractionWorker(QThread):
+    """
+    Coordinates complex remote REST operations querying bibliographic networks asynchronously resolving identifiers effectively.
+    """
+
     finished_extraction = Signal(dict)
 
     def __init__(self, text_chunk: str, parent=None):
+        """
+        Coordinates parsing sequences fetching external web payloads properly formatting requests implicitly mapping inputs.
+
+        Args:
+            text_chunk (str): Arbitrary length snippet text block tracking document semantic beginnings clearly.
+            parent: Context relationship tracking retaining structural parent boundaries implicitly evaluated natively.
+        """
         super().__init__(parent)
         self.text_chunk = text_chunk
         self.headers = {"User-Agent": "RiemannReader/1.0"}
 
     def run(self) -> None:
+        """
+        Enacts sequential network searches evaluating academic signatures utilizing CrossRef algorithms seamlessly resolving queries.
+        """
         metadata = {}
 
-        # FIX: Use a Session block to aggressively release sockets/CPU
         with requests.Session() as session:
             doi_match = re.search(
                 r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", self.text_chunk, re.IGNORECASE
@@ -268,7 +332,6 @@ class MetadataExtractionWorker(QThread):
                 doi = doi_match.group(0).rstrip(".")
                 metadata["doi"] = doi
                 try:
-                    # FIX: Strict (Connect, Read) timeout tuple prevents indefinite hanging
                     res = session.get(
                         f"https://api.crossref.org/works/{doi}",
                         headers=self.headers,

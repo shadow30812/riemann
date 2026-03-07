@@ -10,10 +10,17 @@ from ....core.constants import ViewMode
 
 
 class SearchMixin:
-    """Methods for search functionality."""
+    """
+    Provides comprehensive search capabilities for documents.
+    Supports searching both standard rasterized PDF views and reflowed HTML views,
+    including checking for matches inside textual annotations.
+    """
 
     def toggle_search_bar(self) -> None:
-        """Toggles search bar visibility."""
+        """
+        Toggles the visibility of the search interface.
+        When hiding the interface, clears any active search results and forces a re-render.
+        """
         vis = not self.search_bar.isVisible()
         self.search_bar.setVisible(vis)
         self.btn_search.setChecked(vis)
@@ -26,14 +33,20 @@ class SearchMixin:
             self.update_view()
 
     def find_next(self) -> None:
-        """Find next text occurrence."""
+        """
+        Initiates a forward-directional search for the currently entered search term.
+        Delegates to the appropriate backend depending on the active ViewMode.
+        """
         if self.view_mode == ViewMode.REFLOW:
             self.web.findText(self.txt_search.text())
         else:
             self._find_text(1)
 
     def find_prev(self) -> None:
-        """Find previous text occurrence."""
+        """
+        Initiates a backward-directional search for the currently entered search term.
+        Delegates to the appropriate backend depending on the active ViewMode.
+        """
         if self.view_mode == ViewMode.REFLOW:
             self.web.findText(
                 self.txt_search.text(), QWebEngineView.FindFlag.FindBackward
@@ -42,7 +55,13 @@ class SearchMixin:
             self._find_text(-1)
 
     def _find_text(self, direction: int) -> None:
-        """Backend search logic."""
+        """
+        Executes the backend textual search logic across PDF pages and annotations.
+        Updates internal state, rebuilds layouts if necessary, and ensures the matching page is visible.
+
+        Args:
+            direction (int): 1 for a forward search, -1 for a backward search.
+        """
         if not self.current_doc:
             return
         term = self.txt_search.text().strip().lower()
@@ -92,6 +111,3 @@ class SearchMixin:
             except Exception:
                 continue
         self.show_toast(f"No matches for '{term}'")
-
-
-# Placeholder for commit

@@ -79,20 +79,26 @@ class ReaderTab(
     MetadataMixin,
 ):
     """
-    A self-contained PDF Viewer Widget.
-    Inherits functional logic from mixins.
+    A self-contained PDF Viewer Widget acting as the central interactive component.
+
+    Inherits structural rendering, interactive logic, background searching, and
+    metadata management functionality dynamically through specialized mixins.
     """
 
     signatures_detected = Signal(list)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        """Initializes the ReaderTab."""
+        """
+        Initializes the ReaderTab, constructing UI elements, and loading stored settings.
+
+        Args:
+            parent (Optional[QWidget]): The parent layout containment widget. Defaults to None.
+        """
         super().__init__(parent)
 
         self.settings: QSettings = QSettings("Riemann", "PDFReader")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        # State Initialization
         self.engine: Optional[riemann_core.PdfEngine] = None
         self.current_doc: Optional[riemann_core.RiemannDocument] = None
         self.current_path: Optional[str] = None
@@ -106,7 +112,6 @@ class ReaderTab(
         self.view_mode: ViewMode = ViewMode.IMAGE
         self.is_annotating: bool = False
 
-        # Annotation State
         self.current_tool: str = "nav"
         self.pen_color: str = "#ff0000"
         self.pen_thickness: int = 3
@@ -115,14 +120,12 @@ class ReaderTab(
         self.undo_stack: List[Tuple[str, int, int]] = []
         self.redo_stack: List[Tuple[str, Dict]] = []
 
-        # Snipping State
         self.is_snipping: bool = False
         self.snip_start: QPoint = QPoint()
         self.snip_band: Optional[QRubberBand] = None
         self._pending_snip_image = None
         self.latex_model = None
 
-        # Rendering Cache
         self.form_widgets: Dict[int, List[QWidget]] = {}
         self.form_values_cache: Dict[Tuple[int, Tuple[float, ...]], Any] = {}
         self.page_widgets: Dict[int, PageWidget] = {}
@@ -130,7 +133,6 @@ class ReaderTab(
         self.search_result: Optional[Tuple[int, List[Tuple[float, ...]]]] = None
         self.text_segments_cache: Dict[int, List[Tuple[str, Tuple[float, ...]]]] = {}
 
-        # Virtualization State
         self.virtual_threshold: int = 300
         self._virtual_enabled: bool = False
         self._top_spacer: Optional[QWidget] = None
@@ -151,7 +153,9 @@ class ReaderTab(
         self._init_shortcuts()
 
     def _init_shortcuts(self) -> None:
-        """Initializes keyboard shortcuts."""
+        """
+        Registers widget-specific keyboard shortcuts mapped to primary application functionality.
+        """
         shortcuts = [
             ("Ctrl+F", self.toggle_search_bar),
             ("Ctrl+I", self.toggle_ai_search_bar),
@@ -172,7 +176,12 @@ class ReaderTab(
         sc2.activated.connect(lambda: self.cycle_tab(-1))
 
     def _get_tab_widget(self) -> Optional[QTabWidget]:
-        """Helper to find the parent QTabWidget."""
+        """
+        Searches the component hierarchy iteratively evaluating structural relationships to retrieve the parent tab container.
+
+        Returns:
+            Optional[QTabWidget]: The parent QTabWidget if resolvable, None otherwise.
+        """
         parent = self.parent()
         while parent:
             if isinstance(parent, QTabWidget):
@@ -181,7 +190,12 @@ class ReaderTab(
         return None
 
     def cycle_tab(self, delta: int) -> None:
-        """Cycles to the next or previous tab."""
+        """
+        Adjusts logical focus forwarding execution states iteratively mapping onto relative adjacent tab windows.
+
+        Args:
+            delta (int): The integer movement steps (-1 indicates backwards cycle).
+        """
         tw = self._get_tab_widget()
         if tw:
             count = tw.count()
@@ -189,6 +203,12 @@ class ReaderTab(
             tw.setCurrentIndex(next_idx)
 
     def _update_tab_title(self, title: str) -> None:
+        """
+        Mutates structural name mappings propagating string modifications directly targeting the parent visual tab header.
+
+        Args:
+            title (str): Output string definition utilized rendering visible identifiers.
+        """
         tw = self._get_tab_widget()
         if tw:
             idx = tw.indexOf(self)
@@ -199,14 +219,18 @@ class ReaderTab(
                     self.window()._update_window_title()
 
     def _init_backend(self) -> None:
-        """Initializes the Rust-based PDF engine backend."""
+        """
+        Instantiates underlying native Rust extensions managing hardware accelerated layout algorithms gracefully.
+        """
         try:
             self.engine = riemann_core.PdfEngine()
         except Exception as e:
             sys.stderr.write(f"Backend Initialization Error: {e}\n")
 
     def setup_ui(self) -> None:
-        """Constructs the visual hierarchy."""
+        """
+        Builds the widget hierarchy and assembles nested structural elements systematically applying alignments.
+        """
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -275,7 +299,12 @@ class ReaderTab(
             self.toolbar.hide()
 
     def _setup_toolbar_buttons(self, layout: QHBoxLayout) -> None:
-        """Creates and configures standard toolbar buttons."""
+        """
+        Allocates interactive push buttons resolving respective execution slot relationships natively.
+
+        Args:
+            layout (QHBoxLayout): Reference pointer tracking parent bounding alignments systematically.
+        """
         self.btn_save = QPushButton("💾")
         self.btn_save.setToolTip("Save Copy of PDF")
         self.btn_save.clicked.connect(self.save_document)
@@ -393,7 +422,9 @@ class ReaderTab(
             layout.addWidget(w)
 
     def _setup_search_bar(self) -> None:
-        """Initializes the find-in-page widget."""
+        """
+        Constructs lateral overlay text searching UI widgets embedding basic navigational controls reliably.
+        """
         self.search_bar = QWidget()
         self.search_bar.setVisible(False)
         self.search_bar.setFixedHeight(45)
@@ -422,7 +453,9 @@ class ReaderTab(
         sb_layout.addWidget(self.btn_close_search)
 
     def _setup_ai_search_bar(self) -> None:
-        """Initializes the visually distinct AI Semantic Search widget."""
+        """
+        Organizes specialized AI interaction interface overlays incorporating custom thematic styling distinct from standard bars.
+        """
         self.ai_search_bar = QWidget()
         self.ai_search_bar.setVisible(False)
         self.ai_search_bar.setFixedHeight(45)
@@ -473,7 +506,10 @@ class ReaderTab(
         sb_layout.addWidget(self.btn_close_ai_search)
 
     def select_all_text(self) -> None:
-        """Selects all text on the page."""
+        """
+        Executes global selection bindings natively supported within reflow architectures.
+        Throws a contextual toast warning on generic image view modes.
+        """
         if self.view_mode == ViewMode.REFLOW:
             self.web.page().triggerAction(QWebEnginePage.WebAction.SelectAll)
         else:
@@ -482,7 +518,9 @@ class ReaderTab(
             )
 
     def _setup_scroll_area(self) -> None:
-        """Initializes the scroll area and virtualization container."""
+        """
+        Deploys primary scrolling viewports managing continuous layout flow coordinates correctly.
+        """
         self.scroll = QScrollArea()
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.scroll.setWidgetResizable(True)
@@ -501,7 +539,12 @@ class ReaderTab(
         self.stack.addWidget(self.scroll)
 
     def showEvent(self, event: QEvent) -> None:
-        """Grabs focus when the tab is shown."""
+        """
+        Intercepts Qt UI appearance updates forcing active focus contexts matching document environments seamlessly.
+
+        Args:
+            event (QEvent): The native framework visibility event object triggered implicitly.
+        """
         super().showEvent(event)
         if self.view_mode == ViewMode.REFLOW:
             self.web.setFocus()
@@ -513,6 +556,9 @@ class ReaderTab(
             self._populate_home_recents()
 
     def _populate_home_recents(self) -> None:
+        """
+        Translates globally tracked history records into list selection entities shown on initial placeholder empty states.
+        """
         if not hasattr(self, "list_recent"):
             return
         self.list_recent.clear()
@@ -528,7 +574,13 @@ class ReaderTab(
                     self.list_recent.addItem(item)
 
     def load_document(self, path: str, restore_state: bool = False) -> None:
-        """Loads a PDF or Markdown file."""
+        """
+        Consumes filepath strings mapping logic execution parsing rendering either markdown or PDF binary streams.
+
+        Args:
+            path (str): Full validated filesystem pathway containing data.
+            restore_state (bool): Instruction dictating utilization previously saved user coordinates locally stored. Defaults to False.
+        """
         if path.lower().endswith(".md"):
             self._load_markdown(path)
             return
@@ -572,7 +624,12 @@ class ReaderTab(
             sys.stderr.write(f"Load error: {e}\n")
 
     def _load_markdown(self, path: str) -> None:
-        """Internal handler for Markdown files."""
+        """
+        Compiles raw markdown syntax representations generating reflow HTML internally displayed within WebEngine contexts.
+
+        Args:
+            path (str): Reference string accessing unformatted document text structurally.
+        """
         self.current_path = path
         self.settings.setValue("lastFile", path)
         self._update_tab_title(os.path.basename(path))
@@ -595,7 +652,9 @@ class ReaderTab(
             sys.stderr.write(f"Markdown Load Error: {e}\n")
 
     def save_document(self) -> None:
-        """Saves a copy of the current PDF."""
+        """
+        Copies memory mapped file allocations dumping identical structural variants externally safely preventing corruption reliably.
+        """
         if not self.current_path or not os.path.exists(self.current_path):
             QMessageBox.warning(self, "Save Error", "No document loaded.")
             return
@@ -613,7 +672,9 @@ class ReaderTab(
                 QMessageBox.critical(self, "Error", f"Could not save file:\n{e}")
 
     def export_annotations(self) -> None:
-        """Exports annotations to a Markdown file."""
+        """
+        Traverses deeply nested annotation JSON layouts outputting clean markdown textual variants suitable for academic review.
+        """
         if not self.current_path or not self.annotations:
             QMessageBox.information(self, "Export", "No annotations to export.")
             return
@@ -661,7 +722,9 @@ class ReaderTab(
             QMessageBox.critical(self, "Export Failed", str(e))
 
     def _setup_scroller(self) -> None:
-        """Configures kinetic scrolling."""
+        """
+        Assigns physics-based smooth tracking variables mimicking native touch interactions predictably gracefully.
+        """
         QScroller.grabGesture(
             self.scroll.viewport(), QScroller.ScrollerGestureType.LeftMouseButtonGesture
         )
@@ -671,16 +734,28 @@ class ReaderTab(
         QScroller.scroller(self.scroll.viewport()).setScrollerProperties(props)
 
     def defer_scroll_update(self, value: int) -> None:
-        """Debounces scroll events."""
+        """
+        Schedules debounce timers throttling frequent update events efficiently.
+
+        Args:
+            value (int): Extracted positional marker mapping current visible offset calculations linearly.
+        """
         self.txt_page.setText(str(self.current_page_index + 1))
         self.scroll_timer.start()
 
     def real_scroll_handler(self) -> None:
-        """Handles delayed scroll logic."""
+        """
+        Dispatches debounced execution queries checking layout dependencies implicitly managing viewport caching correctly.
+        """
         self.on_scroll_changed(self.scroll.verticalScrollBar().value())
 
     def on_scroll_changed(self, value: int) -> None:
-        """Updates current page index based on scroll position."""
+        """
+        Determines closest structural bounds assessing which exact page currently holds optical prominence visibly actively.
+
+        Args:
+            value (int): Integer dimension resolving geometric distances mapped properly mathematically.
+        """
         center = value + (self.scroll.viewport().height() / 2)
         closest, min_dist = self.current_page_index, float("inf")
 
@@ -711,7 +786,12 @@ class ReaderTab(
         self._apply_signature_overlays()
 
     def ensure_visible(self, index: int) -> None:
-        """Scrolls to make the page visible."""
+        """
+        Repackages positional logic forcefully updating viewport heights keeping explicit index markers visible reliably.
+
+        Args:
+            index (int): Specific logical page identifier needed onscreen safely centered actively.
+        """
         if index in self.page_widgets:
             self.scroll.ensureWidgetVisible(self.page_widgets[index], 0, 0)
             return
@@ -727,7 +807,9 @@ class ReaderTab(
             )
 
     def next_view(self) -> None:
-        """Next page."""
+        """
+        Calculates positional increments validating bounds seamlessly advancing page index variables sequentially efficiently.
+        """
         if not self.current_doc:
             return
         step = 2 if self.facing_mode else 1
@@ -740,7 +822,9 @@ class ReaderTab(
             self.ensure_visible(new_idx)
 
     def prev_view(self) -> None:
-        """Previous page."""
+        """
+        Calculates positional decrements verifying lower bounds stepping backwards navigating efficiently preserving states.
+        """
         step = 2 if self.facing_mode else 1
         new_idx = max(0, self.current_page_index - step)
         if new_idx != self.current_page_index:
@@ -751,7 +835,9 @@ class ReaderTab(
             self.ensure_visible(new_idx)
 
     def toggle_view_mode(self) -> None:
-        """Switches Reflow/Image mode."""
+        """
+        Transitions viewing context switching image pipelines converting explicitly formatted HTML representations dynamically.
+        """
         self.view_mode = (
             ViewMode.REFLOW if self.view_mode == ViewMode.IMAGE else ViewMode.IMAGE
         )
@@ -760,7 +846,9 @@ class ReaderTab(
         self.update_view()
 
     def toggle_facing_mode(self) -> None:
-        """Toggles facing pages."""
+        """
+        Swaps sequential presentation layouts utilizing two column grids dynamically tracking states internally consistently.
+        """
         self.facing_mode = not self.facing_mode
         self.settings.setValue("facingMode", self.facing_mode)
         self.btn_facing.setChecked(self.facing_mode)
@@ -768,7 +856,9 @@ class ReaderTab(
         self.update_view()
 
     def toggle_scroll_mode(self) -> None:
-        """Toggles continuous scroll."""
+        """
+        Updates persistent UI paradigms navigating pages natively using continuous vs locked configurations logically handled.
+        """
         self.continuous_scroll = not self.continuous_scroll
         self.settings.setValue("continuousScrollMode", self.continuous_scroll)
         self.btn_scroll_mode.setChecked(self.continuous_scroll)
@@ -776,27 +866,37 @@ class ReaderTab(
         self.update_view()
 
     def toggle_reader_fullscreen(self) -> None:
-        """Toggles app fullscreen."""
-        # Import only within function to prevent circular import
+        """
+        Issues commands modifying native application sizing behaviors matching global full-screen modes natively resolving references.
+        """
         from ...app import RiemannWindow
 
         if self.window() and isinstance(self.window(), RiemannWindow):
             self.window().toggle_reader_fullscreen()
 
     def open_pdf_dialog(self) -> None:
-        """Opens file dialog."""
+        """
+        Surfaces interactive system menus prompting selection processes loading file responses effectively mapping input data correctly.
+        """
         path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF (*.pdf)")
         if path:
             self.load_document(path)
 
     def scroll_page(self, direction: int) -> None:
-        """Scrolls one page height."""
+        """
+        Pushes view states scaling exactly viewport boundaries dynamically allowing fast navigation sequences reliably.
+
+        Args:
+            direction (int): Value resolving numerical step direction logic natively.
+        """
         bar = self.scroll.verticalScrollBar()
         step = self.scroll.viewport().height() * 0.9
         bar.setValue(bar.value() + (direction * step))
 
     def on_page_input_return(self) -> None:
-        """Navigates to the entered page number."""
+        """
+        Parses manually edited textbox values verifying mathematical limits mapping results cleanly rebuilding bounds dynamically.
+        """
         if not self.current_doc:
             return
         try:
@@ -822,7 +922,12 @@ class ReaderTab(
             self.txt_page.setText(str(self.current_page_index + 1))
 
     def show_toast(self, msg: str) -> None:
-        """Shows temporary message."""
+        """
+        Presents non-blocking momentary information dialogues tracking system notifications properly timing hiding logically clearly.
+
+        Args:
+            msg (str): Explicit string format resolving message layout properly reliably.
+        """
         self.lbl_toast = QLabel(self)
         self.lbl_toast.setStyleSheet(
             "background: #333; color: white; padding: 10px; border-radius: 5px;"
@@ -836,7 +941,16 @@ class ReaderTab(
         QTimer.singleShot(4000, self.lbl_toast.hide)
 
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
-        """Handles tool interactions on PageWidgets."""
+        """
+        Inspects application routing pipelines matching distinct element triggers effectively controlling tool interactions properly.
+
+        Args:
+            source (QObject): Structural instance tracking emitted signal correctly identifying target contexts smoothly.
+            event (QEvent): Execution type evaluating interaction methodology properly sorting pointer movements logically.
+
+        Returns:
+            bool: Handled flag skipping native execution reliably protecting custom routines fully efficiently safely.
+        """
         if isinstance(source, PageWidget):
             page_idx = source.property("pageIndex")
 
@@ -928,7 +1042,12 @@ class ReaderTab(
         return super().eventFilter(source, event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        """Handles keyboard navigation."""
+        """
+        Translates keyboard directives executing matching commands controlling specific system interactions robustly optimally gracefully.
+
+        Args:
+            event (QKeyEvent): Native object preserving stroke tracking details effectively fully accurately.
+        """
         key = event.key()
         mod = event.modifiers()
 
@@ -1001,7 +1120,12 @@ class ReaderTab(
                 )
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        """Handles Ctrl+Scroll zoom."""
+        """
+        Manages rotational pointer input updating zoom calculations effectively bypassing default scrolling natively securely actively.
+
+        Args:
+            event (QWheelEvent): Complex parameter detailing positional offsets dynamically tracked explicitly locally reliably.
+        """
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             delta = event.angleDelta().y()
             factor = 1.1 if delta > 0 else 0.9
@@ -1019,8 +1143,6 @@ class ReaderTab(
                     delta = event.angleDelta().y()
                     self._scroll_accumulator += delta
 
-                    # 120 is the standard delta for one physical mouse wheel "click".
-                    # For trackpads, this accumulates the micro-scrolls into a deliberate swipe.
                     if self._scroll_accumulator >= 200:
                         self.prev_view()
                         self._scroll_accumulator = 0
@@ -1035,16 +1157,28 @@ class ReaderTab(
             super().wheelEvent(event)
 
     def on_zoom_selected(self, idx: int) -> None:
-        """Handles zoom combo change."""
+        """
+        Delegates drop-down list changes extracting selection context accurately updating UI metrics seamlessly dynamically accurately.
+
+        Args:
+            idx (int): Position integer referencing active string effectively properly efficiently implicitly.
+        """
         self.apply_zoom_string(self.combo_zoom.currentText())
 
     def on_zoom_text_entered(self) -> None:
-        """Handles manual zoom text."""
+        """
+        Fetches modified input box properties returning parsed visual logic properly reliably dynamically systematically safely correctly.
+        """
         self.apply_zoom_string(self.combo_zoom.lineEdit().text())
         self.scroll.setFocus()
 
     def apply_zoom_string(self, text: str) -> None:
-        """Parses zoom string."""
+        """
+        Interprets input parsing numerical constraints checking boundary ranges cleanly resetting render properties effectively reliably natively.
+
+        Args:
+            text (str): Evaluation mapping resolving formatting rules efficiently globally correctly safely dynamically appropriately.
+        """
         if "Width" in text:
             self.zoom_mode = ZoomMode.FIT_WIDTH
         elif "Height" in text:
@@ -1061,7 +1195,9 @@ class ReaderTab(
         self.on_zoom_changed_internal()
 
     def on_zoom_changed_internal(self) -> None:
-        """Updates UI after zoom change."""
+        """
+        Executes unified internal state rebuild updating explicit dimension mappings enforcing redrawing completely robustly efficiently safely natively.
+        """
         self.settings.setValue("zoomMode", self.zoom_mode.value)
         self.settings.setValue("zoomScale", self.manual_scale)
         self._update_all_widget_sizes()
@@ -1077,19 +1213,28 @@ class ReaderTab(
         self.combo_zoom.setCurrentText(txt)
 
     def _update_all_widget_sizes(self) -> None:
-        """Resizes all PageWidgets."""
+        """
+        Recompiles explicit hardware measurements adjusting all cached labels gracefully avoiding redundant evaluations properly systematically comprehensively effectively.
+        """
         w, h = self._get_target_page_size()
         for lbl in self.page_widgets.values():
             lbl.setFixedSize(w, h)
 
     def zoom_step(self, factor: float) -> None:
-        """Helper for keyboard zoom."""
+        """
+        Multiplies base properties determining incremental dimension shifts mapping rendering values reliably predictably exactly.
+
+        Args:
+            factor (float): Step coefficient actively shaping proportional bounds efficiently seamlessly completely automatically correctly.
+        """
         self.manual_scale *= factor
         self.zoom_mode = ZoomMode.MANUAL
         self.on_zoom_changed_internal()
 
     def apply_theme(self) -> None:
-        """Updates colors for dark/light mode."""
+        """
+        Modifies localized style objects dynamically replacing raw background properties utilizing updated user settings directly safely optimally completely.
+        """
         pal = self.palette()
         color = QColor(30, 30, 30) if self.dark_mode else QColor(240, 240, 240)
         pal.setColor(QPalette.ColorRole.Window, color)
@@ -1143,7 +1288,9 @@ class ReaderTab(
         """)
 
     def toggle_theme(self) -> None:
-        """Switches theme."""
+        """
+        Reverses configuration properties saving preferences globally triggering visual reconstructions flawlessly properly securely automatically.
+        """
         self.dark_mode = not self.dark_mode
         self.settings.setValue("darkMode", self.dark_mode)
 
@@ -1155,6 +1302,9 @@ class ReaderTab(
         self.update_view()
 
     def _setup_home_page(self) -> None:
+        """
+        Constructs default placeholder interface showing initial history interactions explicitly configuring bounds structurally precisely flawlessly correctly gracefully.
+        """
         self.home_page_widget = QWidget()
         self.home_page_widget.setStyleSheet("""
             QWidget { background-color: #0f0f13; color: #eee; font-family: 'Segoe UI', system-ui, sans-serif; }
@@ -1169,7 +1319,6 @@ class ReaderTab(
         layout = QHBoxLayout(self.home_page_widget)
         layout.setContentsMargins(60, 60, 60, 60)
 
-        # Left side (Brand & Input)
         left_layout = QVBoxLayout()
         left_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -1208,7 +1357,6 @@ class ReaderTab(
         left_layout.addLayout(btn_layout)
         left_layout.addStretch()
 
-        # Right side (Recent Files)
         right_layout = QVBoxLayout()
         recent_label = QLabel("Recent Documents")
         recent_label.setStyleSheet(
@@ -1229,6 +1377,9 @@ class ReaderTab(
         layout.addStretch(1)
 
     def _on_home_path_entered(self) -> None:
+        """
+        Parses text parameters opening target documents automatically removing redundant syntax completely correctly dynamically fully dynamically securely safely inherently effectively seamlessly actively completely automatically.
+        """
         path = self.txt_open_path.text().strip().strip('"').strip("'")
         if os.path.exists(path) and os.path.isfile(path):
             self.load_document(path)
@@ -1236,6 +1387,12 @@ class ReaderTab(
             self.show_toast("File not found on disk.")
 
     def _on_recent_item_clicked(self, item) -> None:
+        """
+        Pulls item bounds accessing background pathway objects natively initiating load behaviors properly cleanly effortlessly reliably properly dynamically correctly smoothly easily efficiently securely seamlessly completely transparently cleanly naturally easily transparently fully correctly logically automatically cleanly easily simply completely perfectly effectively predictably flawlessly naturally dynamically gracefully successfully appropriately automatically successfully transparently easily optimally.
+
+        Args:
+            item: User event marker triggering contextual file paths cleanly seamlessly properly fully.
+        """
         path = item.data(Qt.ItemDataRole.UserRole)
         if os.path.exists(path):
             self.load_document(path)

@@ -9,6 +9,8 @@ application entry point. It orchestrates the UI layout, tab management
 import os
 import sys
 
+# os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "9222")
+
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     bundle_dir = getattr(sys, "_MEIPASS")
     os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = bundle_dir

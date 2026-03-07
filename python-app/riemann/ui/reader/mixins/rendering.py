@@ -17,10 +17,16 @@ from ..widgets import PageWidget
 
 
 class RenderingMixin:
-    """Methods for rendering PDF pages and layouts."""
+    """
+    Provides rendering capabilities and virtualized layouts for document viewers.
+    Meant to be mixed into the primary reader window interface class.
+    """
 
     def rebuild_layout(self) -> None:
-        """Reconstructs the layout of page widgets, handling virtualization."""
+        """
+        Reconstructs the primary layout tree of page widgets, enforcing view modes
+        and scroll virtualization limits dynamically based on current configuration.
+        """
         if not self.current_doc:
             return
 
@@ -55,7 +61,13 @@ class RenderingMixin:
         sb.blockSignals(was_blocked)
 
     def _build_virtual_layout(self, count: int) -> None:
-        """Helper for virtualized layout construction."""
+        """
+        Constructs a virtualized UI layout utilizing top and bottom spacer blocks
+        to mitigate RAM and Qt object limits on excessively large PDF documents.
+
+        Args:
+            count (int): The total number of pages in the current document.
+        """
         self._virtual_enabled = True
         buf_before = 30
         buf_after = 40
@@ -81,7 +93,13 @@ class RenderingMixin:
         self.scroll_layout.addWidget(self._bottom_spacer)
 
     def _build_standard_layout(self, count: int) -> None:
-        """Helper for standard layout construction."""
+        """
+        Constructs a rigid, non-virtualized standard UI layout where every page
+        is instantiated directly into the scroll view matrix.
+
+        Args:
+            count (int): The total number of pages in the current document.
+        """
         if self.continuous_scroll:
             pages = range(count)
         else:
@@ -94,7 +112,14 @@ class RenderingMixin:
         self._create_widgets_for_range(pages.start, pages.stop)
 
     def _create_widgets_for_range(self, start: int, end: int) -> None:
-        """Creates and adds page widgets for a specific index range."""
+        """
+        Iterates and generates individual visual label wrappers for a defined range
+        of page indices, integrating multi-column structures for facing pages.
+
+        Args:
+            start (int): The starting index of the page batch.
+            end (int): The ending boundary index of the page batch.
+        """
         idx_ptr = start
         while idx_ptr < end:
             p_idx = idx_ptr
@@ -122,7 +147,15 @@ class RenderingMixin:
             self.scroll_layout.addWidget(row)
 
     def _create_page_label(self, index: int) -> PageWidget:
-        """Creates a PageWidget instance."""
+        """
+        Instantiates an empty core structural label widget tailored for holding PDF pixels.
+
+        Args:
+            index (int): The associated integer page index for identification.
+
+        Returns:
+            PageWidget: A configured custom label container widget.
+        """
         lbl = PageWidget()
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setProperty("pageIndex", index)
@@ -134,11 +167,13 @@ class RenderingMixin:
         return lbl
 
     def render_visible_pages(self) -> None:
-        """Triggers rendering for pages currently within viewport range."""
+        """
+        Executes rendering sweeps on currently visible components based on scroll state.
+        Discards older distant cached elements while converting adjacent pages into textures.
+        """
         if not self.current_doc or not self.page_widgets:
             return
 
-        # Determine visible range roughly
         target_indices = set()
         start = max(0, self.current_page_index - 7)
         end = min(self.current_doc.page_count, self.current_page_index + 8)
@@ -146,7 +181,6 @@ class RenderingMixin:
         for i in range(start, end):
             target_indices.add(i)
 
-        # Clear pages that moved out of range
         for idx in list(self.rendered_pages):
             if idx not in target_indices:
                 if idx in self.page_widgets:
@@ -161,7 +195,13 @@ class RenderingMixin:
                 self.rendered_pages.add(idx)
 
     def _render_single_page(self, idx: int, scale: float) -> None:
-        """Renders a page, forms, and annotations."""
+        """
+        Executes rendering logic for a singular page utilizing the internal document bridge.
+
+        Args:
+            idx (int): The index of the specific page to evaluate and draw.
+            scale (float): The multiplier determining display resolution scaling factor.
+        """
         try:
             dpr = self.devicePixelRatio()
             render_scale = scale * dpr
@@ -184,7 +224,14 @@ class RenderingMixin:
             sys.stderr.write(f"Render error page {idx}: {e}\n")
 
     def _render_forms(self, idx: int, scale: float, logical_h: float) -> None:
-        """Overlays interactive form widgets."""
+        """
+        Synthesizes embedded interactive PDF form controls onto the layout architecture.
+
+        Args:
+            idx (int): The current page index to evaluate for embedded fields.
+            scale (float): The visual zoom scale modifier.
+            logical_h (float): The normalized logical height metric.
+        """
         if idx in self.form_widgets:
             for w in self.form_widgets[idx]:
                 w.deleteLater()
@@ -239,7 +286,16 @@ class RenderingMixin:
     def _render_overlays(
         self, idx: int, pix: QPixmap, scale: float, lw: float, lh: float
     ) -> None:
-        """Draws search results and annotations onto the pixmap."""
+        """
+        Applies non-destructive overlays for active annotations and query highlights.
+
+        Args:
+            idx (int): Target page index.
+            pix (QPixmap): The source pixmap object to manipulate and overlay elements onto.
+            scale (float): Rendering magnification variable.
+            lw (float): The logical dimension width calculation.
+            lh (float): The logical dimension height calculation.
+        """
         painter = QPainter(pix)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -262,7 +318,16 @@ class RenderingMixin:
     def _draw_annotation(
         self, painter: QPainter, anno: Dict, lw: float, lh: float, scale: float
     ) -> None:
-        """Draws a single annotation."""
+        """
+        Interprets geometry dict entries into rendered Qt graphical primitives.
+
+        Args:
+            painter (QPainter): The execution painting wrapper to process standard path nodes.
+            anno (Dict): A serialized structure identifying custom bounds data for specific marks.
+            lw (float): Normalized rendering width metrics.
+            lh (float): Normalized rendering height metrics.
+            scale (float): Geometric rendering scale modifier.
+        """
         atype = anno.get("type", "note")
 
         if atype == "note":
@@ -328,7 +393,12 @@ class RenderingMixin:
                     painter.drawLine(x, mid, x + w, mid)
 
     def calculate_scale(self) -> float:
-        """Determines rendering scale based on ZoomMode."""
+        """
+        Determines the dynamic visual viewport scale modifier taking ZoomMode constraints into account.
+
+        Returns:
+            float: The mathematically evaluated sizing zoom ratio.
+        """
         if self.zoom_mode == ZoomMode.MANUAL:
             return self.manual_scale
 
@@ -351,7 +421,10 @@ class RenderingMixin:
         return 1.0
 
     def update_view(self) -> None:
-        """Refreshes the view based on current mode."""
+        """
+        Triggers widespread sync operations tracking view coordinates, updating active displays
+        for either pixel-precise layout views or dynamic text reflow modes.
+        """
         if self.view_mode == ViewMode.IMAGE:
             self.render_visible_pages()
             if self.current_doc:
@@ -368,7 +441,9 @@ class RenderingMixin:
                 self.web.setHtml(html_content)
 
     def _probe_base_page_size(self) -> None:
-        """Caches base page size."""
+        """
+        Executes a background sample extraction on page 0 assessing geometric foundation metrics.
+        """
         if not self.current_doc:
             self._cached_base_size = None
             return
@@ -379,7 +454,12 @@ class RenderingMixin:
             self._cached_base_size = (595, 842)
 
     def _get_target_page_size(self) -> Tuple[int, int]:
-        """Calculates page pixel dimensions at current scale."""
+        """
+        Resolves final bounding box container sizes leveraging calculated metrics.
+
+        Returns:
+            Tuple[int, int]: Integer representations of logical page width and height boundaries.
+        """
         if not self._cached_base_size:
             return (int(595 * self.manual_scale), int(842 * self.manual_scale))
         bw, bh = self._cached_base_size

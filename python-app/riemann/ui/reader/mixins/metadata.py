@@ -1,3 +1,10 @@
+"""
+Metadata Extraction and Renaming Mixin.
+
+This module provides functionality to extract, store, and utilize metadata
+from PDF documents, including automated file renaming and citation copying.
+"""
+
 import os
 import re
 
@@ -7,8 +14,17 @@ from ..workers import MetadataExtractionWorker
 
 
 class MetadataMixin:
+    """
+    Provides methods for background metadata extraction and document management operations.
+    Expected to be mixed into a class providing document context (e.g., ReaderTab).
+    """
+
     def extract_document_metadata(self) -> None:
-        """Checks the DB for metadata, or spins up the extraction worker if missing."""
+        """
+        Initiates the extraction of document metadata.
+        Checks the local library database first for cached metadata. If not found,
+        spins up a background worker to extract metadata from the first page's text.
+        """
         if not self.current_path or not self.current_doc:
             return
 
@@ -17,7 +33,6 @@ class MetadataMixin:
 
         self.document_metadata = {}
 
-        # 1. Check if we already have it in the local database
         if hasattr(self.window(), "library_manager"):
             cached_data = self.window().library_manager.get_metadata(self.current_path)
             if cached_data and cached_data.get("title"):
@@ -25,13 +40,11 @@ class MetadataMixin:
                 self._update_tab_title_with_metadata()
                 return
 
-        # 2. If not, grab the first page text and spin up the worker
         try:
             first_page_text = self.current_doc.get_page_text(0)
             if not first_page_text.strip():
                 return
 
-            # We only need the first ~3000 characters to find a DOI/Title
             self.metadata_worker = MetadataExtractionWorker(
                 first_page_text[:3000], parent=self
             )
@@ -44,13 +57,18 @@ class MetadataMixin:
             print(f"Failed to start metadata extraction: {e}")
 
     def _on_metadata_extracted(self, data: dict) -> None:
-        """Callback when the background worker finishes."""
+        """
+        Callback handler executed when the background metadata extraction worker completes successfully.
+        Saves the extracted data to the library database and triggers a title update.
+
+        Args:
+            data (dict): The dictionary containing the extracted document metadata.
+        """
         if not data:
             return
 
         self.document_metadata = data
 
-        # Save to database
         if hasattr(self.window(), "library_manager"):
             self.window().library_manager.save_metadata(self.current_path, data)
 
@@ -58,22 +76,24 @@ class MetadataMixin:
 
     def _update_tab_title_with_metadata(self) -> None:
         """
-        Metadata is extracted and stored in self.document_metadata,
-        but tab is no longer auto-renamed here.
+        Updates the UI tab title using the extracted metadata.
+        Currently implemented as a no-op placeholder for extended subclasses.
+        Behavior inferred from implementation.
         """
         pass
 
     def rename_current_pdf(self) -> None:
+        """
+        Renames the active PDF file on the filesystem using the extracted document metadata.
+        Constructs a sanitized filename and updates the internal path state and library database upon success.
+        """
         if not self.current_path or not self.document_metadata:
             return
 
         year = self.document_metadata.get("year", "UnknownYear")
-        authors = self.document_metadata.get("authors", "UnknownAuthor").split(",")[
-            0
-        ]  # Just grab first author
+        authors = self.document_metadata.get("authors", "UnknownAuthor").split(",")[0]
         title = self.document_metadata.get("title", "UnknownTitle")
 
-        # Sanitize string to prevent OS errors
         safe_title = re.sub(r'[\\/*?:"<>|]', "", title)[:50]
         safe_author = re.sub(r'[\\/*?:"<>|]', "", authors)[:20]
 
@@ -84,12 +104,10 @@ class MetadataMixin:
             try:
                 os.rename(self.current_path, new_path)
 
-                # Update internal state
                 old_path = self.current_path
                 self.current_path = new_path
                 self.settings.setValue("lastFile", new_path)
 
-                # Update Library Database
                 if hasattr(self.window(), "library_manager"):
                     self.window().library_manager.save_metadata(
                         new_path, self.document_metadata
@@ -104,6 +122,10 @@ class MetadataMixin:
                 )
 
     def copy_citation(self) -> None:
+        """
+        Extracts the BibTeX citation format from the document metadata and copies it to the system clipboard.
+        Displays a UI toast notification indicating success or failure.
+        """
         bibtex = getattr(self, "document_metadata", {}).get("bibtex")
         if bibtex:
             QApplication.clipboard().setText(bibtex)

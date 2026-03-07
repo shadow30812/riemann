@@ -52,10 +52,22 @@ from .browser_handlers import ScriptInjector
 
 
 class YtDlpWorker(QThread):
+    """
+    Background worker thread for executing yt-dlp media downloads.
+    Reports progress and completion status asynchronously to the main thread.
+    """
+
     progress = Signal(int)
     finished = Signal(bool, str)
 
     def __init__(self, url: str, download_dir: str) -> None:
+        """
+        Initializes the yt-dlp download worker.
+
+        Args:
+            url (str): The target media URL to download.
+            download_dir (str): The local directory path to save the downloaded file.
+        """
         super().__init__()
         self.url = url
         self.download_dir = download_dir
@@ -63,6 +75,10 @@ class YtDlpWorker(QThread):
         self.is_cancelled = False
 
     def run(self) -> None:
+        """
+        Executes the yt-dlp subprocess, parses stdout for progress metrics,
+        and emits signals reflecting the operation's state.
+        """
         try:
             cmd = [
                 "yt-dlp",
@@ -112,22 +128,44 @@ class YtDlpWorker(QThread):
             self.finished.emit(False, str(e))
 
     def stop(self) -> None:
-        """Terminates the active yt-dlp subprocess."""
+        """
+        Terminates the active yt-dlp subprocess safely.
+        """
         self.is_cancelled = True
         if self.process:
             self.process.terminate()
 
 
 class WebPage(QWebEnginePage):
-    def __init__(self, profile, parent=None):
+    """
+    Custom QWebEnginePage subclass implementing specific behaviors for
+    window creation, JavaScript console logging, and custom scheme handling.
+    """
+
+    def __init__(
+        self, profile: QWebEngineProfile, parent: Optional[QObject] = None
+    ) -> None:
+        """
+        Initializes the custom web page instance.
+
+        Args:
+            profile (QWebEngineProfile): The web engine profile handling session data.
+            parent (Optional[QObject]): The parent object managing object lifecycle.
+        """
         super().__init__(profile, parent)
         self._popups = []
         self.app_settings = QSettings("Riemann", "PDFReader")
 
-    def createWindow(self, _type):
+    def createWindow(self, _type: QWebEnginePage.WebWindowType) -> QWebEnginePage:
         """
         Handles background tab opening and popups (like Google Login) by
         creating a temporary view that shares the same profile/session.
+
+        Args:
+            _type (QWebEnginePage.WebWindowType): The requested type of the new window.
+
+        Returns:
+            QWebEnginePage: The newly instantiated web page object to host the content.
         """
         view = self.parent()
         main_win = view.window() if view else None
@@ -154,16 +192,50 @@ class WebPage(QWebEnginePage):
         popup_view.show()
         return page
 
-    def _cleanup_popup(self, popup):
+    def _cleanup_popup(self, popup: QWebEngineView) -> None:
+        """
+        Removes a destroyed popup view from the internal tracking list.
+
+        Args:
+            popup (QWebEngineView): The popup instance being destroyed.
+        """
         if popup in self._popups:
             self._popups.remove(popup)
 
-    def javaScriptConsoleMessage(self, level, message, line, source):
-        """Print web errors to your Python terminal"""
+    def javaScriptConsoleMessage(
+        self,
+        level: QWebEnginePage.JavaScriptConsoleMessageLevel,
+        message: str,
+        line: int,
+        source: str,
+    ) -> None:
+        """
+        Intercepts JavaScript console messages and routes them to standard output.
+
+        Args:
+            level (QWebEnginePage.JavaScriptConsoleMessageLevel): The severity level of the message.
+            message (str): The text payload of the log.
+            line (int): The line number where the log originated.
+            source (str): The source file or script identifier.
+        """
         self.level = level
         print(f"[JS] {message} (Line {line} in {source})\n\nlevel- {level}")
 
-    def acceptNavigationRequest(self, url, _type, isMainFrame):
+    def acceptNavigationRequest(
+        self, url: QUrl, _type: QWebEnginePage.NavigationType, isMainFrame: bool
+    ) -> bool:
+        """
+        Intercepts navigation requests to handle custom application URL schemes,
+        such as data synchronization from internal pages.
+
+        Args:
+            url (QUrl): The target URL of the navigation request.
+            _type (QWebEnginePage.NavigationType): The type of navigation.
+            isMainFrame (bool): True if the navigation occurs in the main frame.
+
+        Returns:
+            bool: True if the navigation should proceed natively, False if intercepted.
+        """
         if url.scheme() == "riemann-save":
             payload = urllib.parse.unquote(
                 url.toString().replace("riemann-save://", "")
@@ -181,7 +253,12 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
     """
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
-        """Initializes the interceptor with a list of blocked domains."""
+        """
+        Initializes the interceptor with a predefined list of blocked domains.
+
+        Args:
+            parent (Optional[QObject]): The parent object for memory management.
+        """
         super().__init__(parent)
         self.blocked_domains = [
             "doubleclick.net",
@@ -201,10 +278,11 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
 
     def interceptRequest(self, info: QWebEngineUrlRequestInfo) -> None:
         """
-        Blocks the request if the URL contains a blacklisted domain.
+        Evaluates an outbound network request, blocking it if it matches blacklists,
+        or modifying headers for specific compatibility rules.
 
         Args:
-            info: Information about the URL request.
+            info (QWebEngineUrlRequestInfo): Mutable information about the URL request.
         """
         url = info.requestUrl().toString().lower()
         if any(domain in url for domain in self.blocked_domains):
@@ -253,13 +331,14 @@ class BrowserTab(QWidget):
         incognito: bool = False,
     ) -> None:
         """
-        Initializes the BrowserTab.
+        Initializes the BrowserTab layout and core components.
 
         Args:
-            start_url: The initial URL to load.
-            parent: The parent widget.
-            dark_mode: Initial theme state (True for dark mode).
-            incognito: Whether to use an ephemeral, in-memory profile.
+            start_url (str): The initial URL to load upon creation.
+            parent (Optional[QWidget]): The parent widget container.
+            profile (Optional[QWebEngineProfile]): Specific profile context, if any.
+            dark_mode (bool): Initial theme state flag (True for dark mode).
+            incognito (bool): Whether to use an ephemeral, in-memory profile session.
         """
         super().__init__(parent)
         self.dark_mode = dark_mode
@@ -525,11 +604,20 @@ class BrowserTab(QWidget):
         """
         Handles the event when the Tab widget itself receives focus.
         Immediately forwards focus to the web view to enable page shortcuts.
+
+        Args:
+            event (Any): The underlying Qt focus event.
         """
         self.web.setFocus()
         super().focusInEvent(event)
 
-    def _on_homepage_load_finished(self, ok: bool):
+    def _on_homepage_load_finished(self, ok: bool) -> None:
+        """
+        Injects system data securely into the local homepage once rendering is complete.
+
+        Args:
+            ok (bool): True if the page loaded successfully.
+        """
         if ok and "homepage.html" in self.web.url().toString():
             try:
                 name = pwd.getpwuid(os.getuid()).pw_gecos.split(",")[0]
@@ -547,7 +635,11 @@ class BrowserTab(QWidget):
         self, url: QUrl, feature: QWebEnginePage.Feature
     ) -> None:
         """
-        Auto-grants permissions for Clipboard access so 'Copy' buttons work.
+        Auto-grants permissions for Clipboard access so web application 'Copy' buttons function.
+
+        Args:
+            url (QUrl): The URL requesting the permission.
+            feature (QWebEnginePage.Feature): The specific feature being requested.
         """
         if feature in (
             QWebEnginePage.Feature.ClipboardReadWrite,
@@ -562,7 +654,9 @@ class BrowserTab(QWidget):
             )
 
     def open_devtools(self) -> None:
-        """Opens the Web Inspector for the current page in a separate window."""
+        """
+        Opens the Web Inspector for the current page in an independent detached window.
+        """
         if not hasattr(self, "_devtools_window"):
             self._devtools_window = QWidget()
             self._devtools_window.setWindowTitle("Inspector")
@@ -580,19 +674,25 @@ class BrowserTab(QWidget):
         self._devtools_window.raise_()
 
     def hard_reload(self) -> None:
-        """Clears the HTTP cache and reloads the current page."""
+        """
+        Clears the HTTP cache and forces a full network reload of the current page.
+        """
         self.profile.clearHttpCache()
         self.web.reload()
 
     def focus_url_bar(self) -> None:
-        """Focuses and selects all text in the URL bar."""
+        """
+        Grabs input focus and selects all text within the navigation address bar.
+        """
         self.txt_url.setFocus()
         self.txt_url.selectAll()
 
     def _handle_fullscreen_request(self, request: QWebEngineDownloadRequest) -> None:
         """
-        Handles fullscreen requests from web content.
-        Toggles the main application window's fullscreen state to match.
+        Handles fullscreen requests from web content by toggling the main application state.
+
+        Args:
+            request (QWebEngineDownloadRequest): The fullscreen authorization request object.
         """
         request.accept()
         main_win = self.window()
@@ -616,7 +716,9 @@ class BrowserTab(QWidget):
                 main_win.toggle_reader_fullscreen()
 
     def apply_theme(self) -> None:
-        """Applies colors based on the current Dark/Light mode setting."""
+        """
+        Applies aesthetic color changes to the UI based on the active dark/light mode setting.
+        """
         settings = self.web.page().settings()
         if self.dark_mode:
             bg, fg, inp_bg, border = "#333", "#ddd", "#444", "#555"
@@ -644,6 +746,9 @@ class BrowserTab(QWidget):
             """)
 
     def toggle_theme(self) -> None:
+        """
+        Reverses the active display theme state, applying updates to the local rendering pipeline.
+        """
         self.dark_mode = not self.dark_mode
         if hasattr(self.window(), "settings"):
             self.window().settings.setValue("darkMode", self.dark_mode)
@@ -654,7 +759,14 @@ class BrowserTab(QWidget):
 
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
         """
-        Filters events to handle specific shortcuts before the WebEngine consumes them.
+        Filters input events prioritizing crucial native shortcuts before WebEngine consumption.
+
+        Args:
+            source (QObject): The event origin object.
+            event (QEvent): The triggering Qt framework event payload.
+
+        Returns:
+            bool: Indication of whether the event was successfully consumed.
         """
         if source == self.web and event.type() == QEvent.Type.KeyPress:
             if event.key() == Qt.Key.Key_F11:
@@ -682,32 +794,47 @@ class BrowserTab(QWidget):
         return super().eventFilter(source, event)
 
     def modify_zoom(self, delta: float) -> None:
-        """Increments or decrements the zoom factor and updates the label."""
+        """
+        Adjusts the visual zoom scaling layout property of the rendered web page.
+
+        Args:
+            delta (float): Incremental adjustment value to modify the zoom factor.
+        """
         new_factor = max(0.1, min(self.web.zoomFactor() + delta, 5.0))
         self.web.setZoomFactor(new_factor)
         self.lbl_zoom.setText(f"{int(new_factor * 100)}%")
 
     def reset_zoom(self) -> None:
-        """Resets zoom to 100% and updates the label."""
+        """
+        Resets the rendering layout zoom factor uniformly to absolute normal metrics.
+        """
         self.web.setZoomFactor(1.0)
         self.lbl_zoom.setText("100%")
 
     def toggle_search(self) -> None:
-        """Toggles the visibility of the find-in-page bar."""
+        """
+        Alternates the user-facing visibility properties for the page search utility bar.
+        """
         self.search_bar.setVisible(not self.search_bar.isVisible())
         if self.search_bar.isVisible():
             self.txt_find.setFocus()
 
     def find_next(self) -> None:
-        """Finds the next occurrence of the search text."""
+        """
+        Triggers a progressive forward search utilizing the web engine document parser.
+        """
         self.web.findText(self.txt_find.text())
 
     def find_prev(self) -> None:
-        """Finds the previous occurrence of the search text."""
+        """
+        Executes a backwards search matching string constants against rendered documents.
+        """
         self.web.findText(self.txt_find.text(), QWebEngineView.FindFlag.FindBackward)
 
     def navigate_to_url(self) -> None:
-        """Loads the URL entered in the address bar."""
+        """
+        Resolves input text resolving either a target URL schema or a search query string.
+        """
         text = self.txt_url.text().strip()
         if not text:
             return
@@ -721,7 +848,12 @@ class BrowserTab(QWidget):
         self.web.load(url)
 
     def resizeEvent(self, event: Any) -> None:
-        """Handles window resize events to center the toast notification."""
+        """
+        Recalculates specific UI overlay positions consistently anchoring elements cleanly.
+
+        Args:
+            event (Any): Fired geometry update system event.
+        """
         super().resizeEvent(event)
         if self.lbl_toast.isVisible():
             self.lbl_toast.move(
@@ -729,7 +861,12 @@ class BrowserTab(QWidget):
             )
 
     def show_toast(self, message: str) -> None:
-        """Displays a temporary notification overlay."""
+        """
+        Draws an informative notification overlay layer dismissing itself systematically.
+
+        Args:
+            message (str): Text body to visually render.
+        """
         self.lbl_toast.setText(message)
         self.lbl_toast.adjustSize()
         self.lbl_toast.move(
@@ -740,7 +877,12 @@ class BrowserTab(QWidget):
         QTimer.singleShot(3000, self.lbl_toast.hide)
 
     def _update_url_bar(self, url: QUrl) -> None:
-        """Updates URL bar text and adds the URL to history."""
+        """
+        Refreshes navigation string attributes appropriately adjusting historical states concurrently.
+
+        Args:
+            url (QUrl): Native object tracking active site addressing correctly.
+        """
         s_url = url.toString()
 
         if "homepage.html" in s_url:
@@ -763,14 +905,21 @@ class BrowserTab(QWidget):
         self._update_bookmark_icon(s_url)
 
     def _update_bookmark_icon(self, url: str) -> None:
-        """Updates the bookmark button state based on the current URL."""
+        """
+        Polls internal bookmark managers adjusting interactive visual properties representing status realistically.
+
+        Args:
+            url (str): String identifier for validation querying properly.
+        """
         if self.window() and hasattr(self.window(), "bookmarks_manager"):
             is_bm = self.window().bookmarks_manager.is_bookmarked(url)
             self.btn_bookmark.setChecked(is_bm)
             self.btn_bookmark.setText("★" if is_bm else "☆")
 
     def toggle_bookmark(self) -> None:
-        """Toggles bookmark status for current URL."""
+        """
+        Commits structural changes generating or discarding favorite states natively managing database objects explicitly.
+        """
         if not self.window() or not hasattr(self.window(), "bookmarks_manager"):
             return
 
@@ -787,7 +936,12 @@ class BrowserTab(QWidget):
         self._update_bookmark_icon(url)
 
     def _update_tab_title(self, title: str) -> None:
-        """Updates the parent tab widget's title."""
+        """
+        Injects layout naming overrides referencing document names appropriately truncating extensive text correctly.
+
+        Args:
+            title (str): Full title string extracted smoothly directly.
+        """
         parent = self.parent()
         while parent:
             if isinstance(parent, QTabWidget):
@@ -801,8 +955,10 @@ class BrowserTab(QWidget):
 
     def get_audio_script(self) -> str:
         """
-        Loads the audio_engine.js file from the assets directory.
-        Returns the script content as a string.
+        Extracts foundational Javascript processing payloads natively bundled into application assets reliably.
+
+        Returns:
+            str: Resolved Javascript textual components gracefully mapped dynamically.
         """
         try:
             candidate_path = os.path.join(
@@ -833,7 +989,9 @@ class BrowserTab(QWidget):
             return ""
 
     def toggle_music_mode(self) -> None:
-        """Toggles the Audio Engine state based on button check status."""
+        """
+        Coordinates client-side audio injection enabling graphical DSP environments dynamically correctly logically.
+        """
         is_active = self.btn_music.isChecked()
 
         base_js = self.get_audio_script()
@@ -853,12 +1011,19 @@ class BrowserTab(QWidget):
         self.web.page().runJavaScript(full_script)
 
     def _restore_music_mode(self) -> None:
-        """Re-enables music mode after page navigation if button is checked."""
+        """
+        Reinitializes musical DSP properties securely restoring previous toggles accurately consistently implicitly.
+        """
         if self.btn_music.isChecked():
             QTimer.singleShot(1000, self.toggle_music_mode)
 
     def _handle_download(self, download_item: QWebEngineDownloadRequest) -> None:
-        """Handles file download requests via a file dialog."""
+        """
+        Orchestrates manual dialog generation collecting paths delegating download resolution securely directly internally.
+
+        Args:
+            download_item (QWebEngineDownloadRequest): Engine specific data handler structurally.
+        """
         default_dir = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.DownloadLocation
         )
@@ -885,13 +1050,25 @@ class BrowserTab(QWidget):
     def _check_pdf_open(
         self, state: int, item: QWebEngineDownloadRequest, temp_folder: str
     ) -> None:
-        """Checks if a download is a PDF and opens it if complete."""
+        """
+        Verifies specific download events monitoring completion specifically resolving PDF interactions appropriately gracefully.
+
+        Args:
+            state (int): Evaluated condition metric determining logic branches correctly.
+            item (QWebEngineDownloadRequest): Targeted active network artifact dynamically processed.
+            temp_folder (str): Originating path references safely maintained systematically.
+        """
         if state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
             full_path = os.path.join(temp_folder, item.downloadFileName())
             self._on_pdf_downloaded(full_path)
 
     def _on_pdf_downloaded(self, path: str) -> None:
-        """Callback when an auto-downloaded PDF finishes."""
+        """
+        Redirects confirmed PDF assets into distinct rendering tab allocations automatically efficiently smoothly.
+
+        Args:
+            path (str): Final resulting system file route correctly parsed reliably.
+        """
         if (
             os.path.exists(path)
             and self.window()
@@ -900,6 +1077,9 @@ class BrowserTab(QWidget):
             self.window().open_pdf_in_new_tab(path)
 
     def download_video(self) -> None:
+        """
+        Instantiates background CLI utility download threads bypassing standard media restrictions completely structurally correctly.
+        """
         url = self.web.url().toString()
         if not url or "http" not in url:
             self.show_toast("Invalid URL for download.")
@@ -917,7 +1097,6 @@ class BrowserTab(QWidget):
         self.show_toast("Starting download...")
         self.progress.setValue(0)
 
-        # Transform the download button into a Cancel button
         self.btn_download.setText("⏹")
         self.btn_download.setStyleSheet("color: #FF4500; font-weight: bold;")
         self.btn_download.setToolTip("Cancel Download")
@@ -927,20 +1106,27 @@ class BrowserTab(QWidget):
             pass
         self.btn_download.clicked.connect(self.cancel_download)
 
-        # Initialize and start the background thread
         self.dl_worker = YtDlpWorker(url, dest_dir)
         self.dl_worker.progress.connect(self.progress.setValue)
         self.dl_worker.finished.connect(self._on_download_finished)
         self.dl_worker.start()
 
     def cancel_download(self) -> None:
-        """Triggered when the user clicks the Stop button."""
+        """
+        Safely halts running video fetch mechanisms terminating processes appropriately cleanly precisely.
+        """
         if hasattr(self, "dl_worker") and self.dl_worker.isRunning():
             self.show_toast("Cancelling download...")
             self.dl_worker.stop()
 
     def _on_download_finished(self, success: bool, message: str) -> None:
-        # Revert the Cancel button back to a Download button
+        """
+        Realigns user interface variables matching completed states correctly presenting messages cleanly successfully accurately.
+
+        Args:
+            success (bool): Conditional pass reflecting download health natively explicitly.
+            message (str): Information strings structurally appended describing outcome naturally gracefully.
+        """
         self.btn_download.setText("⬇")
         self.btn_download.setStyleSheet("")
         self.btn_download.setToolTip("Download Video via yt-dlp")
