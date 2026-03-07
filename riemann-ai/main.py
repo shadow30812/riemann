@@ -1,7 +1,17 @@
+"""
+Riemann AI Sidecar Engine.
+
+This module provides a local FastAPI-based backend for the Riemann desktop application.
+It exposes REST and WebSocket endpoints for document indexing, semantic search,
+and automatic tagging using FAISS and SentenceTransformers. All inference runs
+locally to ensure data privacy and offline capability.
+"""
+
 import json
 import os
 import re
 from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator
 
 import faiss
 import fitz
@@ -11,13 +21,12 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
-# --- Global State ---
-# We keep the model, index, and metadata in memory for fast access.
 MODEL_NAME = "all-MiniLM-L6-v2"
-model = None
-vector_index = None
-chunk_metadata = []  # List to store dicts: {"page": int, "text": str}
 
+# Global state for the AI Sidecar
+model: SentenceTransformer | None = None
+vector_index: faiss.IndexFlatIP | None = None
+chunk_metadata: list[dict[str, Any]] = []
 
 AVAILABLE_TAGS = [
     "Analog Circuits",
@@ -31,43 +40,71 @@ AVAILABLE_TAGS = [
     "Artificial Intelligence",
     "Digital Circuits",
 ]
-tag_embeddings = None
+tag_embeddings: np.ndarray | None = None
 
 
-# --- Pydantic Models ---
 class IndexRequest(BaseModel):
+    """Payload for PDF indexing requests."""
+
     pdf_path: str
     chunk_size: int = 200
     chunk_overlap: int = 50
 
 
 class SearchRequest(BaseModel):
+    """Payload for semantic search requests."""
+
     query: str
     top_k: int = 5
 
 
 class SearchResult(BaseModel):
+    """Structure of a single semantic search result."""
+
     page: int
     text: str
     score: float
 
 
 class TagRequest(BaseModel):
+    """Payload for automated tagging of text chunks."""
+
     text_chunk: str
     threshold: float = 0.25
 
 
-# --- Helper Functions ---
 def clean_text(text: str) -> str:
-    """Removes excessive newlines and spaces."""
+    """
+    Cleans raw text extracted from a PDF by normalizing whitespace.
+
+    Args:
+        text (str): The raw text to clean.
+
+    Returns:
+        str: The cleaned, single-spaced string.
+    """
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
 
-def chunk_text(text: str, page_num: int, chunk_size: int, overlap: int):
-    """Splits text into sliding-window chunks."""
+def chunk_text(
+    text: str, page_num: int, chunk_size: int, overlap: int
+) -> list[dict[str, Any]]:
+    """
+    Splits text into sliding-window chunks for vector embedding.
+
+    Args:
+        text (str): The text to be chunked.
+        page_num (int): The 1-based page number from which the text was extracted.
+        chunk_size (int): The maximum number of words per chunk.
+        overlap (int): The number of overlapping words between consecutive chunks.
+
+    Returns:
+        list[dict[str, Any]]: A list of dictionaries containing chunk text and page metadata.
+    """
     words = text.split()
-    chunks = []
+    chunks: list[dict[str, Any]] = []
+
     if not words:
         return chunks
 
@@ -75,26 +112,46 @@ def chunk_text(text: str, page_num: int, chunk_size: int, overlap: int):
         chunk = " ".join(words[i : i + chunk_size])
         if chunk:
             chunks.append({"page": page_num, "text": chunk})
+
     return chunks
 
 
-# --- Lifespan (Startup/Shutdown) ---
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """
+    Manages the lifecycle of the FastAPI application.
+    Loads the sentence transformer model into memory on startup and cleans up on shutdown.
+
+    Args:
+        app (FastAPI): The FastAPI application instance.
+    """
     global model
     print(f"Loading embedding model '{MODEL_NAME}' onto CPU...")
     model = SentenceTransformer(MODEL_NAME, device="cpu")
     print("Model loaded successfully.")
+
     yield
+
     print("Shutting down AI service...")
 
 
-# --- FastAPI App ---
 app = FastAPI(title="Riemann AI Sidecar", lifespan=lifespan)
 
 
 @app.post("/index")
-async def index_pdf(req: IndexRequest):
+async def index_pdf(req: IndexRequest) -> dict[str, Any]:
+    """
+    Reads a PDF, extracts its text, chunks it, and builds a FAISS vector index.
+
+    Args:
+        req (IndexRequest): The configuration for the indexing operation.
+
+    Returns:
+        dict[str, Any]: A status dictionary including the number of chunks indexed.
+
+    Raises:
+        HTTPException: If the PDF cannot be found, read, or contains no text.
+    """
     global vector_index, chunk_metadata, model
 
     if not os.path.exists(req.pdf_path):
@@ -103,7 +160,7 @@ async def index_pdf(req: IndexRequest):
     try:
         print(f"Opening PDF: {req.pdf_path}")
         doc = fitz.open(req.pdf_path)
-        all_chunks = []
+        all_chunks: list[dict[str, Any]] = []
 
         for page_num in range(len(doc)):
             page = doc[page_num]
@@ -113,7 +170,6 @@ async def index_pdf(req: IndexRequest):
                     text, page_num + 1, req.chunk_size, req.chunk_overlap
                 )
                 all_chunks.extend(page_chunks)
-
         doc.close()
 
         if not all_chunks:
@@ -122,7 +178,6 @@ async def index_pdf(req: IndexRequest):
             )
 
         print(f"Extracted {len(all_chunks)} chunks. Generating embeddings...")
-
         texts = [c["text"] for c in all_chunks]
         embeddings = model.encode(
             texts, convert_to_numpy=True, normalize_embeddings=True
@@ -131,7 +186,6 @@ async def index_pdf(req: IndexRequest):
         embedding_dim = embeddings.shape[1]
         vector_index = faiss.IndexFlatIP(embedding_dim)
         vector_index.add(embeddings)
-
         chunk_metadata = all_chunks
 
         return {"status": "success", "chunks_indexed": len(all_chunks)}
@@ -141,7 +195,19 @@ async def index_pdf(req: IndexRequest):
 
 
 @app.post("/search", response_model=list[SearchResult])
-async def search_pdf(req: SearchRequest):
+async def search_pdf(req: SearchRequest) -> list[SearchResult]:
+    """
+    Performs a semantic search against the currently indexed PDF.
+
+    Args:
+        req (SearchRequest): The search query and configuration.
+
+    Returns:
+        list[SearchResult]: The top matches exceeding the similarity threshold.
+
+    Raises:
+        HTTPException: If no PDF is currently indexed or if the search fails.
+    """
     global vector_index, chunk_metadata, model
 
     if vector_index is None or not chunk_metadata:
@@ -151,19 +217,18 @@ async def search_pdf(req: SearchRequest):
         query_embedding = model.encode(
             [req.query], convert_to_numpy=True, normalize_embeddings=True
         )
-
         distances, indices = vector_index.search(query_embedding, req.top_k)
-        results = []
 
+        results: list[SearchResult] = []
         for i in range(req.top_k):
             idx = indices[0][i]
             score = float(distances[0][i])
-
             if idx != -1 and idx < len(chunk_metadata) and score >= 0.35:
                 meta = chunk_metadata[idx]
                 results.append(
                     SearchResult(page=meta["page"], text=meta["text"], score=score)
                 )
+
         return results
 
     except Exception as e:
@@ -171,9 +236,17 @@ async def search_pdf(req: SearchRequest):
 
 
 @app.websocket("/ws/ai")
-async def ai_websocket(websocket: WebSocket):
+async def ai_websocket(websocket: WebSocket) -> None:
+    """
+    WebSocket endpoint for persistent, bidirectional communication with the Riemann frontend.
+    Handles 'index' and 'search' actions while emitting progress updates.
+
+    Args:
+        websocket (WebSocket): The active WebSocket connection.
+    """
     await websocket.accept()
     global vector_index, chunk_metadata, model
+
     try:
         while True:
             data = await websocket.receive_text()
@@ -198,7 +271,7 @@ async def ai_websocket(websocket: WebSocket):
                     continue
 
                 doc = fitz.open(pdf_path)
-                all_chunks = []
+                all_chunks: list[dict[str, Any]] = []
                 for page_num in range(len(doc)):
                     page = doc[page_num]
                     text = clean_text(page.get_text("text"))
@@ -221,6 +294,7 @@ async def ai_websocket(websocket: WebSocket):
                 embeddings = model.encode(
                     texts, convert_to_numpy=True, normalize_embeddings=True
                 )
+
                 embedding_dim = embeddings.shape[1]
                 vector_index = faiss.IndexFlatIP(embedding_dim)
                 vector_index.add(embeddings)
@@ -251,7 +325,7 @@ async def ai_websocket(websocket: WebSocket):
                 )
                 distances, indices = vector_index.search(query_embedding, top_k)
 
-                results = []
+                results: list[dict[str, Any]] = []
                 for i in range(top_k):
                     idx = indices[0][i]
                     score = float(distances[0][i])
@@ -272,13 +346,25 @@ async def ai_websocket(websocket: WebSocket):
 
 
 @app.post("/tag")
-async def generate_tags(req: TagRequest):
+async def generate_tags(req: TagRequest) -> dict[str, list[str]]:
+    """
+    Evaluates a chunk of text and assigns it the most relevant predefined tags.
+
+    Args:
+        req (TagRequest): The payload containing the text chunk and similarity threshold.
+
+    Returns:
+        dict[str, list[str]]: A dictionary containing up to 3 assigned tags.
+
+    Raises:
+        HTTPException: If the model is not loaded or tag generation fails.
+    """
     global tag_embeddings, model
+
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded yet.")
 
     if tag_embeddings is None:
-        # Compute these once and cache them
         tag_embeddings = model.encode(
             AVAILABLE_TAGS, convert_to_numpy=True, normalize_embeddings=True
         )
@@ -289,7 +375,7 @@ async def generate_tags(req: TagRequest):
         )
         similarities = np.dot(chunk_emb, tag_embeddings.T)[0]
 
-        assigned_tags = []
+        assigned_tags: list[dict[str, Any]] = []
         for idx, score in enumerate(similarities):
             if score > req.threshold:
                 assigned_tags.append(
@@ -304,5 +390,4 @@ async def generate_tags(req: TagRequest):
 
 
 if __name__ == "__main__":
-    # Run server locally. In production, Riemann main app will spawn this.
     uvicorn.run(app, host="127.0.0.1", port=8080, log_level="info")

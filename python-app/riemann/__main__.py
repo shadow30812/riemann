@@ -1,6 +1,5 @@
 """
-Package Entry Point.
-
+Entry point for the Riemann application.
 Allows the package to be executed directly using `python -m riemann`.
 """
 

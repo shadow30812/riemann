@@ -1,4 +1,16 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+# ==============================================================================
+# Riemann AI Sidecar Packaging Script
+# 
+# Description:
+#   This script automates the creation of a standalone Conda environment for the 
+#   Riemann AI sidecar. It utilizes `conda-pack` to bundle the environment and 
+#   places the executable runtime inside the main application's assets directory.
+#
+# Usage:
+#   ./build_ai.sh
+# ==============================================================================
 
 set -e
 cd "$(dirname "$0")"

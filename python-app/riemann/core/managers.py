@@ -1,9 +1,9 @@
 """
-State and Data Managers.
+Core data managers for the Riemann application.
 
-This module contains classes responsible for managing persistent application state,
-including bookmarks, browsing history, and file downloads. It handles serialization
-to the local filesystem (JSON) and provides models for UI consumption.
+Provides persistent data handling for the library metadata, bookmarks,
+browsing history, and active/historical downloads. Uses SQLite for
+complex metadata querying and JSON for lightweight list persistence.
 """
 
 import hashlib
@@ -30,9 +30,13 @@ from PySide6.QtWidgets import (
 
 
 class LibraryManager:
-    """Manages the local SQLite database for PDF metadata."""
+    """
+    Manages persistent metadata for the local PDF library.
+    Backed by a SQLite database stored in the user's application data directory.
+    """
 
     def __init__(self) -> None:
+        """Initializes the library manager and ensures the database exists."""
         base = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.AppDataLocation
         )
@@ -40,6 +44,7 @@ class LibraryManager:
         self._init_db()
 
     def _init_db(self) -> None:
+        """Creates the metadata table if it does not already exist."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (
@@ -54,10 +59,27 @@ class LibraryManager:
             """)
 
     def get_file_hash(self, file_path: str) -> str:
-        """Creates a unique hash based on the file path to use as a DB key."""
+        """
+        Generates a SHA-256 hash for a given file path.
+
+        Args:
+            file_path (str): The absolute path to the file.
+
+        Returns:
+            str: The hexadecimal SHA-256 hash.
+        """
         return hashlib.sha256(file_path.encode("utf-8")).hexdigest()
 
-    def get_metadata(self, file_path: str) -> dict:
+    def get_metadata(self, file_path: str) -> Dict[str, Any]:
+        """
+        Retrieves metadata associated with a specific file path.
+
+        Args:
+            file_path (str): The absolute path to the file.
+
+        Returns:
+            Dict[str, Any]: A dictionary containing the file's metadata, or empty if not found.
+        """
         file_hash = self.get_file_hash(file_path)
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -66,15 +88,28 @@ class LibraryManager:
             row = cur.fetchone()
             return dict(row) if row else {}
 
-    def save_metadata(self, file_path: str, data: dict) -> None:
+    def save_metadata(self, file_path: str, data: Dict[str, Any]) -> None:
+        """
+        Saves or updates metadata for a specific file path.
+
+        Args:
+            file_path (str): The absolute path to the file.
+            data (Dict[str, Any]): The metadata payload to persist.
+        """
         file_hash = self.get_file_hash(file_path)
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO metadata 
-                (file_hash, file_path, title, authors, year, doi, arxiv_id) 
+                INSERT INTO metadata (file_hash, file_path, title, authors, year, doi, arxiv_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
+                ON CONFLICT(file_hash) DO UPDATE SET
+                    file_path=excluded.file_path,
+                    title=excluded.title,
+                    authors=excluded.authors,
+                    year=excluded.year,
+                    doi=excluded.doi,
+                    arxiv_id=excluded.arxiv_id
+                """,
                 (
                     file_hash,
                     file_path,
@@ -86,16 +121,24 @@ class LibraryManager:
                 ),
             )
 
-    def search_library(self, query: str) -> list:
-        """Parses queries like 'author:Smith year:2020' and executes the SQL search."""
+    def search_library(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Executes a SQL search across the library metadata based on a query string.
+        Supports specific field filters (e.g., 'author:Smith year:2020').
+
+        Args:
+            query (str): The search query provided by the user.
+
+        Returns:
+            List[Dict[str, Any]]: A list of dictionaries representing matching records.
+        """
         import re
 
-        # Extract specific tags
         author_match = re.search(r'author:\s*"?([^"\s]+)"?', query, re.IGNORECASE)
         year_match = re.search(r"year:\s*(\d{4})", query, re.IGNORECASE)
 
-        conditions = []
-        params = []
+        conditions: List[str] = []
+        params: List[str] = []
 
         if author_match:
             conditions.append("authors LIKE ?")
@@ -107,7 +150,6 @@ class LibraryManager:
             params.append(year_match.group(1))
             query = query.replace(year_match.group(0), "")
 
-        # Any remaining text is treated as a general keyword search
         keywords = query.strip()
         if keywords:
             conditions.append("(title LIKE ? OR authors LIKE ? OR file_path LIKE ?)")
@@ -128,7 +170,6 @@ class LibraryManager:
 class BookmarksManager:
     """
     Manages persistent bookmarks for the application.
-
     Handles CRUD operations for bookmarks stored in a JSON file within the
     user's application data directory.
     """
@@ -164,34 +205,32 @@ class BookmarksManager:
         Adds a new bookmark if the URL does not already exist.
 
         Args:
-            title: The display title.
-            url: The target URL.
+            title (str): The display title of the bookmark.
+            url (str): The target URL.
         """
-        for b in self.bookmarks:
-            if b["url"] == url:
-                return
-        self.bookmarks.append({"title": title, "url": url})
-        self.save()
+        if not any(b["url"] == url for b in self.bookmarks):
+            self.bookmarks.append({"title": title, "url": url})
+            self.save()
 
     def remove(self, url: str) -> None:
         """
-        Removes a bookmark by URL.
+        Removes a bookmark by matching its URL.
 
         Args:
-            url: The URL to remove.
+            url (str): The URL to remove.
         """
         self.bookmarks = [b for b in self.bookmarks if b["url"] != url]
         self.save()
 
     def is_bookmarked(self, url: str) -> bool:
         """
-        Checks if a URL is bookmarked.
+        Checks if a specified URL is currently bookmarked.
 
         Args:
-            url: The URL to check.
+            url (str): The URL to check.
 
         Returns:
-            True if bookmarked, False otherwise.
+            bool: True if the URL exists in the bookmarks, False otherwise.
         """
         return any(b["url"] == url for b in self.bookmarks)
 
@@ -199,13 +238,10 @@ class BookmarksManager:
 class HistoryManager:
     """
     Manages browsing and document history.
-
     Maintains categorized lists (PDF vs Web) of recently accessed items,
     enforcing a maximum limit and handling persistence. Also provides
     data for autocomplete models.
     """
-
-    MAX_ENTRIES = 500
 
     def __init__(self) -> None:
         """Initializes the manager and loads history from disk."""
@@ -214,7 +250,6 @@ class HistoryManager:
         )
         self.path = os.path.join(base, "history.json")
         self.history: Dict[str, List[str]] = {"pdf": [], "web": []}
-
         self.popular_sites: List[str] = [
             "music.youtube.com",
             "whatsapp.com",
@@ -261,19 +296,15 @@ class HistoryManager:
         Adds an item to history, promoting it to the top.
 
         Args:
-            item: The URL or file path.
-            item_type: 'pdf' or 'web'.
+            item (str): The URL or file path.
+            item_type (str): 'pdf' or 'web'. Defaults to 'web'.
         """
-        if not item:
-            return
-
-        target_list = self.history.get(item_type, [])
-
-        if item in target_list:
-            target_list.remove(item)
-
-        target_list.insert(0, item)
-        self.history[item_type] = target_list[: self.MAX_ENTRIES]
+        if item_type not in self.history:
+            self.history[item_type] = []
+        if item in self.history[item_type]:
+            self.history[item_type].remove(item)
+        self.history[item_type].insert(0, item)
+        self.history[item_type] = self.history[item_type][:500]
         self.save()
 
     def get_model_data(self) -> List[str]:
@@ -281,19 +312,23 @@ class HistoryManager:
         Combines history and default sites for autocomplete suggestions.
 
         Returns:
-            A list of strings.
+            List[str]: A combined list of unique historical URLs and popular sites.
         """
-        web_history = self.history.get("web", [])
-        pdf_history = self.history.get("pdf", [])
-        extras = [s for s in self.popular_sites if s not in web_history]
-        return web_history + extras + pdf_history
+        combined = list(self.history.get("web", []))
+        for site in self.popular_sites:
+            if site not in combined:
+                combined.append(site)
+        return combined
 
     def get_list(self, item_type: str) -> List[str]:
         """
         Retrieves the history list for a specific category.
 
         Args:
-            item_type: 'pdf' or 'web'.
+            item_type (str): 'pdf' or 'web'.
+
+        Returns:
+            List[str]: The list of historical items for the category.
         """
         return self.history.get(item_type, [])
 
@@ -301,7 +336,6 @@ class HistoryManager:
 class DownloadManager(QDialog):
     """
     A non-modal dialog for managing file downloads.
-
     Displays active, completed, and failed downloads in a table.
     Supports pausing, resuming, and cancelling active downloads.
     Persists download history across sessions.
@@ -312,44 +346,39 @@ class DownloadManager(QDialog):
         Initializes the Download Manager UI.
 
         Args:
-            parent: The parent widget (usually the main window).
+            parent (Optional[QWidget]): The parent widget (usually the main window).
         """
         super().__init__(parent)
         self.setWindowTitle("Downloads")
-        self.resize(800, 425)
-
-        layout = QVBoxLayout(self)
-
-        self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["File", "Status", "Path", "Actions"])
-
-        header = self.table.horizontalHeader()
-        header.setSectionsMovable(True)
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(False)
-
-        self.table.setColumnWidth(0, 240)
-        self.table.setColumnWidth(1, 120)
-        self.table.setColumnWidth(2, 360)
-        self.table.setColumnWidth(3, 120)
-
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        layout.addWidget(self.table)
-
-        btn_clear = QPushButton("Clear Finished")
-        btn_clear.clicked.connect(self.clear_finished)
-        layout.addWidget(btn_clear)
+        self.resize(700, 400)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowCloseButtonHint)
 
         base = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.AppDataLocation
         )
-        os.makedirs(base, exist_ok=True)
-        self._persist_path = os.path.join(base, "downloads_history.json")
+        self._persist_path = os.path.join(base, "downloads.json")
+
+        layout = QVBoxLayout(self)
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["File", "Status", "Path", "Controls"])
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.Stretch
+        )
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        layout.addWidget(self.table)
+
+        btn_layout = QHBoxLayout()
+        btn_clear = QPushButton("Clear Completed")
+        btn_clear.clicked.connect(self._cleanup_completed)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_clear)
+        layout.addLayout(btn_layout)
 
         self.downloads: List[Dict[str, Any]] = []
-
         self._load_persistent_entries()
 
     def add_download(self, download_item: QWebEngineDownloadRequest) -> None:
@@ -357,80 +386,58 @@ class DownloadManager(QDialog):
         Registers a new active download request.
 
         Args:
-            download_item: The QtWebEngine download request.
+            download_item (QWebEngineDownloadRequest): The QtWebEngine download request.
         """
         row = self.table.rowCount()
         self.table.insertRow(row)
 
-        name = download_item.downloadFileName()
-        self.table.setItem(row, 0, QTableWidgetItem(name))
+        file_name = download_item.downloadFileName()
+        self.table.setItem(row, 0, QTableWidgetItem(file_name))
         self.table.setItem(row, 1, QTableWidgetItem("Starting..."))
 
-        path_text = download_item.downloadDirectory()
-        if path_text:
-            full_path = os.path.join(
-                download_item.downloadDirectory(), download_item.downloadFileName()
-            )
-        else:
-            full_path = "..."
-
-        path_item = QTableWidgetItem(full_path)
-        path_item.setToolTip(full_path)
+        path_item = QTableWidgetItem(download_item.downloadDirectory())
+        path_item.setToolTip(download_item.downloadDirectory())
         self.table.setItem(row, 2, path_item)
 
-        container = QWidget()
-        h_layout = QHBoxLayout(container)
+        ctrl_widget = QWidget()
+        h_layout = QHBoxLayout(ctrl_widget)
         h_layout.setContentsMargins(2, 2, 2, 2)
         h_layout.setSpacing(4)
 
         btn_pause = QPushButton("⏸")
         btn_pause.setFixedWidth(30)
-        btn_pause.setToolTip("Pause")
-
-        btn_resume = QPushButton("▶")
-        btn_resume.setFixedWidth(30)
-        btn_resume.setToolTip("Resume")
-        btn_resume.setEnabled(False)
-
         btn_cancel = QPushButton("⏹")
         btn_cancel.setFixedWidth(30)
-        btn_cancel.setToolTip("Cancel")
 
         h_layout.addWidget(btn_pause)
-        h_layout.addWidget(btn_resume)
         h_layout.addWidget(btn_cancel)
-
-        try:
-            self.table.setCellWidget(row, 3, container)
-        except Exception:
-            self.table.setCellWidget(row, 2, container)
-
-        btn_pause.clicked.connect(download_item.pause)
-        btn_resume.clicked.connect(download_item.resume)
-        btn_cancel.clicked.connect(download_item.cancel)
+        self.table.setCellWidget(row, 3, ctrl_widget)
 
         state_slot = self._make_state_slot(row, download_item)
         finished_slot = self._make_finished_slot(row, download_item)
 
         download_item.stateChanged.connect(state_slot)
-        download_item.stateChanged.connect(finished_slot)
+        download_item.finished.connect(finished_slot)
+
+        def toggle_pause() -> None:
+            if download_item.isPaused():
+                download_item.resume()
+                btn_pause.setText("⏸")
+            else:
+                download_item.pause()
+                btn_pause.setText("▶")
+
+        btn_pause.clicked.connect(toggle_pause)
+        btn_cancel.clicked.connect(download_item.cancel)
 
         self.downloads.append(
             {
                 "item": download_item,
-                "row": row,
-                "btns": (btn_pause, btn_resume, btn_cancel),
                 "state_slot": state_slot,
                 "finished_slot": finished_slot,
             }
         )
-
-        try:
-            self.update_status(row, download_item, download_item.state())
-        except RuntimeError:
-            pass
-
-        self._persist_entries()
+        self.show()
 
     def update_status(
         self,
@@ -442,76 +449,43 @@ class DownloadManager(QDialog):
         Updates the table row based on the download state.
 
         Args:
-            row: Table row index.
-            item: Download request object.
-            state: Current download state.
+            row (int): Table row index.
+            item (QWebEngineDownloadRequest): Download request object.
+            state (QWebEngineDownloadRequest.DownloadState): Current download state.
         """
-        try:
-            status = "Unknown"
-            btns = None
+        if row >= self.table.rowCount():
+            return
 
-            for d in self.downloads:
-                if d["item"] == item:
-                    btns = d["btns"]
-                    break
+        status_str = "Unknown"
+        if state == QWebEngineDownloadRequest.DownloadState.DownloadInProgress:
+            total = item.totalBytes()
+            recv = item.receivedBytes()
+            if total > 0:
+                pct = int((recv / total) * 100)
+                status_str = f"Downloading {pct}%"
+            else:
+                status_str = f"Downloading ({recv} B)"
+        elif state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
+            status_str = "Completed"
+            full_path = os.path.join(item.downloadDirectory(), item.downloadFileName())
+            self._set_open_button(row, full_path)
+            self._persist_entries()
+        elif state == QWebEngineDownloadRequest.DownloadState.DownloadCancelled:
+            status_str = "Cancelled"
+            self.table.setCellWidget(row, 3, QWidget())
+            self._persist_entries()
+        elif state == QWebEngineDownloadRequest.DownloadState.DownloadInterrupted:
+            status_str = "Failed"
+            self.table.setCellWidget(row, 3, QWidget())
+            self._persist_entries()
 
-            if state == QWebEngineDownloadRequest.DownloadState.DownloadInProgress:
-                percent = 0
-                if item.totalBytes() > 0:
-                    percent = int(item.receivedBytes() / item.totalBytes() * 100)
-                status = f"{percent}%"
-                if btns:
-                    btns[0].setEnabled(True)
-                    btns[1].setEnabled(False)
-                    btns[2].setEnabled(True)
+        status_item = self.table.item(row, 1)
+        if status_item:
+            status_item.setText(status_str)
 
-            elif state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
-                status = "Completed"
-                if btns:
-                    for btn in btns:
-                        btn.setEnabled(False)
-
-                path = os.path.join(item.downloadDirectory(), item.downloadFileName())
-                path_item = QTableWidgetItem(path)
-                path_item.setToolTip(path)
-
-                self.table.setItem(row, 2, path_item)
-                self._set_open_button(row, path)
-                self._persist_entries()
-
-            elif state == QWebEngineDownloadRequest.DownloadState.DownloadCancelled:
-                status = "Cancelled"
-                if btns:
-                    btns[0].setEnabled(False)
-                    btns[1].setEnabled(True)
-                    btns[2].setEnabled(False)
-                self._persist_entries()
-
-            elif state == QWebEngineDownloadRequest.DownloadState.DownloadInterrupted:
-                status = "Interrupted"
-                if item.isPaused():
-                    status = "Paused"
-                    if btns:
-                        btns[0].setEnabled(False)
-                        btns[1].setEnabled(True)
-                        btns[2].setEnabled(True)
-                else:
-                    status = "Failed"
-                    if btns:
-                        for btn in btns:
-                            btn.setEnabled(False)
-                self._persist_entries()
-
-            self.table.setItem(row, 1, QTableWidgetItem(status))
-
-        except RuntimeError:
-            pass
-        except Exception as e:
-            print(f"DownloadManager Error: {e}")
-
-    def clear_finished(self) -> None:
+    def _cleanup_completed(self) -> None:
         """Removes rows for downloads that are completed, cancelled, or failed."""
-        rows_to_remove = []
+        rows_to_remove: List[int] = []
         for i in range(self.table.rowCount()):
             status_item = self.table.item(i, 1)
             if status_item and status_item.text() in [
@@ -529,7 +503,13 @@ class DownloadManager(QDialog):
         self._persist_entries()
 
     def _set_open_button(self, row: int, full_path: str) -> None:
-        """Replaces control buttons with an 'Open' button."""
+        """
+        Replaces control buttons with an 'Open' button upon completion.
+
+        Args:
+            row (int): Table row index.
+            full_path (str): Absolute path to the downloaded file.
+        """
         container = QWidget()
         h_layout = QHBoxLayout(container)
         h_layout.setContentsMargins(2, 2, 2, 2)
@@ -546,7 +526,6 @@ class DownloadManager(QDialog):
 
         btn_open.clicked.connect(_open_path)
         h_layout.addWidget(btn_open)
-
         self.table.setCellWidget(row, 3, container)
 
     def _make_state_slot(
@@ -592,6 +571,7 @@ class DownloadManager(QDialog):
         """Restores download history from disk."""
         if not os.path.exists(self._persist_path):
             return
+
         try:
             with open(self._persist_path, "r", encoding="utf-8") as f:
                 entries = json.load(f)
@@ -601,6 +581,7 @@ class DownloadManager(QDialog):
         for e in entries:
             row = self.table.rowCount()
             self.table.insertRow(row)
+
             self.table.setItem(
                 row, 0, QTableWidgetItem(e.get("file_name", "<unknown>"))
             )
@@ -615,11 +596,12 @@ class DownloadManager(QDialog):
 
     def _persist_entries(self) -> None:
         """Writes current table state to disk."""
-        out = []
+        out: List[Dict[str, str]] = []
         for i in range(self.table.rowCount()):
             file_item = self.table.item(i, 0)
             status_item = self.table.item(i, 1)
             path_item = self.table.item(i, 2)
+
             out.append(
                 {
                     "file_name": file_item.text() if file_item else "",
@@ -627,6 +609,7 @@ class DownloadManager(QDialog):
                     "full_path": path_item.text() if path_item else "",
                 }
             )
+
         try:
             with open(self._persist_path, "w", encoding="utf-8") as f:
                 json.dump(out, f, indent=2)
