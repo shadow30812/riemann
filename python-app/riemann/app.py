@@ -798,7 +798,7 @@ class RiemannWindow(QMainWindow):
 
     def new_browser_tab(
         self,
-        url: str = "https://www.google.com",
+        url: str = "",
         incognito: bool = False,
         background: bool = False,
     ) -> BrowserTab:

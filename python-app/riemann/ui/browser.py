@@ -7,14 +7,17 @@ audio processing injection (Riemann Audio), and download management.
 """
 
 import os
+import pwd
 import re
 import subprocess
 import sys
+import urllib.parse
 from typing import Any, Optional
 
 from PySide6.QtCore import (
     QEvent,
     QObject,
+    QSettings,
     QStandardPaths,
     Qt,
     QThread,
@@ -119,6 +122,7 @@ class WebPage(QWebEnginePage):
     def __init__(self, profile, parent=None):
         super().__init__(profile, parent)
         self._popups = []
+        self.app_settings = QSettings("Riemann", "PDFReader")
 
     def createWindow(self, _type):
         """
@@ -158,6 +162,15 @@ class WebPage(QWebEnginePage):
         """Print web errors to your Python terminal"""
         self.level = level
         print(f"[JS] {message} (Line {line} in {source})\n\nlevel- {level}")
+
+    def acceptNavigationRequest(self, url, _type, isMainFrame):
+        if url.scheme() == "riemann-save":
+            payload = urllib.parse.unquote(
+                url.toString().replace("riemann-save://", "")
+            )
+            self.app_settings.setValue("homepage_links", payload)
+            return False
+        return super().acceptNavigationRequest(url, _type, isMainFrame)
 
 
 class RequestInterceptor(QWebEngineUrlRequestInterceptor):
@@ -414,6 +427,9 @@ class BrowserTab(QWidget):
         page.settings().setAttribute(
             QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard, True
         )
+        page.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True
+        )
         page.featurePermissionRequested.connect(self._on_feature_permission_requested)
         page.fullScreenRequested.connect(self._handle_fullscreen_request)
         self.web.setPage(page)
@@ -427,6 +443,7 @@ class BrowserTab(QWidget):
         self.web.loadProgress.connect(self.progress.setValue)
         self.web.loadFinished.connect(lambda: self.progress.setValue(0))
         self.web.loadFinished.connect(self._restore_music_mode)
+        self.web.loadFinished.connect(self._on_homepage_load_finished)
         self.web.titleChanged.connect(self._update_tab_title)
 
         self.shortcut_reload = QShortcut(QKeySequence("F5"), self)
@@ -491,7 +508,18 @@ class BrowserTab(QWidget):
         if self.window() and hasattr(self.window(), "history_model"):
             self.completer.setModel(self.window().history_model)
 
-        self.web.load(QUrl(start_url))
+        if start_url == "https://www.google.com" or not start_url:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            homepage_path = os.path.abspath(
+                os.path.join(base_dir, "..", "assets", "homepage.html")
+            )
+
+            if os.path.exists(homepage_path):
+                self.web.load(QUrl.fromLocalFile(homepage_path))
+            else:
+                self.web.load(QUrl("https://www.google.com"))
+        else:
+            self.web.load(QUrl(start_url))
 
     def focusInEvent(self, event: Any) -> None:
         """
@@ -500,6 +528,20 @@ class BrowserTab(QWidget):
         """
         self.web.setFocus()
         super().focusInEvent(event)
+
+    def _on_homepage_load_finished(self, ok: bool):
+        if ok and "homepage.html" in self.web.url().toString():
+            try:
+                name = pwd.getpwuid(os.getuid()).pw_gecos.split(",")[0]
+                if not name:
+                    name = os.getlogin()
+            except Exception:
+                name = os.getlogin()
+
+            settings = QSettings("Riemann", "PDFReader")
+            links = settings.value("homepage_links", "null")
+            js_code = f"window.initHomepage('{name}', {links});"
+            self.web.page().runJavaScript(js_code)
 
     def _on_feature_permission_requested(
         self, url: QUrl, feature: QWebEnginePage.Feature
@@ -700,11 +742,19 @@ class BrowserTab(QWidget):
     def _update_url_bar(self, url: QUrl) -> None:
         """Updates URL bar text and adds the URL to history."""
         s_url = url.toString()
-        self.txt_url.setText(s_url)
+
+        if "homepage.html" in s_url:
+            self.txt_url.setText("")
+            self.txt_url.setPlaceholderText("Search the web or enter URL...")
+        else:
+            self.txt_url.setText(s_url)
+            self.txt_url.setPlaceholderText("Enter URL or Search...")
+
         self.txt_url.setCursorPosition(0)
 
         if (
             not self.incognito
+            and "homepage.html" not in s_url
             and self.window()
             and hasattr(self.window(), "add_to_history")
         ):
