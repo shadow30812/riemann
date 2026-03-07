@@ -4,6 +4,11 @@ const defaultLinks = [
     { name: 'YT Music', url: 'https://music.youtube.com' }
 ];
 
+/**
+ * Serializes and saves the user's quick links to the host application via a custom URL scheme.
+ *
+ * @param {Array<Object>} links - Array of link objects containing name and url properties.
+ */
 function saveLinks(links) {
     const payload = encodeURIComponent(JSON.stringify(links));
     let iframe = document.getElementById('saveFrame');
@@ -16,6 +21,11 @@ function saveLinks(links) {
     iframe.src = "riemann-save://" + payload;
 }
 
+/**
+ * Renders the grid of quick links in the DOM and binds interaction events.
+ *
+ * @param {Array<Object>} links - Array of link objects to render into the grid interface.
+ */
 function renderGrid(links) {
     const grid = document.getElementById('linksGrid');
     grid.innerHTML = '';
@@ -32,7 +42,6 @@ function renderGrid(links) {
             hostname = link.url;
         }
 
-        // Fetch Favicon, fallback to globe if the image fails to load
         const iconHtml = hostname
             ? `<img src="https://www.google.com/s2/favicons?domain=${hostname}&sz=64" class="icon-img" alt="icon" onerror="this.outerHTML='<div class=\\'icon\\'>🌐</div>'">`
             : `<div class="icon">🌐</div>`;
@@ -65,8 +74,14 @@ function renderGrid(links) {
     grid.appendChild(addBtn);
 }
 
+/**
+ * Initializes the homepage view, configuring the display greeting and bootstrapping the link dataset.
+ *
+ * @param {string} userName - The display name of the active user.
+ * @param {Array<Object>} savedLinks - The collection of saved user links to restore, or empty if using defaults.
+ */
 window.initHomepage = function (userName, savedLinks) {
-    document.getElementById('greeting').innerText = "Hi " + userName + ".";
+    document.getElementById('greeting').innerText = "Hi " + userName + "!";
     let links = savedLinks;
     if (!links || links.length === 0) {
         links = defaultLinks;

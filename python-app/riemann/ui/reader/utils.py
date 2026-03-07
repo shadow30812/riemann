@@ -14,11 +14,11 @@ def generate_reflow_html(text: str, dark_mode: bool) -> str:
     Generates an HTML document with Katex support for reflowed text.
 
     Args:
-        text: The raw text content.
-        dark_mode: Whether to apply dark theme styles.
+        text (str): The raw text content to be displayed.
+        dark_mode (bool): Whether to apply dark theme styles.
 
     Returns:
-        A complete HTML string.
+        str: A complete HTML string representing the reflowed layout.
     """
     escaped_text = html.escape(text)
     bg = "#1e1e1e" if dark_mode else "#fff"
@@ -52,11 +52,11 @@ def generate_markdown_html(markdown_text: str, dark_mode: bool) -> str:
     Converts Markdown text to stylized HTML.
 
     Args:
-        markdown_text: The raw markdown content.
-        dark_mode: Whether to apply dark theme styles.
+        markdown_text (str): The raw markdown content to be parsed.
+        dark_mode (bool): Whether to apply dark theme styles.
 
     Returns:
-        A complete HTML string.
+        str: A complete HTML string containing the rendered markdown layout.
     """
     html_content = markdown.markdown(
         markdown_text, extensions=["fenced_code", "tables"]

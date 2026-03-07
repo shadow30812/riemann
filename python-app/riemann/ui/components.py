@@ -38,7 +38,12 @@ class DraggableTabWidget(QTabWidget):
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        """Initialize the draggable tab widget."""
+        """
+        Initializes the draggable tab widget.
+
+        Args:
+            parent (Optional[QWidget]): The parent widget, if any.
+        """
         super().__init__(parent)
         self.setAcceptDrops(True)
         self.setMovable(True)
@@ -46,10 +51,10 @@ class DraggableTabWidget(QTabWidget):
 
     def dragEnterEvent(self, e: QDragEnterEvent) -> None:
         """
-        Accepts drag events that contain text (file paths).
+        Accepts drag events that contain text representing file paths.
 
         Args:
-            e: The drag enter event.
+            e (QDragEnterEvent): The drag enter event instance.
         """
         if e.mimeData().hasText():
             e.accept()
@@ -58,14 +63,10 @@ class DraggableTabWidget(QTabWidget):
 
     def dropEvent(self, event: QDropEvent) -> None:
         """
-        Handles dropping a file path to create a new tab.
-
-        Note:
-            Imports ReaderTab locally to avoid circular dependencies, as
-            ReaderTab imports DraggableTabWidget via its parent modules.
+        Handles dropping a file path to create a new document tab.
 
         Args:
-            event: The drop event containing the file path.
+            event (QDropEvent): The drop event containing the file path payload.
         """
         file_path = event.mimeData().text()
         if os.path.exists(file_path):
@@ -86,10 +87,10 @@ class DraggableTabBar(QTabBar):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """
-        Initiates a drag operation when a tab is dragged.
+        Initiates a drag operation when a tab is actively dragged by the user.
 
         Args:
-            event: The mouse move event.
+            event (QMouseEvent): The mouse move event triggering the check.
         """
         if event.buttons() != Qt.MouseButton.LeftButton:
             return
@@ -121,6 +122,12 @@ class DraggableTabBar(QTabBar):
         super().mouseMoveEvent(event)
 
     def contextMenuEvent(self, event):
+        """
+        Displays a context menu for tab manipulation, such as intelligent renaming logic.
+
+        Args:
+            event: The context menu event containing the cursor trigger location.
+        """
         tab_index = self.tabAt(event.pos())
         if tab_index < 0:
             return
@@ -132,12 +139,10 @@ class DraggableTabBar(QTabBar):
         revert_action = menu.addAction("Revert to Original Name")
         meta_action = None
 
-        # Check if it's a PDF and has extracted metadata title
         if hasattr(widget, "document_metadata") and widget.document_metadata.get(
             "title"
         ):
             meta_title = widget.document_metadata["title"]
-            # Truncate for the menu display so it doesn't stretch across the screen
             meta_action = menu.addAction(f"Rename to '{meta_title[:30]}...'")
 
         action = menu.exec(event.globalPos())
@@ -151,11 +156,9 @@ class DraggableTabBar(QTabBar):
                 self.setTabText(tab_index, new_name.strip())
 
         elif action == revert_action:
-            # If it's a ReaderTab (PDF)
             if hasattr(widget, "current_path") and widget.current_path:
                 original_name = os.path.basename(widget.current_path)
                 self.setTabText(tab_index, original_name)
-            # If it's a BrowserTab
             elif hasattr(widget, "view") and hasattr(widget.view, "title"):
                 original_name = widget.view.title()
                 if not original_name:
@@ -218,7 +221,12 @@ class AnnotationToolbar(QWidget):
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        """Initialize the annotation toolbar."""
+        """
+        Initializes the annotation toolbar UI elements and layout configuration.
+
+        Args:
+            parent (Optional[QWidget]): The parent widget container.
+        """
         super().__init__(parent)
         self.setFixedHeight(45)
         self.setStyleSheet(self.STYLESHEET)
@@ -321,7 +329,19 @@ class AnnotationToolbar(QWidget):
         layout: QHBoxLayout,
         checked: bool = False,
     ) -> QToolButton:
-        """Helper to create and add a standard checkable tool button."""
+        """
+        Helper method to create and add a standard checkable tool button.
+
+        Args:
+            icon (str): The display text or symbol for the button.
+            tool_id (str): The internal identifier for the tool to emit.
+            tooltip (str): The tooltip text to display on hover.
+            layout (QHBoxLayout): The layout to add the constructed button to.
+            checked (bool): True if the button should be checked upon initialization.
+
+        Returns:
+            QToolButton: The configured tool button instance.
+        """
         btn = QToolButton()
         btn.setText(icon)
         btn.setCheckable(True)
@@ -335,7 +355,15 @@ class AnnotationToolbar(QWidget):
     def _add_menu_action(
         self, menu: QMenu, text: str, tool_id: str, parent_btn: QToolButton
     ) -> None:
-        """Helper to add actions to dropdown menus (shapes, stamps)."""
+        """
+        Helper method to add selectable actions to dropdown tool menus.
+
+        Args:
+            menu (QMenu): The drop-down menu to add the action to.
+            text (str): The display string for the menu option.
+            tool_id (str): The internal identifier for the specific tool.
+            parent_btn (QToolButton): The parent button that opened the menu.
+        """
         action = QAction(text, self)
         action.triggered.connect(
             lambda: self._set_menu_tool(parent_btn, tool_id, text.split(" ")[0])
@@ -343,7 +371,14 @@ class AnnotationToolbar(QWidget):
         menu.addAction(action)
 
     def _set_menu_tool(self, btn: QToolButton, tool_id: str, icon: str) -> None:
-        """Updates the parent dropdown button to reflect the selected sub-tool."""
+        """
+        Updates the parent dropdown button to reflect the actively selected sub-tool.
+
+        Args:
+            btn (QToolButton): The dropdown button representing the tool category.
+            tool_id (str): The specific identifier to emit.
+            icon (str): The new icon to display on the main toolbar level.
+        """
         btn.setText(icon)
 
         if not btn.isChecked():
@@ -355,14 +390,21 @@ class AnnotationToolbar(QWidget):
         self.tool_changed.emit(tool_id)
 
     def _add_separator(self, layout: QHBoxLayout) -> None:
-        """Adds a visual vertical line separator."""
+        """
+        Adds a visual vertical line separator to the provided layout instance.
+
+        Args:
+            layout (QHBoxLayout): The layout receiving the separator line.
+        """
         line = QFrame()
         line.setFrameShape(QFrame.Shape.VLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(line)
 
     def _pick_color(self) -> None:
-        """Opens a color picker dialog and emits the selected color."""
+        """
+        Opens a system color picker dialog and emits the result if a valid selection is made.
+        """
         color = QColorDialog.getColor(Qt.GlobalColor.red, self, "Select Tool Color")
         if color.isValid():
             self.color_changed.emit(color.name())

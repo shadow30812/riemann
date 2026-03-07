@@ -9,8 +9,6 @@ application entry point. It orchestrates the UI layout, tab management
 import os
 import sys
 
-# os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "9222")
-
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     bundle_dir = getattr(sys, "_MEIPASS")
     os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = bundle_dir
@@ -68,7 +66,15 @@ from .ui.reader import ReaderTab
 
 
 def get_resource_path(relative_path: str) -> str:
-    """Get absolute path to resource, works for dev and for PyInstaller"""
+    """
+    Get absolute path to resource, works for dev and for PyInstaller.
+
+    Args:
+        relative_path (str): The relative path to the requested resource.
+
+    Returns:
+        str: The absolute path to the resource on the file system.
+    """
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         base_path = getattr(sys, "_MEIPASS")
     else:
@@ -91,17 +97,15 @@ class SettingsDialog(QDialog):
         Initializes the settings dialog.
 
         Args:
-            parent: The main window instance, used to retrieve current settings.
+            parent (RiemannWindow): The main window instance, used to retrieve current settings.
         """
         super().__init__(parent)
         self.parent_win = parent
         self.setWindowTitle("Settings")
         self.resize(400, 400)
 
-        # Main layout
         layout = QVBoxLayout(self)
 
-        # --- Preferences Section ---
         form_layout = QFormLayout()
         self.cb_dark = QCheckBox()
         self.cb_dark.setChecked(parent.dark_mode)
@@ -114,7 +118,6 @@ class SettingsDialog(QDialog):
         form_layout.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
         layout.addLayout(form_layout)
 
-        # --- Data Management Section ---
         group = QGroupBox("Data Management")
         group_layout = QVBoxLayout(group)
 
@@ -141,7 +144,6 @@ class SettingsDialog(QDialog):
         group_layout.addWidget(btn_clear_all)
         layout.addWidget(group)
 
-        # --- Dialog Buttons ---
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -150,6 +152,9 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.button_box)
 
     def clear_history(self) -> None:
+        """
+        Clears the web browsing history from the history manager and updates the autocomplete model.
+        """
         self.parent_win.history_manager.history["web"] = []
         self.parent_win.history_manager.save()
         self.parent_win.history_model.setStringList(
@@ -158,6 +163,9 @@ class SettingsDialog(QDialog):
         QMessageBox.information(self, "Success", "Browsing history cleared.")
 
     def clear_downloads(self) -> None:
+        """
+        Clears all entries from the download manager's history interface and persists the empty state.
+        """
         dl_manager = self.parent_win.download_manager_dialog
         dl_manager.table.setRowCount(0)
         dl_manager.downloads.clear()
@@ -165,16 +173,25 @@ class SettingsDialog(QDialog):
         QMessageBox.information(self, "Success", "Download history cleared.")
 
     def clear_cookies(self) -> None:
+        """
+        Deletes all persistent cookies from the application's global web profile.
+        """
         if not self.parent_win.incognito:
             self.parent_win.web_profile.cookieStore().deleteAllCookies()
         QMessageBox.information(self, "Success", "Cookies cleared.")
 
     def clear_cache(self) -> None:
+        """
+        Clears the HTTP network cache from the application's global web profile.
+        """
         if not self.parent_win.incognito:
             self.parent_win.web_profile.clearHttpCache()
         QMessageBox.information(self, "Success", "Cache cleared.")
 
     def clear_all_data(self) -> None:
+        """
+        Prompts for user confirmation, then clears browsing history, downloads, cookies, and cache in bulk.
+        """
         reply = QMessageBox.question(
             self,
             "Confirm",
@@ -182,20 +199,17 @@ class SettingsDialog(QDialog):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            # Clear History
             self.parent_win.history_manager.history["web"] = []
             self.parent_win.history_manager.save()
             self.parent_win.history_model.setStringList(
                 self.parent_win.history_manager.get_model_data()
             )
 
-            # Clear Downloads
             dl_manager = self.parent_win.download_manager_dialog
             dl_manager.table.setRowCount(0)
             dl_manager.downloads.clear()
             dl_manager._persist_entries()
 
-            # Clear Cookies and Cache
             if not self.parent_win.incognito:
                 self.parent_win.web_profile.cookieStore().deleteAllCookies()
                 self.parent_win.web_profile.clearHttpCache()
@@ -203,25 +217,24 @@ class SettingsDialog(QDialog):
             QMessageBox.information(self, "Success", "All data has been cleared.")
 
 
-from PySide6.QtWidgets import (
-    QDialog,
-    QHeaderView,
-    QLineEdit,
-    QTableWidget,
-    QTableWidgetItem,
-    QVBoxLayout,
-)
-
-
 class LibrarySearchDialog(QDialog):
+    """
+    A modal dialog for searching the local PDF library using keywords or tags.
+    """
+
     def __init__(self, parent):
+        """
+        Initializes the library search dialog interface and layout.
+
+        Args:
+            parent (QWidget): The parent widget, expected to provide library management functionality.
+        """
         super().__init__(parent)
         self.setWindowTitle("Search Library")
         self.resize(800, 500)
 
         layout = QVBoxLayout(self)
 
-        # Search Bar
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText(
             "Search by keyword, or use tags like author:Smith year:2024"
@@ -229,7 +242,6 @@ class LibrarySearchDialog(QDialog):
         self.search_input.returnPressed.connect(self.execute_search)
         layout.addWidget(self.search_input)
 
-        # Results Table
         self.results_table = QTableWidget(0, 4)
         self.results_table.setHorizontalHeaderLabels(
             ["Title", "Authors", "Year", "Path"]
@@ -241,8 +253,10 @@ class LibrarySearchDialog(QDialog):
         layout.addWidget(self.results_table)
 
     def execute_search(self):
+        """
+        Executes a query against the library manager and populates the results table.
+        """
         query = self.search_input.text().strip()
-        # Call the method you already built in managers.py!
         results = self.parent().library_manager.search_library(query)
 
         self.results_table.setRowCount(0)
@@ -258,18 +272,22 @@ class LibrarySearchDialog(QDialog):
                 row_idx, 2, QTableWidgetItem(row_data.get("year", ""))
             )
 
-            # Store the file path but make it non-editable
             path_item = QTableWidgetItem(row_data.get("file_path", ""))
             path_item.setFlags(path_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
             self.results_table.setItem(row_idx, 3, path_item)
 
     def open_selected_pdf(self, item):
+        """
+        Retrieves the file path from the selected table item and triggers the parent window to open it.
+
+        Args:
+            item (QTableWidgetItem): The table item double-clicked by the user.
+        """
         row = item.row()
         file_path = self.results_table.item(row, 3).text()
 
         if file_path:
-            self.accept()  # Close dialog
-            # Hook right back into your existing tab logic
+            self.accept()
             self.parent().new_pdf_tab(file_path)
 
 
@@ -286,8 +304,8 @@ class RiemannWindow(QMainWindow):
         Initializes the main application window.
 
         Args:
-            incognito: If True, history will not be recorded.
-            restore_session: If True, attempts to restore tabs from the last session.
+            incognito (bool): If True, history will not be recorded.
+            restore_session (bool): If True, attempts to restore tabs from the last session.
         """
         super().__init__()
         self.incognito = incognito
@@ -312,9 +330,6 @@ class RiemannWindow(QMainWindow):
             self.web_profile.setPersistentCookiesPolicy(
                 QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
             )
-
-        # user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
-        # self.web_profile.setHttpUserAgent(user_agent)
 
         self.resize(1200, 900)
 
@@ -361,7 +376,9 @@ class RiemannWindow(QMainWindow):
         self.hover_timer.timeout.connect(self._check_auto_hide)
 
     def _init_shortcuts(self) -> None:
-        """Initializes global keyboard shortcuts."""
+        """
+        Initializes and binds global application keyboard shortcuts.
+        """
         shortcuts = [
             ("Ctrl+Q", self.close),
             ("Ctrl+W", self.close_active_tab),
@@ -378,6 +395,16 @@ class RiemannWindow(QMainWindow):
             shortcut.activated.connect(slot)
 
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
+        """
+        Filters events to handle global keyboard shortcuts and mouse hover reveals.
+
+        Args:
+            source (QObject): The object that generated the event.
+            event (QEvent): The event instance.
+
+        Returns:
+            bool: True if the event was handled and should be stopped, False otherwise.
+        """
         if event.type() == QEvent.Type.KeyPress:
             key = event.key()
             modifiers = event.modifiers()
@@ -409,6 +436,9 @@ class RiemannWindow(QMainWindow):
         return super().eventFilter(source, event)
 
     def next_tab(self):
+        """
+        Advances the focus to the next tab in the main tab widget, wrapping around if necessary.
+        """
         idx = self.tabs_main.currentIndex()
         if idx < self.tabs_main.count() - 1:
             self.tabs_main.setCurrentIndex(idx + 1)
@@ -416,6 +446,9 @@ class RiemannWindow(QMainWindow):
             self.tabs_main.setCurrentIndex(0)
 
     def prev_tab(self):
+        """
+        Reverts the focus to the previous tab in the main tab widget, wrapping around if necessary.
+        """
         idx = self.tabs_main.currentIndex()
         if idx > 0:
             self.tabs_main.setCurrentIndex(idx - 1)
@@ -423,7 +456,12 @@ class RiemannWindow(QMainWindow):
             self.tabs_main.setCurrentIndex(self.tabs_main.count() - 1)
 
     def _reveal_controls(self, show: bool):
-        """Helper to show/hide the tab bar and menu bar."""
+        """
+        Controls the visibility of the application menu bar and tab bars.
+
+        Args:
+            show (bool): True to make UI controls visible, False to hide them.
+        """
         if show:
             self.menuBar().show()
             self.tabs_main.tabBar().show()
@@ -436,13 +474,20 @@ class RiemannWindow(QMainWindow):
                 self.tabs_side.tabBar().hide()
 
     def _check_auto_hide(self):
-        """Hides controls if mouse is not at the top."""
+        """
+        Checks the mouse cursor position to automatically hide UI controls in fullscreen reading mode.
+        """
         mouse_pos = self.mapFromGlobal(QCursor.pos())
         if mouse_pos.y() > 100 and getattr(self, "_reader_fullscreen", False):
             self._reveal_controls(False)
 
     def _update_window_title(self, index: int = -1) -> None:
-        """Updates the main window title to reflect the active tab."""
+        """
+        Updates the main window title to reflect the active tab.
+
+        Args:
+            index (int): The index of the active tab. Defaults to -1.
+        """
         target = (
             self.tabs_side
             if (self.tabs_side.isVisible() and self.tabs_side.hasFocus())
@@ -460,7 +505,9 @@ class RiemannWindow(QMainWindow):
         self.refresh_signature_panel()
 
     def split_pdf(self) -> None:
-        """Utility to extract specific pages into a new PDF using pypdf."""
+        """
+        Utility to extract specific pages into a new PDF using pypdf.
+        """
         current = self.tabs_main.currentWidget()
         source_path = ""
         if isinstance(current, ReaderTab) and current.current_path:
@@ -519,7 +566,9 @@ class RiemannWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to split PDF: {e}")
 
     def join_pdfs(self) -> None:
-        """Utility to merge multiple PDFs into one using pypdf."""
+        """
+        Utility to merge multiple PDFs into one using pypdf.
+        """
         paths, _ = QFileDialog.getOpenFileNames(
             self, "Select PDFs to Merge", "", "PDF Files (*.pdf)"
         )
@@ -559,15 +608,13 @@ class RiemannWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to merge PDFs: {e}")
 
-    # --- History & Session Management ---
-
     def add_to_history(self, item: str, item_type: str = "web") -> None:
         """
         Adds an item to the history manager and updates the autocomplete model.
 
         Args:
-            item: The URL or file path to add.
-            item_type: The type of item ("web" or "pdf").
+            item (str): The URL or file path to add.
+            item_type (str): The type of item ("web" or "pdf").
         """
         if self.incognito:
             return
@@ -606,11 +653,10 @@ class RiemannWindow(QMainWindow):
         Parses settings data to recreate tabs.
 
         Args:
-            key: The QSettings key to read from.
-            target_widget: The QTabWidget to populate.
+            key (str): The QSettings key to read from.
+            target_widget (QTabWidget): The QTabWidget to populate.
         """
         items = self.settings.value(key, [], type=list)
-        # Ensure items is a list (QSettings can sometimes return a single item as non-list)
         if isinstance(items, str):
             items = [items]
 
@@ -628,7 +674,9 @@ class RiemannWindow(QMainWindow):
                     self._add_browser_tab(item["data"], target_widget)
 
     def refresh_signature_panel(self) -> None:
-        """Dynamically shows or hides the signature dock based on the active tab."""
+        """
+        Dynamically shows or hides the signature dock based on the active tab.
+        """
         active_widget = self.tabs_main.currentWidget()
         if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
             side_widget = self.tabs_side.currentWidget()
@@ -673,8 +721,6 @@ class RiemannWindow(QMainWindow):
             if self.tabs_side.count() == 0:
                 self.tabs_side.hide()
 
-    # --- Tab Creation Helpers ---
-
     def _add_pdf_tab(
         self, path: str, target_widget: QTabWidget, restore_state: bool = False
     ) -> None:
@@ -682,9 +728,9 @@ class RiemannWindow(QMainWindow):
         Internal helper to instantiate and add a ReaderTab.
 
         Args:
-            path: Path to the PDF file.
-            target_widget: The tab widget to add the tab to.
-            restore_state: Whether to restore scroll position/zoom.
+            path (str): Path to the PDF file.
+            target_widget (QTabWidget): The tab widget to add the tab to.
+            restore_state (bool): Whether to restore scroll position/zoom.
         """
         self.add_to_history(path, "pdf")
         reader = ReaderTab()
@@ -699,8 +745,8 @@ class RiemannWindow(QMainWindow):
         Passing the shared profile to avoid database locking.
 
         Args:
-            url: The URL to load.
-            target_widget: The tab widget to add the tab to.
+            url (str): The URL to load.
+            target_widget (QTabWidget): The tab widget to add the tab to.
         """
         if self.incognito:
             use_profile = self.web_profile
@@ -719,24 +765,24 @@ class RiemannWindow(QMainWindow):
         )
         browser.web.loadFinished.connect(lambda ok: self._update_tab_title(browser))
 
-    # --- UI Setup ---
-
     def setup_menu(self) -> None:
-        """Configures the main window menu bar actions."""
+        """
+        Configures the main window menu bar actions.
+        """
         menubar = self.menuBar()
         file_menu = menubar.addMenu("File")
 
         actions = [
             ("Open PDF", "Ctrl+O", self.open_pdf_smart),
             ("Open New PDF Tab", "Ctrl+T", lambda: self.new_pdf_tab()),
-            (None, None, None),  # Separator
+            (None, None, None),
             ("Split Current PDF", None, self.split_pdf),
             ("Merge PDFs", None, self.join_pdfs),
-            (None, None, None),  # Separator
+            (None, None, None),
             ("New Browser Tab", "Ctrl+B", lambda: self.new_browser_tab()),
             ("New Window", "Ctrl+N", self.new_window),
             ("New Incognito Tab", "Ctrl+Shift+N", self.new_incognito_window),
-            (None, None, None),  # Separator
+            (None, None, None),
             ("Exit (Ctrl+Q)", None, self.close),
         ]
 
@@ -750,7 +796,6 @@ class RiemannWindow(QMainWindow):
                 if slot:
                     action.triggered.connect(slot)
 
-        # View Menu
         view_menu = menubar.addMenu("View")
 
         view_actions = [
@@ -768,10 +813,10 @@ class RiemannWindow(QMainWindow):
                 action.setShortcut(shortcut)
             action.triggered.connect(slot)
 
-    # --- Actions ---
-
     def show_settings(self) -> None:
-        """Displays the configuration dialog and applies changes on acceptance."""
+        """
+        Displays the configuration dialog and applies changes on acceptance.
+        """
         dlg = SettingsDialog(self)
         if dlg.exec():
             if dlg.cb_dark.isChecked() != self.dark_mode:
@@ -785,8 +830,8 @@ class RiemannWindow(QMainWindow):
         Creates a new PDF tab in the main tab widget.
 
         Args:
-            path: Optional file path. If None, creates an empty tab.
-            restore_state: Whether to restore reading state.
+            path (Optional[str]): Optional file path. If None, creates an empty tab.
+            restore_state (bool): Whether to restore reading state.
         """
         if path:
             self._add_pdf_tab(path, self.tabs_main, restore_state)
@@ -807,9 +852,12 @@ class RiemannWindow(QMainWindow):
         Prioritizes the focused side tab widget if active.
 
         Args:
-            url: The URL to navigate to.
-            incognito: Whether to enable incognito mode for this tab.
-            background: Open tab in background or foreground
+            url (str): The URL to navigate to.
+            incognito (bool): Whether to enable incognito mode for this tab.
+            background (bool): Open tab in background or foreground.
+
+        Returns:
+            BrowserTab: The newly created browser tab instance.
         """
         is_incognito = self.incognito or incognito
         target = self.tabs_main
@@ -841,12 +889,16 @@ class RiemannWindow(QMainWindow):
         return browser
 
     def new_window(self) -> None:
-        """Spawns a new independent standard application window."""
+        """
+        Spawns a new independent standard application window.
+        """
         self._new_window_ref = RiemannWindow(incognito=False, restore_session=False)
         self._new_window_ref.show()
 
     def new_incognito_window(self) -> None:
-        """Spawns a new independent window in Incognito mode."""
+        """
+        Spawns a new independent window in Incognito mode.
+        """
         self.incognito_window = RiemannWindow(incognito=True)
         self.incognito_window.show()
 
@@ -902,7 +954,7 @@ class RiemannWindow(QMainWindow):
         Saves the state of a closed tab to the stack for restoration.
 
         Args:
-            widget: The tab widget being closed (ReaderTab or BrowserTab).
+            widget (QWidget): The tab widget being closed (ReaderTab or BrowserTab).
         """
         if isinstance(widget, ReaderTab) and widget.current_path:
             self.closed_tabs_stack.append({"type": "pdf", "data": widget.current_path})
@@ -912,7 +964,9 @@ class RiemannWindow(QMainWindow):
             )
 
     def restore_last_closed_tab(self) -> None:
-        """Restores the most recently closed tab from the stack."""
+        """
+        Restores the most recently closed tab from the stack.
+        """
         if not self.closed_tabs_stack:
             return
 
@@ -935,7 +989,7 @@ class RiemannWindow(QMainWindow):
         Closes a tab in the main tab widget.
 
         Args:
-            index: The index of the tab to close.
+            index (int): The index of the tab to close.
         """
         widget = self.tabs_main.widget(index)
         if widget:
@@ -950,7 +1004,7 @@ class RiemannWindow(QMainWindow):
         Closes a tab in the side tab widget.
 
         Args:
-            index: The index of the tab to close.
+            index (int): The index of the tab to close.
         """
         widget = self.tabs_side.widget(index)
         if widget:
@@ -968,13 +1022,17 @@ class RiemannWindow(QMainWindow):
         self._check_all_tabs_closed()
 
     def _check_all_tabs_closed(self) -> None:
-        """Checks if all tabs are closed and exits fullscreen if necessary."""
+        """
+        Checks if all tabs are closed and exits fullscreen if necessary.
+        """
         if self.tabs_main.count() == 0 and self.tabs_side.count() == 0:
             if getattr(self, "_reader_fullscreen", False):
                 self.toggle_reader_fullscreen()
 
     def _handle_escape(self) -> None:
-        """Handles the Escape key event to exit fullscreen."""
+        """
+        Handles the Escape key event to exit fullscreen.
+        """
         if getattr(self, "_reader_fullscreen", False):
             self.toggle_reader_fullscreen()
 
@@ -982,12 +1040,24 @@ class RiemannWindow(QMainWindow):
         """
         Handles the window close event.
         Saves session data unless in incognito mode.
+
+        Args:
+            event (QCloseEvent): The close event triggered by the system.
         """
         if self.incognito or not self.restore_session:
             super().closeEvent(event)
             return
 
         def get_files(tab_widget: QTabWidget) -> List[dict]:
+            """
+            Extracts serializable session data from the provided tab widget.
+
+            Args:
+                tab_widget (QTabWidget): The tab widget containing open browser or PDF tabs.
+
+            Returns:
+                List[dict]: A list of dictionaries representing the state of each tab.
+            """
             tabs_data = []
             for i in range(tab_widget.count()):
                 wid = tab_widget.widget(i)
@@ -1012,7 +1082,6 @@ class RiemannWindow(QMainWindow):
         Hides UI elements (menu bar, tab bars, toolbars) for immersive reading.
         """
         if not getattr(self, "_reader_fullscreen", False):
-            # Enter Fullscreen
             self._reader_fullscreen = True
             self._was_maximized = self.isMaximized()
             self.menuBar().hide()
@@ -1021,7 +1090,6 @@ class RiemannWindow(QMainWindow):
             self._set_tabs_toolbar_visible(False)
             self.showFullScreen()
         else:
-            # Exit Fullscreen
             self._reader_fullscreen = False
             self.menuBar().show()
             self.tabs_main.tabBar().show()
@@ -1036,6 +1104,9 @@ class RiemannWindow(QMainWindow):
         """
         Helper to recursively hide/show toolbars in tabs.
         Assumes tabs have a 'toolbar' attribute.
+
+        Args:
+            visible (bool): True to make toolbars visible, False to hide them.
         """
         for tab_widget in [self.tabs_main, self.tabs_side]:
             for i in range(tab_widget.count()):
@@ -1044,6 +1115,9 @@ class RiemannWindow(QMainWindow):
                     w.toolbar.setVisible(visible)
 
     def toggle_theme(self) -> None:
+        """
+        Toggles the dark mode theme across the application and active tabs.
+        """
         target_widget = self.tabs_main.currentWidget()
         if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
             target_widget = self.tabs_side.currentWidget()
@@ -1055,7 +1129,9 @@ class RiemannWindow(QMainWindow):
             self.settings.setValue("darkMode", self.dark_mode)
 
     def close_active_tab(self) -> None:
-        """Closes the tab currently holding focus."""
+        """
+        Closes the tab currently holding focus.
+        """
         focus_widget = QApplication.focusWidget()
         target = None
         curr = focus_widget
@@ -1084,7 +1160,9 @@ class RiemannWindow(QMainWindow):
                 self.close_side_tab(idx)
 
     def show_history(self) -> None:
-        """Displays a dialog containing the unified web and PDF history."""
+        """
+        Displays a dialog containing the unified web and PDF history.
+        """
         dialog = QDialog(self)
         dialog.setWindowTitle("History")
         dialog.resize(600, 400)
@@ -1093,6 +1171,15 @@ class RiemannWindow(QMainWindow):
         tabs = QTabWidget()
 
         def create_list(data: List[str]) -> QListWidget:
+            """
+            Creates and populates a QListWidget with the provided string data.
+
+            Args:
+                data (List[str]): List of strings to populate the widget with.
+
+            Returns:
+                QListWidget: The populated list widget.
+            """
             lw = QListWidget()
             lw.addItems(data)
             return lw
@@ -1112,6 +1199,9 @@ class RiemannWindow(QMainWindow):
         layout.addWidget(button_box)
 
         def open_item() -> None:
+            """
+            Handles double-click or accept events to open the selected history item in a new tab.
+            """
             current_list = list_web if tabs.currentIndex() == 0 else list_pdf
             item = current_list.currentItem()
             if not item:
@@ -1120,7 +1210,7 @@ class RiemannWindow(QMainWindow):
             data = item.text()
             dialog.accept()
 
-            if tabs.currentIndex() == 1:  # PDF Tab
+            if tabs.currentIndex() == 1:
                 if os.path.exists(data):
                     current = self.tabs_main.currentWidget()
                     if isinstance(current, ReaderTab) and not current.current_path:
@@ -1130,10 +1220,9 @@ class RiemannWindow(QMainWindow):
                         )
                 else:
                     self._add_pdf_tab(data, self.tabs_main)
-            else:  # Web Tab
+            else:
                 self.new_browser_tab(data)
 
-        # Reconnect accepted to our custom handler
         button_box.accepted.disconnect()
         button_box.accepted.connect(open_item)
 
@@ -1143,7 +1232,9 @@ class RiemannWindow(QMainWindow):
         dialog.exec()
 
     def show_bookmarks(self) -> None:
-        """Displays a dialog containing saved bookmarks."""
+        """
+        Displays a dialog containing saved bookmarks.
+        """
         dialog = QDialog(self)
         dialog.setWindowTitle("Bookmarks")
         dialog.resize(600, 400)
@@ -1163,10 +1254,12 @@ class RiemannWindow(QMainWindow):
         layout.addWidget(button_box)
 
         def open_bm() -> None:
+            """
+            Parses the selected bookmark and opens the corresponding URL in a new browser tab.
+            """
             item = list_widget.currentItem()
             if not item:
                 return
-            # Rudimentary parsing: Title (URL)
             url = item.text().split(" (")[-1][:-1]
             dialog.accept()
             self.new_browser_tab(url)
@@ -1176,16 +1269,26 @@ class RiemannWindow(QMainWindow):
         dialog.exec()
 
     def show_downloads(self) -> None:
-        """Shows the non-modal download manager dialog."""
+        """
+        Shows the non-modal download manager dialog.
+        """
         self.download_manager_dialog.show()
         self.download_manager_dialog.raise_()
 
     def show_library_search(self) -> None:
+        """
+        Instantiates and displays the modal library search dialog.
+        """
         dialog = LibrarySearchDialog(self)
         dialog.exec()
 
     def toggle_auto_pdf(self, checked: bool) -> None:
-        """Updates the auto-open PDF setting."""
+        """
+        Updates the auto-open PDF setting.
+
+        Args:
+            checked (bool): True to enable auto-opening of PDFs, False to disable.
+        """
         self.settings.setValue("browser/auto_open_pdf", checked)
 
     def open_pdf_in_new_tab(self, path: str) -> None:
@@ -1194,7 +1297,7 @@ class RiemannWindow(QMainWindow):
         Preferentially opens in the Side Split if active, otherwise Main.
 
         Args:
-            path: The file path to the PDF.
+            path (str): The file path to the PDF.
         """
         target = self.tabs_side if (self.tabs_side.isVisible()) else self.tabs_main
 
@@ -1208,6 +1311,10 @@ class RiemannWindow(QMainWindow):
     def _update_tab_title(self, browser, *args):
         """
         Updates the tab title when the web page title changes.
+
+        Args:
+            browser (BrowserTab): The browser tab instance triggering the title update.
+            args: Variable arguments corresponding to the underlying Qt signal payload.
         """
         title = browser.web.title()
         display_title = (title[:20] + "..") if len(title) > 20 else title

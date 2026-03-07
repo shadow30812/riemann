@@ -16,7 +16,12 @@ class PageWidget(QLabel):
     """
 
     def __init__(self, parent=None) -> None:
-        """Initialize the PageWidget."""
+        """
+        Initializes the PageWidget and its drawing context states.
+
+        Args:
+            parent: The parent widget instance. Defaults to None.
+        """
         super().__init__(parent)
         self.temp_points: List[QPoint] = []
         self.temp_pen = QPen()
@@ -27,7 +32,15 @@ class PageWidget(QLabel):
     def set_temp_stroke(
         self, points: List[QPoint], color_str: str, thickness: int, is_highlight: bool
     ) -> None:
-        """Updates temporary stroke data and triggers repaint."""
+        """
+        Updates temporary stroke data and triggers a repaint event.
+
+        Args:
+            points (List[QPoint]): The sequence of coordinate points mapping the stroke.
+            color_str (str): The hexadecimal color string representing the stroke line.
+            thickness (int): The width/thickness of the stroke line.
+            is_highlight (bool): True if the stroke represents a translucent highlight context.
+        """
         self.temp_points = points
         c = QColor(color_str)
         if is_highlight:
@@ -46,19 +59,32 @@ class PageWidget(QLabel):
         self.update()
 
     def set_markup_preview(self, rects: List[QRect], color: QColor) -> None:
-        """Updates text selection preview rectangles."""
+        """
+        Updates text selection preview rectangles for document markup display.
+
+        Args:
+            rects (List[QRect]): A list of rectangles determining the highlight bounds.
+            color (QColor): The color instance to apply to the highlighted regions.
+        """
         self.markup_rects = rects
         self.markup_color = color
         self.update()
 
     def clear_temp_stroke(self) -> None:
-        """Clears all temporary visuals."""
+        """
+        Clears all temporary visual strokes and selection preview rectangles.
+        """
         self.temp_points = []
         self.markup_rects = []
         self.update()
 
     def paintEvent(self, event) -> None:
-        """Draws cached PDF image and temporary overlays."""
+        """
+        Draws the cached PDF image alongside any temporary graphical overlays or signature bounds.
+
+        Args:
+            event: The paint event triggered by the Qt framework signaling drawing routines.
+        """
         super().paintEvent(event)
         painter = QPainter(self)
 
@@ -82,15 +108,15 @@ class PageWidget(QLabel):
             painter.drawRect(rect)
 
             if status == "VALID":
-                color = QColor(46, 125, 50)  # Green
+                color = QColor(46, 125, 50)
                 icon = "✔️"
                 msg = "Signature Valid"
             elif status == "UNKNOWN":
-                color = QColor(245, 127, 23)  # Yellow
+                color = QColor(245, 127, 23)
                 icon = "❓"
                 msg = "Identity Unknown"
             else:
-                color = QColor(198, 40, 40)  # Red
+                color = QColor(198, 40, 40)
                 icon = "❌"
                 msg = "Invalid / Modified"
 
@@ -113,6 +139,11 @@ class PageWidget(QLabel):
         painter.end()
 
     def set_signature_overlays(self, overlays: List[dict]) -> None:
-        """Updates the Adobe-style signature visual bounds."""
+        """
+        Updates the visual validation bounds and status indicators for embedded digital signatures.
+
+        Args:
+            overlays (List[dict]): A list of dictionaries containing signature properties and bounding boxes.
+        """
         self.signature_overlays = overlays
         self.update()

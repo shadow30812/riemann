@@ -3,16 +3,25 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>Riemann Home</title>
+    <title>New Page</title>
     <link rel="stylesheet" href="homepage.css">
 </head>
 
 <body>
+    <!--
+    Component: Header & Search Area
+    Purpose: Displays the personalized user greeting and captures web search queries or URLs.
+    -->
     <div class="search-container">
         <h1 id="greeting">Good Session.</h1>
         <input type="text" class="search-box" id="searchInput" placeholder="Search the web or enter URL..."
             autocomplete="off" autofocus>
     </div>
+
+    <!--
+    Component: Links Grid Container
+    Purpose: Serves as the DOM target for rendering dynamic quick-access website shortcut cards.
+    -->
     <div class="grid" id="linksGrid"></div>
 
     <script src="homepage.js"></script>

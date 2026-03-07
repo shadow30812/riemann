@@ -1,3 +1,7 @@
+/*
+Component: Base Variables & Body Layout
+Purpose: Defines global color tokens, thematic backgrounds, and baseline typographic settings.
+*/
 :root {
     --bg: #0f0f13;
     --accent: #ff4500;
@@ -20,6 +24,10 @@ body {
     min-height: 100vh;
 }
 
+/*
+Component: Search Interface
+Purpose: Styles the central search input container, typography, and focus states.
+*/
 .search-container {
     margin-top: 18vh;
     width: 100%;
@@ -51,6 +59,10 @@ body {
     box-shadow: 0 0 15px rgba(255, 69, 0, 0.3);
 }
 
+/*
+Component: Quick Links Grid
+Purpose: Defines the responsive grid layout and interactive card elements for saved links.
+*/
 .grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
@@ -89,7 +101,6 @@ body {
     margin-bottom: 12px;
 }
 
-/* Favicon image styling */
 .card .icon-img {
     width: 32px;
     height: 32px;

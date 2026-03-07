@@ -1,13 +1,31 @@
+"""
+Browser scripts and injection handlers.
+
+This module provides utilities for injecting custom JavaScript into
+QWebEngine profiles to modify web page behavior and appearance.
+"""
+
 from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineScript
 
 
 class ScriptInjector:
-    """Handles injection of JavaScript into QWebEngineProfile."""
+    """
+    Handles injection of JavaScript into a QWebEngineProfile.
+    """
 
     def __init__(self, profile: QWebEngineProfile):
+        """
+        Initializes the ScriptInjector with a target profile.
+
+        Args:
+            profile (QWebEngineProfile): The web engine profile to receive injected scripts.
+        """
         self.profile = profile
 
     def inject_ad_skipper(self) -> None:
+        """
+        Injects a script to automatically skip or fast-forward video advertisements.
+        """
         js_code = """
         (function() {
             const clearAds = () => {
@@ -29,6 +47,10 @@ class ScriptInjector:
         self._insert_script("RiemannAdBlock", js_code)
 
     def inject_backspace_handler(self) -> None:
+        """
+        Injects a script to handle the Backspace key for navigation, ensuring it
+        does not trigger back navigation when typing in input fields.
+        """
         js_code = """
         document.addEventListener("keydown", function(e) {
             if (e.key === "Backspace" && !e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
@@ -47,6 +69,13 @@ class ScriptInjector:
         self._insert_script("RiemannBackspace", js_code)
 
     def inject_smart_dark_mode(self, web_page, is_dark_mode: bool) -> None:
+        """
+        Injects or removes a smart dark mode CSS inversion script on a specific web page.
+
+        Args:
+            web_page: The QWebEnginePage instance to inject the script into.
+            is_dark_mode (bool): True to enable dark mode, False to disable it.
+        """
         if is_dark_mode:
             js = """
             (function() {
@@ -91,6 +120,15 @@ class ScriptInjector:
         injection_point=QWebEngineScript.InjectionPoint.DocumentCreation,
         world_id=QWebEngineScript.ScriptWorldId.ApplicationWorld,
     ):
+        """
+        Helper method to configure and insert a QWebEngineScript into the profile.
+
+        Args:
+            name (str): The unique identifier for the script.
+            source (str): The JavaScript source code.
+            injection_point: When the script should run based on Qt Injection Points.
+            world_id: The isolation world for the script execution.
+        """
         script = QWebEngineScript()
         script.setName(name)
         script.setSourceCode(source)

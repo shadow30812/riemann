@@ -12,7 +12,7 @@ import os
 import sqlite3
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QStandardPaths, QUrl
+from PySide6.QtCore import QStandardPaths, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWebEngineCore import QWebEngineDownloadRequest
 from PySide6.QtWidgets import (
@@ -36,7 +36,9 @@ class LibraryManager:
     """
 
     def __init__(self) -> None:
-        """Initializes the library manager and ensures the database exists."""
+        """
+        Initializes the library manager and ensures the persistent database exists.
+        """
         base = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.AppDataLocation
         )
@@ -44,7 +46,9 @@ class LibraryManager:
         self._init_db()
 
     def _init_db(self) -> None:
-        """Creates the metadata table if it does not already exist."""
+        """
+        Creates the metadata table in the SQLite database if it does not already exist.
+        """
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (
@@ -66,19 +70,19 @@ class LibraryManager:
             file_path (str): The absolute path to the file.
 
         Returns:
-            str: The hexadecimal SHA-256 hash.
+            str: The hexadecimal SHA-256 hash representing the file path.
         """
         return hashlib.sha256(file_path.encode("utf-8")).hexdigest()
 
     def get_metadata(self, file_path: str) -> Dict[str, Any]:
         """
-        Retrieves metadata associated with a specific file path.
+        Retrieves metadata associated with a specific file path from the database.
 
         Args:
             file_path (str): The absolute path to the file.
 
         Returns:
-            Dict[str, Any]: A dictionary containing the file's metadata, or empty if not found.
+            Dict[str, Any]: A dictionary containing the file's metadata, or an empty dictionary if not found.
         """
         file_hash = self.get_file_hash(file_path)
         with sqlite3.connect(self.db_path) as conn:
@@ -90,11 +94,11 @@ class LibraryManager:
 
     def save_metadata(self, file_path: str, data: Dict[str, Any]) -> None:
         """
-        Saves or updates metadata for a specific file path.
+        Saves or updates metadata for a specific file path in the database.
 
         Args:
             file_path (str): The absolute path to the file.
-            data (Dict[str, Any]): The metadata payload to persist.
+            data (Dict[str, Any]): The metadata payload to persist. Expected keys include 'title', 'authors', 'year', 'doi', and 'arxiv_id'.
         """
         file_hash = self.get_file_hash(file_path)
         with sqlite3.connect(self.db_path) as conn:
@@ -124,13 +128,13 @@ class LibraryManager:
     def search_library(self, query: str) -> List[Dict[str, Any]]:
         """
         Executes a SQL search across the library metadata based on a query string.
-        Supports specific field filters (e.g., 'author:Smith year:2020').
+        Supports specific field filters such as 'author:' and 'year:'.
 
         Args:
             query (str): The search query provided by the user.
 
         Returns:
-            List[Dict[str, Any]]: A list of dictionaries representing matching records.
+            List[Dict[str, Any]]: A list of dictionaries representing matching database records.
         """
         import re
 
@@ -175,7 +179,9 @@ class BookmarksManager:
     """
 
     def __init__(self) -> None:
-        """Initializes the manager and loads existing bookmarks from disk."""
+        """
+        Initializes the manager, determines the storage path, and loads existing bookmarks from disk.
+        """
         base = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.AppDataLocation
         )
@@ -184,7 +190,9 @@ class BookmarksManager:
         self.load()
 
     def load(self) -> None:
-        """Loads bookmarks from the JSON persistence file."""
+        """
+        Loads bookmarks from the JSON persistence file. If the file is missing or corrupted, initializes an empty list.
+        """
         if os.path.exists(self.path):
             try:
                 with open(self.path, "r", encoding="utf-8") as f:
@@ -193,7 +201,9 @@ class BookmarksManager:
                 self.bookmarks = []
 
     def save(self) -> None:
-        """Saves the current list of bookmarks to disk."""
+        """
+        Saves the current list of bookmarks to the JSON persistence file. Silently ignores file system errors.
+        """
         try:
             with open(self.path, "w", encoding="utf-8") as f:
                 json.dump(self.bookmarks, f, indent=2)
@@ -202,7 +212,7 @@ class BookmarksManager:
 
     def add(self, title: str, url: str) -> None:
         """
-        Adds a new bookmark if the URL does not already exist.
+        Adds a new bookmark if the URL does not already exist in the bookmarks list.
 
         Args:
             title (str): The display title of the bookmark.
@@ -217,7 +227,7 @@ class BookmarksManager:
         Removes a bookmark by matching its URL.
 
         Args:
-            url (str): The URL to remove.
+            url (str): The URL to remove from the bookmarks list.
         """
         self.bookmarks = [b for b in self.bookmarks if b["url"] != url]
         self.save()
@@ -244,7 +254,9 @@ class HistoryManager:
     """
 
     def __init__(self) -> None:
-        """Initializes the manager and loads history from disk."""
+        """
+        Initializes the manager, defines popular default sites, and loads history from disk.
+        """
         base = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.AppDataLocation
         )
@@ -271,7 +283,9 @@ class HistoryManager:
         self.load()
 
     def load(self) -> None:
-        """Loads history from the JSON persistence file."""
+        """
+        Loads history from the JSON persistence file. Handles legacy format migration and corrupted states.
+        """
         if os.path.exists(self.path):
             try:
                 with open(self.path, "r", encoding="utf-8") as f:
@@ -284,7 +298,9 @@ class HistoryManager:
                 self.history = {"pdf": [], "web": []}
 
     def save(self) -> None:
-        """Saves current history to disk."""
+        """
+        Saves current history state to the JSON persistence file. Silently ignores file system errors.
+        """
         try:
             with open(self.path, "w", encoding="utf-8") as f:
                 json.dump(self.history, f, indent=2)
@@ -293,11 +309,11 @@ class HistoryManager:
 
     def add(self, item: str, item_type: str = "web") -> None:
         """
-        Adds an item to history, promoting it to the top.
+        Adds an item to history, promoting it to the top of the specified category, and enforces size limits.
 
         Args:
             item (str): The URL or file path.
-            item_type (str): 'pdf' or 'web'. Defaults to 'web'.
+            item_type (str): The category type, typically 'pdf' or 'web'. Defaults to 'web'.
         """
         if item_type not in self.history:
             self.history[item_type] = []
@@ -309,10 +325,10 @@ class HistoryManager:
 
     def get_model_data(self) -> List[str]:
         """
-        Combines history and default sites for autocomplete suggestions.
+        Combines historical web paths and popular default sites for autocomplete suggestions.
 
         Returns:
-            List[str]: A combined list of unique historical URLs and popular sites.
+            List[str]: A combined list of unique historical URLs and predefined popular sites.
         """
         combined = list(self.history.get("web", []))
         for site in self.popular_sites:
@@ -325,10 +341,10 @@ class HistoryManager:
         Retrieves the history list for a specific category.
 
         Args:
-            item_type (str): 'pdf' or 'web'.
+            item_type (str): The history category, such as 'pdf' or 'web'.
 
         Returns:
-            List[str]: The list of historical items for the category.
+            List[str]: The list of historical items for the specified category.
         """
         return self.history.get(item_type, [])
 
@@ -343,7 +359,7 @@ class DownloadManager(QDialog):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         """
-        Initializes the Download Manager UI.
+        Initializes the Download Manager UI components and loads persistent history.
 
         Args:
             parent (Optional[QWidget]): The parent widget (usually the main window).
@@ -383,7 +399,7 @@ class DownloadManager(QDialog):
 
     def add_download(self, download_item: QWebEngineDownloadRequest) -> None:
         """
-        Registers a new active download request.
+        Registers a new active download request, creates its UI row, and binds signal handlers.
 
         Args:
             download_item (QWebEngineDownloadRequest): The QtWebEngine download request.
@@ -446,12 +462,12 @@ class DownloadManager(QDialog):
         state: QWebEngineDownloadRequest.DownloadState,
     ) -> None:
         """
-        Updates the table row based on the download state.
+        Updates the table row based on the current state of the download request.
 
         Args:
-            row (int): Table row index.
-            item (QWebEngineDownloadRequest): Download request object.
-            state (QWebEngineDownloadRequest.DownloadState): Current download state.
+            row (int): The table row index corresponding to the download.
+            item (QWebEngineDownloadRequest): The active download request object.
+            state (QWebEngineDownloadRequest.DownloadState): The current state of the download.
         """
         if row >= self.table.rowCount():
             return
@@ -484,7 +500,9 @@ class DownloadManager(QDialog):
             status_item.setText(status_str)
 
     def _cleanup_completed(self) -> None:
-        """Removes rows for downloads that are completed, cancelled, or failed."""
+        """
+        Iterates through the table and removes any rows representing completed, cancelled, or failed downloads.
+        """
         rows_to_remove: List[int] = []
         for i in range(self.table.rowCount()):
             status_item = self.table.item(i, 1)
@@ -504,11 +522,11 @@ class DownloadManager(QDialog):
 
     def _set_open_button(self, row: int, full_path: str) -> None:
         """
-        Replaces control buttons with an 'Open' button upon completion.
+        Replaces the pause/cancel control buttons with an 'Open' button upon download completion.
 
         Args:
-            row (int): Table row index.
-            full_path (str): Absolute path to the downloaded file.
+            row (int): The table row index.
+            full_path (str): The absolute file system path to the downloaded file.
         """
         container = QWidget()
         h_layout = QHBoxLayout(container)
@@ -531,7 +549,16 @@ class DownloadManager(QDialog):
     def _make_state_slot(
         self, row: int, item: QWebEngineDownloadRequest
     ) -> Callable[[Any], None]:
-        """Creates a closure to handle state changes for a specific row."""
+        """
+        Creates a closure to safely handle state change signals for a specific table row.
+
+        Args:
+            row (int): The associated table row index.
+            item (QWebEngineDownloadRequest): The download request object.
+
+        Returns:
+            Callable[[Any], None]: The generated slot function.
+        """
 
         def _slot(state: QWebEngineDownloadRequest.DownloadState) -> None:
             try:
@@ -547,7 +574,16 @@ class DownloadManager(QDialog):
     def _make_finished_slot(
         self, row: int, item: QWebEngineDownloadRequest
     ) -> Callable[[], None]:
-        """Creates a closure to handle completion for a specific row."""
+        """
+        Creates a closure to safely handle completion signals for a specific table row.
+
+        Args:
+            row (int): The associated table row index.
+            item (QWebEngineDownloadRequest): The download request object.
+
+        Returns:
+            Callable[[], None]: The generated slot function.
+        """
 
         def _slot() -> None:
             try:
@@ -561,14 +597,22 @@ class DownloadManager(QDialog):
         return _slot
 
     def on_finished(self, row: int, item: QWebEngineDownloadRequest) -> None:
-        """Signal handler for download completion."""
+        """
+        Handles the final state update when a download finishes execution.
+
+        Args:
+            row (int): The table row index.
+            item (QWebEngineDownloadRequest): The completed download request object.
+        """
         try:
             self.update_status(row, item, item.state())
         except Exception:
             pass
 
     def _load_persistent_entries(self) -> None:
-        """Restores download history from disk."""
+        """
+        Reads download history from disk and populates the table with historical entries.
+        """
         if not os.path.exists(self._persist_path):
             return
 
@@ -595,7 +639,9 @@ class DownloadManager(QDialog):
             self._set_open_button(row, path_str)
 
     def _persist_entries(self) -> None:
-        """Writes current table state to disk."""
+        """
+        Extracts current table state and writes the download history to disk.
+        """
         out: List[Dict[str, str]] = []
         for i in range(self.table.rowCount()):
             file_item = self.table.item(i, 0)
@@ -617,7 +663,12 @@ class DownloadManager(QDialog):
             pass
 
     def closeEvent(self, event: Any) -> None:
-        """Clean up signals and save state on close."""
+        """
+        Cleans up Qt signal connections and guarantees the current state is saved before closing the dialog.
+
+        Args:
+            event (Any): The window close event generated by the system.
+        """
         for d in list(self.downloads):
             try:
                 d["item"].stateChanged.disconnect(d.get("state_slot"))
