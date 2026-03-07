@@ -664,7 +664,7 @@ class BrowserTab(QWidget):
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 key = event.key()
                 if key == Qt.Key.Key_T:
-                    self.window().open_pdf_smart()
+                    self.window().new_pdf_tab()
                     return True
                 if key == Qt.Key.Key_M:
                     self.btn_music.click()

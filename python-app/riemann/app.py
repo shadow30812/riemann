@@ -728,7 +728,7 @@ class RiemannWindow(QMainWindow):
 
         actions = [
             ("Open PDF", "Ctrl+O", self.open_pdf_smart),
-            ("Open New PDF Tab", "Ctrl+T", self.open_pdf_smart),
+            ("Open New PDF Tab", "Ctrl+T", lambda: self.new_pdf_tab()),
             (None, None, None),  # Separator
             ("Split Current PDF", None, self.split_pdf),
             ("Merge PDFs", None, self.join_pdfs),

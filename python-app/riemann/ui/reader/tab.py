@@ -37,6 +37,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QRubberBand,
@@ -249,10 +251,18 @@ class ReaderTab(
         self._setup_scroll_area()
 
         self.web = QWebEngineView()
+        self.stack.addWidget(self.scroll)
         self.stack.addWidget(self.web)
-        self.web.installEventFilter(self)
 
+        self._setup_home_page()
+        self.stack.addWidget(self.home_page_widget)
+
+        self.web.installEventFilter(self)
         layout.addWidget(self.stack)
+
+        if not getattr(self, "current_path", None):
+            self.stack.setCurrentIndex(2)
+            self.toolbar.hide()
 
     def _setup_toolbar_buttons(self, layout: QHBoxLayout) -> None:
         """Creates and configures standard toolbar buttons."""
@@ -483,6 +493,25 @@ class ReaderTab(
         else:
             self.setFocus()
 
+        if getattr(self, "stack", None) and self.stack.currentIndex() == 2:
+            self.txt_open_path.setFocus()
+            self._populate_home_recents()
+
+    def _populate_home_recents(self) -> None:
+        if not hasattr(self, "list_recent"):
+            return
+        self.list_recent.clear()
+
+        if self.window() and hasattr(self.window(), "history_manager"):
+            recent_pdfs = self.window().history_manager.history.get("pdf", [])
+            for path in recent_pdfs[:10]:
+                if os.path.exists(path):
+                    name = os.path.basename(path)
+                    item = QListWidgetItem(f"📄 {name}")
+                    item.setToolTip(path)
+                    item.setData(Qt.ItemDataRole.UserRole, path)
+                    self.list_recent.addItem(item)
+
     def load_document(self, path: str, restore_state: bool = False) -> None:
         """Loads a PDF or Markdown file."""
         if path.lower().endswith(".md"):
@@ -493,6 +522,13 @@ class ReaderTab(
             self.current_doc = self.engine.load_document(path)
             self._probe_base_page_size()
             self.current_path = path
+
+            self.toolbar.show()
+            self.stack.setCurrentIndex(0)
+            self.view_mode = ViewMode.IMAGE
+            if hasattr(self.window(), "_update_window_title"):
+                self.window()._update_window_title()
+
             self.settings.setValue("lastFile", path)
             self.load_annotations()
             QTimer.singleShot(500, lambda: self._detect_signatures(path))
@@ -526,11 +562,15 @@ class ReaderTab(
         try:
             with open(path, "r", encoding="utf-8") as f:
                 text = f.read()
-
             full_html = generate_markdown_html(text, self.dark_mode)
             self.web.setHtml(full_html)
-            self.view_mode = ViewMode.REFLOW
+
+            self.toolbar.show()
             self.stack.setCurrentIndex(1)
+            self.view_mode = ViewMode.REFLOW
+            if hasattr(self.window(), "_update_window_title"):
+                self.window()._update_window_title()
+
             self.btn_facing.setEnabled(False)
             self.btn_ocr.setEnabled(False)
         except Exception as e:
@@ -1095,3 +1135,91 @@ class ReaderTab(
         self.apply_theme()
         self.rendered_pages.clear()
         self.update_view()
+
+    def _setup_home_page(self) -> None:
+        self.home_page_widget = QWidget()
+        self.home_page_widget.setStyleSheet("""
+            QWidget { background-color: #0f0f13; color: #eee; font-family: 'Segoe UI', system-ui, sans-serif; }
+            QLineEdit { background: #1a1a20; border: 1px solid #333; border-radius: 20px; padding: 12px 20px; font-size: 15px; color: white; }
+            QLineEdit:focus { border: 1px solid #ff4500; }
+            QPushButton { background: transparent; border: 2px dashed #555; color: #aaa; border-radius: 12px; padding: 12px 24px; font-size: 15px; font-weight: bold; }
+            QPushButton:hover { border-color: #ff4500; color: #fff; background: rgba(255, 69, 0, 0.1); }
+            QListWidget { background: transparent; border: none; font-size: 14px; outline: none; }
+            QListWidget::item { padding: 12px; border-radius: 8px; margin-bottom: 6px; background: rgba(30, 30, 35, 0.8); border: 1px solid #222; }
+            QListWidget::item:hover { background: rgba(255, 69, 0, 0.1); border-color: #ff4500; }
+        """)
+        layout = QHBoxLayout(self.home_page_widget)
+        layout.setContentsMargins(60, 60, 60, 60)
+
+        # Left side (Brand & Input)
+        left_layout = QVBoxLayout()
+        left_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        title = QLabel("Riemann")
+        title.setStyleSheet(
+            "font-size: 54px; font-weight: 300; letter-spacing: 4px; color: #ff4500; margin-bottom: 10px; background: transparent;"
+        )
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        subtitle = QLabel("High-Performance Research Environment")
+        subtitle.setStyleSheet(
+            "font-size: 16px; color: #888; margin-bottom: 50px; background: transparent;"
+        )
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.txt_open_path = QLineEdit()
+        self.txt_open_path.setPlaceholderText(
+            "Paste PDF absolute path here and press Enter..."
+        )
+        self.txt_open_path.returnPressed.connect(self._on_home_path_entered)
+
+        btn_browse = QPushButton("Browse Files (Ctrl+O)")
+        btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_browse.clicked.connect(self.open_pdf_dialog)
+
+        left_layout.addStretch()
+        left_layout.addWidget(title)
+        left_layout.addWidget(subtitle)
+        left_layout.addWidget(self.txt_open_path)
+        left_layout.addSpacing(20)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_browse)
+        btn_layout.addStretch()
+        left_layout.addLayout(btn_layout)
+        left_layout.addStretch()
+
+        # Right side (Recent Files)
+        right_layout = QVBoxLayout()
+        recent_label = QLabel("Recent Documents")
+        recent_label.setStyleSheet(
+            "font-size: 18px; font-weight: bold; margin-bottom: 15px; color: #ccc; background: transparent;"
+        )
+
+        self.list_recent = QListWidget()
+        self.list_recent.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.list_recent.itemClicked.connect(self._on_recent_item_clicked)
+
+        right_layout.addWidget(recent_label)
+        right_layout.addWidget(self.list_recent)
+
+        layout.addStretch(1)
+        layout.addLayout(left_layout, 2)
+        layout.addStretch(1)
+        layout.addLayout(right_layout, 2)
+        layout.addStretch(1)
+
+    def _on_home_path_entered(self) -> None:
+        path = self.txt_open_path.text().strip().strip('"').strip("'")
+        if os.path.exists(path) and os.path.isfile(path):
+            self.load_document(path)
+        else:
+            self.show_toast("File not found on disk.")
+
+    def _on_recent_item_clicked(self, item) -> None:
+        path = item.data(Qt.ItemDataRole.UserRole)
+        if os.path.exists(path):
+            self.load_document(path)
+        else:
+            self.show_toast("File no longer exists at this location.")
