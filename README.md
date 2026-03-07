@@ -1,241 +1,781 @@
-# **Riemann**
+# Riemann
 
-**An Integrated Research Environment (IRE) Designed for High-Performance Workflows.**
+**An Integrated Research Environment (IRE) Designed for High-Performance Research Workflows**
 
-Riemann transcends the functionality of conventional PDF viewers, operating as a specialized workspace engineered to address the complexities inherent in contemporary research. In an environment characterized by information saturation, traditional software—predominantly designed for passive consumption or administrative tasks—often proves inadequate for rigorous inquiry.
+Riemann is a hybrid desktop research environment designed for serious reading, analysis, and knowledge workflows. It combines a high-performance PDF engine, local-first AI tools, a full Chromium research browser, annotation systems, document utilities, and a deep-work-oriented workspace into a single cohesive application.
 
-Constructed upon an advanced hybrid architecture that leverages **Python (PySide6)** for interface flexibility and **Rust** for computational performance and memory safety, Riemann provides a unified environment. It integrates processing speed, absolute data sovereignty, and local-first Artificial Intelligence into a cohesive tool designed to respect both user attention and data integrity.
+Unlike traditional PDF viewers or browser-based tools, Riemann is designed as a **complete research operating environment**.
 
-## **Key Features and Architectural Philosophy**
+The system uses a **hybrid architecture** combining:
+
+* **Python (PySide6)** for UI orchestration
+* **Rust** for performance-critical computation
+* **FastAPI** for local AI services
+
+All AI inference, document analysis, and indexing run **entirely on the user's machine**.
+
+---
+
+## Table of Contents
+
+* Philosophy
+* Positioning
+* System Architecture
+* Runtime Architecture
+* Rust Core Engine
+* Reader System
+* Annotation System
+* AI Subsystem
+* OCR Pipeline
+* Integrated Browser
+* Audio Engine
+* Library & Knowledge Management
+* PDF Utilities
+* Viewing Modes
+* Keyboard Shortcuts
+* Repository Structure
+* Rendering Pipeline
+* AI Pipeline
+* Installation
+* Development Setup
+* Build System
+* Continuous Integration
+* Performance Characteristics
+* Security Model
+* Local-First Philosophy
+* Contributing
+* License
 
-### **Hybrid Architecture**
+---
 
-Riemann represents a significant evolution in desktop application design. Rather than selecting between development velocity (Python) and runtime efficiency (Rust), Riemann synergizes these technologies. The Python frontend manages the user interface and high-level logic, facilitating rapid development cycles. Conversely, the Rust backend handles computationally intensive tasks—such as vector calculations, rendering pipelines, and memory management—ensuring optimal performance and stability.
+## Philosophy
 
-### **Local-First AI Analysis**
+Modern research workflows are fragmented across many tools:
 
-While many AI-enhanced readers operate on a Software-as-a-Service model, Riemann eschews this approach to protect data sovereignty. The AI mixin interfaces exclusively with local model packages. Unpublished research and personal annotations remain confined to the local machine, ensuring the user retains complete control over the intelligence pipeline.
+* PDF viewers
+* reference managers
+* browsers
+* note-taking apps
+* AI tools
 
-### **Active Reading System**
+Riemann integrates these into a **single research environment**.
 
-Riemann conceptualizes annotations as fundamental data structures rather than superficial visual layers. Users may classify highlights semantically (e.g., "Arguments," "Evidence," "Rebuttals"), effectively converting a document into a structured map. The application also implements a marginalia system for persistent notes that anchor to specific paragraphs without obscuring the text.
+Core principles:
 
-### **Integrated Research Browser**
+* **Local-First Computing** – no external AI APIs required
+* **Performance through Rust** – heavy computation bypasses Python limitations
+* **Composable UI Architecture** – mixin-based UI composition
+* **Deep Work Design** – minimize context switching
+* **Data Sovereignty** – user documents never leave the device
 
-To mitigate the cognitive load associated with context switching, Riemann integrates a fully functional web view embedded alongside the document. This feature allows for expedited citation retrieval and asset management (e.g., downloading datasets) without exiting the application environment.
+---
 
-### **Integrated Music Mode**
+## Positioning
 
-Riemann acknowledges that auditory inputs are as critical to concentration as visual ones. To support "Deep Work" methodologies, the application includes a native, high-performance Music Mode, activated via Ctrl + M.
+Riemann is designed as a **research workspace for reading and analyzing technical documents**.
 
-#### Architectural Integration
+It is not intended to replace mature, specialized software ecosystems such as:
 
-Unlike standard media overlays, this feature is embedded directly into the application's core event loop. It utilizes the custom JavaScript audio bridge (audio_engine.js) to render soundscapes with minimal system resource overhead. This integration eliminates the need for external streaming applications, thereby reducing the temptation to interact with algorithmically distracting playlists or advertisements.
+* Acrobat — enterprise document workflows and editing
+* Okular — lightweight general-purpose document viewing
+* Zotero — citation management and research library tooling
 
-#### Flow State Induction
+Instead, Riemann focuses on combining several research tasks into a single environment:
 
-The Music Mode is engineered to induce flow states by providing a consistent, non-intrusive auditory environment. It supports local asset playback and utilizes a separate volume processing pipeline, allowing researchers to balance the audio mix against the Text-to-Speech engine. This ensures that users can listen to paper recitations (TTS) over a bed of ambient focus music without frequency clashing or auditory fatigue.
+* deep reading of research papers
+* local AI-assisted document exploration
+* integrated research browsing
+* structured annotation workflows
+* lightweight document manipulation
 
-## **System Implementation and Codebase Structure**
+The goal is not to compete directly with long-established PDF software, but to explore a **new workflow-oriented research environment** that integrates reading, browsing, and local AI analysis.
 
-The Riemann codebase utilizes a sophisticated separation of concerns, employing a hybrid language approach to optimize for both developer ergonomics and runtime speed.
+---
 
-### **1\. The Foreign Function Interface (FFI) Boundary**
+## System Architecture
 
-The core communication between the Python frontend and the Rust backend is mediated through **PyO3**. This library facilitates the creation of Python extensions using Rust. The riemann-core library compiles into a shared object file (.so or .pyd), exposing high-performance functions directly to the Python interpreter. This allows the application to execute heavy computational tasks—such as parsing PDF object trees or calculating embeddings—without the overhead of the Python Global Interpreter Lock (GIL).
+```
++------------------------------------------------------------+
+|                        USER INTERFACE                      |
+|                        (PySide6 / Qt)                      |
+|                                                            |
+| ReaderTab | Browser | Managers | Tabs | Settings           |
++------------------------------------------------------------+
+|                    Python Application Layer                |
+|                                                            |
+| Mixins: Rendering | Annotation | Metadata | Search | AI    |
+| Workers: OCR | Model Loader | Installer | Inference        |
+| Managers: Library | History | Downloads | Bookmarks        |
++------------------------------------------------------------+
+|                     Rust Native Backend                    |
+|                                                            |
+| riemann_core (PDF engine bindings via PyO3)                |
+| rust-ocr-worker                                            |
++------------------------------------------------------------+
+|                    External Systems                        |
+|                                                            |
+| PDFium | Tesseract | Torch | Transformers | FAISS          |
++------------------------------------------------------------+
+```
 
-### **2\. UI Composition via the Mixin Pattern**
+---
 
-The user interface logic, located within python-app/riemann/ui, avoids the monolithic class structures common in legacy GUI applications. Instead, it employs a compositional Mixin pattern. The primary reading component, ReaderTab, inherits functionality from discrete modules:
+## Runtime Architecture
 
-* mixins/rendering.py: Manages the QImage generation and painting cycles.  
-* mixins/ai.py: Handles the context menu triggers and asynchronous calls to the inference engine.  
-* mixins/annotations.py: Manages the coordinate mapping between PDF points and screen pixels.  
-  This modularity ensures that feature isolation is maintained, simplifying debugging and testing procedures.
+Riemann bridges Python and Rust using **PyO3**, allowing Rust code to compile into Python extensions.
 
-### **3\. Asynchronous OCR Pipeline**
+The Rust backend compiles to:
 
-Optical Character Recognition is resource-intensive and prone to blocking the main UI thread. Riemann isolates this functionality within the rust-ocr-worker crate. This standalone Rust component operates independently of the main application loop. Image data is passed to the worker via thread-safe channels; the worker processes the pixel data and returns text layers asynchronously. This architecture ensures that the interface remains responsive even during heavy batch processing of scanned documents.
+```
+riemann_core.abi3.so
+```
 
-### **4\. Browser Integration and Sandbox**
+(or `.pyd` on Windows).
 
-The integrated browser (ui/browser.py) utilizes the QWebEngineView, which is based on the Chromium engine. Riemann configures a specific profile for this view to ensure it remains lightweight. The browser logic is decoupled from the document reader but shares the same application window, allowing for split-pane layouts. Signals and slots are used to bridge the document view (e.g., clicking a citation) with the browser view (e.g., navigating to the URL).
+Heavy operations run outside the Python Global Interpreter Lock.
 
-### **5\. State Management and Configuration**
+Responsibilities of the Rust backend:
 
-Application state is managed centrally through core/managers.py. This module handles configuration persistence, loading user preferences (themes, model paths, keybindings) from disk at startup, and broadcasting state changes to relevant UI components. This centralization preventing "prop drilling" (passing data through multiple layers of components) and ensures that settings changes apply immediately across the application.
+* PDF parsing
+* rendering
+* text extraction
+* annotation embedding
+* form handling
+* search
 
-### **6\. Build System and Distribution**
+Python remains responsible for:
 
-The project utilizes a dual-stage build process. **Maturin** is employed to compile the Rust crates and package them as Python wheels. Subsequently, **PyInstaller** bundles the Python interpreter, the Qt binaries, and the compiled Rust extensions into a single standalone executable. The Riemann.spec file defines the precise dependency tree and resource inclusion rules required to produce a portable binary for Linux and Windows.
+* UI
+* event orchestration
+* threading
+* AI service communication
 
-## **Installation and Execution**
+---
 
-Riemann supports two primary operational modes: execution from source code for developers requiring modification capabilities, and execution via compiled binary for standard users.
+## Rust Core Engine
 
-### **Method 1: Source Code Execution**
+The Rust core exposes several classes via PyO3.
 
-**Prerequisites:** Python 3.11, Rust Toolchain (Cargo), Just, and `libpdfium`.
+### PdfEngine
 
-1. **Repository Cloning:**
+Singleton responsible for initializing the **PDFium rendering engine**.
 
-   ```bash
-   git clone https://github.com/shadow30812/riemann.git
-   cd riemann
-   ```
+Responsibilities:
 
-2. **External Library Setup:** Riemann requires the pdfium binary to be placed manually.
+* loading pdfium
+* managing runtime state
 
-   * Download **pdfium-linux-x64.tgz** (Version >= 7643) from [pdfium-binaries releases](https://github.com/bblanchon/pdfium-binaries/releases).
-   * Extract the archive.
-   * Copy lib/libpdfium.so into the libs/ directory in the project root:
+Must be initialized before documents open.
 
-   ```bash
-   mkdir -p libs
-   cp path_to_extracted_lib/libpdfium.so libs/
-   ```
+---
 
-3. **Environment Initialization:**
+### RiemannDocument
 
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
+Thread-safe representation of an open PDF document.
 
-4. **Compilation & Application Launch:**
+Methods:
 
-   ```bash
-   maturin develop --release
-   python -m riemann
-   ```
+```
+render_page(page_index, scale, dark_mode_int)
+get_page_text(page_index)
+ocr_page(page_index, scale)
+search_page(page_index, query)
+get_text_segments(page_index)
+create_markup_annotation(page_index, rects, subtype, color)
+get_form_widgets(page_index)
+```
 
-5. **Developer Workflow (Using Just):**  
-   We use just to manage build tasks and environment hygiene.  
-   Step 4 can be replaced by `just run` after installing the required dependencies.  
-   * **Run Application:** Compiles Rust changes and launches the Python app.  
+Capabilities:
 
-   ```bash
-   just run
-   ```
+* page rasterization
+* text extraction
+* OCR delegation
+* search
+* annotation insertion
+* form widget inspection
 
-   * **Build Extension:** Only compiles the Rust backend (useful for debugging).  
+---
 
-   ```bash
-   just build
-   ```
+### RenderResult
 
-   * **Clean Project:** Removes all compiled artifacts (Python cache and Rust target).  
+Returned by rendering pipeline.
 
-   ```bash
-   just clean
-   ```
+Contains:
 
-### **Method 2: Building a Standalone Binary**
+```
+width
+height
+pixel_buffer
+```
 
-Riemann offers two build pipelines. The **Nuitka** build is recommended for performance and smaller binary size.
+The pixel buffer is returned as raw BGRA bytes.
 
-#### **Option A: Optimized Build (Nuitka) — Recommended**
+---
 
-This method compiles Python code into C instructions, resulting in faster startup. It automatically handles icon integration for Linux environments.
+## Reader System
 
-##### Ensure nuitka and patchelf are installed
+The **ReaderTab** class is the central reading component.
 
-   ```bash
-   pip install nuitka patchelf
-   ```
+Rather than a monolithic architecture, ReaderTab uses a **mixin composition model**.
 
-##### Run the optimized build script
+Advantages:
 
-   ```bash
-   ./nbuild.sh
-   ```
+* modular development
+* feature isolation
+* easier debugging
 
-*The resulting binary will be located at dist/Riemann.*
+---
 
-#### **Option B: Standard Build (PyInstaller)**
+## Reader Mixins
 
-The legacy build method is available for compatibility.  
-Some features like audio engine or an app icon may be missing in this build.
+### RenderingMixin
 
-   ```bash
-   pip install pyinstaller  
-   ./build.sh
-   ```
+Responsible for:
 
-### **Method 3: Running the pre-compiled binary**
+* page rasterization
+* QImage creation
+* zoom scaling
+* viewport layout
 
-A pre-compiled and optimised version of the binary is available in the releases section of the GitHub page. You may choose to use it for the sake of convenience, but it may not run equally well on all distributions of Linux. It is compiled and tested on Ubuntu 24.04.02 LTS with Linux Kernel 6.8.0-94-generic on an x86_64 architecture machine.
+#### Virtualized Rendering
 
-At the time of writing this README, the latest pre-compiled binary is available on [this](https://github.com/shadow30812/riemann/releases/download/v3.0/Riemann) page of the GitHub repository.
+Documents larger than **300 pages** automatically switch to virtualized rendering.
 
-## **AI & OCR Configuration**
+Only visible pages are rendered.
 
-Riemann's AI features are strictly local-first and modular.
+---
 
-### **Dynamic Model Loading**
+### AnnotationMixin
 
-To keep the application lightweight, heavy Machine Learning libraries (Torch, Transformers) are **not** bundled directly into the core executable. Instead, they are loaded dynamically at runtime.
+Handles annotation features.
 
-* **Source Users:** Necessary libraries are in requirements.txt. If you do not use AI/OCR, you can remove torch and related ML packages to save space.  
-* **Binary Users:** The application loads models from the local environment or cache when the OCR worker is started. If not found, it downloads the models from the source repository. Download is triggered by clicking the OCR button (eye icon in the toolbar of the PDF Viewer), so take care to do it ahead of time in case of urgent use.
+Supported tools:
 
-### **Initializing Model Packs**
+* highlight
+* underline
+* strikeout
+* rectangles
+* ovals
+* sticky notes
+* freehand pen
+* tick/cross stamps
 
-Before using AI features, you must generate the local model package structure (if you are running from source) to ensure the inference engine has access to weights locally.
+Annotations stored locally in:
 
-./create\_model\_pack.sh
+```
+~/.local/share/riemann/annotations/
+```
 
-## **Keyboard Shortcuts**
+Undo/redo fully supported.
 
-Riemann prioritizes keyboard-centric workflows. The following mapping describes the default configuration.
+---
 
-### **Application Control**
+### SearchMixin
 
-| Shortcut | Action |
-| :---- | :---- |
-| Ctrl \+ O | Open PDF Document |
-| Ctrl \+ Q | Quit Application |
-| Ctrl \+ , | Open Settings / Preferences |
-| F | Toggle Fullscreen Mode |
-| Esc | Exit Fullscreen Mode |
+Implements document search.
 
-### **Navigation and Viewing**
+Capabilities:
 
-| Shortcut | Action |
-| :---- | :---- |
-| Up Arrow | Scroll Up |
-| Down Arrow | Scroll Down |
-| Left Arrow | Previous Page |
-| Right Arrow | Next Page |
-| Ctrl \+ \+ | Zoom In |
-| Ctrl \+ \- | Zoom Out |
-| Ctrl \+ 0 | Reset Zoom to Fit |
+* keyword search
+* result highlighting
+* navigation between matches
 
-### **Tools and Search**
+---
 
-| Shortcut | Action |
-| :---- | :---- |
-| Ctrl \+ F | Focus Search Bar |
-| Enter | Find Next Occurrence |
-| Home | Go to the first page |
-| End | Go to the last page |
+### MetadataMixin
 
-*Home and End might not work well for larger documents or e-books (>40 pages).*
+Handles metadata extraction.
 
-### **Browser and Tabs**
+Extracted fields:
 
-| Shortcut | Action |
-| :---- | :---- |
-| Ctrl \+ T | Open New Tab |
-| Ctrl \+ W | Close Current Tab |
-| Ctrl \+ Tab | Switch to Next Tab |
-| Ctrl \+ Shift \+ Tab | Switch to Previous Tab |
-| Backspace | Browser Back (if not in text field) |
-| Alt \+ Left Arrow | Browser Back |
-| Alt \+ Right Arrow | Browser Forward |
-| F6 | Focus Address Bar |
+* title
+* authors
+* publication year
+* DOI
+* arXiv ID
 
-## **Licensing**
+Sources:
 
-This project is open-source and licensed under the terms specified in the LICENSE file within this repository.
+* Crossref
+* OpenAlex
+
+---
+
+### SignatureMixin
+
+Handles cryptographic signatures using **pyHanko**.
+
+Features:
+
+* signature detection
+* certificate inspection
+* integrity validation
+* local trust store
+* PKCS#12 signing
+
+---
+
+### AiMixin
+
+Provides AI-powered document analysis tools.
+
+Capabilities:
+
+* semantic search
+* LaTeX extraction
+* OCR assistance
+* embedding generation
+
+---
+
+## AI Subsystem
+
+Riemann includes a **local AI sidecar engine** implemented using **FastAPI**.
+
+Capabilities:
+
+* document chunk embeddings
+* semantic search
+* inference pipelines
+
+Model used:
+
+```
+all-MiniLM-L6-v2
+```
+
+Vector index:
+
+```
+FAISS
+```
+
+---
+
+## Snip-to-AI Mode
+
+Users can draw a rectangle over document content.
+
+Pipeline:
+
+```
+Selection
+→ Rendered image
+→ PNG buffer
+→ Inference engine
+```
+
+Supported tasks:
+
+* equation extraction
+* LaTeX generation
+
+---
+
+## OCR Pipeline
+
+OCR handled by Rust worker crate.
+
+```
+rust-ocr-worker
+```
+
+Pipeline:
+
+```
+Page Render
+→ RGBA buffer
+→ Rust worker
+→ PNG encode
+→ Tesseract
+→ Text output
+```
+
+---
+
+## Integrated Browser
+
+Riemann embeds a Chromium-based browser using **Qt WebEngine**.
+
+Capabilities:
+
+* research browsing
+* viewing supplementary material
+* dataset downloads
+
+---
+
+## Browser Request Interceptor
+
+Custom interceptor blocks telemetry and ads.
+
+Blocked domains include:
+
+* doubleclick
+* googlesyndication
+* googleadservices
+
+---
+
+## Homepage System
+
+Browser homepage includes:
+
+* quick search
+* customizable link cards
+* persistent shortcuts
+
+Communication with Python occurs via:
+
+```
+riemann-save://
+```
+
+---
+
+## Music Mode (Audio Engine)
+
+Riemann includes a Web Audio DSP engine for focus music.
+
+DSP Chain:
+
+```
+Media Source
+→ PreAmp
+→ Saturation
+→ Mid/Side Split
+→ Low Shelf EQ
+→ High Shelf EQ
+→ Reverb
+→ Compressor
+→ Limiter
+→ FFT Analyzer
+→ Output
+```
+
+---
+
+## Library Manager
+
+Persistent research library stored in **SQLite**.
+
+Indexed metadata:
+
+* file hash
+* file path
+* title
+* authors
+* year
+* DOI
+* arXiv ID
+
+---
+
+## Bookmark Manager
+
+Bookmarks stored in:
+
+```
+bookmarks.json
+```
+
+---
+
+## History System
+
+Tracks:
+
+* opened PDFs
+* visited websites
+
+Categories:
+
+```
+pdf
+web
+```
+
+---
+
+## Download Manager
+
+Non-modal download manager window.
+
+Capabilities:
+
+* download progress
+* pause
+* resume
+* cancel
+
+---
+
+## PDF Utilities
+
+Capabilities:
+
+* PDF splitting
+* page extraction
+* document merging
+
+---
+
+## Markdown Reflow
+
+Supports Markdown rendering including **KaTeX math blocks**.
+
+---
+
+## Viewing Modes
+
+```
+IMAGE
+REFLOW
+```
+
+Zoom modes:
+
+```
+MANUAL
+FIT_WIDTH
+FIT_HEIGHT
+```
+
+---
+
+## Keyboard Shortcuts
+
+### Application
+
+Ctrl+O — Open document
+
+Ctrl+Q — Quit
+
+Ctrl+, — Preferences
+
+F — Fullscreen
+
+Esc — Exit fullscreen
+
+### Navigation
+
+Up / Down — Scroll
+
+Left / Right — Page navigation
+
+Ctrl + + — Zoom in
+
+Ctrl + - — Zoom out
+
+Ctrl + 0 — Reset zoom
+
+### Tabs
+
+Ctrl + T — New tab
+
+Ctrl + W — Close tab
+
+### Browser
+
+Backspace — Back
+
+Alt + Left — Back
+
+Alt + Right — Forward
+
+F6 — Focus address bar
+
+---
+
+## Repository Structure
+
+```
+riemann/
+
+python-app/
+ └─ riemann/
+
+    core/
+      constants.py
+      managers.py
+
+    ui/
+      browser.py
+      browser_handlers.py
+      components.py
+
+      reader/
+        tab.py
+        utils.py
+        widgets.py
+        workers.py
+
+        mixins/
+          ai.py
+          annotations.py
+          metadata.py
+          rendering.py
+          search.py
+          signatures.py
+
+    assets/
+      audio_engine.js
+      homepage.html
+      homepage.css
+      homepage.js
+
+rust-core/
+   src/lib.rs
+
+rust-ocr-worker/
+   src/lib.rs
+
+riemann-ai/
+   main.py
+
+build scripts /
+   build.sh
+   nbuild.sh
+   justfile
+   create_model_pack.sh
+
+CI /
+   .github/workflows/release.yml
+```
+
+---
+
+## Rendering Pipeline
+
+```
+PDF
+→ Rust PDFium
+→ Rasterization
+→ BGRA buffer
+→ Python layer
+→ QImage
+→ Display
+```
+
+---
+
+## AI Pipeline
+
+```
+PDF
+→ Chunking
+→ Embeddings
+→ FAISS index
+→ Semantic search
+→ Result highlighting
+```
+
+---
+
+## Installation
+
+Requirements:
+
+* Python 3.11
+* Rust toolchain
+* pdfium
+* Tesseract
+
+```bash
+git clone https://github.com/shadow30812/riemann.git
+cd riemann
+pip install -r requirements.txt
+maturin develop --release
+python -m riemann
+```
+
+---
+
+## Development Setup
+
+Recommended tools:
+
+* Python 3.11
+* Rust stable
+* just build tool
+
+---
+
+## Build System
+
+Multi-stage build pipeline.
+
+### Maturin
+
+Builds Rust components.
+
+### Nuitka
+
+Compiles Python into optimized binaries.
+
+### PyInstaller
+
+Creates distributable executables.
+
+---
+
+## Continuous Integration
+
+GitHub Actions build releases for:
+
+* Linux
+* Windows
+* macOS
+
+---
+
+## Performance Characteristics
+
+Optimizations include:
+
+* Rust rendering pipeline
+* virtualized scrolling
+* asynchronous OCR
+* FAISS indexing
+
+---
+
+## Security Model
+
+Principles:
+
+* local AI execution
+* no external APIs
+* local document storage
+
+---
+
+## Local-First Architecture
+
+All analysis runs locally including:
+
+* rendering
+* OCR
+* AI
+* vector search
+
+---
+
+## Contributing
+
+Contributions welcome in:
+
+* rendering improvements
+* AI integrations
+* UI improvements
+* performance optimization
+
+---
+
+## Versioning
+
+V3.1 released on 07/03/2026
+
+## License
+
+See LICENSE file.
