@@ -19,3 +19,4 @@ build_ai/
 *.build
 *.dist
 node_modules/
+*.pytest_cache
