@@ -591,56 +591,103 @@ F6 — Focus address bar
 
 ```
 riemann/
-
-python-app/
- └─ riemann/
-
-    core/
-      constants.py
-      managers.py
-
-    ui/
-      browser.py
-      browser_handlers.py
-      components.py
-
-      reader/
-        tab.py
-        utils.py
-        widgets.py
-        workers.py
-
-        mixins/
-          ai.py
-          annotations.py
-          metadata.py
-          rendering.py
-          search.py
-          signatures.py
-
-    assets/
-      audio_engine.js
-      homepage.html
-      homepage.css
-      homepage.js
-
-rust-core/
-   src/lib.rs
-
-rust-ocr-worker/
-   src/lib.rs
-
-riemann-ai/
-   main.py
-
-build scripts /
-   build.sh
-   nbuild.sh
-   justfile
-   create_model_pack.sh
-
-CI /
-   .github/workflows/release.yml
+├── .editorconfig
+├── .github/
+│   └── workflows/
+│       └── release.yml
+├── .gitignore
+├── Cargo.lock
+├── Cargo.toml
+├── LICENSE
+├── README.md
+├── Riemann.spec
+├── build.sh
+├── build_entry.py
+├── create_model_pack.sh
+├── directory-tree.md
+├── install_icon.sh
+├── justfile
+├── libs/
+│   └── libpdfium.so
+├── nbuild.sh
+├── package-lock.json
+├── package.json
+├── pyproject.toml
+├── python-app/
+│   ├── riemann/
+│   │   ├── __init__.py
+│   │   ├── __main__.py
+│   │   ├── app.py
+│   │   ├── assets/
+│   │   │   ├── __tests__/
+│   │   │   │   ├── audio_engine.test.js
+│   │   │   │   └── homepage.test.js
+│   │   │   ├── audio_engine.js
+│   │   │   ├── homepage.css
+│   │   │   ├── homepage.html
+│   │   │   ├── homepage.js
+│   │   │   ├── Icon.png
+│   │   │   └── icon.ico
+│   │   ├── core/
+│   │   │   ├── constants.py
+│   │   │   └── managers.py
+│   │   ├── ui/
+│   │   │   ├── browser.py
+│   │   │   ├── browser_handlers.py
+│   │   │   ├── components.py
+│   │   │   └── reader/
+│   │   │       ├── __init__.py
+│   │   │       ├── mixins/
+│   │   │       │   ├── ai.py
+│   │   │       │   ├── annotations.py
+│   │   │       │   ├── metadata.py
+│   │   │       │   ├── rendering.py
+│   │   │       │   ├── search.py
+│   │   │       │   └── signatures.py
+│   │   │       ├── tab.py
+│   │   │       ├── utils.py
+│   │   │       ├── widgets.py
+│   │   │       └── workers.py
+│   │   ├── riemann_core.abi3.so
+│   │   └── riemann_core.pyi
+│   └── tests/
+│       ├── test_ai.py
+│       ├── test_annotations.py
+│       ├── test_app.py
+│       ├── test_browser.py
+│       ├── test_browser_handlers.py
+│       ├── test_components.py
+│       ├── test_constants.py
+│       ├── test_managers.py
+│       ├── test_metadata.py
+│       ├── test_rendering.py
+│       ├── test_search.py
+│       ├── test_signatures.py
+│       ├── test_utils.py
+│       ├── test_widgets.py
+│       └── test_workers.py
+├── requirements.txt
+├── riemann-ai/
+│   ├── build_ai.sh
+│   ├── main.py
+│   ├── requirements.txt
+│   └── tests/
+│       └── test_main.py
+├── rust-core/
+│   ├── Cargo.lock
+│   ├── Cargo.toml
+│   ├── src/
+│   │   └── lib.rs
+│   └── tests/
+│       └── test_core.rs
+├── rust-ocr-worker/
+│   ├── Cargo.lock
+│   ├── Cargo.toml
+│   ├── src/
+│   │   └── lib.rs
+│   └── tests/
+│       └── test_ocr.rs
+└── test_runner.sh
 ```
 
 ---
@@ -685,9 +732,10 @@ Requirements:
 git clone https://github.com/shadow30812/riemann.git
 cd riemann
 pip install -r requirements.txt
-maturin develop --release
-python -m riemann
+just run
 ```
+
+You may also choose to install the pre-compiled optimized binary of the app. Note however that it may not be stable on all systems directly, and you may have to run it with the terminal in case of any missing packages or errors. That being said, the latest binary at the time of writing this README is available at <https://github.com/shadow30812/riemann/releases/download/v3.2/Riemann>, compiled in an Ubuntu 24.04.02 LTS machine.
 
 ---
 
@@ -774,7 +822,7 @@ Contributions welcome in:
 
 ## Versioning
 
-V3.1 released on 07/03/2026
+V3.2 released on 09/03/2026
 
 ## License
 

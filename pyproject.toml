@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "riemann"
-version = "3.1"
+version = "3.2"
 description = "PDF reader and Web browser with integrated music mode"
 requires-python = ">=3.11"
 dependencies = [
@@ -14,3 +14,6 @@ dependencies = [
 [tool.maturin]
 manifest-path = "rust-core/Cargo.toml"
 python-source = "python-app"
+
+[tool.pytest.ini_options]
+addopts = "--capture=fd"
