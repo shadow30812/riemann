@@ -1,9 +1,8 @@
-import os
 import sys
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtCore import QObject, Qt, QUrl, Signal
+from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 from riemann.app import (
     LibrarySearchDialog,
@@ -12,7 +11,6 @@ from riemann.app import (
     get_resource_path,
 )
 
-# Ensure QApplication is initialized before testing PySide6 components
 if not QApplication.instance():
     app = QApplication(sys.argv)
 
@@ -20,6 +18,11 @@ if not QApplication.instance():
 class DummyWeb(QObject):
     urlChanged = Signal(QUrl)
     loadFinished = Signal(bool)
+
+    def __init__(self):
+        self.urlChanged = MagicMock()
+        self.loadFinished = MagicMock()
+        self.titleChanged = MagicMock()
 
     def url(self):
         return QUrl("https://example.com")
@@ -55,7 +58,6 @@ class DummyBrowser(QWidget):
         pass
 
 
-# A safe replacement for QDialog to prevent blocking without crashing the C++ bindings
 class DummyQDialog(QWidget):
     def exec(self):
         return 1
