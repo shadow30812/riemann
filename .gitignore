@@ -18,3 +18,4 @@ build_ai/
 *debug.log
 *.build
 *.dist
+node_modules/

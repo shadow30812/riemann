@@ -8,11 +8,19 @@ name = "riemann_core"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.21.0", features = ["extension-module", "abi3-py311"] }
 pdfium-render = "0.8.37" 
 image = "0.24"
 once_cell = "1.18"
 anyhow = "1.0"
-
-# Import our local OCR worker
 riemann_ocr_worker = { path = "../rust-ocr-worker" }
+
+[dependencies.pyo3]
+version = "0.21.0"
+features = ["abi3-py311"]
+
+[features]
+extension-module = ["pyo3/extension-module"]
+default = ["extension-module"]
+
+[dev-dependencies]
+pyo3 = { version = "0.21.0", features = ["auto-initialize"] }
