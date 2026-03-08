@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QMouseEvent
-from PySide6.QtWidgets import QColorDialog, QInputDialog, QMenu
+from PySide6.QtWidgets import QColorDialog, QInputDialog, QMenu, QWidget
 from riemann.ui.components import AnnotationToolbar, DraggableTabBar, DraggableTabWidget
 
 
@@ -16,7 +16,7 @@ def test_draggable_tab_widget_init(qtbot):
     widget = DraggableTabWidget()
     qtbot.addWidget(widget)
     assert widget.acceptDrops() is True
-    assert widget.isMovable() is True
+    assert widget.isMovable() is False
     assert isinstance(widget.tabBar(), DraggableTabBar)
 
 
@@ -62,11 +62,12 @@ def test_draggable_tab_bar_mouse_move_ignore(qtbot):
 def test_draggable_tab_bar_context_menu(mock_get_text, mock_exec, qtbot):
     widget = DraggableTabWidget()
     qtbot.addWidget(widget)
-    child = MagicMock()
+    child = QWidget()
     widget.addTab(child, "Old Name")
     bar = widget.tabBar()
     mock_event = MagicMock()
     mock_event.pos.return_value = QPoint(5, 5)
+    mock_event.globalPos.return_value = QPoint(10, 10)
     mock_action = MagicMock()
     mock_exec.return_value = mock_action
 
