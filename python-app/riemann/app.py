@@ -28,6 +28,7 @@ from PySide6.QtCore import (
     QStringListModel,
     Qt,
     QTimer,
+    QUrl,
 )
 from PySide6.QtGui import QCloseEvent, QCursor, QIcon, QKeySequence, QShortcut
 from PySide6.QtWebEngineCore import QWebEngineProfile
@@ -760,14 +761,12 @@ class RiemannWindow(QMainWindow):
         browser = BrowserTab(url, profile=use_profile, dark_mode=self.dark_mode)
         browser.completer.setModel(self.history_model)
 
-        target_widget.addTab(browser, "Loading...")
-        i = target_widget.addTab(browser, "New Tab")
-        target_widget.setCurrentIndex(i)
+        idx = target_widget.addTab(browser, "Loading...")
+        target_widget.setCurrentIndex(idx)
 
-        browser.web.urlChanged.connect(
-            lambda qurl: self._update_tab_title(browser, qurl)
-        )
+        browser.web.urlChanged.connect(lambda qurl: self._update_tab_title(browser))
         browser.web.loadFinished.connect(lambda ok: self._update_tab_title(browser))
+        browser.web.titleChanged.connect(lambda title: self._update_tab_title(browser))
 
     def setup_menu(self) -> None:
         """
@@ -846,10 +845,7 @@ class RiemannWindow(QMainWindow):
             self.tabs_main.setCurrentWidget(reader)
 
     def new_browser_tab(
-        self,
-        url: str = "",
-        incognito: bool = False,
-        background: bool = False,
+        self, url: str = "", incognito: bool = False, background: bool = False
     ) -> BrowserTab:
         """
         Creates a new Web Browser tab.
@@ -883,6 +879,10 @@ class RiemannWindow(QMainWindow):
         label = "Incognito" if incognito else "Loading..."
         target.addTab(browser, label)
         new_tab = target.widget(target.count() - 1)
+
+        browser.web.urlChanged.connect(lambda qurl: self._update_tab_title(browser))
+        browser.web.loadFinished.connect(lambda ok: self._update_tab_title(browser))
+        browser.web.titleChanged.connect(lambda title: self._update_tab_title(browser))
 
         if not background:
             target.setCurrentWidget(new_tab)
@@ -1326,7 +1326,14 @@ class RiemannWindow(QMainWindow):
             args: Variable arguments corresponding to the underlying Qt signal payload.
         """
         title = browser.web.title()
-        display_title = (title[:20] + "..") if len(title) > 20 else title
+        if not title:
+            url_str = browser.web.url().toString()
+            if url_str and url_str != "about:blank":
+                title = QUrl(url_str).host()
+            else:
+                title = "New Tab"
+
+        display_title = (title[:20] + "...") if len(title) > 25 else title
 
         idx = self.tabs_main.indexOf(browser)
         if idx != -1:

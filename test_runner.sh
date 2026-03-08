@@ -33,4 +33,22 @@ else
     exit 1
 fi
 
+echo -e "${BLUE}Running riemann-ai backend tests...${NC}"
+if cd riemann-ai && conda run -n rmai python3 -m pytest; then
+    echo -e "${GREEN}riemann-ai tests passed!${NC}\n"
+    cd ..
+else
+    echo -e "${RED}riemann-ai tests failed!${NC}"
+    exit 1
+fi
+
+echo -e "${BLUE}Running python-app tests...${NC}"
+if cd python-app && python3 -m pytest; then
+    echo -e "${GREEN}python-app tests passed!${NC}\n"
+    cd ..
+else
+    echo -e "${RED}python-app tests failed!${NC}"
+    exit 1
+fi
+
 echo -e "${GREEN}All test suites executed successfully!${NC}"
