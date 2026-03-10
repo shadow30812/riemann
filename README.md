@@ -18,33 +18,35 @@ All AI inference, document analysis, and indexing run **entirely on the user's m
 
 ## Table of Contents
 
-* Philosophy
-* Positioning
-* System Architecture
-* Runtime Architecture
-* Rust Core Engine
-* Reader System
-* Annotation System
-* AI Subsystem
-* OCR Pipeline
-* Integrated Browser
-* Audio Engine
-* Library & Knowledge Management
-* PDF Utilities
-* Viewing Modes
-* Keyboard Shortcuts
-* Repository Structure
-* Rendering Pipeline
-* AI Pipeline
-* Installation
-* Development Setup
-* Build System
-* Continuous Integration
-* Performance Characteristics
-* Security Model
-* Local-First Philosophy
-* Contributing
-* License
+* [Philosophy](#philosophy)
+* [Positioning](#positioning)
+* [System Architecture](#system-architecture)
+* [Runtime Architecture](#runtime-architecture)
+* [Rust Core Engine](#rust-core-engine)
+* [Reader System](#reader-system)
+* [Annotation System](#annotationmixin)
+* [AI Subsystem](#ai-subsystem)
+* [OCR Pipeline](#ocr-pipeline)
+* [Integrated Browser](#integrated-browser)
+* [Audio Engine](#music-mode-audio-engine)
+* [Library & Knowledge Management](#library-manager)
+* [PDF Utilities](#pdf-utilities)
+* [Viewing Modes](#viewing-modes)
+* [Workspace & Tab Management](#workspace--tab-management)
+* [Keyboard Shortcuts](#keyboard-shortcuts)
+* [Repository Structure](#repository-structure)
+* [Rendering Pipeline](#rendering-pipeline)
+* [AI Pipeline](#ai-pipeline)
+* [Installation](#installation)
+* [Development Setup](#development-setup)
+* [Build System](#build-system)
+* [Testing Infrastructure](#testing-infrastructure)
+* [Continuous Integration](#continuous-integration)
+* [Performance Characteristics](#performance-characteristics)
+* [Security Model](#security-model)
+* [Local-First Philosophy](#local-first-architecture)
+* [Contributing](#contributing)
+* [License](#license)
 
 ---
 
@@ -402,6 +404,7 @@ Capabilities:
 * research browsing
 * viewing supplementary material
 * dataset downloads
+* print webview to PDF (allowing users to instantly capture and convert live web research, articles, or documentation into local PDFs for offline reading and annotation)
 
 ---
 
@@ -495,6 +498,8 @@ pdf
 web
 ```
 
+This history state is directly integrated into the application menu via an **Open Recent** dropdown, allowing frictionless resumption of previously active documents without needing to open the full library.
+
 ---
 
 ## Download Manager
@@ -540,6 +545,20 @@ MANUAL
 FIT_WIDTH
 FIT_HEIGHT
 ```
+
+### Intelligent Dark Mode
+
+In addition to the standard light mode and naive dark mode, Riemann features an intelligent dark mode designed for late-night research. Instead of applying a simple global color inversion, the rendering engine smartly inverts document backgrounds and text while preserving the visual fidelity and original colors of images, charts, and figures.
+
+---
+
+## Workspace & Tab Management
+
+Riemann provides advanced window and tab management to help organize complex research sessions:
+
+* **Advanced Tab Controls:** Context menus on tabs allow users to quickly *Duplicate Tab*, *Close Tabs to the Right*, or *Close Other Tabs* to declutter the workspace.
+* **Drag-and-Drop:** Documents can be opened instantly by dragging and dropping PDF files directly anywhere over the application's title bar.
+* **Mute Tab Audio:** Individual web or document tabs can be muted directly from the tab bar, silencing noisy web pages without interrupting Riemann's dedicated focus audio engine or system volume.
 
 ---
 
@@ -764,6 +783,21 @@ Compiles Python into optimized binaries.
 ### PyInstaller
 
 Creates distributable executables.
+
+---
+
+## Testing Infrastructure
+
+Riemann utilizes a comprehensive, multi-language testing suite to ensure stability across its hybrid architecture.
+
+The test coverage includes:
+
+* **Python UI & App Logic:** `pytest` suites covering the PySide6 components, managers, and ReaderTab mixins (located in `python-app/tests/`).
+* **Rust Native Core:** `cargo test` suites validating PDFium bindings, concurrent memory safety, and the OCR worker crates.
+* **AI Subsystem:** FastAPI endpoint testing for the local sidecar.
+* **JavaScript/Web:** Jest tests for the internal Audio Engine and Homepage components.
+
+Tests can be orchestrated locally using the provided `test_runner.sh` script.
 
 ---
 

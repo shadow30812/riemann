@@ -2,14 +2,12 @@ use riemann_ocr_worker::OcrEngine;
 
 #[test]
 fn test_engine_default() {
-    let engine = OcrEngine;
-    drop(engine);
+    let _engine = OcrEngine;
 }
 
 #[test]
 fn test_engine_new() {
-    let engine = OcrEngine::new();
-    drop(engine);
+    let _engine = OcrEngine::new();
 }
 
 #[test]
