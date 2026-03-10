@@ -30,7 +30,16 @@ from PySide6.QtCore import (
     QTimer,
     QUrl,
 )
-from PySide6.QtGui import QCloseEvent, QCursor, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import (
+    QCloseEvent,
+    QCursor,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QIcon,
+    QKeySequence,
+    QShortcut,
+)
 from PySide6.QtWebEngineCore import QWebEngineProfile
 from PySide6.QtWidgets import (
     QApplication,
@@ -45,6 +54,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSplitter,
@@ -352,12 +362,24 @@ class RiemannWindow(QMainWindow):
         self.tabs_main.setTabsClosable(True)
         self.tabs_main.tabCloseRequested.connect(self.close_tab)
         self.tabs_main.currentChanged.connect(self._update_window_title)
+        self.tabs_main.tabBar().setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.tabs_main.tabBar().customContextMenuRequested.connect(
+            lambda pos: self._show_tab_context_menu(pos, self.tabs_main)
+        )
         self.splitter.addWidget(self.tabs_main)
 
         self.tabs_side = DraggableTabWidget()
         self.tabs_side.setTabsClosable(True)
         self.tabs_side.tabCloseRequested.connect(self.close_side_tab)
         self.tabs_side.currentChanged.connect(self._update_window_title)
+        self.tabs_side.tabBar().setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.tabs_side.tabBar().customContextMenuRequested.connect(
+            lambda pos: self._show_tab_context_menu(pos, self.tabs_side)
+        )
         self.tabs_side.hide()
         self.splitter.addWidget(self.tabs_side)
 
@@ -371,6 +393,7 @@ class RiemannWindow(QMainWindow):
         self._restore_session()
 
         self.setMouseTracking(True)
+        self.setAcceptDrops(True)
         self.installEventFilter(self)
 
         self.hover_timer = QTimer(self)
@@ -775,6 +798,11 @@ class RiemannWindow(QMainWindow):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("File")
 
+        self.recent_menu = file_menu.addMenu("Open Recent")
+        self.recent_menu.aboutToShow.connect(self._populate_recent_menu)
+
+        file_menu.addSeparator()
+
         actions = [
             ("Open PDF", "Ctrl+O", self.open_pdf_smart),
             ("Open New PDF Tab", "Ctrl+T", lambda: self.new_pdf_tab()),
@@ -815,6 +843,22 @@ class RiemannWindow(QMainWindow):
             if shortcut:
                 action.setShortcut(shortcut)
             action.triggered.connect(slot)
+
+    def _populate_recent_menu(self) -> None:
+        """Dynamically populates the Recent menu with the latest PDFs."""
+        self.recent_menu.clear()
+        recent_pdfs = self.history_manager.get_list("pdf")[-10:]
+        if not recent_pdfs:
+            action = self.recent_menu.addAction("No recent files")
+            action.setEnabled(False)
+            return
+
+        for pdf_path in reversed(recent_pdfs):
+            if os.path.exists(pdf_path):
+                action = self.recent_menu.addAction(os.path.basename(pdf_path))
+                action.triggered.connect(
+                    lambda checked=False, p=pdf_path: self.new_pdf_tab(p)
+                )
 
     def show_settings(self) -> None:
         """
@@ -1347,6 +1391,116 @@ class RiemannWindow(QMainWindow):
                 self.tabs_side.setTabText(idx, display_title)
                 self._update_window_title()
 
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        """Accepts the drag event if it contains local files."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        """Continuously accepts the drag action as it moves over child widgets."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        """Handles dropped files by opening supported types in a new tab."""
+        for url in event.mimeData().urls():
+            if url.isLocalFile():
+                path = url.toLocalFile()
+                if path.lower().endswith(".pdf") or path.lower().endswith(".md"):
+                    self.new_pdf_tab(path)
+        event.acceptProposedAction()
+
+    def _show_tab_context_menu(self, pos, tab_widget: QTabWidget) -> None:
+        """Displays the advanced tab management context menu."""
+        idx = tab_widget.tabBar().tabAt(pos)
+        if idx == -1:
+            return
+
+        widget = tab_widget.widget(idx)
+        menu = QMenu(self)
+
+        rename_action = menu.addAction("Rename Tab (Custom)")
+        revert_action = menu.addAction("Revert to Original Name")
+        meta_action = None
+
+        if hasattr(widget, "document_metadata") and widget.document_metadata.get(
+            "title"
+        ):
+            meta_title = widget.document_metadata["title"]
+            meta_action = menu.addAction(f"Rename to '{meta_title[:30]}...'")
+
+        menu.addSeparator()
+        action_duplicate = menu.addAction("Duplicate Tab")
+        menu.addSeparator()
+        action_close = menu.addAction("Close Tab")
+        action_close_other = menu.addAction("Close Other Tabs")
+        action_close_right = menu.addAction("Close Tabs to the Right")
+
+        action = menu.exec(tab_widget.tabBar().mapToGlobal(pos))
+
+        if not action:
+            return
+
+        if action == rename_action:
+            current_name = tab_widget.tabText(idx)
+            new_name, ok = QInputDialog.getText(
+                self, "Rename Tab", "Enter new tab name:", text=current_name
+            )
+            if ok and new_name.strip():
+                tab_widget.setTabText(idx, new_name.strip())
+                self._update_window_title()
+
+        elif action == revert_action:
+            if hasattr(widget, "current_path") and widget.current_path:
+                original_name = os.path.basename(widget.current_path)
+                tab_widget.setTabText(idx, original_name)
+                self._update_window_title()
+            elif hasattr(widget, "web") and hasattr(widget.web, "title"):
+                original_name = widget.web.title()
+                if not original_name:
+                    original_name = "New Tab"
+                tab_widget.setTabText(idx, original_name)
+                self._update_window_title()
+            elif hasattr(widget, "view") and hasattr(widget.view, "title"):
+                original_name = widget.view.title()
+                if not original_name:
+                    original_name = "New Tab"
+                tab_widget.setTabText(idx, original_name)
+                self._update_window_title()
+
+        elif meta_action and action == meta_action:
+            title = widget.document_metadata["title"]
+            display_title = (title[:25] + "..") if len(title) > 25 else title
+            tab_widget.setTabText(idx, display_title)
+            self._update_window_title()
+
+        elif action == action_close:
+            if tab_widget == self.tabs_main:
+                self.close_tab(idx)
+            else:
+                self.close_side_tab(idx)
+
+        elif action == action_close_other:
+            for i in range(tab_widget.count() - 1, -1, -1):
+                if i != idx:
+                    if tab_widget == self.tabs_main:
+                        self.close_tab(i)
+                    else:
+                        self.close_side_tab(i)
+
+        elif action == action_close_right:
+            for i in range(tab_widget.count() - 1, idx, -1):
+                if tab_widget == self.tabs_main:
+                    self.close_tab(i)
+                else:
+                    self.close_side_tab(i)
+
+        elif action == action_duplicate:
+            if hasattr(widget, "current_path") and widget.current_path:
+                self._add_pdf_tab(widget.current_path, tab_widget)
+            elif hasattr(widget, "web"):
+                self._add_browser_tab(widget.web.url().toString(), tab_widget)
+
 
 def run() -> None:
     """
@@ -1374,8 +1528,13 @@ def run() -> None:
         app.setWindowIcon(QIcon(icon_path))
 
     window = RiemannWindow()
-    window.show()
+    args = app.arguments()
 
+    for arg in args[1:]:
+        if not arg.startswith("-") and os.path.isfile(arg):
+            window.new_pdf_tab(arg)
+
+    window.show()
     sys.exit(app.exec())
 
 

@@ -408,6 +408,12 @@ class BrowserTab(QWidget):
         self.btn_bookmark.setToolTip("Bookmark this page")
         self.btn_bookmark.clicked.connect(self.toggle_bookmark)
 
+        self.btn_mute = QPushButton("🔊")
+        self.btn_mute.setFixedWidth(30)
+        self.btn_mute.setCheckable(True)
+        self.btn_mute.setToolTip("Mute/Unmute Tab")
+        self.btn_mute.clicked.connect(self.toggle_mute)
+
         self.btn_music = QPushButton("♫")
         self.btn_music.setFixedWidth(30)
         self.btn_music.setCheckable(True)
@@ -426,6 +432,11 @@ class BrowserTab(QWidget):
         self.btn_download.setToolTip("Download Video via yt-dlp")
         self.btn_download.clicked.connect(self.download_video)
 
+        self.btn_print_pdf = QPushButton("🖨")
+        self.btn_print_pdf.setFixedWidth(30)
+        self.btn_print_pdf.setToolTip("Save Webpage to PDF")
+        self.btn_print_pdf.clicked.connect(self.print_to_pdf)
+
         self.lbl_zoom = QLabel("100%")
         self.lbl_zoom.setFixedWidth(40)
         self.lbl_zoom.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -439,8 +450,10 @@ class BrowserTab(QWidget):
 
         tb_layout.addWidget(self.txt_url)
         tb_layout.addWidget(self.btn_bookmark)
+        tb_layout.addWidget(self.btn_mute)
         tb_layout.addWidget(self.btn_music)
         tb_layout.addWidget(self.btn_download)
+        tb_layout.addWidget(self.btn_print_pdf)
         tb_layout.addWidget(self.lbl_zoom)
 
         layout.addWidget(self.toolbar)
@@ -1118,6 +1131,42 @@ class BrowserTab(QWidget):
         if hasattr(self, "dl_worker") and self.dl_worker.isRunning():
             self.show_toast("Cancelling download...")
             self.dl_worker.stop()
+
+    def toggle_mute(self) -> None:
+        """Mutes or unmutes the audio output specifically for this web tab."""
+        is_muted = self.btn_mute.isChecked()
+        self.web.page().setAudioMuted(is_muted)
+        self.btn_mute.setText("🔇" if is_muted else "🔊")
+
+    def print_to_pdf(self) -> None:
+        """Renders the current web page directly to a PDF and opens it in Riemann."""
+        default_dir = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        )
+        suggested_name = (
+            f"{self.web.title()}.pdf" if self.web.title() else "webpage.pdf"
+        )
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Webpage as PDF",
+            os.path.join(default_dir, suggested_name),
+            "PDF Files (*.pdf)",
+        )
+
+        if path:
+            self.show_toast("Rendering PDF...")
+
+            def handle_pdf_print(file_path, success):
+                self.web.page().pdfPrintingFinished.disconnect(handle_pdf_print)
+                if success:
+                    self.show_toast("PDF saved successfully!")
+                    if self.window() and hasattr(self.window(), "new_pdf_tab"):
+                        self.window().new_pdf_tab(file_path)
+                    self.show_toast("Failed to render PDF.")
+
+            self.web.page().pdfPrintingFinished.connect(handle_pdf_print)
+            self.web.page().printToPdf(path)
 
     def _on_download_finished(self, success: bool, message: str) -> None:
         """
