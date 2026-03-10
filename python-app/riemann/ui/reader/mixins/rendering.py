@@ -161,7 +161,7 @@ class RenderingMixin:
         lbl.setProperty("pageIndex", index)
         w, h = self._get_target_page_size()
         lbl.setFixedSize(w, h)
-        bg = "#333" if self.dark_mode else "#fff"
+        bg = "#333" if self.theme_mode != 0 else "#fff"
         lbl.setStyleSheet(f"background-color: {bg}; border: 1px solid #555;")
         lbl.installEventFilter(self)
         return lbl
@@ -205,9 +205,7 @@ class RenderingMixin:
         try:
             dpr = self.devicePixelRatio()
             render_scale = scale * dpr
-            res = self.current_doc.render_page(
-                idx, render_scale, 1 if self.dark_mode else 0
-            )
+            res = self.current_doc.render_page(idx, render_scale, self.theme_mode)
 
             img = QImage(res.data, res.width, res.height, QImage.Format.Format_ARGB32)
             img.setDevicePixelRatio(dpr)
@@ -300,7 +298,7 @@ class RenderingMixin:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         if self.search_result and self.search_result[0] == idx:
-            c = QColor(255, 255, 0, 100 if self.dark_mode else 128)
+            c = QColor(255, 255, 0, 100 if self.theme_mode != 0 else 128)
             painter.setBrush(c)
             painter.setPen(Qt.PenStyle.NoPen)
             for l, t, r, b in self.search_result[1]:
@@ -437,7 +435,7 @@ class RenderingMixin:
         else:
             if self.current_doc:
                 txt = self.current_doc.get_page_text(self.current_page_index)
-                html_content = generate_reflow_html(txt, self.dark_mode)
+                html_content = generate_reflow_html(txt, self.theme_mode != 0)
                 self.web.setHtml(html_content)
 
     def _probe_base_page_size(self) -> None:

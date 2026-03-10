@@ -80,7 +80,8 @@ fn generate_bitmap<'a>(page: &'a PdfPage<'a>, scale: f32) -> PyResult<PdfBitmap<
         .set_target_width(width)
         .set_target_height(height)
         .rotate_if_landscape(PdfPageRenderRotation::None, true)
-        .render_annotations(true);
+        .render_annotations(true)
+        .set_clear_color(PdfColor::new(255, 255, 255, 255));
 
     page.render_with_config(&render_config)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
@@ -134,8 +135,7 @@ impl RiemannDocument {
     /// * `py` - The Python GIL token.
     /// * `page_index` - Zero-based index of the page to render.
     /// * `scale` - Zoom level/scaling factor.
-    /// * `dark_mode_int` - Integer flag (1 for dark mode, 0 for light).
-    ///
+    /// * `theme_mode` - Integer flag (0 for Light, 1 for Fast Dark, 2 for Smart Dark).    ///
     /// # Returns
     /// A `RenderResult` object containing the image data.
     fn render_page(
@@ -143,9 +143,8 @@ impl RiemannDocument {
         py: Python,
         page_index: u16,
         scale: f32,
-        dark_mode_int: u8,
+        theme_mode: u8,
     ) -> PyResult<RenderResult> {
-        let dark_mode = dark_mode_int != 0;
         let doc_guard = self.inner.lock().unwrap();
 
         let page = doc_guard
@@ -157,13 +156,83 @@ impl RiemannDocument {
         let bitmap = generate_bitmap(&page, scale)?;
         let mut buffer = bitmap.as_raw_bytes().to_vec();
 
-        if dark_mode {
-            buffer.chunks_exact_mut(4).for_each(|pixel| {
-                pixel[0] = 255 - pixel[0]; // Blue
-                pixel[1] = 255 - pixel[1]; // Green
-                pixel[2] = 255 - pixel[2]; // Red
-            });
-        }
+        buffer.chunks_exact_mut(4).for_each(|pixel| {
+            let b_raw = pixel[0];
+            let g_raw = pixel[1];
+            let r_raw = pixel[2];
+
+            if theme_mode == 1 {
+                pixel[0] = 255 - r_raw;
+                pixel[1] = 255 - g_raw;
+                pixel[2] = 255 - b_raw;
+            } else if theme_mode == 2 {
+                let b = b_raw as f32 / 255.0;
+                let g = g_raw as f32 / 255.0;
+                let r = r_raw as f32 / 255.0;
+
+                let max = r.max(g).max(b);
+                let min = r.min(g).min(b);
+                let l = (max + min) / 2.0;
+
+                if max == min {
+                    let val = ((1.0 - l) * 255.0) as u8;
+                    pixel[0] = val;
+                    pixel[1] = val;
+                    pixel[2] = val;
+                } else {
+                    let d = max - min;
+                    let s = if l > 0.5 {
+                        d / (2.0 - max - min)
+                    } else {
+                        d / (max + min)
+                    };
+
+                    let mut h = if max == r {
+                        (g - b) / d + (if g < b { 6.0 } else { 0.0 })
+                    } else if max == g {
+                        (b - r) / d + 2.0
+                    } else {
+                        (r - g) / d + 4.0
+                    };
+                    h /= 6.0;
+
+                    let new_l = 1.0 - l;
+                    let q = if new_l < 0.5 {
+                        new_l * (1.0 + s)
+                    } else {
+                        new_l + s - new_l * s
+                    };
+                    let p = 2.0 * new_l - q;
+
+                    let hue_to_rgb = |mut t: f32| -> f32 {
+                        if t < 0.0 {
+                            t += 1.0;
+                        }
+                        if t > 1.0 {
+                            t -= 1.0;
+                        }
+                        if t < 1.0 / 6.0 {
+                            return p + (q - p) * 6.0 * t;
+                        }
+                        if t < 1.0 / 2.0 {
+                            return q;
+                        }
+                        if t < 2.0 / 3.0 {
+                            return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+                        }
+                        p
+                    };
+
+                    pixel[0] = (hue_to_rgb(h + 1.0 / 3.0) * 255.0) as u8;
+                    pixel[1] = (hue_to_rgb(h) * 255.0) as u8;
+                    pixel[2] = (hue_to_rgb(h - 1.0 / 3.0) * 255.0) as u8;
+                }
+            } else {
+                pixel[0] = r_raw;
+                pixel[1] = g_raw;
+                pixel[2] = b_raw;
+            }
+        });
 
         let data = PyBytes::new_bound(py, &buffer);
 

@@ -104,7 +104,7 @@ class ReaderTab(
         self.current_path: Optional[str] = None
         self.current_page_index: int = 0
 
-        self.dark_mode: bool = self.settings.value("darkMode", True, type=bool)
+        self.theme_mode: int = self.settings.value("themeMode", 0, type=int)
         self.zoom_mode: ZoomMode = ZoomMode.FIT_WIDTH
         self.manual_scale: float = 1.0
         self.facing_mode: bool = False
@@ -370,7 +370,7 @@ class ReaderTab(
         self.combo_zoom.setFixedWidth(100)
 
         self.btn_theme = QPushButton("🌓")
-        self.btn_theme.setToolTip("Toggle Dark/Light Mode")
+        self.btn_theme.setToolTip("Cycle Theme (Light / Fast Dark / Smart Dark)")
         self.btn_theme.clicked.connect(self.toggle_theme)
 
         self.btn_fullscreen = QPushButton("⛶")
@@ -637,7 +637,7 @@ class ReaderTab(
         try:
             with open(path, "r", encoding="utf-8") as f:
                 text = f.read()
-            full_html = generate_markdown_html(text, self.dark_mode)
+            full_html = generate_markdown_html(text, self.theme_mode != 0)
             self.web.setHtml(full_html)
 
             self.toolbar.show()
@@ -1235,21 +1235,20 @@ class ReaderTab(
         """
         Modifies localized style objects dynamically replacing raw background properties utilizing updated user settings directly safely optimally completely.
         """
+        is_dark = self.theme_mode != 0
         pal = self.palette()
-        color = QColor(30, 30, 30) if self.dark_mode else QColor(240, 240, 240)
+        color = QColor(30, 30, 30) if is_dark else QColor(240, 240, 240)
         pal.setColor(QPalette.ColorRole.Window, color)
         self.setPalette(pal)
 
-        bg_scroll = "#222" if self.dark_mode else "#eee"
+        bg_scroll = "#222" if is_dark else "#eee"
         self.scroll_content.setStyleSheet(
             f"#scrollContent {{ background-color: {bg_scroll}; }}"
         )
 
-        fg = "#ddd" if self.dark_mode else "#111"
+        fg = "#ddd" if is_dark else "#111"
 
-        checked_bg = (
-            "rgba(60, 140, 255, 0.3)" if self.dark_mode else "rgba(0, 100, 255, 0.2)"
-        )
+        checked_bg = "rgba(60, 140, 255, 0.3)" if is_dark else "rgba(0, 100, 255, 0.2)"
         checked_border = "#50a0ff"
 
         self.toolbar.setStyleSheet(f"""
@@ -1269,10 +1268,10 @@ class ReaderTab(
             }}
         """)
 
-        sb_bg = "#2a2a2a" if self.dark_mode else "#e0e0e0"
-        sb_fg = "#ddd" if self.dark_mode else "#111"
-        input_bg = "#1e1e1e" if self.dark_mode else "#ffffff"
-        input_border = "#555" if self.dark_mode else "#bbb"
+        sb_bg = "#2a2a2a" if is_dark else "#e0e0e0"
+        sb_fg = "#ddd" if is_dark else "#111"
+        input_bg = "#1e1e1e" if is_dark else "#ffffff"
+        input_border = "#555" if is_dark else "#bbb"
 
         self.search_bar.setStyleSheet(f"""
             QWidget {{ background-color: {sb_bg}; color: {sb_fg}; }}
@@ -1289,17 +1288,18 @@ class ReaderTab(
 
     def toggle_theme(self) -> None:
         """
-        Reverses configuration properties saving preferences globally triggering visual reconstructions flawlessly properly securely automatically.
+        Cycles configuration properties through Light, Fast Dark, and Smart Dark modes.
+        Saves preferences globally and triggers visual reconstructions safely.
         """
-        self.dark_mode = not self.dark_mode
-        self.settings.setValue("darkMode", self.dark_mode)
-
-        if hasattr(self.window(), "dark_mode"):
-            self.window().dark_mode = self.dark_mode
+        self.theme_mode = (self.theme_mode + 1) % 3
+        self.settings.setValue("themeMode", self.theme_mode)
 
         self.apply_theme()
         self.rendered_pages.clear()
         self.update_view()
+
+        mode_names = ["Light Mode", "Fast Dark Mode", "Smart Dark Mode"]
+        self.show_toast(f"Theme set to: {mode_names[self.theme_mode]}")
 
     def _setup_home_page(self) -> None:
         """
