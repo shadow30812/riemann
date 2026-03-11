@@ -856,7 +856,7 @@ Contributions welcome in:
 
 ## Versioning
 
-V3.2 released on 09/03/2026
+V3.2 released on 11/03/2026
 
 ## License
 
