@@ -312,7 +312,12 @@ class RiemannWindow(QMainWindow):
     shortcuts, and session persistence.
     """
 
-    def __init__(self, incognito: bool = False, restore_session: bool = True) -> None:
+    def __init__(
+        self,
+        incognito: bool = False,
+        restore_session: bool = True,
+        external_files: Optional[List[str]] = None,
+    ) -> None:
         """
         Initializes the main application window.
 
@@ -323,6 +328,7 @@ class RiemannWindow(QMainWindow):
         super().__init__()
         self.incognito = incognito
         self.restore_session = restore_session
+        self.external_files = external_files or []
 
         if self.incognito:
             self.setWindowTitle("Riemann (Incognito)")
@@ -651,11 +657,13 @@ class RiemannWindow(QMainWindow):
     def _restore_session(self) -> None:
         """
         Restores the window geometry and open tabs from the previous session.
-        Defaults to opening both PDF and browser homepages if no session exists or incognito is active.
+        Defaults to opening both PDF and browser homepages if no session exists or incognito is active
+        UNLESS app is opened externally.
         """
         if self.incognito or not self.restore_session:
-            self.new_pdf_tab()
-            self.new_browser_tab()
+            if not self.external_files:
+                self.new_pdf_tab()
+                self.new_browser_tab()
             self.resize(1200, 900)
             return
 
@@ -673,8 +681,9 @@ class RiemannWindow(QMainWindow):
             self.tabs_side.hide()
 
         if self.tabs_main.count() == 0 and self.tabs_side.count() == 0:
-            self.new_pdf_tab()
-            self.new_browser_tab()
+            if not self.external_files:
+                self.new_pdf_tab()
+                self.new_browser_tab()
 
     def _restore_tabs_from_settings(self, key: str, target_widget: QTabWidget) -> None:
         """
@@ -1506,14 +1515,18 @@ def run() -> None:
     """
     Application Entry Point.
 
-    Sets required Chromium flags for the QtWebEngine, initializes the QApplication,
+    Sets required Chromium flags for the QtWebEngine,
+    initializes the QApplication,
+    enforces a single-instance pattern via QLocalServer,
     and starts the main event loop.
     """
+
+    from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
         "--autoplay-policy=no-user-gesture-required "
         "--disable-setuid-sandbox "
-        "--disable-features=AudioServiceOutOfProcess"
+        "--disable-features=AudioServiceOutOfProcess "
         "--referrer-policy=no-referrer-when-downgrade "
         "--enable-features=WebEngineProprietaryCodecs"
     )
@@ -1523,16 +1536,53 @@ def run() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("Riemann")
 
+    window = RiemannWindow()
+    args = app.arguments()
+    files_to_open = [
+        arg for arg in args[1:] if not arg.startswith("-") and os.path.isfile(arg)
+    ]
+
+    server_name = "RiemannSingleInstance"
+    socket = QLocalSocket()
+    socket.connectToServer(server_name)
+
+    if socket.waitForConnected(500):
+        if files_to_open:
+            msg = "|".join(files_to_open)
+            socket.write(msg.encode("utf-8"))
+            socket.waitForBytesWritten(500)
+        sys.exit(0)
+
+    server = QLocalServer()
+    server.removeServer(server_name)
+    server.listen(server_name)
+
     icon_path = get_resource_path(os.path.join("assets", "icon.ico"))
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
 
-    window = RiemannWindow()
-    args = app.arguments()
+    window = RiemannWindow(external_files=files_to_open)
 
-    for arg in args[1:]:
-        if not arg.startswith("-") and os.path.isfile(arg):
-            window.new_pdf_tab(arg)
+    def handle_connection():
+        """Handles incoming IPC connections from secondary instances."""
+        client = server.nextPendingConnection()
+
+        def read_data():
+            msg = client.readAll().data().decode("utf-8")
+            if msg:
+                for path in msg.split("|"):
+                    if os.path.isfile(path):
+                        window.new_pdf_tab(path)
+            window.activateWindow()
+            window.raise_()
+            client.disconnectFromServer()
+
+        client.readyRead.connect(read_data)
+
+    server.newConnection.connect(handle_connection)
+
+    for path in files_to_open:
+        window.new_pdf_tab(path)
 
     window.show()
     sys.exit(app.exec())
