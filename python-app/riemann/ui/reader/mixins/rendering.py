@@ -7,7 +7,7 @@ Handles layout calculation, virtualization, and PDF page rendering.
 import sys
 from typing import Dict, Tuple
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygon, QTransform
 from PySide6.QtWidgets import QApplication, QCheckBox, QHBoxLayout, QLineEdit, QWidget
 
@@ -33,7 +33,7 @@ class RenderingMixin:
         sb = self.scroll.verticalScrollBar()
         was_blocked = sb.signalsBlocked()
         sb.blockSignals(True)
-        old_scroll_val = sb.value()
+        target_page = self.current_page_index
 
         self.page_widgets.clear()
         self.rendered_pages.clear()
@@ -56,9 +56,8 @@ class RenderingMixin:
         self.scroll_content.adjustSize()
         QApplication.processEvents()
 
-        if self.continuous_scroll:
-            sb.setValue(old_scroll_val)
         sb.blockSignals(was_blocked)
+        QTimer.singleShot(50, lambda: self.ensure_visible(target_page))
 
     def _build_virtual_layout(self, count: int) -> None:
         """
@@ -482,15 +481,25 @@ class RenderingMixin:
             Tuple[int, int]: Integer representations of logical page width and height boundaries.
         """
         if not self._cached_base_size:
+            self._probe_base_page_size()
+        if not self._cached_base_size:
             return (int(595 * self.manual_scale), int(842 * self.manual_scale))
         bw, bh = self._cached_base_size
         s = self.calculate_scale()
         return (int(bw * s), int(bh * s))
 
     def rotate_document(self) -> None:
-        """Forces re-evaluation of base size constraints."""
+        """Rotate document clockwise"""
         if not hasattr(self, "rotation"):
             self.rotation = 0
         self.rotation = (self.rotation + 90) % 360
+        self._cached_base_size = None
+        self.on_zoom_changed_internal()
+
+    def rotate_document_ccw(self) -> None:
+        """Rotate document counter-clockwise"""
+        if not hasattr(self, "rotation"):
+            self.rotation = 0
+        self.rotation = (self.rotation - 90) % 360
         self._cached_base_size = None
         self.on_zoom_changed_internal()

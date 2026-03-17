@@ -159,10 +159,12 @@ class ReaderTab(
         shortcuts = [
             ("Ctrl+F", self.toggle_search_bar),
             ("Ctrl+I", self.toggle_ai_search_bar),
-            ("Ctrl+Shift+A", self.btn_annotate.click),
             ("Ctrl+A", self.select_all_text),
+            ("Ctrl+Shift+A", self.btn_annotate.click),
             ("Ctrl+Z", self.undo_annotation),
             ("Ctrl+Shift+Z", self.redo_annotation),
+            ("Ctrl+R", self.rotate_document),
+            ("Ctrl+Shift+R", self.rotate_document_ccw),
         ]
         for seq, slot in shortcuts:
             QShortcut(QKeySequence(seq), self).activated.connect(slot)
@@ -324,6 +326,10 @@ class ReaderTab(
         self.btn_rotate = QPushButton("↻")
         self.btn_rotate.setToolTip("Rotate PDF 90°")
         self.btn_rotate.clicked.connect(self.rotate_document)
+
+        self.btn_rotate_ccw = QPushButton("↺")
+        self.btn_rotate_ccw.setToolTip("Rotate PDF -90°")
+        self.btn_rotate_ccw.clicked.connect(self.rotate_document_ccw)
 
         self.btn_reflow = QPushButton("📄/📝")
         self.btn_reflow.setToolTip("Toggle Text Reflow Mode")
@@ -1208,6 +1214,7 @@ class ReaderTab(
         self.settings.setValue("zoomMode", self.zoom_mode.value)
         self.settings.setValue("zoomScale", self.manual_scale)
         self._update_all_widget_sizes()
+        self.rebuild_layout()
         self.rendered_pages.clear()
         self.update_view()
 
@@ -1300,8 +1307,8 @@ class ReaderTab(
         """
         self.theme_mode = (self.theme_mode + 1) % 3
         self.settings.setValue("themeMode", self.theme_mode)
-
         self.apply_theme()
+        self.rebuild_layout()
         self.rendered_pages.clear()
         self.update_view()
 
@@ -1423,3 +1430,31 @@ class ReaderTab(
         elif rotation == 270:
             return 1.0 - ry, rx
         return rx, ry
+
+    def resizeEvent(self, event: Any) -> None:
+        """
+        Recalculates specific UI overlay positions consistently anchoring elements cleanly.
+
+        Args:
+            event (Any): Fired geometry update system event.
+        """
+        super().resizeEvent(event)
+        if hasattr(self, "lbl_toast") and self.lbl_toast.isVisible():
+            self.lbl_toast.move(
+                (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
+            )
+
+        if (
+            getattr(self, "current_doc", None)
+            and getattr(self, "view_mode", None) == ViewMode.IMAGE
+        ):
+            if getattr(self, "zoom_mode", None) in (
+                ZoomMode.FIT_WIDTH,
+                ZoomMode.FIT_HEIGHT,
+            ):
+                if not hasattr(self, "_resize_timer"):
+                    self._resize_timer = QTimer(self)
+                    self._resize_timer.setSingleShot(True)
+                    self._resize_timer.setInterval(150)
+                    self._resize_timer.timeout.connect(self.on_zoom_changed_internal)
+                self._resize_timer.start()
