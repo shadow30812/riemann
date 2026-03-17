@@ -40,6 +40,7 @@ from PySide6.QtGui import (
     QKeySequence,
     QShortcut,
 )
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWebEngineCore import QWebEngineProfile
 from PySide6.QtWidgets import (
     QApplication,
@@ -460,9 +461,10 @@ class RiemannWindow(QMainWindow):
             getattr(self, "_reader_fullscreen", False)
             and event.type() == QEvent.Type.MouseMove
         ):
-            if event.pos().y() < 10:
+            local_pos = self.mapFromGlobal(QCursor.pos())
+            if local_pos.y() < 10:
                 self._reveal_controls(True)
-            elif event.pos().y() > 100:
+            elif local_pos.y() > 100:
                 self.hover_timer.start()
 
         return super().eventFilter(source, event)
@@ -1530,8 +1532,6 @@ def run() -> None:
     enforces a single-instance pattern via QLocalServer,
     and starts the main event loop.
     """
-
-    from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
         "--autoplay-policy=no-user-gesture-required "
