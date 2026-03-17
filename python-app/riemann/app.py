@@ -1051,6 +1051,11 @@ class RiemannWindow(QMainWindow):
         widget = self.tabs_main.widget(index)
         if widget:
             self._record_closed_tab(widget)
+
+            if isinstance(widget, BrowserTab):
+                widget.web.setUrl(QUrl("about:blank"))
+                widget.web.page().deleteLater()
+
             widget.deleteLater()
         self.tabs_main.removeTab(index)
 
@@ -1066,6 +1071,11 @@ class RiemannWindow(QMainWindow):
         widget = self.tabs_side.widget(index)
         if widget:
             self._record_closed_tab(widget)
+
+            if isinstance(widget, BrowserTab):
+                widget.web.setUrl(QUrl("about:blank"))
+                widget.web.page().deleteLater()
+
             if widget == getattr(self, "tree_signatures", None):
                 active_main = self.tabs_main.currentWidget()
                 if active_main:

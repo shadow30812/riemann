@@ -1,5 +1,6 @@
 import os
 
+import certifi
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign import signers
@@ -152,6 +153,20 @@ class SignaturesMixin:
         self.btn_trust_cert.setVisible(False)
 
         trusted_pems = self.settings.value("trusted_certs_pem", [], type=list)
+
+        try:
+            with open(certifi.where(), "r", encoding="utf-8") as f:
+                ca_bundle = f.read()
+
+            mozilla_pems = [
+                pem.strip() + "\n-----END CERTIFICATE-----\n"
+                for pem in ca_bundle.split("-----END CERTIFICATE-----")
+                if "-----BEGIN CERTIFICATE-----" in pem
+            ]
+
+            trusted_pems.extend(mozilla_pems)
+        except Exception as e:
+            print(f"Failed to load Mozilla Root CAs: {e}")
 
         self.sig_worker = SignatureValidationWorker(path, trusted_pems)
         self.sig_worker.finished_validation.connect(self._on_signatures_validated)
