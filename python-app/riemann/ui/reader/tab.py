@@ -10,6 +10,7 @@ import shutil
 import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+import pikepdf
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
@@ -55,6 +56,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...core.constants import ViewMode, ZoomMode
+from ...core.managers import PasswordDialog
 from ..components import AnnotationToolbar
 from .mixins.ai import AiMixin
 from .mixins.annotations import AnnotationsMixin
@@ -168,6 +170,7 @@ class ReaderTab(
             ("Ctrl+Shift+Z", self.redo_annotation),
             ("Ctrl+R", self.rotate_document),
             ("Ctrl+Shift+R", self.rotate_document_ccw),
+            ("Ctrl+Shift+S", self.export_secure_pdf),
         ]
         for seq, slot in shortcuts:
             QShortcut(QKeySequence(seq), self).activated.connect(slot)
@@ -416,6 +419,27 @@ class ReaderTab(
         )
         self.btn_ai_search.clicked.connect(self.toggle_ai_search_bar)
 
+        self.btn_secure_export = QPushButton("🔒 Lock | Save")
+        self.btn_secure_export.setToolTip(
+            "Export a password-protected copy of this PDF (Ctrl+Shift+S)"
+        )
+        self.btn_secure_export.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.btn_secure_export.setStyleSheet("""
+            QPushButton {
+                padding: 6px 14px;
+                border-radius: 4px;
+                background-color: #2C2C30;
+                color: #E0E0E0;
+                border: 1px solid #3F3F46;
+            }
+            QPushButton:hover {
+                background-color: #3F3F46;
+                border: 1px solid #52525B;
+            }
+        """)
+        self.btn_secure_export.clicked.connect(self.export_secure_pdf)
+
         self.btn_sign = QPushButton("🖋️")
         self.btn_sign.setToolTip("Sign Document (PKCS#12)")
         self.btn_sign.clicked.connect(self.initiate_signing_flow)
@@ -443,6 +467,7 @@ class ReaderTab(
             self.combo_zoom,
             self.btn_theme,
             self.btn_fullscreen,
+            self.btn_secure_export,
         ]
         for w in widgets:
             layout.addWidget(w)
@@ -600,7 +625,11 @@ class ReaderTab(
                     self.list_recent.addItem(item)
 
     def load_document(
-        self, path: str, restore_state: bool = False, password: Optional[str] = None
+        self,
+        path: str,
+        restore_state: bool = False,
+        password: Optional[str] = None,
+        is_retry: bool = False,
     ) -> None:
         """
         Consumes filepath strings mapping logic execution parsing rendering either markdown or PDF binary streams.
@@ -619,6 +648,11 @@ class ReaderTab(
             self._probe_base_page_size()
             self.current_path = path
             self._update_tab_title(os.path.basename(path))
+
+            if is_retry and hasattr(self, "show_toast"):
+                QTimer.singleShot(
+                    50, lambda: self.show_toast("Document unlocked successfully.")
+                )
 
             self.toolbar.show()
             self.stack.setCurrentIndex(0)
@@ -640,7 +674,7 @@ class ReaderTab(
                 self.rebuild_layout()
                 self.update_view()
                 QTimer.singleShot(
-                    50, lambda: self.scroll.verticalScrollBar().setValue(saved_scroll)
+                    100, lambda: self.scroll.verticalScrollBar().setValue(saved_scroll)
                 )
             else:
                 self.current_page_index = 0
@@ -657,14 +691,14 @@ class ReaderTab(
                 or "format error" in err_str
                 or "error" in err_str
             ):
-                pw, ok = QInputDialog.getText(
-                    self,
-                    "Password Protected",
-                    "Enter PDF Password:",
-                    QLineEdit.EchoMode.Password,
+                error_text = (
+                    "Incorrect password. Please try again." if is_retry else None
                 )
-                if ok and pw:
-                    self.load_document(path, restore_state, pw)
+                dialog = PasswordDialog(self, error_msg=error_text)
+                if dialog.exec():
+                    pw = dialog.get_password()
+                    if pw:
+                        self.load_document(path, restore_state, pw, is_retry=True)
                 return
 
             sys.stderr.write(f"Load error: {e}\n")
@@ -1494,3 +1528,47 @@ class ReaderTab(
                     self._resize_timer.setInterval(150)
                     self._resize_timer.timeout.connect(self.on_zoom_changed_internal)
                 self._resize_timer.start()
+
+    def export_secure_pdf(self) -> None:
+        """Prompts the user for a password and saves an encrypted copy."""
+        if not hasattr(self, "current_path") or not self.current_path:
+            return
+
+        password, ok = QInputDialog.getText(
+            self,
+            "Secure PDF",
+            "Enter a password to lock this PDF:",
+            QLineEdit.EchoMode.Password,
+        )
+
+        if not ok or not password:
+            return
+
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Encrypted PDF",
+            self.current_path.replace(".pdf", "_secure.pdf"),
+            "PDF Files (*.pdf)",
+        )
+
+        if not save_path:
+            return
+
+        try:
+            with pikepdf.Pdf.open(self.current_path) as pdf:
+                encryption = pikepdf.Encryption(
+                    user=password,
+                    owner=password,
+                    allow=pikepdf.Permissions(extract=False, modify_assembly=False),
+                )
+
+                pdf.save(save_path, encryption=encryption)
+
+            QMessageBox.information(
+                self, "Success", "Encrypted PDF saved successfully!"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Export Error", f"Failed to encrypt PDF:\n{str(e)}"
+            )

@@ -18,8 +18,11 @@ from PySide6.QtWebEngineCore import QWebEngineDownloadRequest
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
+    QDialogButtonBox,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -678,3 +681,87 @@ class DownloadManager(QDialog):
 
         self._persist_entries()
         super().closeEvent(event)
+
+
+class PasswordDialog(QDialog):
+    def __init__(self, parent=None, error_msg: Optional[str] = None):
+        super().__init__(parent)
+        self.setWindowTitle("Unlock Secure PDF")
+
+        self.setMinimumWidth(350)
+        self.setMinimumHeight(160)
+
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        self.lbl_instruction = QLabel(
+            "This document is encrypted.\nPlease enter the password to open it:"
+        )
+        self.lbl_instruction.setWordWrap(True)
+        layout.addWidget(self.lbl_instruction)
+
+        if error_msg:
+            self.lbl_error = QLabel(error_msg)
+            self.lbl_error.setStyleSheet(
+                "color: #EF4444; font-weight: bold; font-size: 13px;"
+            )
+            layout.addWidget(self.lbl_error)
+
+        self.txt_password = QLineEdit(self)
+        self.txt_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.txt_password.setPlaceholderText("Enter password...")
+        layout.addWidget(self.txt_password)
+
+        self.button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1E1E22;
+                color: #E0E0E0;
+            }
+            QLabel {
+                font-size: 14px;
+                color: #D4D4D8;
+            }
+            QLineEdit {
+                padding: 10px;
+                font-size: 14px;
+                background-color: #27272A;
+                color: #FFFFFF;
+                border: 1px solid #3F3F46;
+                border-radius: 6px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #3B82F6; /* Subtle blue glow on focus */
+                background-color: #303036;
+            }
+            QPushButton {
+                padding: 8px 16px;
+                background-color: #3F3F46;
+                color: white;
+                border-radius: 4px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #52525B;
+            }
+            QPushButton[text="OK"] {
+                background-color: #2563EB; /* Distinct primary action color */
+            }
+            QPushButton[text="OK"]:hover {
+                background-color: #1D4ED8;
+            }
+        """)
+
+    def get_password(self) -> str:
+        return self.txt_password.text()
