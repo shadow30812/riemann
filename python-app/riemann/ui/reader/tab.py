@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import urllib.parse
+from math import inf
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pikepdf
@@ -591,6 +592,7 @@ class ReaderTab(
 
         self.scroll.setWidget(self.scroll_content)
         self.scroll.verticalScrollBar().valueChanged.connect(self.defer_scroll_update)
+        self.scroll.verticalScrollBar().sliderReleased.connect(self.real_scroll_handler)
         self.stack.addWidget(self.scroll)
 
     def showEvent(self, event: QEvent) -> None:
@@ -824,13 +826,24 @@ class ReaderTab(
         Args:
             value (int): Extracted positional marker mapping current visible offset calculations linearly.
         """
-        self.txt_page.setText(str(self.current_page_index + 1))
+        if self._virtual_enabled and self._cached_base_size and self.current_doc:
+            center = value + (self.scroll.viewport().height() / 2)
+            _, base_h = self._cached_base_size
+            ph = int(base_h * self.calculate_scale()) + self.scroll_layout.spacing()
+            if ph > 0:
+                temp_idx = min(
+                    self.current_doc.page_count - 1, max(0, int(center / ph))
+                )
+                self.txt_page.setText(str(temp_idx + 1))
+        else:
+            self.txt_page.setText(str(self.current_page_index + 1))
         self.scroll_timer.start()
 
     def real_scroll_handler(self) -> None:
         """
         Dispatches debounced execution queries checking layout dependencies implicitly managing viewport caching correctly.
         """
+        self.scroll_timer.stop()
         self.on_scroll_changed(self.scroll.verticalScrollBar().value())
 
     def on_scroll_changed(self, value: int) -> None:
@@ -841,19 +854,28 @@ class ReaderTab(
             value (int): Integer dimension resolving geometric distances mapped properly mathematically.
         """
         center = value + (self.scroll.viewport().height() / 2)
-        closest, min_dist = self.current_page_index, float("inf")
 
-        for idx, widget in self.page_widgets.items():
-            try:
-                w_center = widget.mapTo(self.scroll_content, QPoint(0, 0)).y() + (
-                    widget.height() / 2
-                )
-                dist = abs(w_center - center)
-                if dist < min_dist:
-                    min_dist = dist
-                    closest = idx
-            except RuntimeError:
-                continue
+        if self._virtual_enabled and self._cached_base_size and self.current_doc:
+            _, base_h = self._cached_base_size
+            ph = int(base_h * self.calculate_scale()) + self.scroll_layout.spacing()
+            if ph > 0:
+                closest = min(self.current_doc.page_count - 1, max(0, int(center / ph)))
+            else:
+                closest = self.current_page_index
+
+        else:
+            closest, min_dist = self.current_page_index, inf
+            for idx, widget in self.page_widgets.items():
+                try:
+                    w_center = widget.mapTo(self.scroll_content, QPoint(0, 0)).y() + (
+                        widget.height() / 2
+                    )
+                    dist = abs(w_center - center)
+                    if dist < min_dist:
+                        min_dist = dist
+                        closest = idx
+                except RuntimeError:
+                    continue
 
         if closest != self.current_page_index:
             self.current_page_index = closest
@@ -862,9 +884,11 @@ class ReaderTab(
 
         if self._virtual_enabled:
             s, e = self._virtual_range
-            if self.current_page_index > e - 10 or self.current_page_index < s + 10:
+            count = self.current_doc.page_count
+            if (self.current_page_index > e - 10 and e < count) or (
+                self.current_page_index < s + 10 and s > 0
+            ):
                 self.rebuild_layout()
-                self.ensure_visible(self.current_page_index)
 
         self.render_visible_pages()
         self._apply_signature_overlays()
