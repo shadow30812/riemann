@@ -23,11 +23,24 @@ class PageWidget(QLabel):
             parent: The parent widget instance. Defaults to None.
         """
         super().__init__(parent)
+        self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.temp_points: List[QPoint] = []
         self.temp_pen = QPen()
         self.markup_rects: List[QRect] = []
         self.markup_color: QColor = QColor()
         self.signature_overlays: List[dict] = []
+        self.selected_text_rects: List[QRect] = []
+
+    def set_text_selection(self, rects: List[QRect]) -> None:
+        """
+        Sets the text selection rectangles to be visually highlighted.
+
+        Args:
+            rects (List[QRect]): The bounding rectangles of the selected text segments.
+        """
+        self.selected_text_rects = rects
+        self.update()
 
     def set_temp_stroke(
         self, points: List[QPoint], color_str: str, thickness: int, is_highlight: bool
@@ -122,8 +135,8 @@ class PageWidget(QLabel):
 
             painter.setPen(QPen(color, 3))
             painter.drawRect(rect)
-
             painter.setPen(color)
+
             font = painter.font()
             font.setPointSize(max(8, int(rect.height() / 6)))
             font.setBold(True)
@@ -135,6 +148,11 @@ class PageWidget(QLabel):
                 Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
                 f"{icon} {msg}\n{subject}",
             )
+        if hasattr(self, "selected_text_rects") and self.selected_text_rects:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 120, 215, 80))
+            for rect in self.selected_text_rects:
+                painter.drawRect(rect)
 
         painter.end()
 

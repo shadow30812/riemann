@@ -8,6 +8,7 @@ the full PDF reading experience.
 import os
 import shutil
 import sys
+import urllib.parse
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pikepdf
@@ -21,10 +22,12 @@ from PySide6.QtCore import (
     QSettings,
     Qt,
     QTimer,
+    QUrl,
     Signal,
 )
 from PySide6.QtGui import (
     QColor,
+    QDesktopServices,
     QKeyEvent,
     QKeySequence,
     QPalette,
@@ -43,6 +46,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPushButton,
     QRubberBand,
@@ -1121,6 +1125,61 @@ class ReaderTab(
                         self.active_drawing = []
                         return True
 
+            elif (
+                event.type() == QEvent.Type.MouseButtonPress
+                and event.button() == Qt.MouseButton.LeftButton
+            ):
+                source.setFocus()
+                self.is_selecting_text = True
+                self.text_select_start = event.pos()
+                source.set_text_selection([])
+                self.current_selected_text = ""
+                return True
+
+            elif event.type() == QEvent.Type.MouseMove and getattr(
+                self, "is_selecting_text", False
+            ):
+                drag_rect = QRect(self.text_select_start, event.pos()).normalized()
+                rects, text = self._get_intersecting_text_data(page_idx, drag_rect)
+                source.set_text_selection(rects)
+                self.current_selected_text = text
+                return True
+
+            elif event.type() == QEvent.Type.MouseButtonRelease and getattr(
+                self, "is_selecting_text", False
+            ):
+                self.is_selecting_text = False
+                drag_rect = QRect(self.text_select_start, event.pos()).normalized()
+                rects, text = self._get_intersecting_text_data(page_idx, drag_rect)
+                source.set_text_selection(rects)
+                self.current_selected_text = text
+                return True
+
+            elif (
+                event.type() == QEvent.Type.KeyPress
+                and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+                and event.key() == Qt.Key.Key_C
+            ):
+                if getattr(self, "current_selected_text", ""):
+                    QApplication.clipboard().setText(self.current_selected_text)
+                    self.show_toast("Copied text to clipboard! 📋")
+                return True
+
+            elif event.type() == QEvent.Type.ContextMenu:
+                if getattr(self, "current_selected_text", ""):
+                    menu = QMenu(source)
+                    copy_action = menu.addAction("Copy Text")
+                    search_action = menu.addAction("Search Web")
+
+                    action = menu.exec(event.globalPos())
+
+                    if action == copy_action:
+                        QApplication.clipboard().setText(self.current_selected_text)
+                        self.show_toast("Copied text to clipboard! 📋")
+                    elif action == search_action:
+                        self._search_web_for_selected_text(self.current_selected_text)
+                return True
+
         return super().eventFilter(source, event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -1572,3 +1631,97 @@ class ReaderTab(
             QMessageBox.critical(
                 self, "Export Error", f"Failed to encrypt PDF:\n{str(e)}"
             )
+
+    def _get_intersecting_text_data(
+        self, page_idx: int, drag_rect: QRect
+    ) -> tuple[List[QRect], str]:
+        """
+        Calculates character-level intersections with the drag rectangle and extracts the precise text.
+
+        Args:
+            page_idx (int): The index of the currently processed document page.
+            drag_rect (QRect): The user's selection drag bounding box.
+
+        Returns:
+            tuple[List[QRect], str]: A tuple containing the list of character bounding boxes
+                                     and the concatenated string of selected text.
+        """
+        if not drag_rect or drag_rect.isEmpty():
+            return [], ""
+
+        scale = self.calculate_scale()
+        base_w, base_h = (
+            self._cached_base_size if self._cached_base_size else (595, 842)
+        )
+        rotation = getattr(self, "rotation", 0)
+
+        if rotation in (90, 270):
+            logical_w, logical_h = base_h * scale, base_w * scale
+        else:
+            logical_w, logical_h = base_w * scale, base_h * scale
+
+        if page_idx not in self.text_segments_cache:
+            self.text_segments_cache[page_idx] = self.current_doc.get_text_segments(
+                page_idx
+            )
+
+        segments = self.text_segments_cache[page_idx]
+        intersecting_rects = []
+        selected_text_pieces = []
+
+        for text, (l, t, r, b) in segments:
+            char_count = len(text)
+            if char_count == 0:
+                continue
+
+            char_w = (r - l) / char_count
+            segment_chars = []
+
+            for i, char in enumerate(text):
+                char_l = l + i * char_w
+                char_r = char_l + char_w
+
+                x = int(char_l * scale)
+                w_rect = int((char_r - char_l) * scale)
+                h_rect = int((t - b) * scale)
+                y = int(logical_h - (t * scale))
+
+                if h_rect < 0:
+                    y += h_rect
+                    h_rect = abs(h_rect)
+
+                if rotation == 90:
+                    x, y = int(logical_h) - y - h_rect, x
+                    w_rect, h_rect = h_rect, w_rect
+                elif rotation == 180:
+                    x, y = int(logical_w) - x - w_rect, int(logical_h) - y - h_rect
+                elif rotation == 270:
+                    x, y = y, int(logical_w) - x - w_rect
+                    w_rect, h_rect = h_rect, w_rect
+
+                char_rect = QRect(x, y, max(1, w_rect), h_rect)
+
+                if drag_rect.intersects(char_rect):
+                    intersecting_rects.append(char_rect)
+                    segment_chars.append(char)
+
+            if segment_chars:
+                selected_text_pieces.append("".join(segment_chars))
+
+        return intersecting_rects, " ".join(selected_text_pieces)
+
+    def _search_web_for_selected_text(self, text: str) -> None:
+        """
+        Formats a Google search URL for the selected text and opens it
+        in the application's internal browser.
+
+        Args:
+            text (str): The selected text string to search for.
+        """
+        query = urllib.parse.quote_plus(text.strip())
+        url_string = f"https://www.google.com/search?q={query}"
+
+        if hasattr(self, "window") and hasattr(self.window(), "new_browser_tab"):
+            self.window().new_browser_tab(url_string)
+        else:
+            QDesktopServices.openUrl(QUrl(url_string))

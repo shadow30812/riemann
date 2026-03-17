@@ -684,7 +684,23 @@ class DownloadManager(QDialog):
 
 
 class PasswordDialog(QDialog):
+    """
+    A custom dialog for prompting the user to enter a password to unlock a secure PDF.
+
+    This dialog features a modern dark-mode stylesheet, hides the default context
+    help button, and supports displaying an optional inline error message if a
+    previous password attempt failed.
+    """
+
     def __init__(self, parent=None, error_msg: Optional[str] = None):
+        """
+        Initializes the PasswordDialog.
+
+        Args:
+            parent: The parent widget (usually the ReaderTab).
+            error_msg: An optional string to display as a red error label above
+                       the input field (e.g., "Incorrect password. Please try again.").
+        """
         super().__init__(parent)
         self.setWindowTitle("Unlock Secure PDF")
 
@@ -764,4 +780,10 @@ class PasswordDialog(QDialog):
         """)
 
     def get_password(self) -> str:
+        """
+        Retrieves the password currently entered in the dialog's text field.
+
+        Returns:
+            The raw string value from the password input field.
+        """
         return self.txt_password.text()
