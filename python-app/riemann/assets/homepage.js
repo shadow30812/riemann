@@ -18,7 +18,7 @@ function saveLinks(links) {
         iframe.style.display = 'none';
         document.body.appendChild(iframe);
     }
-    iframe.src = "riemann-save://" + payload;
+    iframe.src = "https://riemann-save.local/?data=" + payload;
 }
 
 /**

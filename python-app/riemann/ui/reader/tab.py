@@ -321,6 +321,10 @@ class ReaderTab(
         self.btn_cite.setToolTip("Copy BibTeX Citation")
         self.btn_cite.clicked.connect(self.copy_citation)
 
+        self.btn_rotate = QPushButton("↻")
+        self.btn_rotate.setToolTip("Rotate PDF 90°")
+        self.btn_rotate.clicked.connect(self.rotate_document)
+
         self.btn_reflow = QPushButton("📄/📝")
         self.btn_reflow.setToolTip("Toggle Text Reflow Mode")
         self.btn_reflow.setCheckable(True)
@@ -401,6 +405,7 @@ class ReaderTab(
             self.btn_rename,
             self.btn_export,
             self.btn_sign,
+            self.btn_rotate,
             self.btn_reflow,
             self.btn_facing,
             self.btn_scroll_mode,
@@ -983,11 +988,11 @@ class ReaderTab(
                     if self.current_tool == "note":
                         if self.handle_annotation_click(source, event):
                             return True
-                        self.create_new_annotation(
-                            page_idx,
+                        rx, ry = self._map_to_unrotated(
                             event.pos().x() / source.width(),
                             event.pos().y() / source.height(),
                         )
+                        self.create_new_annotation(page_idx, rx, ry)
                         return True
                     elif self.current_tool in (
                         "pen",
@@ -1024,17 +1029,19 @@ class ReaderTab(
                         and self.active_drawing
                     ):
                         w, h = source.width(), source.height()
-                        pts = [(p.x() / w, p.y() / h) for p in self.active_drawing]
-                        self._add_anno_data(
-                            page_idx,
-                            {
-                                "type": "drawing",
-                                "subtype": self.current_tool,
-                                "points": pts,
-                                "color": self.pen_color,
-                                "thickness": self.pen_thickness,
-                            },
-                        )
+                        pts = []
+                        for p in self.active_drawing:
+                            pts.append(self._map_to_unrotated(p.x() / w, p.y() / h))
+                            self._add_anno_data(
+                                page_idx,
+                                {
+                                    "type": "drawing",
+                                    "subtype": self.current_tool,
+                                    "points": pts,
+                                    "color": self.pen_color,
+                                    "thickness": self.pen_thickness,
+                                },
+                            )
                         source.clear_temp_stroke()
                         self.active_drawing = []
                         return True
@@ -1398,3 +1405,21 @@ class ReaderTab(
             self.load_document(path)
         else:
             self.show_toast("File no longer exists at this location.")
+
+    def _map_to_unrotated(self, rx: float, ry: float) -> Tuple[float, float]:
+        """Maps x and y coordinates of rotated PDF to unrotated pixmaps
+
+        Args:
+            rx: Unrotated x coordinates
+            ry: Unrotated y coordinates
+
+        Returns:
+            Tuple[float, float]: Rotated x and y coordinates"""
+        rotation = getattr(self, "rotation", 0)
+        if rotation == 90:
+            return ry, 1.0 - rx
+        elif rotation == 180:
+            return 1.0 - rx, 1.0 - ry
+        elif rotation == 270:
+            return 1.0 - ry, rx
+        return rx, ry

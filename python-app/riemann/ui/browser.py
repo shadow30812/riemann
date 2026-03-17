@@ -236,12 +236,20 @@ class WebPage(QWebEnginePage):
         Returns:
             bool: True if the navigation should proceed natively, False if intercepted.
         """
+        if url.host() == "riemann-save.local":
+            query = url.query()
+            if query.startswith("data="):
+                payload = urllib.parse.unquote(query[5:])
+                self.app_settings.setValue("homepage_links", payload)
+            return False
+
         if url.scheme() == "riemann-save":
             payload = urllib.parse.unquote(
                 url.toString().replace("riemann-save://", "")
             )
             self.app_settings.setValue("homepage_links", payload)
             return False
+
         return super().acceptNavigationRequest(url, _type, isMainFrame)
 
 

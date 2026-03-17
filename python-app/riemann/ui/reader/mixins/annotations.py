@@ -155,12 +155,15 @@ class AnnotationsMixin:
             bool: True if an annotation was clicked and handled; False otherwise.
         """
         pid = str(label.property("pageIndex"))
-        x, y = event.pos().x(), event.pos().y()
+        w, h = label.width(), label.height()
+        rx, ry = event.pos().x() / w, event.pos().y() / h
+        if hasattr(self, "_map_to_unrotated"):
+            rx, ry = self._map_to_unrotated(rx, ry)
+
         for i, anno in enumerate(self.annotations.get(pid, [])):
             if anno.get("type") == "note":
                 ax, ay = anno["rel_pos"]
-                px, py = ax * label.width(), ay * label.height()
-                if ((x - px) ** 2 + (y - py) ** 2) ** 0.5 < 20:
+                if ((rx - ax) ** 2 + (ry - ay) ** 2) ** 0.5 < 0.03:
                     self.show_annotation_popup(anno, int(pid), i)
                     return True
         return False
@@ -239,8 +242,11 @@ class AnnotationsMixin:
         pid = str(page_idx)
         if pid not in self.annotations:
             return
+
         w, h = label.width(), label.height()
         rx, ry = pos.x() / w, pos.y() / h
+        if hasattr(self, "_map_to_unrotated"):
+            rx, ry = self._map_to_unrotated(rx, ry)
 
         best, min_dist = -1, 0.08
         for i, anno in enumerate(self.annotations[pid]):

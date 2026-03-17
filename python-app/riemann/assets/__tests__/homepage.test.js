@@ -59,7 +59,7 @@ describe('Homepage UI Interactions', () => {
         expect(iframe.style.display).toBe('none');
 
         const encodedPayload = encodeURIComponent(JSON.stringify(testLinks));
-        expect(iframe.src).toBe(`riemann-save://${encodedPayload}`);
+        expect(iframe.src).toBe(`riemann-save.local/?data=${encodedPayload}`);
     });
 
     test('Add Link button prompts user and updates grid', () => {

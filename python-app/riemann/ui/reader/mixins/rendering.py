@@ -8,7 +8,7 @@ import sys
 from typing import Dict, Tuple
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygon
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygon, QTransform
 from PySide6.QtWidgets import QApplication, QCheckBox, QHBoxLayout, QLineEdit, QWidget
 
 from ....core.constants import ViewMode, ZoomMode
@@ -213,15 +213,24 @@ class RenderingMixin:
 
             w, h = pix.width() / dpr, pix.height() / dpr
 
-            self._render_forms(idx, scale, h)
+            self._render_forms(idx, scale, w, h)
             self._render_overlays(idx, pix, scale, w, h)
+
+            rotation = getattr(self, "rotation", 0)
+            if rotation != 0:
+                transform = QTransform().rotate(rotation)
+                pix = pix.transformed(
+                    transform, Qt.TransformationMode.SmoothTransformation
+                )
 
             self.page_widgets[idx].setPixmap(pix)
 
         except Exception as e:
             sys.stderr.write(f"Render error page {idx}: {e}\n")
 
-    def _render_forms(self, idx: int, scale: float, logical_h: float) -> None:
+    def _render_forms(
+        self, idx: int, scale: float, logical_w: float, logical_h: float
+    ) -> None:
         """
         Synthesizes embedded interactive PDF form controls onto the layout architecture.
 
@@ -254,6 +263,16 @@ class RenderingMixin:
                 if h_rect < 0:
                     y += h_rect
                     h_rect = abs(h_rect)
+
+                rotation = getattr(self, "rotation", 0)
+                if rotation == 90:
+                    x, y = int(logical_h) - y - h_rect, x
+                    w_rect, h_rect = h_rect, w_rect
+                elif rotation == 180:
+                    x, y = int(logical_w) - x - w_rect, int(logical_h) - y - h_rect
+                elif rotation == 270:
+                    x, y = y, int(logical_w) - x - w_rect
+                    w_rect, h_rect = h_rect, w_rect
 
                 ctrl = None
                 if "Text" in f_type:
@@ -447,7 +466,11 @@ class RenderingMixin:
             return
         try:
             res = self.current_doc.render_page(0, 1.0, 0)
-            self._cached_base_size = (res.width, res.height)
+            w, h = res.width, res.height
+            if getattr(self, "rotation", 0) in (90, 270):
+                self._cached_base_size = (h, w)
+            else:
+                self._cached_base_size = (w, h)
         except Exception:
             self._cached_base_size = (595, 842)
 
@@ -463,3 +486,11 @@ class RenderingMixin:
         bw, bh = self._cached_base_size
         s = self.calculate_scale()
         return (int(bw * s), int(bh * s))
+
+    def rotate_document(self) -> None:
+        """Forces re-evaluation of base size constraints."""
+        if not hasattr(self, "rotation"):
+            self.rotation = 0
+        self.rotation = (self.rotation + 90) % 360
+        self._cached_base_size = None
+        self.on_zoom_changed_internal()
