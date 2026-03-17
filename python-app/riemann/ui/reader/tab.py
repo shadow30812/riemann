@@ -11,9 +11,11 @@ import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import (
+    QEasingCurve,
     QEvent,
     QObject,
     QPoint,
+    QPropertyAnimation,
     QRect,
     QSettings,
     Qt,
@@ -35,6 +37,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -239,8 +242,19 @@ class ReaderTab(
 
         self.toolbar = QWidget()
         self.toolbar.setFixedHeight(50)
-        t_layout = QHBoxLayout(self.toolbar)
+        self.toolbar.installEventFilter(self)
 
+        self.toolbar_anim = QPropertyAnimation(self.toolbar, b"maximumHeight")
+        self.toolbar_anim.setDuration(200)
+        self.toolbar_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+
+        self.hover_trigger = QWidget(self)
+        self.hover_trigger.setFixedHeight(15)
+        self.hover_trigger.setStyleSheet("background: transparent;")
+        self.hover_trigger.installEventFilter(self)
+        self.hover_trigger.hide()
+
+        t_layout = QHBoxLayout(self.toolbar)
         self._setup_toolbar_buttons(t_layout)
         t_layout.addStretch()
         layout.addWidget(self.toolbar)
@@ -412,6 +426,7 @@ class ReaderTab(
             self.btn_export,
             self.btn_sign,
             self.btn_rotate,
+            self.btn_rotate_ccw,
             self.btn_reflow,
             self.btn_facing,
             self.btn_scroll_mode,
@@ -584,20 +599,23 @@ class ReaderTab(
                     item.setData(Qt.ItemDataRole.UserRole, path)
                     self.list_recent.addItem(item)
 
-    def load_document(self, path: str, restore_state: bool = False) -> None:
+    def load_document(
+        self, path: str, restore_state: bool = False, password: Optional[str] = None
+    ) -> None:
         """
         Consumes filepath strings mapping logic execution parsing rendering either markdown or PDF binary streams.
 
         Args:
             path (str): Full validated filesystem pathway containing data.
             restore_state (bool): Instruction dictating utilization previously saved user coordinates locally stored. Defaults to False.
+            password (Optional[str]): String checking presence/absence of password protection in currently open file. Defaults to None.
         """
         if path.lower().endswith(".md"):
             self._load_markdown(path)
             return
 
         try:
-            self.current_doc = self.engine.load_document(path)
+            self.current_doc = self.engine.load_document(path, password)
             self._probe_base_page_size()
             self.current_path = path
             self._update_tab_title(os.path.basename(path))
@@ -632,6 +650,23 @@ class ReaderTab(
             QTimer.singleShot(2000, self.extract_document_metadata)
 
         except Exception as e:
+            err_str = str(e).lower()
+            if (
+                "password" in err_str
+                or "encrypted" in err_str
+                or "format error" in err_str
+                or "error" in err_str
+            ):
+                pw, ok = QInputDialog.getText(
+                    self,
+                    "Password Protected",
+                    "Enter PDF Password:",
+                    QLineEdit.EchoMode.Password,
+                )
+                if ok and pw:
+                    self.load_document(path, restore_state, pw)
+                return
+
             sys.stderr.write(f"Load error: {e}\n")
 
     def _load_markdown(self, path: str) -> None:
@@ -1439,6 +1474,7 @@ class ReaderTab(
             event (Any): Fired geometry update system event.
         """
         super().resizeEvent(event)
+
         if hasattr(self, "lbl_toast") and self.lbl_toast.isVisible():
             self.lbl_toast.move(
                 (self.width() - self.lbl_toast.width()) // 2, self.height() - 80

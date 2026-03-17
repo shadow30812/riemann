@@ -147,6 +147,7 @@ class PdfEngine:
 
         Args:
             path: The absolute path to the PDF file.
+            password: Optional password for encrypted PDFs.
 
         Returns:
             A loaded RiemannDocument instance.

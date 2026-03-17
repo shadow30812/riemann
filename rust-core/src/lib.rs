@@ -618,12 +618,16 @@ impl PdfEngine {
     ///
     /// # Arguments
     /// * `path` - The absolute or relative path to the PDF file.
+    /// * `password` - Password to the PDF file.
     ///
     /// # Returns
     /// A `RiemannDocument` instance ready for rendering and interaction.
-    fn load_document(&self, path: String) -> PyResult<RiemannDocument> {
+    #[pyo3(signature = (path, password=None))]
+    fn load_document(&self, path: &str, password: Option<String>) -> PyResult<RiemannDocument> {
+        let pwd_static: Option<&'static str> =
+            password.map(|p| Box::leak(p.into_boxed_str()) as &'static str);
         let doc = get_pdfium()
-            .load_pdf_from_file(&path, None)
+            .load_pdf_from_file(path, pwd_static)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
 
         Ok(RiemannDocument {
