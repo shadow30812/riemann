@@ -1,6 +1,6 @@
 # Riemann
 
-**An Integrated Research Environment (IRE) Designed for High-Performance Research Workflows**
+## An Integrated Research Environment (IRE) Designed for High-Performance Research Workflows
 
 Riemann is a hybrid desktop research environment designed for serious reading, analysis, and knowledge workflows. It combines a high-performance PDF engine, local-first AI tools, a full Chromium research browser, annotation systems, document utilities, and a deep-work-oriented workspace into a single cohesive application.
 
@@ -96,7 +96,7 @@ The goal is not to compete directly with long-established PDF software, but to e
 
 ## System Architecture
 
-```
+```markdown
 +------------------------------------------------------------+
 |                        USER INTERFACE                      |
 |                        (PySide6 / Qt)                      |
@@ -128,7 +128,7 @@ Riemann bridges Python and Rust using **PyO3**, allowing Rust code to compile in
 
 The Rust backend compiles to:
 
-```
+```bash
 riemann_core.abi3.so
 ```
 
@@ -177,7 +177,7 @@ Thread-safe representation of an open PDF document.
 
 Methods:
 
-```
+```py
 render_page(page_index, scale, dark_mode_int)
 get_page_text(page_index)
 ocr_page(page_index, scale)
@@ -204,7 +204,7 @@ Returned by rendering pipeline.
 
 Contains:
 
-```
+```py
 width
 height
 pixel_buffer
@@ -225,6 +225,11 @@ Advantages:
 * modular development
 * feature isolation
 * easier debugging
+
+### PDF Text Selection & Extraction
+
+* Added full support for click-and-drag text selection directly within the PDF image viewport.
+* Quick "Search Web" functionality directly from selected PDF text.
 
 ---
 
@@ -264,7 +269,7 @@ Supported tools:
 
 Annotations stored locally in:
 
-```
+```bash
 ~/.local/share/riemann/annotations/
 ```
 
@@ -342,13 +347,13 @@ Capabilities:
 
 Model used:
 
-```
+```bash
 all-MiniLM-L6-v2
 ```
 
 Vector index:
 
-```
+```bash
 FAISS
 ```
 
@@ -360,7 +365,7 @@ Users can draw a rectangle over document content.
 
 Pipeline:
 
-```
+```markdown
 Selection
 → Rendered image
 → PNG buffer
@@ -378,13 +383,13 @@ Supported tasks:
 
 OCR handled by Rust worker crate.
 
-```
+```rust
 rust-ocr-worker
 ```
 
 Pipeline:
 
-```
+```markdown
 Page Render
 → RGBA buffer
 → Rust worker
@@ -405,6 +410,7 @@ Capabilities:
 * viewing supplementary material
 * dataset downloads
 * print webview to PDF (allowing users to instantly capture and convert live web research, articles, or documentation into local PDFs for offline reading and annotation)
+* Homepage UI for managing quick-access web links with a sleek modal interface (showShortcutModal) to safely add, edit, and delete custom URL shortcuts with automatic favicon fetching.
 
 ---
 
@@ -430,7 +436,7 @@ Browser homepage includes:
 
 Communication with Python occurs via:
 
-```
+```js
 riemann-save://
 ```
 
@@ -438,11 +444,11 @@ riemann-save://
 
 ## Music Mode (Audio Engine)
 
-Riemann includes a Web Audio DSP engine for focus music.
+Riemann includes a Web Audio DSP engine for focus music. Users can manipulate real-time sliders to customize the equalizer parameters: Gain, Warmth (Saturation), Width, Bass, Treble, and Air.
 
 DSP Chain:
 
-```
+```markdown
 Media Source
 → PreAmp
 → Saturation
@@ -478,7 +484,7 @@ Indexed metadata:
 
 Bookmarks stored in:
 
-```
+```json
 bookmarks.json
 ```
 
@@ -493,7 +499,7 @@ Tracks:
 
 Categories:
 
-```
+```md
 pdf
 web
 ```
@@ -523,6 +529,12 @@ Capabilities:
 * page extraction
 * document merging
 
+### PDF Security & Password Management
+
+* Password Detection: Automatically detects encrypted PDFs and prompts users for a password via a seamless inline UI dialog upon opening.
+
+* Secure Export: Added the ability to lock and export an encrypted, password-protected copy of the current PDF using pikepdf.
+
 ---
 
 ## Markdown Reflow
@@ -533,14 +545,14 @@ Supports Markdown rendering including **KaTeX math blocks**.
 
 ## Viewing Modes
 
-```
+```enum
 IMAGE
 REFLOW
 ```
 
 Zoom modes:
 
-```
+```enum
 MANUAL
 FIT_WIDTH
 FIT_HEIGHT
@@ -566,13 +578,15 @@ Riemann provides advanced window and tab management to help organize complex res
 
 ### Application
 
-Ctrl+O — Open document
+Ctrl + O — Open document
 
-Ctrl+Q — Quit
+Ctrl + Q — Quit active window
 
-Ctrl+, — Preferences
+Ctrl + , — Settings
 
-F — Fullscreen
+Ctrl + D — Toggle Dark Mode (works on both PDFs and websites)
+
+F11 — Fullscreen
 
 Esc — Exit fullscreen
 
@@ -582,17 +596,63 @@ Up / Down — Scroll
 
 Left / Right — Page navigation
 
-Ctrl + + — Zoom in
+Ctrl + +/= — Zoom in
 
-Ctrl + - — Zoom out
+Ctrl + -/_ — Zoom out
 
 Ctrl + 0 — Reset zoom
 
-### Tabs
+Ctrl + Tab — Cycle through tabs
+
+Ctrl + Shift + Tab — Cycle through tabs in the reverse direction
+
+### Tabs and Windows
 
 Ctrl + T — New tab
 
 Ctrl + W — Close tab
+
+Ctrl + N — New Window
+
+Ctrl + Shift + N — New Incognito Window
+
+### PDF Reader
+
+F — Immersive fullscreen (no menu bar)
+
+N — Toggle Dark Mode
+
+R — Toggle Reflow Mode
+
+C — Toggle Continuous Mode
+
+D — Toggle Dual Page Mode
+
+W — Apply "Fit Width" Zoom
+
+H — Apply "Fit Height" Zoom
+
+Ctrl + R — Rotate page clockwise by 90°
+
+Ctrl + Shift + R — Rotate page counter-clockwise by 90°
+
+Ctrl + A — Select all text in reflow/markdown mode
+
+Ctrl + F — Toggle standard search bar
+
+Ctrl + I — Toggle AI semantic search bar
+
+Ctrl + Shift + A — Toggle Annotation Tools
+
+Ctrl + Shift + S — Save an encrypted copy of the current file
+
+Space — Scroll down one page length
+
+Shift + Space — Scroll up one page length
+
+Home — Scroll to absolute top of the document
+
+End — Scroll to absolute bottom of the document
 
 ### Browser
 
@@ -604,11 +664,19 @@ Alt + Right — Forward
 
 F6 — Focus address bar
 
+Ctrl + M — Toggle Music Mode
+
+F12 / Ctrl + Shift + I — Open Web Inspector/DevTools
+
+Ctrl + R — Reload page
+
+Ctrl + Shift + R — Clear cache and reload page
+
 ---
 
 ## Repository Structure
 
-```
+```bash
 riemann/
 ├── .editorconfig
 ├── .github/
@@ -713,7 +781,7 @@ riemann/
 
 ## Rendering Pipeline
 
-```
+```markdown
 PDF
 → Rust PDFium
 → Rasterization
@@ -723,11 +791,17 @@ PDF
 → Display
 ```
 
+### PDF Rotation & Responsive Rendering
+
+* Added the ability to rotate the current PDF 90° clockwise and counter-clockwise with dynamic bounding box recalculations.
+
+* Improved viewport responsiveness: PDF rendering and zoom layouts now automatically and correctly rebuild when resizing the window or changing displays.
+
 ---
 
 ## AI Pipeline
 
-```
+```markdown
 PDF
 → Chunking
 → Embeddings
@@ -754,7 +828,7 @@ pip install -r requirements.txt
 just run
 ```
 
-You may also choose to install the pre-compiled optimized binary of the app. Note however that it may not be stable on all systems directly, and you may have to run it with the terminal in case of any missing packages or errors. That being said, the latest binary at the time of writing this README is available at <https://github.com/shadow30812/riemann/releases/download/v3.2/Riemann>, compiled in an Ubuntu 24.04.02 LTS machine.
+You may also choose to install the pre-compiled optimized binary of the app. Note however that it may not be stable on all systems directly, and you may have to run it with the terminal in case of any missing packages or errors. That being said, the latest binary at the time of writing this README is available at <https://github.com/shadow30812/riemann/releases/download/v3.2.7/Riemann>, compiled in an Ubuntu 24.04.02 LTS machine.
 
 ---
 
@@ -856,7 +930,7 @@ Contributions welcome in:
 
 ## Versioning
 
-V3.2 released on 11/03/2026
+V3.2.7 released on 18/03/2026
 
 ## License
 
