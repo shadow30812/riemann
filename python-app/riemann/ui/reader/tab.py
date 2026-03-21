@@ -836,6 +836,9 @@ class ReaderTab(
         Args:
             value (int): Extracted positional marker mapping current visible offset calculations linearly.
         """
+        if getattr(self, "_ignore_scroll", False):
+            return
+
         if self._virtual_enabled and self._cached_base_size and self.current_doc:
             center = value + (self.scroll.viewport().height() / 2)
             _, base_h = self._cached_base_size
@@ -853,6 +856,9 @@ class ReaderTab(
         """
         Dispatches debounced execution queries checking layout dependencies implicitly managing viewport caching correctly.
         """
+        if getattr(self, "_ignore_scroll", False):
+            return
+
         self.scroll_timer.stop()
         self.on_scroll_changed(self.scroll.verticalScrollBar().value())
 

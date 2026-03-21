@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "riemann"
-version = "3.2.7"
+version = "3.2.8"
 description = "PDF reader and Web browser with integrated music mode"
 requires-python = ">=3.11"
 dependencies = [

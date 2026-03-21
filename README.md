@@ -828,7 +828,7 @@ pip install -r requirements.txt
 just run
 ```
 
-You may also choose to install the pre-compiled optimized binary of the app. Note however that it may not be stable on all systems directly, and you may have to run it with the terminal in case of any missing packages or errors. That being said, the latest binary at the time of writing this README is available at <https://github.com/shadow30812/riemann/releases/download/v3.2.7/Riemann>, compiled in an Ubuntu 24.04.02 LTS machine.
+You may also choose to install the pre-compiled optimized binary of the app. Note however that it may not be stable on all systems directly, and you may have to run it with the terminal in case of any missing packages or errors. That being said, the latest binary at the time of writing this README is available at <https://github.com/shadow30812/riemann/releases/download/v3.2.8/Riemann>, compiled in an Ubuntu 24.04.02 LTS machine.
 
 ---
 
@@ -930,7 +930,7 @@ Contributions welcome in:
 
 ## Versioning
 
-V3.2.7 released on 21/03/2026
+V3.2.8 released on 21/03/2026
 
 ## License
 

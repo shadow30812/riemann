@@ -30,6 +30,9 @@ class RenderingMixin:
         if not self.current_doc:
             return
 
+        self._ignore_scroll = True
+        self.scroll_timer.stop()
+
         sb = self.scroll.verticalScrollBar()
         was_blocked = sb.signalsBlocked()
         sb.blockSignals(True)
@@ -55,9 +58,14 @@ class RenderingMixin:
 
         self.scroll_content.adjustSize()
         QApplication.processEvents()
-
         sb.blockSignals(was_blocked)
-        QTimer.singleShot(50, lambda: self.ensure_visible(target_page))
+
+        def _finalize_rebuild():
+            self.current_page_index = target_page
+            self._ignore_scroll = False
+            self.ensure_visible(target_page)
+
+        QTimer.singleShot(50, _finalize_rebuild)
 
     def _build_virtual_layout(self, count: int) -> None:
         """

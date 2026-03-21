@@ -134,8 +134,6 @@ lxml==6.0.2
     #   pyhanko
 markdown==3.10.1
     # via -r requirements.in
-markdown-it-py==4.0.0
-    # via rich
 markupsafe==3.0.3
     # via
     #   jinja2
