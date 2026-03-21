@@ -458,18 +458,32 @@ class RenderingMixin:
 
     def _probe_base_page_size(self) -> None:
         """
-        Executes a background sample extraction on page 0 assessing geometric foundation metrics.
+        Executes a background sample extraction on all pages assessing geometric foundation metrics,
+        taking the maximum width and height to accommodate variable-sized PDFs.
         """
         if not self.current_doc:
             self._cached_base_size = None
             return
         try:
-            res = self.current_doc.render_page(0, 1.0, 0)
-            w, h = res.width, res.height
-            if getattr(self, "rotation", 0) in (90, 270):
-                self._cached_base_size = (h, w)
-            else:
-                self._cached_base_size = (w, h)
+            max_w, max_h = 0, 0
+            test_scale = 0.1
+
+            for i in range(self.current_doc.page_count):
+                res = self.current_doc.render_page(i, test_scale, 0)
+
+                w = int(res.width / test_scale)
+                h = int(res.height / test_scale)
+
+                if getattr(self, "rotation", 0) in (90, 270):
+                    max_w = max(max_w, h)
+                    max_h = max(max_h, w)
+                else:
+                    max_w = max(max_w, w)
+                    max_h = max(max_h, h)
+
+            self._cached_base_size = (
+                (max_w, max_h) if max_w > 0 and max_h > 0 else (595, 842)
+            )
         except Exception:
             self._cached_base_size = (595, 842)
 
