@@ -428,6 +428,11 @@ class RenderingMixin:
         vw = max(10, viewport.width() - 30)
         vh = max(10, viewport.height() - 20)
 
+        if self.zoom_mode == ZoomMode.AUTO_FIT:
+            scale_w = vw / (bw * 2) if self.facing_mode else vw / bw
+            scale_h = vh / bh
+            return min(scale_w, scale_h)
+
         if self.facing_mode and self.zoom_mode == ZoomMode.FIT_WIDTH:
             return vw / (bw * 2)
         elif self.zoom_mode == ZoomMode.FIT_WIDTH:

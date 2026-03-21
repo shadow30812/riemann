@@ -395,7 +395,17 @@ class ReaderTab(
         self.combo_zoom = QComboBox()
         self.combo_zoom.setEditable(True)
         self.combo_zoom.addItems(
-            ["Fit Width", "Fit Height", "50%", "75%", "100%", "125%", "150%", "200%"]
+            [
+                "Auto Fit",
+                "Fit Width",
+                "Fit Height",
+                "50%",
+                "75%",
+                "100%",
+                "125%",
+                "150%",
+                "200%",
+            ]
         )
         self.combo_zoom.currentIndexChanged.connect(self.on_zoom_selected)
         self.combo_zoom.lineEdit().returnPressed.connect(self.on_zoom_text_entered)
@@ -1329,6 +1339,7 @@ class ReaderTab(
             idx (int): Position integer referencing active string effectively properly efficiently implicitly.
         """
         self.apply_zoom_string(self.combo_zoom.currentText())
+        self.scroll.setFocus()
 
     def on_zoom_text_entered(self) -> None:
         """
@@ -1344,13 +1355,19 @@ class ReaderTab(
         Args:
             text (str): Evaluation mapping resolving formatting rules efficiently globally correctly safely dynamically appropriately.
         """
-        if "Width" in text:
+        if "Auto" in text:
+            self.zoom_mode = ZoomMode.AUTO_FIT
+        elif "Width" in text:
             self.zoom_mode = ZoomMode.FIT_WIDTH
         elif "Height" in text:
             self.zoom_mode = ZoomMode.FIT_HEIGHT
         else:
             try:
-                val = float(text.replace("%", "").strip())
+                val = (
+                    float(text.replace("%", "").strip())
+                    if "%" in text
+                    else float(text.strip())
+                )
                 self.manual_scale = max(
                     0.1, min(val / 100.0 if val > 5.0 else val, 5.0)
                 )
@@ -1370,7 +1387,9 @@ class ReaderTab(
         self.rendered_pages.clear()
         self.update_view()
 
-        if self.zoom_mode == ZoomMode.FIT_WIDTH:
+        if self.zoom_mode == ZoomMode.AUTO_FIT:
+            txt = "Auto Fit"
+        elif self.zoom_mode == ZoomMode.FIT_WIDTH:
             txt = "Fit Width"
         elif self.zoom_mode == ZoomMode.FIT_HEIGHT:
             txt = "Fit Height"
@@ -1749,3 +1768,33 @@ class ReaderTab(
             self.window().new_browser_tab(url_string)
         else:
             QDesktopServices.openUrl(QUrl(url_string))
+
+    def focusInEvent(self, event: Any) -> None:
+        """
+        Handles the event when the ReaderTab widget itself receives focus from the OS.
+        Immediately forwards focus to the appropriate viewing canvas.
+        """
+        if getattr(self, "view_mode", None) == ViewMode.REFLOW:
+            if hasattr(self, "web"):
+                self.web.setFocus()
+        else:
+            if hasattr(self, "scroll"):
+                self.scroll.setFocus()
+
+        super().focusInEvent(event)
+
+    def changeEvent(self, event: QEvent) -> None:
+        """
+        Intercepts state changes, such as window activation from alt-tabbing,
+        to ensure keyboard focus is restored to the correct canvas.
+        """
+        super().changeEvent(event)
+
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            focus_widget = QApplication.focusWidget()
+            if not isinstance(focus_widget, (QLineEdit, QComboBox)):
+                if self.view_mode == ViewMode.REFLOW:
+                    if hasattr(self, "web"):
+                        self.web.setFocus()
+                else:
+                    self.setFocus()

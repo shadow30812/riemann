@@ -16,11 +16,13 @@ class ZoomMode(Enum):
         MANUAL (int): Zoom level is set explicitly by the user (e.g., 100%, 150%).
         FIT_WIDTH (int): Zoom level automatically calculates to fit the page width.
         FIT_HEIGHT (int): Zoom level automatically calculates to fit the page height.
+        AUTO_FIT (int): Zoom level automatically calculates to fit the page optimally.
     """
 
     MANUAL = 0
     FIT_WIDTH = 1
     FIT_HEIGHT = 2
+    AUTO_FIT = 3
 
 
 class ViewMode(Enum):
