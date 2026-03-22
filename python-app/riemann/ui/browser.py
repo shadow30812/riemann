@@ -418,6 +418,7 @@ class BrowserTab(QWidget):
             """)
 
         self.btn_bookmark = QPushButton("☆")
+        self.btn_bookmark.setObjectName("bookmarkBtn")
         self.btn_bookmark.setFixedWidth(30)
         self.btn_bookmark.setCheckable(True)
         self.btn_bookmark.setToolTip("Bookmark this page")

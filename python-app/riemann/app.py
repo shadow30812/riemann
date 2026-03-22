@@ -119,11 +119,7 @@ class SettingsDialog(QDialog):
         self.resize(400, 400)
 
         layout = QVBoxLayout(self)
-
         form_layout = QFormLayout()
-        self.cb_dark = QCheckBox()
-        self.cb_dark.setChecked(parent.dark_mode)
-        form_layout.addRow("Dark Mode:", self.cb_dark)
 
         self.cb_auto_pdf = QCheckBox()
         self.cb_auto_pdf.setChecked(
@@ -352,9 +348,16 @@ class RiemannWindow(QMainWindow):
             )
 
         self.resize(1200, 900)
-
         self.settings = QSettings("Riemann", "PDFReader")
         self.dark_mode: bool = self.settings.value("darkMode", True, type=bool)
+
+        if self.dark_mode:
+            css_path = os.path.join(
+                os.path.dirname(__file__), "assets", "theme", "modern_dark.css"
+            )
+            if os.path.exists(css_path):
+                with open(css_path, "r", encoding="utf-8") as f:
+                    self.setStyleSheet(f.read())
 
         self.download_manager_dialog = DownloadManager(self)
         self.history_manager = HistoryManager()

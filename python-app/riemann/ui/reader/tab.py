@@ -419,7 +419,7 @@ class ReaderTab(
         )
         self.combo_zoom.currentIndexChanged.connect(self.on_zoom_selected)
         self.combo_zoom.lineEdit().returnPressed.connect(self.on_zoom_text_entered)
-        self.combo_zoom.setFixedWidth(100)
+        self.combo_zoom.setFixedWidth(120)
 
         self.btn_theme = QPushButton("🌓")
         self.btn_theme.setToolTip("Cycle Theme (Light / Fast Dark / Smart Dark)")
@@ -1270,6 +1270,10 @@ class ReaderTab(
                 return
             elif key == Qt.Key.Key_D:
                 self.toggle_facing_mode()
+                event.accept()
+                return
+            elif key == Qt.Key.Key_A:
+                self.apply_zoom_string("Auto Fit")
                 event.accept()
                 return
             elif key == Qt.Key.Key_W:

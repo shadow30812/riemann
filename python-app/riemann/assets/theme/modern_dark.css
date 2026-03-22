@@ -1,0 +1,256 @@
+/* =======================================================
+   1. GLOBAL VARIABLES & BASE STYLES
+   ======================================================= */
+* {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+}
+
+QWidget {
+    background-color: #1E1E1E; /* Deep dark background */
+    color: #CCCCCC;            /* Soft white text */
+}
+
+/* =======================================================
+   2. INPUTS & DROPDOWNS (Address bar, Search, Zoom)
+   ======================================================= */
+QLineEdit, QComboBox, QSpinBox {
+    background-color: #2D2D30;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+    padding: 6px 12px;
+    min-height: 20px; /* Forces alignment with buttons */
+    color: #FFFFFF;
+    selection-background-color: #007FD4;
+}
+
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+    border: 1px solid #007FD4; 
+    background-color: #1E1E1E;
+}
+
+/* Fixes the missing dropdown popup menu */
+QComboBox QAbstractItemView {
+    background-color: #252526;
+    border: 1px solid #333333;
+    border-radius: 6px;
+    selection-background-color: #04395E;
+    color: #CCCCCC;
+    outline: none;
+    padding: 4px;
+}
+
+/* Rebuilds the dropdown arrow area */
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 24px;
+    border-left: 1px solid #3E3E42;
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
+/* Inserts your downloaded SVG as the arrow */
+QComboBox::down-arrow {
+    image: url('python-app/riemann/assets//icons/chevron-down.svg');
+    width: 14px;
+    height: 14px;
+}
+
+/* =======================================================
+   3. BUTTONS (Toolbar, Actions)
+   ======================================================= */
+QPushButton, QToolButton {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 4px 8px; /* Balanced padding */
+    min-height: 20px; /* Matches inputs perfectly for straight toolbars */
+    qproperty-iconSize: 18px 18px; /* STOPS icons from squishing */
+    color: #CCCCCC;
+}
+
+QPushButton:hover, QToolButton:hover {
+    background-color: #2D2D30; 
+    color: #FFFFFF;
+}
+
+QPushButton:pressed, QToolButton:pressed {
+    background-color: #3E3E42;
+}
+
+QPushButton:checked, QToolButton:checked {
+    background-color: rgba(0, 127, 212, 0.15); 
+    border: 1px solid #007FD4;
+    color: #007FD4;
+}
+
+/* =======================================================
+   4. TAB WIDGETS (Browser & Reader Tabs)
+   ======================================================= */
+QTabWidget::pane {
+    border: none;
+    border-top: 1px solid #333333;
+    background-color: #1E1E1E;
+}
+
+QTabBar::tab {
+    background-color: #181818;
+    color: #888888;
+    padding: 8px 16px;
+    border: none;
+    border-right: 1px solid #2D2D30;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    min-width: 120px;
+    margin-top: 4px; /* Give inactive tabs a shorter look */
+}
+
+QTabBar::tab:selected {
+    background-color: #1E1E1E; /* Matches the pane background */
+    color: #FFFFFF;
+    border-top: 2px solid #007FD4; /* Accent line on top */
+    margin-top: 0px; /* Selected tab is taller */
+    font-weight: bold;
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: #252526;
+    color: #CCCCCC;
+}
+
+/* =======================================================
+   5. SCROLLBARS (Thin, overlay-style)
+   ======================================================= */
+QScrollBar:vertical {
+    border: none;
+    background: #1E1E1E;
+    width: 12px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: #424242;
+    min-height: 20px;
+    border-radius: 5px;
+    margin: 2px; /* Margin creates the floating pill effect */
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #4F4F4F;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px; /* Hide the ugly default arrow buttons */
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+/* Same for horizontal */
+QScrollBar:horizontal {
+    border: none;
+    background: #1E1E1E;
+    height: 12px;
+    margin: 0px;
+}
+QScrollBar::handle:horizontal {
+    background: #424242;
+    min-width: 20px;
+    border-radius: 5px;
+    margin: 2px;
+}
+QScrollBar::handle:horizontal:hover { background: #4F4F4F; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
+
+/* =======================================================
+   6. MENUS, LISTS & TOP MENU BAR
+   ======================================================= */
+/* The top bar containing File, View, etc. */
+QMenuBar {
+    background-color: #1E1E1E;
+    color: #E0E0E0;
+    padding: 4px;
+    font-weight: 500;
+    border-bottom: 1px solid #2D2D30; /* Subtle separator line */
+}
+
+/* The individual "File" and "View" buttons */
+QMenuBar::item {
+    background-color: transparent;
+    padding: 6px 14px; /* Gives the text room to breathe */
+    margin: 2px 4px;   /* Creates the "pretty box" separation */
+    border-radius: 6px; /* Rounds the boxes */
+}
+
+QMenuBar::item:selected {
+    background-color: #2D2D30; /* Subtle highlight box on hover */
+    color: #FFFFFF;
+}
+
+QMenuBar::item:pressed {
+    background-color: rgba(0, 127, 212, 0.2); /* Blue tint when clicked */
+    color: #007FD4;
+}
+
+/* The Dropdown Menus */
+QMenu, QListWidget, QTreeWidget {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    border-radius: 8px; /* Modern rounded dropdowns */
+    padding: 6px 4px;
+    outline: none; 
+}
+
+/* Items inside the dropdowns */
+QMenu::item {
+    padding: 6px 32px 6px 16px; /* Cinematic spacing */
+    border-radius: 4px;
+    margin: 2px 4px; /* Prevents the hover state from touching the edges */
+    color: #CCCCCC;
+}
+
+QMenu::item:selected, QListWidget::item:selected, QTreeWidget::item:selected {
+    background-color: #007FD4; /* Sharp blue highlight */
+    color: white;
+}
+
+/* The divider lines inside menus */
+QMenu::separator {
+    height: 1px;
+    background: #3E3E42;
+    margin: 6px 12px;
+}
+
+/* =======================================================
+   7. SPECIFIC UI COMPONENTS
+   ======================================================= */
+#contentFrame {
+    background-color: #181818;
+    border: 1px solid #333333;
+    border-radius: 8px;
+}
+
+/* =======================================================
+   8. SPECIFIC OVERRIDES (Tabs & Bookmarks)
+   ======================================================= */
+
+/* --- Custom Tab Close Button --- */
+QTabBar::close-button {
+    image: url('python-app/riemann/assets/icons/x-white.svg'); 
+    background: transparent;
+    padding: 2px;
+}
+QTabBar::close-button:hover {
+    background: #3F3F46;
+    border-radius: 4px;
+}
+
+/* --- Bookmark Button --- */
+QPushButton#bookmarkBtn:checked {
+    background-color: transparent; /* Removes the blue box */
+    border: 1px solid transparent;
+    color: #007FD4; /* Tints the star blue instead */
+}
