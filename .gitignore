@@ -8,15 +8,17 @@ build/
 dist/
 # lib*
 *nstructions*
+# instructions, constructions
 releases/download/
 them/
 flexibility.java
 *crash-report*
 riemann_ai_engine/
-# riemann_core.abi3.so
+*.so
 build_ai/
 *debug.log
 *.build
 *.dist
 node_modules/
 *.pytest_cache
+commands.txt

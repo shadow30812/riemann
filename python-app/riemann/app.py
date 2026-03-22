@@ -1018,9 +1018,11 @@ class RiemannWindow(QMainWindow):
         if isinstance(widget, ReaderTab) and widget.current_path:
             self.closed_tabs_stack.append({"type": "pdf", "data": widget.current_path})
         elif isinstance(widget, BrowserTab):
-            self.closed_tabs_stack.append(
-                {"type": "web", "data": widget.web.url().toString()}
+            url_str = getattr(
+                widget, "_original_url_before_close", widget.web.url().toString()
             )
+            if url_str and url_str != "about:blank":
+                self.closed_tabs_stack.append({"type": "web", "data": url_str})
 
     def restore_last_closed_tab(self) -> None:
         """
@@ -1045,19 +1047,44 @@ class RiemannWindow(QMainWindow):
 
     def close_tab(self, index: int) -> None:
         """
-        Closes a tab in the main tab widget.
+        Closes a tab in the main tab widget with safety checks for web dialogs.
 
         Args:
             index (int): The index of the tab to close.
         """
         widget = self.tabs_main.widget(index)
         if widget:
+            if isinstance(widget, BrowserTab):
+                if not getattr(widget, "_close_in_progress", False):
+                    widget._close_in_progress = True
+                    widget._original_url_before_close = widget.web.url().toString()
+
+                    def load_finished(ok):
+                        try:
+                            widget.web.loadFinished.disconnect(
+                                widget._close_load_finished
+                            )
+                        except Exception:
+                            pass
+                        widget._close_load_finished = None
+
+                        if ok and widget.web.url().toString() == "about:blank":
+                            idx = self.tabs_main.indexOf(widget)
+                            if idx != -1:
+                                self.close_tab(idx)
+                        else:
+                            widget._close_in_progress = False
+
+                    widget._close_load_finished = load_finished
+                    widget.web.loadFinished.connect(widget._close_load_finished)
+                    widget.web.setUrl(QUrl("about:blank"))
+                    return
+
             self._record_closed_tab(widget)
 
             if isinstance(widget, BrowserTab):
                 widget.web.triggerPageAction(QWebEnginePage.WebAction.Stop)
                 widget.web.setHtml("")
-                widget.web.setUrl(QUrl("about:blank"))
                 if widget.web.page():
                     widget.web.page().deleteLater()
                 widget.web.deleteLater()
@@ -1068,18 +1095,46 @@ class RiemannWindow(QMainWindow):
 
     def close_side_tab(self, index: int) -> None:
         """
-        Closes a tab in the side tab widget.
+        Closes a tab in the side tab widget with safety checks for web dialogs.
 
         Args:
             index (int): The index of the tab to close.
         """
         widget = self.tabs_side.widget(index)
         if widget:
+            if isinstance(widget, BrowserTab):
+                if not getattr(widget, "_close_in_progress", False):
+                    widget._close_in_progress = True
+                    widget._original_url_before_close = widget.web.url().toString()
+
+                    def load_finished(ok):
+                        try:
+                            widget.web.loadFinished.disconnect(
+                                widget._close_load_finished
+                            )
+                        except Exception:
+                            pass
+                        widget._close_load_finished = None
+
+                        if ok and widget.web.url().toString() == "about:blank":
+                            idx = self.tabs_side.indexOf(widget)
+                            if idx != -1:
+                                self.close_side_tab(idx)
+                        else:
+                            widget._close_in_progress = False
+
+                    widget._close_load_finished = load_finished
+                    widget.web.loadFinished.connect(widget._close_load_finished)
+                    widget.web.setUrl(QUrl("about:blank"))
+                    return
+
             self._record_closed_tab(widget)
 
             if isinstance(widget, BrowserTab):
-                widget.web.setUrl(QUrl("about:blank"))
-                widget.web.page().deleteLater()
+                widget.web.triggerPageAction(QWebEnginePage.WebAction.Stop)
+                widget.web.setHtml("")
+                if widget.web.page():
+                    widget.web.page().deleteLater()
 
             if widget == getattr(self, "tree_signatures", None):
                 active_main = self.tabs_main.currentWidget()
