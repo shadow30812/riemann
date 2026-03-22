@@ -930,7 +930,7 @@ Contributions welcome in:
 
 ## Versioning
 
-V3.2.8 released on 21/03/2026
+V3.2.8 released on 22/03/2026
 
 ## License
 

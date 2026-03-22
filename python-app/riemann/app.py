@@ -41,7 +41,7 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWebEngineCore import QWebEngineProfile
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -1055,12 +1055,15 @@ class RiemannWindow(QMainWindow):
             self._record_closed_tab(widget)
 
             if isinstance(widget, BrowserTab):
+                widget.web.triggerPageAction(QWebEnginePage.WebAction.Stop)
+                widget.web.setHtml("")
                 widget.web.setUrl(QUrl("about:blank"))
-                widget.web.page().deleteLater()
-
+                if widget.web.page():
+                    widget.web.page().deleteLater()
+                widget.web.deleteLater()
             widget.deleteLater()
-        self.tabs_main.removeTab(index)
 
+        self.tabs_main.removeTab(index)
         self._check_all_tabs_closed()
 
     def close_side_tab(self, index: int) -> None:
@@ -1538,7 +1541,10 @@ def run() -> None:
         "--disable-setuid-sandbox "
         "--disable-features=AudioServiceOutOfProcess "
         "--referrer-policy=no-referrer-when-downgrade "
-        "--enable-features=WebEngineProprietaryCodecs"
+        "--enable-features=WebEngineProprietaryCodecs "
+        "--renderer-process-limit=2 "
+        "--process-per-site "
+        "--disk-cache-size=52428800 "
     )
     sys.argv.append("--autoplay-policy=no-user-gesture-required")
 

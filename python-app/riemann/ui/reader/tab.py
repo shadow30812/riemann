@@ -308,14 +308,14 @@ class ReaderTab(
         self.stack = QStackedWidget()
         self._setup_scroll_area()
 
-        self.web = QWebEngineView()
+        self.scroll_content = QWidget()
         self.stack.addWidget(self.scroll)
-        self.stack.addWidget(self.web)
+
+        self._web_placeholder = QWidget()
+        self.stack.addWidget(self._web_placeholder)
 
         self._setup_home_page()
         self.stack.addWidget(self.home_page_widget)
-
-        self.web.installEventFilter(self)
         layout.addWidget(self.stack)
 
         if not getattr(self, "current_path", None):
@@ -734,7 +734,8 @@ class ReaderTab(
             with open(path, "r", encoding="utf-8") as f:
                 text = f.read()
             full_html = generate_markdown_html(text, self.theme_mode != 0)
-            self.web.setHtml(full_html)
+            web_view = self._get_or_create_web_view()
+            web_view.setHtml(full_html)
 
             self.toolbar.show()
             self.stack.setCurrentIndex(1)
@@ -965,6 +966,8 @@ class ReaderTab(
         self.view_mode = (
             ViewMode.REFLOW if self.view_mode == ViewMode.IMAGE else ViewMode.IMAGE
         )
+        if self.view_mode == ViewMode.REFLOW:
+            self._get_or_create_web_view()
         self.stack.setCurrentIndex(1 if self.view_mode == ViewMode.REFLOW else 0)
         self.btn_reflow.setChecked(self.view_mode == ViewMode.REFLOW)
         self.update_view()
@@ -1804,3 +1807,12 @@ class ReaderTab(
                         self.web.setFocus()
                 else:
                     self.setFocus()
+
+    def _get_or_create_web_view(self) -> QWebEngineView:
+        """Instantiates the Chromium view only when actively needed."""
+        if not hasattr(self, "web"):
+            self.web = QWebEngineView()
+            self.web.installEventFilter(self)
+            self.stack.removeWidget(self._web_placeholder)
+            self.stack.insertWidget(1, self.web)
+        return self.web

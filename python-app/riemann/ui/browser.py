@@ -292,6 +292,13 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
         Args:
             info (QWebEngineUrlRequestInfo): Mutable information about the URL request.
         """
+        if (
+            info.resourceType()
+            == QWebEngineUrlRequestInfo.ResourceType.ResourceTypeServiceWorker
+        ):
+            info.block(True)
+            return
+
         url = info.requestUrl().toString().lower()
         if any(domain in url for domain in self.blocked_domains):
             info.block(True)
