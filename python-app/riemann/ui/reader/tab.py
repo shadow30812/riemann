@@ -29,12 +29,16 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QColor,
     QDesktopServices,
+    QImage,
     QKeyEvent,
     QKeySequence,
+    QPainter,
     QPalette,
+    QPixmap,
     QShortcut,
     QWheelEvent,
 )
+from PySide6.QtPrintSupport import QPrintDialog, QPrinter
 from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
@@ -49,6 +53,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QMessageBox,
+    QProgressDialog,
     QPushButton,
     QRubberBand,
     QScrollArea,
@@ -169,6 +174,7 @@ class ReaderTab(
         shortcuts = [
             ("Ctrl+F", self.toggle_search_bar),
             ("Ctrl+I", self.toggle_ai_search_bar),
+            ("Ctrl+P", self.print_document),
             ("Ctrl+A", self.select_all_text),
             ("Ctrl+Shift+A", self.btn_annotate.click),
             ("Ctrl+Z", self.undo_annotation),
@@ -341,6 +347,10 @@ class ReaderTab(
         self.btn_export.setToolTip("Export Annotations to Markdown")
         self.btn_export.clicked.connect(self.export_annotations)
 
+        self.btn_print = QPushButton("🖨️")
+        self.btn_print.setToolTip("Print Document (Ctrl+P)")
+        self.btn_print.clicked.connect(self.print_document)
+
         self.btn_cite = QPushButton("📑")
         self.btn_cite.setToolTip("Copy BibTeX Citation")
         self.btn_cite.clicked.connect(self.copy_citation)
@@ -461,6 +471,7 @@ class ReaderTab(
 
         widgets = [
             self.btn_save,
+            self.btn_print,
             self.btn_rename,
             self.btn_export,
             self.btn_sign,
@@ -884,6 +895,9 @@ class ReaderTab(
             closest, min_dist = self.current_page_index, inf
             for idx, widget in self.page_widgets.items():
                 try:
+                    if not self.scroll_content.isAncestorOf(widget):
+                        continue
+
                     w_center = widget.mapTo(self.scroll_content, QPoint(0, 0)).y() + (
                         widget.height() / 2
                     )
@@ -1816,3 +1830,93 @@ class ReaderTab(
             self.stack.removeWidget(self._web_placeholder)
             self.stack.insertWidget(1, self.web)
         return self.web
+
+    def print_document(self) -> None:
+        """
+        Opens the system print dialog and prints the current document.
+        Handles both REFLOW (WebEngine) and IMAGE (PDF) view modes.
+        """
+        if not self.current_path and self.view_mode != ViewMode.REFLOW:
+            self.show_toast("No document to print.")
+            return
+
+        printer = QPrinter()
+        printer.setResolution(300)
+        dialog = QPrintDialog(printer, self)
+
+        if dialog.exec() == QPrintDialog.DialogCode.Accepted:
+            self.show_toast("Preparing print job...")
+
+            if self.view_mode == ViewMode.REFLOW:
+                self.web.page().print(
+                    printer,
+                    lambda success: self.show_toast(
+                        "Print complete!" if success else "Print failed."
+                    ),
+                )
+                return
+
+            if self.current_doc:
+                num_pages = self.current_doc.page_count
+                progress = QProgressDialog(
+                    "Preparing print job...", "Cancel", 0, num_pages, self
+                )
+                progress.setWindowTitle("Printing PDF")
+                progress.setWindowModality(Qt.WindowModality.WindowModal)
+                progress.setMinimumDuration(0)
+                painter = QPainter()
+                if painter.begin(printer):
+                    try:
+                        for page_idx in range(num_pages):
+                            QApplication.processEvents()
+                            if progress.wasCanceled():
+                                printer.abort()
+                                self.show_toast("Printing canceled.")
+                                break
+
+                            progress.setLabelText(
+                                f"Rendering page {page_idx + 1} of {num_pages}..."
+                            )
+                            progress.setValue(page_idx)
+                            if page_idx > 0:
+                                printer.newPage()
+
+                            res = self.current_doc.render_page(
+                                page_idx, 2.5, self.theme_mode
+                            )
+
+                            if res and res.data:
+                                img = QImage(
+                                    res.data,
+                                    res.width,
+                                    res.height,
+                                    QImage.Format.Format_RGB32,
+                                )
+                                pixmap = QPixmap.fromImage(img)
+                                rect = printer.pageRect(QPrinter.Unit.DevicePixel)
+                                print_w = int(rect.width())
+                                print_h = int(rect.height())
+
+                                scaled_pixmap = pixmap.scaled(
+                                    print_w,
+                                    print_h,
+                                    Qt.AspectRatioMode.KeepAspectRatio,
+                                    Qt.TransformationMode.FastTransformation,
+                                )
+
+                                x = int((rect.width() - scaled_pixmap.width()) / 2)
+                                y = int((rect.height() - scaled_pixmap.height()) / 2)
+
+                                painter.drawPixmap(x, y, scaled_pixmap)
+
+                        if not progress.wasCanceled():
+                            progress.setValue(num_pages)
+                            self.show_toast("Print complete!")
+                        else:
+                            raise Exception
+
+                    except Exception as e:
+                        self.show_toast(f"Print failed: {str(e)}")
+                        print(e)
+                    finally:
+                        painter.end()

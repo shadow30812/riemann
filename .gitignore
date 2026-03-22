@@ -22,3 +22,4 @@ build_ai/
 node_modules/
 *.pytest_cache
 commands.txt
+*sandbox*
