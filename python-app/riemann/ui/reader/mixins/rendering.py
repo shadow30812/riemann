@@ -36,10 +36,12 @@ class RenderingMixin:
         sb = self.scroll.verticalScrollBar()
         was_blocked = sb.signalsBlocked()
         sb.blockSignals(True)
+
         target_page = self.current_page_index
+        target_value = sb.value()
+        target_max = sb.maximum()
 
         self.page_widgets.clear()
-        self.rendered_pages.clear()
         self._virtual_enabled = False
         self._virtual_range = (0, 0)
 
@@ -57,8 +59,24 @@ class RenderingMixin:
             self._build_standard_layout(count)
 
         self.scroll_content.adjustSize()
+
+        if hasattr(self, "scroll_layout") and self.scroll_layout:
+            self.scroll_layout.activate()
+
         QApplication.processEvents()
+
+        self.current_page_index = target_page
+        self._ignore_scroll = False
+
+        if target_max > 0 and sb.maximum() > 0:
+            ratio = target_value / target_max
+            sb.setValue(int(ratio * sb.maximum()))
+        else:
+            self.ensure_visible(target_page)
+
         sb.blockSignals(was_blocked)
+        if hasattr(self, "scroll") and self.scroll:
+            self.scroll.setFocus()
 
         def _finalize_rebuild():
             self.current_page_index = target_page
@@ -192,8 +210,8 @@ class RenderingMixin:
             viewport_y = self.scroll.verticalScrollBar().value()
             viewport_h = self.scroll.viewport().height()
 
-            view_start = viewport_y - viewport_h
-            view_end = viewport_y + (viewport_h * 2)
+            view_start = viewport_y - (viewport_h * 4)
+            view_end = viewport_y + (viewport_h * 5)
 
             for idx, widget in self.page_widgets.items():
                 try:

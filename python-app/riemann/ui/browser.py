@@ -25,7 +25,7 @@ from PySide6.QtCore import (
     QUrl,
     Signal,
 )
-from PySide6.QtGui import QColor, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QColor, QKeySequence, QShortcut
 from PySide6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
     QWebEnginePage,
@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QProgressBar,
     QPushButton,
     QTabWidget,
@@ -453,9 +454,24 @@ class BrowserTab(QWidget):
         self.btn_print_pdf.setToolTip("Save Webpage to PDF")
         self.btn_print_pdf.clicked.connect(self.print_to_pdf)
 
-        self.lbl_zoom = QLabel("100%")
-        self.lbl_zoom.setFixedWidth(40)
-        self.lbl_zoom.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.btn_zoom = QPushButton("100%")
+        self.btn_zoom.setFixedWidth(65)
+        self.btn_zoom.setToolTip("Zoom Controls")
+
+        zoom_menu = QMenu(self.btn_zoom)
+        action_zoom_in = QAction("➕ Zoom In", self)
+        action_zoom_in.triggered.connect(lambda: self.modify_zoom(0.1))
+
+        action_zoom_out = QAction("➖ Zoom Out", self)
+        action_zoom_out.triggered.connect(lambda: self.modify_zoom(-0.1))
+
+        action_zoom_reset = QAction("🔄 Reset (100%)", self)
+        action_zoom_reset.triggered.connect(self.reset_zoom)
+
+        zoom_menu.addAction(action_zoom_in)
+        zoom_menu.addAction(action_zoom_out)
+        zoom_menu.addAction(action_zoom_reset)
+        self.btn_zoom.setMenu(zoom_menu)
 
         tb_layout.addWidget(self.btn_back)
         tb_layout.addWidget(self.btn_fwd)
@@ -470,7 +486,7 @@ class BrowserTab(QWidget):
         tb_layout.addWidget(self.btn_music)
         tb_layout.addWidget(self.btn_download)
         tb_layout.addWidget(self.btn_print_pdf)
-        tb_layout.addWidget(self.lbl_zoom)
+        tb_layout.addWidget(self.btn_zoom)
 
         layout.addWidget(self.toolbar)
 
@@ -601,6 +617,9 @@ class BrowserTab(QWidget):
 
         self.apply_theme()
         self.web.installEventFilter(self)
+
+        for child in self.web.children():
+            child.installEventFilter(self)
 
         if self.incognito:
             self.txt_url.setStyleSheet("""
@@ -797,28 +816,60 @@ class BrowserTab(QWidget):
         Returns:
             bool: Indication of whether the event was successfully consumed.
         """
-        if source == self.web and event.type() == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Key_F11:
-                self.window().toggle_reader_fullscreen()
-                return True
+        if source == self.web and event.type() == QEvent.Type.ChildAdded:
+            event.child().installEventFilter(self)
+            return False
 
-            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-                key = event.key()
-                if key == Qt.Key.Key_T:
-                    self.window().new_pdf_tab()
+        is_web_source = source == self.web or source in self.web.children()
+
+        if is_web_source:
+            if event.type() == QEvent.Type.Wheel:
+                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                    delta = event.angleDelta().y()
+                    if delta != 0:
+                        self.modify_zoom(delta / 1200.0)
                     return True
-                if key == Qt.Key.Key_M:
-                    self.btn_music.click()
+                if event.modifiers() & Qt.KeyboardModifier.AltModifier:
+                    delta = event.angleDelta().y()
+                    if delta != 0:
+                        js = f"window.scrollBy({{top: {-delta * 3}, behavior: 'instant'}});"
+                        self.web.page().runJavaScript(js)
+                        return True
+
+            elif event.type() == QEvent.Type.NativeGesture:
+                if (
+                    hasattr(event, "gestureType")
+                    and event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture
+                ):
+                    self.modify_zoom(event.value())
                     return True
 
-                if key == Qt.Key.Key_Tab:
-                    if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                        if hasattr(self.window(), "prev_tab"):
-                            self.window().prev_tab()
-                    else:
-                        if hasattr(self.window(), "next_tab"):
-                            self.window().next_tab()
+            elif event.type() == QEvent.Type.KeyPress:
+                if event.key() == Qt.Key.Key_F11:
+                    if self.window() and hasattr(
+                        self.window(), "toggle_reader_fullscreen"
+                    ):
+                        self.window().toggle_reader_fullscreen()
                     return True
+
+                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                    key = event.key()
+                    if key == Qt.Key.Key_T:
+                        if self.window() and hasattr(self.window(), "new_pdf_tab"):
+                            self.window().new_pdf_tab()
+                        return True
+                    if key == Qt.Key.Key_M:
+                        self.btn_music.click()
+                        return True
+
+                    if key == Qt.Key.Key_Tab:
+                        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                            if hasattr(self.window(), "prev_tab"):
+                                self.window().prev_tab()
+                        else:
+                            if hasattr(self.window(), "next_tab"):
+                                self.window().next_tab()
+                        return True
 
         return super().eventFilter(source, event)
 
@@ -831,14 +882,14 @@ class BrowserTab(QWidget):
         """
         new_factor = max(0.1, min(self.web.zoomFactor() + delta, 5.0))
         self.web.setZoomFactor(new_factor)
-        self.lbl_zoom.setText(f"{int(new_factor * 100)}%")
+        self.btn_zoom.setText(f"{int(new_factor * 100)}%")
 
     def reset_zoom(self) -> None:
         """
         Resets the rendering layout zoom factor uniformly to absolute normal metrics.
         """
         self.web.setZoomFactor(1.0)
-        self.lbl_zoom.setText("100%")
+        self.btn_zoom.setText("100%")
 
     def toggle_search(self) -> None:
         """
@@ -1208,3 +1259,13 @@ class BrowserTab(QWidget):
             self.progress.setValue(0)
 
         self.show_toast(message)
+
+    def deleteLater(self) -> None:
+        """
+        Hooks into the Qt Object deletion pipeline to aggressively scrub and stop
+        phantom background Audio/Video playback processes when the tab is closed.
+        """
+        if hasattr(self, "web") and self.web:
+            self.web.page().setAudioMuted(True)
+            self.web.load(QUrl("about:blank"))
+        super().deleteLater()

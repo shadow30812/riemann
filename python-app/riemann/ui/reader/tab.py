@@ -1322,6 +1322,30 @@ class ReaderTab(
                     self.scroll.verticalScrollBar().maximum()
                 )
 
+    def event(self, event: QEvent) -> bool:
+        """
+        Intercepts raw system events to support native gestures like pinch-to-zoom on trackpads.
+        """
+        if event.type() == QEvent.Type.NativeGesture:
+            if event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
+                delta = event.value()
+                self.manual_scale = max(
+                    0.1, min(self.manual_scale * (1.0 + delta), 5.0)
+                )
+                self.zoom_mode = ZoomMode.MANUAL
+
+                if not hasattr(self, "_zoom_debounce_timer"):
+                    self._zoom_debounce_timer = QTimer(self)
+                    self._zoom_debounce_timer.setSingleShot(True)
+                    self._zoom_debounce_timer.setInterval(100)
+                    self._zoom_debounce_timer.timeout.connect(
+                        self.on_zoom_changed_internal
+                    )
+
+                self._zoom_debounce_timer.start()
+                return True
+        return super().event(event)
+
     def wheelEvent(self, event: QWheelEvent) -> None:
         """
         Manages rotational pointer input updating zoom calculations effectively bypassing default scrolling natively securely actively.
@@ -1329,35 +1353,56 @@ class ReaderTab(
         Args:
             event (QWheelEvent): Complex parameter detailing positional offsets dynamically tracked explicitly locally reliably.
         """
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+        mod = event.modifiers()
+
+        # if mod & Qt.KeyboardModifier.ControlModifier:
+        #     delta = event.angleDelta().y()
+        #     if delta != 0:
+        #         factor = 1.0 + (delta / 1200.0)
+        #         self.manual_scale = max(0.1, min(self.manual_scale * factor, 5.0))
+        #         self.zoom_mode = ZoomMode.MANUAL
+
+        #         if not hasattr(self, "_zoom_debounce_timer"):
+        #             self._zoom_debounce_timer = QTimer(self)
+        #             self._zoom_debounce_timer.setSingleShot(True)
+        #             self._zoom_debounce_timer.setInterval(100)
+        #             self._zoom_debounce_timer.timeout.connect(
+        #                 self.on_zoom_changed_internal
+        #             )
+
+        #         self._zoom_debounce_timer.start()
+        #     event.accept()
+        #     return
+
+        if mod & Qt.KeyboardModifier.AltModifier:
             delta = event.angleDelta().y()
-            factor = 1.1 if delta > 0 else 0.9
-            self.manual_scale = max(0.1, min(self.manual_scale * factor, 5.0))
-            self.zoom_mode = ZoomMode.MANUAL
-            self.on_zoom_changed_internal()
-            event.accept()
-        else:
-            if not self.continuous_scroll and self.view_mode == ViewMode.IMAGE:
+            if delta != 0:
                 vbar = self.scroll.verticalScrollBar()
-                if vbar.maximum() == 0:
-                    if not hasattr(self, "_scroll_accumulator"):
-                        self._scroll_accumulator = 0
+                vbar.setValue(vbar.value() - (delta * 3))  
+            event.accept()
+            return
 
-                    delta = event.angleDelta().y()
-                    self._scroll_accumulator += delta
+        if not self.continuous_scroll and self.view_mode == ViewMode.IMAGE:
+            vbar = self.scroll.verticalScrollBar()
+            if vbar.maximum() == 0:
+                if not hasattr(self, "_scroll_accumulator"):
+                    self._scroll_accumulator = 0
 
-                    if self._scroll_accumulator >= 200:
-                        self.prev_view()
-                        self._scroll_accumulator = 0
-                    elif self._scroll_accumulator <= -200:
-                        self.next_view()
-                        self._scroll_accumulator = 0
-                    event.accept()
-                    return
+                delta = event.angleDelta().y()
+                self._scroll_accumulator += delta
 
-            if hasattr(self, "_scroll_accumulator"):
-                self._scroll_accumulator = 0
-            super().wheelEvent(event)
+                if self._scroll_accumulator >= 200:
+                    self.prev_view()
+                    self._scroll_accumulator = 0
+                elif self._scroll_accumulator <= -200:
+                    self.next_view()
+                    self._scroll_accumulator = 0
+                event.accept()
+                return
+
+        if hasattr(self, "_scroll_accumulator"):
+            self._scroll_accumulator = 0
+        super().wheelEvent(event)
 
     def on_zoom_selected(self, idx: int) -> None:
         """
@@ -1367,14 +1412,16 @@ class ReaderTab(
             idx (int): Position integer referencing active string effectively properly efficiently implicitly.
         """
         self.apply_zoom_string(self.combo_zoom.currentText())
-        self.scroll.setFocus()
+        if hasattr(self, "scroll") and self.scroll:
+            self.scroll.setFocus()
 
     def on_zoom_text_entered(self) -> None:
         """
         Fetches modified input box properties returning parsed visual logic properly reliably dynamically systematically safely correctly.
         """
         self.apply_zoom_string(self.combo_zoom.lineEdit().text())
-        self.scroll.setFocus()
+        if hasattr(self, "scroll") and self.scroll:
+            self.scroll.setFocus()
 
     def apply_zoom_string(self, text: str) -> None:
         """
