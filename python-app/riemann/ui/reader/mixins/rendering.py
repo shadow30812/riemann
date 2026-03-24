@@ -182,11 +182,37 @@ class RenderingMixin:
             return
 
         target_indices = set()
-        start = max(0, self.current_page_index - 7)
-        end = min(self.current_doc.page_count, self.current_page_index + 8)
 
-        for i in range(start, end):
-            target_indices.add(i)
+        if self._virtual_enabled:
+            start = max(0, self.current_page_index - 7)
+            end = min(self.current_doc.page_count, self.current_page_index + 8)
+            for i in range(start, end):
+                target_indices.add(i)
+        else:
+            viewport_y = self.scroll.verticalScrollBar().value()
+            viewport_h = self.scroll.viewport().height()
+
+            view_start = viewport_y - viewport_h
+            view_end = viewport_y + (viewport_h * 2)
+
+            for idx, widget in self.page_widgets.items():
+                try:
+                    row = widget.parentWidget()
+                    if not row:
+                        continue
+                    w_y = row.pos().y()
+                    w_bottom = w_y + widget.height()
+
+                    if w_bottom >= view_start and w_y <= view_end:
+                        target_indices.add(idx)
+                except Exception:
+                    continue
+
+            if not target_indices:
+                start = max(0, self.current_page_index - 7)
+                end = min(self.current_doc.page_count, self.current_page_index + 8)
+                for i in range(start, end):
+                    target_indices.add(i)
 
         for idx in list(self.rendered_pages):
             if idx not in target_indices:

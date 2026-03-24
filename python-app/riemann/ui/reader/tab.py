@@ -841,6 +841,34 @@ class ReaderTab(
         props.setScrollMetric(QScrollerProperties.ScrollMetric.MaximumVelocity, 0.8)
         QScroller.scroller(self.scroll.viewport()).setScrollerProperties(props)
 
+    def _get_closest_page(self, value: int) -> int:
+        """Calculates the geometric closest page index dynamically."""
+        if not self.current_doc:
+            return self.current_page_index
+
+        center = value + (self.scroll.viewport().height() / 2)
+
+        if self._virtual_enabled and self._cached_base_size:
+            _, base_h = self._cached_base_size
+            ph = int(base_h * self.calculate_scale()) + self.scroll_layout.spacing()
+            if ph > 0:
+                return min(self.current_doc.page_count - 1, max(0, int(center / ph)))
+
+        closest, min_dist = self.current_page_index, inf
+        for idx, widget in self.page_widgets.items():
+            try:
+                row_widget = widget.parentWidget()
+                if not row_widget:
+                    continue
+                w_center = row_widget.pos().y() + (widget.height() / 2)
+                dist = abs(w_center - center)
+                if dist < min_dist:
+                    min_dist = dist
+                    closest = idx
+            except Exception:
+                continue
+        return closest
+
     def defer_scroll_update(self, value: int) -> None:
         """
         Schedules debounce timers throttling frequent update events efficiently.
@@ -851,17 +879,12 @@ class ReaderTab(
         if getattr(self, "_ignore_scroll", False):
             return
 
-        if self._virtual_enabled and self._cached_base_size and self.current_doc:
-            center = value + (self.scroll.viewport().height() / 2)
-            _, base_h = self._cached_base_size
-            ph = int(base_h * self.calculate_scale()) + self.scroll_layout.spacing()
-            if ph > 0:
-                temp_idx = min(
-                    self.current_doc.page_count - 1, max(0, int(center / ph))
-                )
-                self.txt_page.setText(str(temp_idx + 1))
-        else:
-            self.txt_page.setText(str(self.current_page_index + 1))
+        closest = self._get_closest_page(value)
+        if closest != self.current_page_index:
+            self.current_page_index = closest
+            if self.current_doc:
+                self.txt_page.setText(str(closest + 1))
+
         self.scroll_timer.start()
 
     def real_scroll_handler(self) -> None:
@@ -881,32 +904,10 @@ class ReaderTab(
         Args:
             value (int): Integer dimension resolving geometric distances mapped properly mathematically.
         """
-        center = value + (self.scroll.viewport().height() / 2)
+        closest = self._get_closest_page(value)
 
-        if self._virtual_enabled and self._cached_base_size and self.current_doc:
-            _, base_h = self._cached_base_size
-            ph = int(base_h * self.calculate_scale()) + self.scroll_layout.spacing()
-            if ph > 0:
-                closest = min(self.current_doc.page_count - 1, max(0, int(center / ph)))
-            else:
-                closest = self.current_page_index
-
-        else:
-            closest, min_dist = self.current_page_index, inf
-            for idx, widget in self.page_widgets.items():
-                try:
-                    if not self.scroll_content.isAncestorOf(widget):
-                        continue
-
-                    w_center = widget.mapTo(self.scroll_content, QPoint(0, 0)).y() + (
-                        widget.height() / 2
-                    )
-                    dist = abs(w_center - center)
-                    if dist < min_dist:
-                        min_dist = dist
-                        closest = idx
-                except RuntimeError:
-                    continue
+        if closest != self.current_page_index:
+            self.current_page_index = closest
 
         if closest != self.current_page_index:
             self.current_page_index = closest
