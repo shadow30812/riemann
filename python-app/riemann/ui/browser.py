@@ -25,7 +25,7 @@ from PySide6.QtCore import (
     QUrl,
     Signal,
 )
-from PySide6.QtGui import QAction, QColor, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QShortcut
 from PySide6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
     QWebEnginePage,
@@ -50,6 +50,24 @@ from PySide6.QtWidgets import (
 )
 
 from .browser_handlers import ScriptInjector
+
+
+def get_resource_path(relative_path: str) -> str:
+    """
+    Get absolute path to resource, works for dev and for PyInstaller.
+
+    Args:
+        relative_path (str): The relative path to the requested resource.
+
+    Returns:
+        str: The absolute path to the resource on the file system.
+    """
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base_path = getattr(sys, "_MEIPASS")
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+
+    return os.path.join(base_path, relative_path)
 
 
 class YtDlpWorker(QThread):
@@ -418,6 +436,11 @@ class BrowserTab(QWidget):
                 }
             """)
 
+        self.btn_theme_toggle = QPushButton("🌗")
+        self.btn_theme_toggle.setFixedWidth(30)
+        self.btn_theme_toggle.setToolTip("Toggle Browser Dark Mode")
+        self.btn_theme_toggle.clicked.connect(self.toggle_theme)
+
         self.btn_bookmark = QPushButton("☆")
         self.btn_bookmark.setObjectName("bookmarkBtn")
         self.btn_bookmark.setFixedWidth(30)
@@ -484,6 +507,7 @@ class BrowserTab(QWidget):
         tb_layout.addWidget(self.btn_bookmark)
         tb_layout.addWidget(self.btn_mute)
         tb_layout.addWidget(self.btn_music)
+        tb_layout.addWidget(self.btn_theme_toggle)
         tb_layout.addWidget(self.btn_download)
         tb_layout.addWidget(self.btn_print_pdf)
         tb_layout.addWidget(self.btn_zoom)
@@ -565,6 +589,8 @@ class BrowserTab(QWidget):
 
         self.web.urlChanged.connect(self._update_url_bar)
         self.web.loadProgress.connect(self.progress.setValue)
+        self.web.iconChanged.connect(self._update_tab_icon)
+
         self.web.loadFinished.connect(lambda: self.progress.setValue(0))
         self.web.loadFinished.connect(self._restore_music_mode)
         self.web.loadFinished.connect(self._on_homepage_load_finished)
@@ -1033,6 +1059,25 @@ class BrowserTab(QWidget):
                 break
             parent = parent.parent()
 
+    def _update_tab_icon(self, icon) -> None:
+        """
+        Catches the website's favicon and updates the parent tab's icon.
+        """
+
+        parent = self.parent()
+        icon_path = get_resource_path(os.path.join("assets", "icons", "browser.svg"))
+        page_icon = QIcon(icon_path)
+        while parent:
+            if isinstance(parent, QTabWidget):
+                idx = parent.indexOf(self)
+                if idx != -1 and not icon.isNull():
+                    parent.setTabIcon(idx, icon)
+                else:
+                    parent.setTabIcon(idx, page_icon)
+                break
+
+            parent = parent.parent()
+
     def get_audio_script(self) -> str:
         """
         Extracts foundational Javascript processing payloads natively bundled into application assets reliably.
@@ -1267,5 +1312,5 @@ class BrowserTab(QWidget):
         """
         if hasattr(self, "web") and self.web:
             self.web.page().setAudioMuted(True)
-            self.web.load(QUrl("about:blank"))
+            self.web.setHtml("")
         super().deleteLater()

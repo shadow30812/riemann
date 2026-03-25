@@ -778,7 +778,11 @@ class RiemannWindow(QMainWindow):
         reader = ReaderTab()
         reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
         reader.load_document(path, restore_state=restore_state)
-        idx = target_widget.addTab(reader, os.path.basename(path))
+
+        icon_path = get_resource_path(os.path.join("assets", "icons", "pdf.png"))
+        pdf_icon = QIcon(icon_path)
+
+        idx = target_widget.addTab(reader, pdf_icon, os.path.basename(path))
         target_widget.setCurrentIndex(idx)
 
     def _add_browser_tab(self, url: str, target_widget: QTabWidget) -> None:
@@ -899,7 +903,11 @@ class RiemannWindow(QMainWindow):
         else:
             reader = ReaderTab()
             reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
-            self.tabs_main.addTab(reader, "New Tab")
+
+            icon_path = get_resource_path(os.path.join("assets", "icons", "pdf.png"))
+            pdf_icon = QIcon(icon_path)
+
+            self.tabs_main.addTab(reader, pdf_icon, "New Tab")
             self.tabs_main.setCurrentWidget(reader)
 
     def new_browser_tab(
@@ -1057,32 +1065,6 @@ class RiemannWindow(QMainWindow):
         """
         widget = self.tabs_main.widget(index)
         if widget:
-            if isinstance(widget, BrowserTab):
-                if not getattr(widget, "_close_in_progress", False):
-                    widget._close_in_progress = True
-                    widget._original_url_before_close = widget.web.url().toString()
-
-                    def load_finished(ok):
-                        try:
-                            widget.web.loadFinished.disconnect(
-                                widget._close_load_finished
-                            )
-                        except Exception:
-                            pass
-                        widget._close_load_finished = None
-
-                        if ok and widget.web.url().toString() == "about:blank":
-                            idx = self.tabs_main.indexOf(widget)
-                            if idx != -1:
-                                self.close_tab(idx)
-                        else:
-                            widget._close_in_progress = False
-
-                    widget._close_load_finished = load_finished
-                    widget.web.loadFinished.connect(widget._close_load_finished)
-                    widget.web.setUrl(QUrl("about:blank"))
-                    return
-
             self._record_closed_tab(widget)
 
             if isinstance(widget, BrowserTab):
@@ -1105,32 +1087,6 @@ class RiemannWindow(QMainWindow):
         """
         widget = self.tabs_side.widget(index)
         if widget:
-            if isinstance(widget, BrowserTab):
-                if not getattr(widget, "_close_in_progress", False):
-                    widget._close_in_progress = True
-                    widget._original_url_before_close = widget.web.url().toString()
-
-                    def load_finished(ok):
-                        try:
-                            widget.web.loadFinished.disconnect(
-                                widget._close_load_finished
-                            )
-                        except Exception:
-                            pass
-                        widget._close_load_finished = None
-
-                        if ok and widget.web.url().toString() == "about:blank":
-                            idx = self.tabs_side.indexOf(widget)
-                            if idx != -1:
-                                self.close_side_tab(idx)
-                        else:
-                            widget._close_in_progress = False
-
-                    widget._close_load_finished = load_finished
-                    widget.web.loadFinished.connect(widget._close_load_finished)
-                    widget.web.setUrl(QUrl("about:blank"))
-                    return
-
             self._record_closed_tab(widget)
 
             if isinstance(widget, BrowserTab):
@@ -1175,6 +1131,7 @@ class RiemannWindow(QMainWindow):
             event (QCloseEvent): The close event triggered by the system.
         """
         if self.incognito or not self.restore_session:
+            self._kill_all_media_safely()
             super().closeEvent(event)
             return
 
@@ -1209,6 +1166,9 @@ class RiemannWindow(QMainWindow):
         self.settings.setValue("session/side_tabs", get_files(self.tabs_side))
         self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/state", self.saveState())
+
+        self.settings.sync()
+        self._kill_all_media_safely()
         super().closeEvent(event)
 
     def toggle_reader_fullscreen(self) -> None:
@@ -1582,6 +1542,28 @@ class RiemannWindow(QMainWindow):
                 self._add_pdf_tab(widget.current_path, tab_widget)
             elif hasattr(widget, "web"):
                 self._add_browser_tab(widget.web.url().toString(), tab_widget)
+
+    def _kill_all_media_safely(self) -> None:
+        """
+        Swaps out all WebEngine pages with blank profiles before teardown
+        to instantly kill all active media pipelines.
+        """
+        for target in (self.tabs_main, self.tabs_side):
+            for i in range(target.count()):
+                wid = target.widget(i)
+                if (
+                    isinstance(wid, BrowserTab)
+                    and hasattr(wid, "web")
+                    and wid.web.page()
+                ):
+                    wid.web.page().setAudioMuted(True)
+                    current_profile = wid.web.page().profile()
+
+                    empty_page = QWebEnginePage(current_profile, wid.web)
+                    old_page = wid.web.page()
+
+                    wid.web.setPage(empty_page)
+                    old_page.deleteLater()
 
 
 def run() -> None:

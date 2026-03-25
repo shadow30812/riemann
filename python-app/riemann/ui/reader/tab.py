@@ -1355,30 +1355,11 @@ class ReaderTab(
         """
         mod = event.modifiers()
 
-        # if mod & Qt.KeyboardModifier.ControlModifier:
-        #     delta = event.angleDelta().y()
-        #     if delta != 0:
-        #         factor = 1.0 + (delta / 1200.0)
-        #         self.manual_scale = max(0.1, min(self.manual_scale * factor, 5.0))
-        #         self.zoom_mode = ZoomMode.MANUAL
-
-        #         if not hasattr(self, "_zoom_debounce_timer"):
-        #             self._zoom_debounce_timer = QTimer(self)
-        #             self._zoom_debounce_timer.setSingleShot(True)
-        #             self._zoom_debounce_timer.setInterval(100)
-        #             self._zoom_debounce_timer.timeout.connect(
-        #                 self.on_zoom_changed_internal
-        #             )
-
-        #         self._zoom_debounce_timer.start()
-        #     event.accept()
-        #     return
-
         if mod & Qt.KeyboardModifier.AltModifier:
             delta = event.angleDelta().y()
             if delta != 0:
                 vbar = self.scroll.verticalScrollBar()
-                vbar.setValue(vbar.value() - (delta * 3))  
+                vbar.setValue(vbar.value() - (delta * 3))
             event.accept()
             return
 
