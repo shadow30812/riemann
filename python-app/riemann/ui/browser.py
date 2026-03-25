@@ -1065,7 +1065,9 @@ class BrowserTab(QWidget):
         """
 
         parent = self.parent()
-        icon_path = get_resource_path(os.path.join("assets", "icons", "browser.svg"))
+        icon_path = get_resource_path(
+            os.path.join("..", "assets", "icons", "browser.svg")
+        )
         page_icon = QIcon(icon_path)
         while parent:
             if isinstance(parent, QTabWidget):

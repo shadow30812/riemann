@@ -1147,6 +1147,16 @@ class RiemannWindow(QMainWindow):
                 List[dict]: A list of dictionaries representing the state of each tab.
             """
             tabs_data = []
+            media_domains = [
+                "youtube.com",
+                "dailymotion.com",
+                "reddit.com",
+                "vimeo.com",
+                "twitch.tv",
+                "spotify.com",
+                "netflix.com",
+            ]
+
             for i in range(tab_widget.count()):
                 wid = tab_widget.widget(i)
                 if isinstance(wid, ReaderTab) and getattr(wid, "current_path", None):
@@ -1154,6 +1164,13 @@ class RiemannWindow(QMainWindow):
                 elif isinstance(wid, BrowserTab):
                     if not getattr(wid, "incognito", False):
                         url_str = wid.web.url().toString()
+
+                        for domain in media_domains:
+                            if domain in url_str.lower():
+                                url_obj = wid.web.url()
+                                url_str = f"{url_obj.scheme()}://{url_obj.host()}"
+                                break
+
                         if (
                             "homepage.html" not in url_str
                             and url_str != "about:blank"
@@ -1545,9 +1562,19 @@ class RiemannWindow(QMainWindow):
 
     def _kill_all_media_safely(self) -> None:
         """
-        Swaps out all WebEngine pages with blank profiles before teardown
-        to instantly kill all active media pipelines.
+        Navigates active media tabs to their root domain before exit
+        to sever the media pipeline without destroying C++ objects prematurely.
         """
+        media_domains = [
+            "youtube.com",
+            "dailymotion.com",
+            "reddit.com",
+            "vimeo.com",
+            "twitch.tv",
+            "spotify.com",
+            "netflix.com",
+        ]
+
         for target in (self.tabs_main, self.tabs_side):
             for i in range(target.count()):
                 wid = target.widget(i)
@@ -1557,13 +1584,19 @@ class RiemannWindow(QMainWindow):
                     and wid.web.page()
                 ):
                     wid.web.page().setAudioMuted(True)
-                    current_profile = wid.web.page().profile()
+                    url_str = wid.web.url().toString().lower()
+                    is_media = False
 
-                    empty_page = QWebEnginePage(current_profile, wid.web)
-                    old_page = wid.web.page()
+                    for domain in media_domains:
+                        if domain in url_str:
+                            is_media = True
+                            url_obj = wid.web.url()
+                            base_url = f"{url_obj.scheme()}://{url_obj.host()}"
+                            wid.web.load(QUrl(base_url))
+                            break
 
-                    wid.web.setPage(empty_page)
-                    old_page.deleteLater()
+                    if not is_media:
+                        wid.web.triggerPageAction(QWebEnginePage.WebAction.Stop)
 
 
 def run() -> None:
