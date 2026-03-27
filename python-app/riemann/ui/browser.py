@@ -36,6 +36,7 @@ from PySide6.QtWebEngineCore import (
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
+    QApplication,
     QCompleter,
     QFileDialog,
     QHBoxLayout,
@@ -597,48 +598,63 @@ class BrowserTab(QWidget):
         self.web.titleChanged.connect(self._update_tab_title)
 
         self.shortcut_reload = QShortcut(QKeySequence("F5"), self)
+        self.shortcut_reload.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_reload.activated.connect(self.web.reload)
 
         self.shortcut_reload_ctrl = QShortcut(QKeySequence("Ctrl+R"), self)
+        self.shortcut_reload_ctrl.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_reload_ctrl.activated.connect(self.web.reload)
 
         self.shortcut_hard_reload = QShortcut(QKeySequence("Ctrl+Shift+R"), self)
+        self.shortcut_hard_reload.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_hard_reload.activated.connect(self.hard_reload)
 
         self.shortcut_f6 = QShortcut(QKeySequence("F6"), self)
+        self.shortcut_f6.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_f6.activated.connect(self.focus_url_bar)
 
         self.shortcut_find = QShortcut(QKeySequence("Ctrl+F"), self)
+        self.shortcut_find.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_find.activated.connect(self.toggle_search)
 
         self.shortcut_zoom_in = QShortcut(QKeySequence("Ctrl+="), self)
+        self.shortcut_zoom_in.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_zoom_in.activated.connect(lambda: self.modify_zoom(0.1))
 
         self.shortcut_zoom_in_alt = QShortcut(QKeySequence("Ctrl++"), self)
+        self.shortcut_zoom_in_alt.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_zoom_in_alt.activated.connect(lambda: self.modify_zoom(0.1))
 
         self.shortcut_zoom_out = QShortcut(QKeySequence("Ctrl+-"), self)
+        self.shortcut_zoom_out.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_zoom_out.activated.connect(lambda: self.modify_zoom(-0.1))
 
-        self.shortcut_zoom_out = QShortcut(QKeySequence("Ctrl+_"), self)
-        self.shortcut_zoom_out.activated.connect(lambda: self.modify_zoom(-0.1))
+        self.shortcut_zoom_out_alt = QShortcut(QKeySequence("Ctrl+_"), self)
+        self.shortcut_zoom_out_alt.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.shortcut_zoom_out_alt.activated.connect(lambda: self.modify_zoom(-0.1))
 
         self.shortcut_zoom_reset = QShortcut(QKeySequence("Ctrl+0"), self)
+        self.shortcut_zoom_reset.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_zoom_reset.activated.connect(self.reset_zoom)
 
         self.shortcut_back_alt = QShortcut(QKeySequence("Alt+Left"), self)
+        self.shortcut_back_alt.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_back_alt.activated.connect(self.web.back)
 
         self.shortcut_fwd_alt = QShortcut(QKeySequence("Alt+Right"), self)
+        self.shortcut_fwd_alt.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_fwd_alt.activated.connect(self.web.forward)
 
         self.shortcut_music = QShortcut(QKeySequence("Ctrl+M"), self)
+        self.shortcut_music.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_music.activated.connect(self.btn_music.click)
 
         self.shortcut_devtools_func = QShortcut(QKeySequence("F12"), self)
+        self.shortcut_devtools_func.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_devtools_func.activated.connect(self.open_devtools)
 
         self.shortcut_devtools = QShortcut(QKeySequence("Ctrl+Shift+I"), self)
+        self.shortcut_devtools.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_devtools.activated.connect(self.open_devtools)
 
         self.apply_theme()
@@ -1316,3 +1332,10 @@ class BrowserTab(QWidget):
             self.web.page().setAudioMuted(True)
             self.web.setHtml("")
         super().deleteLater()
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            focus_widget = QApplication.focusWidget()
+            if not isinstance(focus_widget, QLineEdit):
+                self.web.setFocus()

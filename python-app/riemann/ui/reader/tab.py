@@ -187,11 +187,11 @@ class ReaderTab(
             QShortcut(QKeySequence(seq), self).activated.connect(slot)
 
         sc1 = QShortcut(QKeySequence("Ctrl+Tab"), self)
-        sc1.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        sc1.setContext(Qt.ShortcutContext.WindowShortcut)
         sc1.activated.connect(lambda: self.cycle_tab(1))
 
         sc2 = QShortcut(QKeySequence("Ctrl+Shift+Tab"), self)
-        sc2.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        sc2.setContext(Qt.ShortcutContext.WindowShortcut)
         sc2.activated.connect(lambda: self.cycle_tab(-1))
 
     def _get_tab_widget(self) -> Optional[QTabWidget]:

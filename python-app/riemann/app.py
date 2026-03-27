@@ -539,7 +539,22 @@ class RiemannWindow(QMainWindow):
         else:
             self.setWindowTitle(prefix)
 
+        target_widget = target.currentWidget()
+        if target_widget:
+            target_widget.setFocus()
+
         self.refresh_signature_panel()
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            target = (
+                self.tabs_side
+                if (self.tabs_side.isVisible() and self.tabs_side.hasFocus())
+                else self.tabs_main
+            )
+            if target.currentWidget():
+                target.currentWidget().setFocus()
 
     def split_pdf(self) -> None:
         """
