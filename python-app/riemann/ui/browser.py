@@ -18,6 +18,7 @@ from PySide6.QtCore import (
     QEvent,
     QObject,
     QSettings,
+    QSize,
     QStandardPaths,
     Qt,
     QThread,
@@ -37,6 +38,7 @@ from PySide6.QtWebEngineCore import (
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QCompleter,
     QFileDialog,
     QHBoxLayout,
@@ -46,6 +48,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -378,6 +381,7 @@ class BrowserTab(QWidget):
         super().__init__(parent)
         self.dark_mode = dark_mode
         self.incognito = incognito
+        icon_size = QSize(18, 18)
 
         if profile:
             self.profile = profile
@@ -404,11 +408,37 @@ class BrowserTab(QWidget):
         tb_layout = QHBoxLayout(self.toolbar)
         tb_layout.setContentsMargins(5, 0, 5, 0)
 
-        self.btn_back = QPushButton("◀")
+        self.btn_back = QPushButton()
+        self.btn_back.setIcon(
+            QIcon(
+                get_resource_path(
+                    os.path.join("..", "assets", "icons", "chevron-left.svg")
+                )
+            )
+        )
+        self.btn_back.setIconSize(icon_size)
         self.btn_back.setFixedWidth(30)
-        self.btn_fwd = QPushButton("▶")
+
+        self.btn_fwd = QPushButton()
+        self.btn_fwd.setIcon(
+            QIcon(
+                get_resource_path(
+                    os.path.join("..", "assets", "icons", "chevron-right.svg")
+                )
+            )
+        )
+        self.btn_fwd.setIconSize(icon_size)
         self.btn_fwd.setFixedWidth(30)
-        self.btn_reload = QPushButton("↻")
+
+        self.btn_reload = QPushButton()
+        self.btn_reload.setIcon(
+            QIcon(
+                get_resource_path(
+                    os.path.join("..", "assets", "icons", "rotate-cw.svg")
+                )
+            )
+        )
+        self.btn_reload.setIconSize(icon_size)
         self.btn_reload.setFixedWidth(30)
 
         self.txt_url = QLineEdit()
@@ -422,7 +452,15 @@ class BrowserTab(QWidget):
         self.txt_url.setCompleter(self.completer)
 
         if self.incognito:
-            self.btn_incognito_icon = QPushButton("🙈")
+            self.btn_incognito_icon = QPushButton()
+            self.btn_incognito_icon.setIcon(
+                QIcon(
+                    get_resource_path(
+                        os.path.join("..", "assets", "icons", "incognito.svg")
+                    )
+                )
+            )
+            self.btn_incognito_icon.setIconSize(icon_size)
             self.btn_incognito_icon.setFlat(True)
             self.btn_incognito_icon.setFixedWidth(30)
             self.btn_incognito_icon.setToolTip(
@@ -438,43 +476,79 @@ class BrowserTab(QWidget):
                 }
             """)
 
-        self.btn_theme_toggle = QPushButton("🌗")
+        self.btn_theme_toggle = QPushButton()
+        self.btn_theme_toggle.setIcon(
+            QIcon(
+                get_resource_path(
+                    os.path.join(
+                        "..",
+                        "assets",
+                        "icons",
+                        "sun.svg" if getattr(self, "dark_mode", False) else "moon.svg",
+                    )
+                )
+            )
+        )
+        self.btn_theme_toggle.setIconSize(icon_size)
         self.btn_theme_toggle.setFixedWidth(30)
         self.btn_theme_toggle.setToolTip("Toggle Browser Dark Mode")
         self.btn_theme_toggle.clicked.connect(self.toggle_theme)
 
-        self.btn_bookmark = QPushButton("☆")
+        self.btn_bookmark = QPushButton()
+        self.btn_bookmark.setIcon(
+            QIcon(
+                get_resource_path(os.path.join("..", "assets", "icons", "bookmark.svg"))
+            )
+        )
+        self.btn_bookmark.setIconSize(icon_size)
         self.btn_bookmark.setObjectName("bookmarkBtn")
         self.btn_bookmark.setFixedWidth(30)
         self.btn_bookmark.setCheckable(True)
         self.btn_bookmark.setToolTip("Bookmark this page")
         self.btn_bookmark.clicked.connect(self.toggle_bookmark)
 
-        self.btn_mute = QPushButton("🔊")
+        self.btn_mute = QPushButton()
+        self.btn_mute.setIcon(
+            QIcon(
+                get_resource_path(
+                    os.path.join("..", "assets", "icons", "volume-on.svg")
+                )
+            )
+        )
+        self.btn_mute.setIconSize(icon_size)
         self.btn_mute.setFixedWidth(30)
         self.btn_mute.setCheckable(True)
         self.btn_mute.setToolTip("Mute/Unmute Tab")
         self.btn_mute.clicked.connect(self.toggle_mute)
 
-        self.btn_music = QPushButton("♫")
+        self.btn_music = QPushButton()
+        self.btn_music.setIcon(
+            QIcon(get_resource_path(os.path.join("..", "assets", "icons", "music.svg")))
+        )
+        self.btn_music.setIconSize(icon_size)
         self.btn_music.setFixedWidth(30)
         self.btn_music.setCheckable(True)
         self.btn_music.setToolTip("Toggle Audiophile Music Mode")
         self.btn_music.clicked.connect(self.toggle_music_mode)
-        self.btn_music.setStyleSheet("""
-            QPushButton:checked {
-                background-color: #FF4500;
-                color: white;
-                border: 1px solid #CC3700;
-            }
-        """)
 
-        self.btn_download = QPushButton("⬇")
+        self.btn_download = QPushButton()
+        self.btn_download.setIcon(
+            QIcon(
+                get_resource_path(os.path.join("..", "assets", "icons", "download.svg"))
+            )
+        )
+        self.btn_download.setIconSize(icon_size)
         self.btn_download.setFixedWidth(30)
         self.btn_download.setToolTip("Download Video via yt-dlp")
         self.btn_download.clicked.connect(self.download_video)
 
-        self.btn_print_pdf = QPushButton("🖨")
+        self.btn_print_pdf = QPushButton()
+        self.btn_print_pdf.setIcon(
+            QIcon(
+                get_resource_path(os.path.join("..", "assets", "icons", "printer.svg"))
+            )
+        )
+        self.btn_print_pdf.setIconSize(icon_size)
         self.btn_print_pdf.setFixedWidth(30)
         self.btn_print_pdf.setToolTip("Save Webpage to PDF")
         self.btn_print_pdf.clicked.connect(self.print_to_pdf)
@@ -484,13 +558,13 @@ class BrowserTab(QWidget):
         self.btn_zoom.setToolTip("Zoom Controls")
 
         zoom_menu = QMenu(self.btn_zoom)
-        action_zoom_in = QAction("➕ Zoom In", self)
+        action_zoom_in = QAction("(+) Zoom In", self)
         action_zoom_in.triggered.connect(lambda: self.modify_zoom(0.1))
 
-        action_zoom_out = QAction("➖ Zoom Out", self)
+        action_zoom_out = QAction("(-) Zoom Out", self)
         action_zoom_out.triggered.connect(lambda: self.modify_zoom(-0.1))
 
-        action_zoom_reset = QAction("🔄 Reset (100%)", self)
+        action_zoom_reset = QAction("Reset (100%)", self)
         action_zoom_reset.triggered.connect(self.reset_zoom)
 
         zoom_menu.addAction(action_zoom_in)
@@ -696,6 +770,10 @@ class BrowserTab(QWidget):
         else:
             self.web.load(QUrl(start_url))
 
+        for widget_class in (QPushButton, QToolButton, QComboBox):
+            for w in self.findChildren(widget_class):
+                w.setCursor(Qt.CursorShape.PointingHandCursor)
+
     def focusInEvent(self, event: Any) -> None:
         """
         Handles the event when the Tab widget itself receives focus.
@@ -826,20 +904,37 @@ class BrowserTab(QWidget):
             self.web.page().setBackgroundColor(QColor("#fff"))
 
         self.script_injector.inject_smart_dark_mode(self.web.page(), self.dark_mode)
-        style = f"QWidget {{ background: {bg}; color: {fg}; }} QLineEdit {{ background: {inp_bg}; border: 1px solid {border}; border-radius: 4px; padding: 4px; }}"
+        style = f"QWidget {{ background: {bg}; \
+                                            color: {fg}; }} \
+                                QLineEdit {{ background: {inp_bg}; \
+                                            border: 1px solid {border}; \
+                                            border-radius: 4px; \
+                                            padding: 4px; }}"
         self.toolbar.setStyleSheet(style)
         self.search_bar.setStyleSheet(style)
 
         if self.incognito:
             self.txt_url.setStyleSheet("""
-                QLineEdit { 
-                    border: 2px solid #6A0DAD; 
-                    background-color: #2D2D2D; 
-                    color: white; 
-                    border-radius: 4px;
-                    padding: 4px;
-                }
+                QLineEdit { border: 2px solid #6A0DAD; 
+                            background-color: #2D2D2D; 
+                            color: white; 
+                            border-radius: 4px; 
+                            padding: 4px; }
             """)
+
+        menu_bg = "#2C2C30" if self.dark_mode else "#F0F0F0"
+        menu_fg = "#E0E0E0" if self.dark_mode else "#111111"
+        menu_border = "#3F3F46" if self.dark_mode else "#CCCCCC"
+        if hasattr(self, "btn_zoom") and self.btn_zoom.menu():
+            self.btn_zoom.menu().setStyleSheet(
+                f"QMenu {{ background: {menu_bg}; \
+                           color: {menu_fg}; \
+                           border: 1px solid {menu_border}; }} \
+                QMenu::item:selected {{ background: rgba(128, 128, 128, 0.2); }}"
+            )
+
+        if hasattr(self, "btn_back"):
+            self._update_icons()
 
     def toggle_theme(self) -> None:
         """
@@ -1049,7 +1144,9 @@ class BrowserTab(QWidget):
         if self.window() and hasattr(self.window(), "bookmarks_manager"):
             is_bm = self.window().bookmarks_manager.is_bookmarked(url)
             self.btn_bookmark.setChecked(is_bm)
-            self.btn_bookmark.setText("★" if is_bm else "☆")
+            self.btn_bookmark.setIcon(
+                self._get_icon("bookmark-filled.svg" if is_bm else "bookmark.svg")
+            )
 
     def toggle_bookmark(self) -> None:
         """
@@ -1095,7 +1192,7 @@ class BrowserTab(QWidget):
 
         parent = self.parent()
         icon_path = get_resource_path(
-            os.path.join("..", "assets", "icons", "browser.svg")
+            os.path.join("..", "assets", "icons", "browser.png")
         )
         page_icon = QIcon(icon_path)
         while parent:
@@ -1253,8 +1350,7 @@ class BrowserTab(QWidget):
         self.show_toast("Starting download...")
         self.progress.setValue(0)
 
-        self.btn_download.setText("⏹")
-        self.btn_download.setStyleSheet("color: #FF4500; font-weight: bold;")
+        self.btn_download.setIcon(self._get_icon("circle-stop.svg"))
         self.btn_download.setToolTip("Cancel Download")
         try:
             self.btn_download.clicked.disconnect()
@@ -1279,7 +1375,9 @@ class BrowserTab(QWidget):
         """Mutes or unmutes the audio output specifically for this web tab."""
         is_muted = self.btn_mute.isChecked()
         self.web.page().setAudioMuted(is_muted)
-        self.btn_mute.setText("🔇" if is_muted else "🔊")
+
+        icon = "volume-x.svg" if is_muted else "volume-on.svg"
+        self.btn_mute.setIcon(self._get_icon(icon))
 
     def print_to_pdf(self) -> None:
         """Renders the current web page directly to a PDF and opens it in Riemann."""
@@ -1319,8 +1417,7 @@ class BrowserTab(QWidget):
             success (bool): Conditional pass reflecting download health natively explicitly.
             message (str): Information strings structurally appended describing outcome naturally gracefully.
         """
-        self.btn_download.setText("⬇")
-        self.btn_download.setStyleSheet("")
+        self.btn_download.setIcon(self._get_icon("download.svg"))
         self.btn_download.setToolTip("Download Video via yt-dlp")
         try:
             self.btn_download.clicked.disconnect()
@@ -1352,3 +1449,66 @@ class BrowserTab(QWidget):
             focus_widget = QApplication.focusWidget()
             if not isinstance(focus_widget, QLineEdit):
                 self.web.setFocus()
+
+    def _get_icon(self, filename: str) -> QIcon:
+        is_dark = getattr(self, "dark_mode", False)
+        if (
+            is_dark
+            and filename.endswith(".svg")
+            and not filename.endswith("-white.svg")
+        ):
+            filename = filename.replace(".svg", "-white.svg")
+
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            base_path = getattr(sys, "_MEIPASS")
+            path = os.path.join(base_path, "riemann", "assets", "icons", filename)
+        else:
+            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            path = os.path.join(base_path, "assets", "icons", filename)
+
+        if not os.path.exists(path) and "-white.svg" in filename:
+            path = path.replace("-white.svg", ".svg")
+
+        return QIcon(path)
+
+    def _update_icons(self) -> None:
+        """Refreshes all browser icons dynamically when the theme changes."""
+        self.btn_back.setIcon(self._get_icon("chevron-left.svg"))
+        self.btn_fwd.setIcon(self._get_icon("chevron-right.svg"))
+        self.btn_reload.setIcon(self._get_icon("rotate-cw.svg"))
+
+        if self.incognito:
+            self.btn_incognito_icon.setIcon(self._get_icon("incognito.svg"))
+
+        icon_name = "moon.svg" if getattr(self, "dark_mode", False) else "sun.svg"
+        self.btn_theme_toggle.setIcon(self._get_icon(icon_name))
+
+        is_bm = False
+        if hasattr(self.window(), "bookmarks_manager"):
+            is_bm = self.window().bookmarks_manager.is_bookmarked(
+                self.web.url().toString()
+            )
+        self.btn_bookmark.setIcon(
+            self._get_icon("bookmark-filled.svg" if is_bm else "bookmark.svg")
+        )
+
+        self.btn_mute.setIcon(
+            self._get_icon(
+                "volume-x.svg" if self.btn_mute.isChecked() else "volume-on.svg"
+            )
+        )
+        self.btn_music.setIcon(self._get_icon("music.svg"))
+
+        dl_icon = (
+            "circle-stop.svg"
+            if getattr(self, "dl_worker", None) and self.dl_worker.isRunning()
+            else "download.svg"
+        )
+        self.btn_download.setIcon(self._get_icon(dl_icon))
+
+        self.btn_print_pdf.setIcon(self._get_icon("printer.svg"))
+
+        if hasattr(self, "btn_find_prev"):
+            self.btn_find_prev.setIcon(self._get_icon("chevron-up.svg"))
+            self.btn_find_next.setIcon(self._get_icon("chevron-down.svg"))
+            self.btn_close_find.setIcon(self._get_icon("x.svg"))

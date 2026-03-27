@@ -6,23 +6,27 @@ including a draggable tab system and a specialized annotation toolbar.
 """
 
 import os
+import sys
 from typing import Optional
 
-from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
+from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QDrag,
     QDragEnterEvent,
     QDropEvent,
+    QIcon,
     QMouseEvent,
 )
 from PySide6.QtWidgets import (
     QButtonGroup,
     QColorDialog,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QInputDialog,
     QMenu,
+    QPushButton,
     QSpinBox,
     QTabBar,
     QTabWidget,
@@ -237,68 +241,80 @@ class AnnotationToolbar(QWidget):
 
         self.btn_group = QButtonGroup(self)
         self.btn_group.setExclusive(True)
+        icon_size = QSize(20, 20)
 
         self.btn_nav = self._add_tool_btn(
-            "🖱️", "nav", "Navigate / Select", layout, checked=True
+            "cursor.svg", "nav", "Navigate / Select", layout, checked=True
         )
-
         self._add_separator(layout)
-
-        self.btn_note = self._add_tool_btn("📝", "note", "Sticky Note", layout)
-        self.btn_text = self._add_tool_btn("🔤", "text", "Text Label", layout)
-        self.btn_pen = self._add_tool_btn("🖊️", "pen", "Freehand Pen", layout)
-        self.btn_highlighter = self._add_tool_btn(
-            "🖍️", "highlight", "Highlighter", layout
+        self.btn_note = self._add_tool_btn(
+            "sticky-note.svg", "note", "Sticky Note", layout
         )
-
+        self.btn_text = self._add_tool_btn("type.svg", "text", "Text Label", layout)
+        self.btn_pen = self._add_tool_btn("pen-line.svg", "pen", "Freehand Pen", layout)
+        self.btn_highlighter = self._add_tool_btn(
+            "highlighter.svg", "highlight", "Highlighter", layout
+        )
         self._add_separator(layout)
 
         self.btn_markup_h = self._add_tool_btn(
-            "H", "markup_highlight", "Text Highlight", layout
+            "highlighter.svg", "markup_highlight", "Text Highlight", layout
         )
         self.btn_markup_u = self._add_tool_btn(
-            "U", "markup_underline", "Text Underline", layout
+            "underline.svg", "markup_underline", "Text Underline", layout
         )
         self.btn_markup_s = self._add_tool_btn(
-            "S", "markup_strikeout", "Text Strikeout", layout
+            "strikethrough.svg", "markup_strikeout", "Text Strikeout", layout
         )
 
         self._add_separator(layout)
 
         self.btn_shapes = QToolButton()
-        self.btn_shapes.setText("□")
+        self.btn_shapes.setIcon(self._get_icon("square-dashed.svg"))
+        self.btn_shapes.setIconSize(icon_size)
         self.btn_shapes.setToolTip("Shapes")
         self.btn_shapes.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
 
         shape_menu = QMenu(self.btn_shapes)
-        self._add_menu_action(shape_menu, "□ Rectangle", "rect", self.btn_shapes)
-        self._add_menu_action(shape_menu, "◯ Oval", "oval", self.btn_shapes)
+        self._add_menu_action(
+            shape_menu, "Rectangle", "square-dashed.svg", "rect", self.btn_shapes
+        )
+        self._add_menu_action(
+            shape_menu, "Oval", "circle-slash.svg", "oval", self.btn_shapes
+        )
         self.btn_shapes.setMenu(shape_menu)
         layout.addWidget(self.btn_shapes)
 
         self.btn_stamps = QToolButton()
-        self.btn_stamps.setText("✅")
+        self.btn_stamps.setIcon(self._get_icon("check.svg"))
+        self.btn_stamps.setIconSize(icon_size)
         self.btn_stamps.setToolTip("Stamps")
         self.btn_stamps.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
 
         stamp_menu = QMenu(self.btn_stamps)
-        self._add_menu_action(stamp_menu, "✅ Tick", "stamp_tick", self.btn_stamps)
-        self._add_menu_action(stamp_menu, "❌ Cross", "stamp_cross", self.btn_stamps)
+        self._add_menu_action(
+            stamp_menu, "Tick", "check.svg", "stamp_tick", self.btn_stamps
+        )
+        self._add_menu_action(
+            stamp_menu, "Cross", "x.svg", "stamp_cross", self.btn_stamps
+        )
         self.btn_stamps.setMenu(stamp_menu)
         layout.addWidget(self.btn_stamps)
 
         self._add_separator(layout)
 
-        self.btn_eraser = self._add_tool_btn("⌫", "eraser", "Eraser", layout)
+        self.btn_eraser = self._add_tool_btn("eraser.svg", "eraser", "Eraser", layout)
 
         self.btn_undo = QToolButton()
-        self.btn_undo.setText("↩️")
+        self.btn_undo.setIcon(self._get_icon("undo.svg"))
+        self.btn_undo.setIconSize(icon_size)
         self.btn_undo.setToolTip("Undo")
         self.btn_undo.clicked.connect(self.undo_requested.emit)
         layout.addWidget(self.btn_undo)
 
         self.btn_redo = QToolButton()
-        self.btn_redo.setText("↪️")
+        self.btn_redo.setIcon(self._get_icon("redo.svg"))
+        self.btn_redo.setIconSize(icon_size)
         self.btn_redo.setToolTip("Redo")
         self.btn_redo.clicked.connect(self.redo_requested.emit)
         layout.addWidget(self.btn_redo)
@@ -306,7 +322,8 @@ class AnnotationToolbar(QWidget):
         self._add_separator(layout)
 
         self.btn_color = QToolButton()
-        self.btn_color.setText("🎨")
+        self.btn_color.setIcon(self._get_icon("palette.svg"))
+        self.btn_color.setIconSize(icon_size)
         self.btn_color.setToolTip("Change Color")
         self.btn_color.clicked.connect(self._pick_color)
         layout.addWidget(self.btn_color)
@@ -320,6 +337,64 @@ class AnnotationToolbar(QWidget):
         layout.addWidget(self.spin_thick)
 
         layout.addStretch()
+        
+        for widget_class in (QPushButton, QToolButton, QComboBox):
+            for w in self.findChildren(widget_class):
+                w.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def _get_icon(self, filename: str) -> QIcon:
+        is_dark = False
+        if self.parent() and hasattr(self.parent(), "theme_mode"):
+            is_dark = self.parent().theme_mode != 0
+
+        if (
+            is_dark
+            and filename.endswith(".svg")
+            and not filename.endswith("-white.svg")
+        ):
+            filename = filename.replace(".svg", "-white.svg")
+
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            base_path = getattr(sys, "_MEIPASS")
+            path = os.path.join(base_path, "riemann", "assets", "icons", filename)
+        else:
+            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            path = os.path.join(base_path, "assets", "icons", filename)
+
+        if not os.path.exists(path) and "-white.svg" in filename:
+            path = path.replace("-white.svg", ".svg")
+
+        return QIcon(path)
+
+    def _update_icons(self) -> None:
+        """Refreshes all annotation icons dynamically when the theme changes."""
+        self.btn_nav.setIcon(self._get_icon("browser.svg"))
+        self.btn_note.setIcon(self._get_icon("sticky-note.svg"))
+        self.btn_text.setIcon(self._get_icon("type.svg"))
+        self.btn_pen.setIcon(self._get_icon("pen-line.svg"))
+        self.btn_highlighter.setIcon(self._get_icon("highlighter.svg"))
+        self.btn_markup_h.setIcon(self._get_icon("highlighter.svg"))
+        self.btn_markup_u.setIcon(self._get_icon("underline.svg"))
+        self.btn_markup_s.setIcon(self._get_icon("strikethrough.svg"))
+
+        self.btn_shapes.setIcon(self._get_icon("square-dashed.svg"))
+        self.btn_stamps.setIcon(self._get_icon("check.svg"))
+        self.btn_eraser.setIcon(self._get_icon("eraser.svg"))
+        self.btn_undo.setIcon(self._get_icon("undo.svg"))
+        self.btn_redo.setIcon(self._get_icon("redo.svg"))
+        self.btn_color.setIcon(self._get_icon("palette.svg"))
+
+        for action in self.btn_shapes.menu().actions():
+            if "Rectangle" in action.text():
+                action.setIcon(self._get_icon("square-dashed.svg"))
+            if "Oval" in action.text():
+                action.setIcon(self._get_icon("circle-slash.svg"))
+
+        for action in self.btn_stamps.menu().actions():
+            if "Tick" in action.text():
+                action.setIcon(self._get_icon("check.svg"))
+            if "Cross" in action.text():
+                action.setIcon(self._get_icon("x.svg"))
 
     def _add_tool_btn(
         self,
@@ -343,7 +418,8 @@ class AnnotationToolbar(QWidget):
             QToolButton: The configured tool button instance.
         """
         btn = QToolButton()
-        btn.setText(icon)
+        btn.setIcon(self._get_icon(icon))
+        btn.setIconSize(QSize(20, 20))
         btn.setCheckable(True)
         btn.setToolTip(tooltip)
         btn.setChecked(checked)
@@ -353,7 +429,7 @@ class AnnotationToolbar(QWidget):
         return btn
 
     def _add_menu_action(
-        self, menu: QMenu, text: str, tool_id: str, parent_btn: QToolButton
+        self, menu: QMenu, text: str, icon: str, tool_id: str, parent_btn: QToolButton
     ) -> None:
         """
         Helper method to add selectable actions to dropdown tool menus.
@@ -364,10 +440,8 @@ class AnnotationToolbar(QWidget):
             tool_id (str): The internal identifier for the specific tool.
             parent_btn (QToolButton): The parent button that opened the menu.
         """
-        action = QAction(text, self)
-        action.triggered.connect(
-            lambda: self._set_menu_tool(parent_btn, tool_id, text.split(" ")[0])
-        )
+        action = QAction(self._get_icon(icon), text, self)
+        action.triggered.connect(lambda: self._set_menu_tool(parent_btn, tool_id, icon))
         menu.addAction(action)
 
     def _set_menu_tool(self, btn: QToolButton, tool_id: str, icon: str) -> None:
@@ -379,7 +453,7 @@ class AnnotationToolbar(QWidget):
             tool_id (str): The specific identifier to emit.
             icon (str): The new icon to display on the main toolbar level.
         """
-        btn.setText(icon)
+        btn.setIcon(self._get_icon(icon))
 
         if not btn.isChecked():
             btn.setChecked(True)

@@ -21,6 +21,7 @@ from PySide6.QtCore import (
     QPropertyAnimation,
     QRect,
     QSettings,
+    QSize,
     Qt,
     QTimer,
     QUrl,
@@ -29,6 +30,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QColor,
     QDesktopServices,
+    QIcon,
     QImage,
     QKeyEvent,
     QKeySequence,
@@ -61,6 +63,7 @@ from PySide6.QtWidgets import (
     QScrollerProperties,
     QStackedWidget,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -328,6 +331,10 @@ class ReaderTab(
             self.stack.setCurrentIndex(2)
             self.toolbar.hide()
 
+        for widget_class in (QPushButton, QToolButton, QComboBox):
+            for w in self.findChildren(widget_class):
+                w.setCursor(Qt.CursorShape.PointingHandCursor)
+
     def _setup_toolbar_buttons(self, layout: QHBoxLayout) -> None:
         """
         Allocates interactive push buttons resolving respective execution slot relationships natively.
@@ -335,61 +342,89 @@ class ReaderTab(
         Args:
             layout (QHBoxLayout): Reference pointer tracking parent bounding alignments systematically.
         """
-        self.btn_save = QPushButton("💾")
+        icon_size = QSize(20, 20)
+
+        self.btn_save = QPushButton()
+        self.btn_save.setIcon(self._get_icon("save.svg"))
+        self.btn_save.setIconSize(icon_size)
         self.btn_save.setToolTip("Save Copy of PDF")
         self.btn_save.clicked.connect(self.save_document)
 
-        self.btn_rename = QPushButton("🏷️")
+        self.btn_rename = QPushButton()
+        self.btn_rename.setIcon(self._get_icon("rename.svg"))
+        self.btn_rename.setIconSize(icon_size)
         self.btn_rename.setToolTip("Auto-Rename File using Metadata")
         self.btn_rename.clicked.connect(self.rename_current_pdf)
 
-        self.btn_export = QPushButton("📤")
+        self.btn_export = QPushButton()
+        self.btn_export.setIcon(self._get_icon("file-output.svg"))
+        self.btn_export.setIconSize(icon_size)
         self.btn_export.setToolTip("Export Annotations to Markdown")
         self.btn_export.clicked.connect(self.export_annotations)
 
-        self.btn_print = QPushButton("🖨️")
+        self.btn_print = QPushButton()
+        self.btn_print.setIcon(self._get_icon("printer.svg"))
+        self.btn_print.setIconSize(icon_size)
         self.btn_print.setToolTip("Print Document (Ctrl+P)")
         self.btn_print.clicked.connect(self.print_document)
 
-        self.btn_cite = QPushButton("📑")
+        self.btn_cite = QPushButton()
+        self.btn_cite.setIcon(self._get_icon("text-quote.svg"))
+        self.btn_cite.setIconSize(icon_size)
         self.btn_cite.setToolTip("Copy BibTeX Citation")
         self.btn_cite.clicked.connect(self.copy_citation)
 
-        self.btn_rotate = QPushButton("↻")
+        self.btn_rotate = QPushButton()
+        self.btn_rotate.setIcon(self._get_icon("rotate-cw.svg"))
+        self.btn_rotate.setIconSize(icon_size)
         self.btn_rotate.setToolTip("Rotate PDF 90°")
         self.btn_rotate.clicked.connect(self.rotate_document)
 
-        self.btn_rotate_ccw = QPushButton("↺")
+        self.btn_rotate_ccw = QPushButton()
+        self.btn_rotate_ccw.setIcon(self._get_icon("rotate-ccw.svg"))
+        self.btn_rotate_ccw.setIconSize(icon_size)
         self.btn_rotate_ccw.setToolTip("Rotate PDF -90°")
         self.btn_rotate_ccw.clicked.connect(self.rotate_document_ccw)
 
-        self.btn_reflow = QPushButton("📄/📝")
+        self.btn_reflow = QPushButton()
+        self.btn_reflow.setIcon(self._get_icon("file-text.svg"))
+        self.btn_reflow.setIconSize(icon_size)
         self.btn_reflow.setToolTip("Toggle Text Reflow Mode")
         self.btn_reflow.setCheckable(True)
         self.btn_reflow.clicked.connect(self.toggle_view_mode)
 
-        self.btn_facing = QPushButton("📄/📖")
+        self.btn_facing = QPushButton()
+        self.btn_facing.setIcon(self._get_icon("book-open.svg"))
+        self.btn_facing.setIconSize(icon_size)
         self.btn_facing.setToolTip("Toggle Facing Pages")
         self.btn_facing.setCheckable(True)
         self.btn_facing.clicked.connect(self.toggle_facing_mode)
 
-        self.btn_scroll_mode = QPushButton("📄/📜")
+        self.btn_scroll_mode = QPushButton()
+        self.btn_scroll_mode.setIcon(self._get_icon("scroll.svg"))
+        self.btn_scroll_mode.setIconSize(icon_size)
         self.btn_scroll_mode.setToolTip("Toggle Scroll Mode")
         self.btn_scroll_mode.setCheckable(True)
         self.btn_scroll_mode.setChecked(self.continuous_scroll)
         self.btn_scroll_mode.clicked.connect(self.toggle_scroll_mode)
 
-        self.btn_annotate = QPushButton("🖊️")
+        self.btn_annotate = QPushButton()
+        self.btn_annotate.setIcon(self._get_icon("pen-line.svg"))
+        self.btn_annotate.setIconSize(icon_size)
         self.btn_annotate.setToolTip("Show Annotation Tools")
         self.btn_annotate.setCheckable(True)
         self.btn_annotate.clicked.connect(self.toggle_annotation_mode)
 
-        self.btn_snip = QPushButton("✂️")
+        self.btn_snip = QPushButton()
+        self.btn_snip.setIcon(self._get_icon("crop.svg"))
+        self.btn_snip.setIconSize(icon_size)
         self.btn_snip.setToolTip("Snip Math to LaTeX")
         self.btn_snip.setCheckable(True)
         self.btn_snip.clicked.connect(self.toggle_snip_mode)
 
-        self.btn_prev = QPushButton("◄")
+        self.btn_prev = QPushButton()
+        self.btn_prev.setIcon(self._get_icon("chevron-left.svg"))
+        self.btn_prev.setIconSize(icon_size)
         self.btn_prev.clicked.connect(self.prev_view)
 
         self.txt_page = QLineEdit()
@@ -399,7 +434,9 @@ class ReaderTab(
 
         self.lbl_total = QLabel("/ 0")
 
-        self.btn_next = QPushButton("►")
+        self.btn_next = QPushButton()
+        self.btn_next.setIcon(self._get_icon("chevron-right.svg"))
+        self.btn_next.setIconSize(icon_size)
         self.btn_next.clicked.connect(self.next_view)
 
         self.combo_zoom = QComboBox()
@@ -421,22 +458,36 @@ class ReaderTab(
         self.combo_zoom.lineEdit().returnPressed.connect(self.on_zoom_text_entered)
         self.combo_zoom.setFixedWidth(120)
 
-        self.btn_theme = QPushButton("🌓")
+        self.btn_theme = QPushButton()
+        self.btn_theme.setIcon(
+            self._get_icon(
+                "moon.svg" if getattr(self, "theme_mode", 0) == 0 else "sun.svg"
+            )
+        )
+        self.btn_theme.setIconSize(icon_size)
         self.btn_theme.setToolTip("Cycle Theme (Light / Fast Dark / Smart Dark)")
         self.btn_theme.clicked.connect(self.toggle_theme)
 
-        self.btn_fullscreen = QPushButton("⛶")
+        self.btn_fullscreen = QPushButton()
+        self.btn_fullscreen.setIcon(self._get_icon("maximize.svg"))
+        self.btn_fullscreen.setIconSize(icon_size)
         self.btn_fullscreen.clicked.connect(self.toggle_reader_fullscreen)
 
-        self.btn_ocr = QPushButton("👁️")
+        self.btn_ocr = QPushButton()
+        self.btn_ocr.setIcon(self._get_icon("scan-text.svg"))
+        self.btn_ocr.setIconSize(icon_size)
         self.btn_ocr.setToolTip("OCR Current Page")
         self.btn_ocr.clicked.connect(self.perform_ocr_current_page)
 
-        self.btn_search = QPushButton("🔍")
+        self.btn_search = QPushButton()
+        self.btn_search.setIcon(self._get_icon("search.svg"))
+        self.btn_search.setIconSize(icon_size)
         self.btn_search.setCheckable(True)
         self.btn_search.clicked.connect(self.toggle_search_bar)
 
-        self.btn_ai_search = QPushButton("✨")
+        self.btn_ai_search = QPushButton()
+        self.btn_ai_search.setIcon(self._get_icon("sparkles.svg"))
+        self.btn_ai_search.setIconSize(icon_size)
         self.btn_ai_search.setToolTip("AI Semantic Search (Ctrl+I)")
         self.btn_ai_search.setCheckable(True)
         self.btn_ai_search.setStyleSheet(
@@ -444,12 +495,15 @@ class ReaderTab(
         )
         self.btn_ai_search.clicked.connect(self.toggle_ai_search_bar)
 
-        self.btn_secure_export = QPushButton("🔒 Lock | Save")
+        self.btn_secure_export = QPushButton()
+        self.btn_secure_export.setIcon(self._get_icon("file-lock.svg"))
+        self.btn_secure_export.setIconSize(icon_size)
+        self.btn_secure_export.setText(" Lock | Save")
         self.btn_secure_export.setToolTip(
             "Export a password-protected copy of this PDF (Ctrl+Shift+S)"
         )
-        self.btn_secure_export.setCursor(Qt.CursorShape.PointingHandCursor)
 
+        self.btn_secure_export.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_secure_export.setStyleSheet("""
             QPushButton {
                 padding: 6px 14px;
@@ -465,7 +519,9 @@ class ReaderTab(
         """)
         self.btn_secure_export.clicked.connect(self.export_secure_pdf)
 
-        self.btn_sign = QPushButton("🖋️")
+        self.btn_sign = QPushButton()
+        self.btn_sign.setIcon(self._get_icon("pen-line.svg"))
+        self.btn_sign.setIconSize(icon_size)
         self.btn_sign.setToolTip("Sign Document (PKCS#12)")
         self.btn_sign.clicked.connect(self.initiate_signing_flow)
 
@@ -513,13 +569,20 @@ class ReaderTab(
         self.txt_search.setPlaceholderText("Find text...")
         self.txt_search.returnPressed.connect(self.find_next)
 
-        self.btn_find_prev = QPushButton("▲")
+        icon_size = QSize(18, 18)
+        self.btn_find_prev = QPushButton()
+        self.btn_find_prev.setIcon(self._get_icon("chevron-up.svg"))
+        self.btn_find_prev.setIconSize(icon_size)
         self.btn_find_prev.clicked.connect(self.find_prev)
 
-        self.btn_find_next = QPushButton("▼")
+        self.btn_find_next = QPushButton()
+        self.btn_find_next.setIcon(self._get_icon("chevron-down.svg"))
+        self.btn_find_next.setIconSize(icon_size)
         self.btn_find_next.clicked.connect(self.find_next)
 
-        self.btn_close_search = QPushButton("✕")
+        self.btn_close_search = QPushButton()
+        self.btn_close_search.setIcon(self._get_icon("x.svg"))
+        self.btn_close_search.setIconSize(icon_size)
         self.btn_close_search.setFlat(True)
         self.btn_close_search.clicked.connect(self.toggle_search_bar)
 
@@ -536,7 +599,6 @@ class ReaderTab(
         self.ai_search_bar = QWidget()
         self.ai_search_bar.setVisible(False)
         self.ai_search_bar.setFixedHeight(45)
-
         self.ai_search_bar.setStyleSheet("background-color: #2b1d3d; color: #e6d0ff;")
 
         sb_layout = QHBoxLayout(self.ai_search_bar)
@@ -554,7 +616,8 @@ class ReaderTab(
             lambda: self.ai_search(self.txt_ai_search.text())
         )
 
-        self.btn_ai_find = QPushButton("Ask AI ✨")
+        self.btn_ai_find = QPushButton("Ask AI")
+        self.btn_ai_find.setIcon(self._get_icon("sparkles.svg"))
         self.btn_ai_find.setStyleSheet(
             "background-color: #7b4bce; color: white; border-radius: 4px; padding: 4px 10px;"
         )
@@ -562,20 +625,27 @@ class ReaderTab(
             lambda: self.ai_search(self.txt_ai_search.text())
         )
 
-        self.btn_ai_prev = QPushButton("▲")
-        self.btn_ai_prev.setStyleSheet("color: #e6d0ff; font-weight: bold;")
+        icon_size = QSize(18, 18)
+        self.btn_ai_prev = QPushButton()
+        self.btn_ai_prev.setIcon(self._get_icon("chevron-up.svg"))
+        self.btn_ai_prev.setIconSize(icon_size)
         self.btn_ai_prev.clicked.connect(self.ai_find_prev)
 
-        self.btn_ai_next = QPushButton("▼")
-        self.btn_ai_next.setStyleSheet("color: #e6d0ff; font-weight: bold;")
+        self.btn_ai_next = QPushButton()
+        self.btn_ai_next.setIcon(self._get_icon("chevron-down.svg"))
+        self.btn_ai_next.setIconSize(icon_size)
         self.btn_ai_next.clicked.connect(self.ai_find_next)
 
-        self.btn_close_ai_search = QPushButton("✕")
+        self.btn_close_ai_search = QPushButton()
+        self.btn_close_ai_search.setIcon(self._get_icon("x-white.svg"))
+        self.btn_close_ai_search.setIconSize(icon_size)
         self.btn_close_ai_search.setFlat(True)
-        self.btn_close_ai_search.setStyleSheet("color: #e6d0ff; font-weight: bold;")
         self.btn_close_ai_search.clicked.connect(self.toggle_ai_search_bar)
 
-        sb_layout.addWidget(QLabel("✨ AI Search:"))
+        lbl = QLabel("AI Search:")
+        lbl.setStyleSheet("font-weight: bold;")
+
+        sb_layout.addWidget(lbl)
         sb_layout.addWidget(self.txt_ai_search)
         sb_layout.addWidget(self.btn_ai_find)
         sb_layout.addWidget(self.btn_ai_prev)
@@ -1523,44 +1593,73 @@ class ReaderTab(
         )
 
         fg = "#ddd" if is_dark else "#111"
-
         checked_bg = "rgba(60, 140, 255, 0.3)" if is_dark else "rgba(0, 100, 255, 0.2)"
         checked_border = "#50a0ff"
-
-        self.toolbar.setStyleSheet(f"""
-            QWidget {{ background: {color.name()}; color: {fg}; }}
-            QPushButton {{ 
-                border: 1px solid transparent; 
-                padding: 6px; 
-                border-radius: 4px; 
-                background: transparent;
-            }}
-            QPushButton:hover {{ 
-                background: rgba(128, 128, 128, 0.2); 
-            }}
-            QPushButton:checked {{ 
-                background-color: {checked_bg}; 
-                border: 1px solid {checked_border}; 
-            }}
-        """)
 
         sb_bg = "#2a2a2a" if is_dark else "#e0e0e0"
         sb_fg = "#ddd" if is_dark else "#111"
         input_bg = "#1e1e1e" if is_dark else "#ffffff"
         input_border = "#555" if is_dark else "#bbb"
 
-        self.search_bar.setStyleSheet(f"""
-            QWidget {{ background-color: {sb_bg}; color: {sb_fg}; }}
-            QLineEdit {{
-                background-color: {input_bg};
-                color: {sb_fg};
-                border: 1px solid {input_border};
-                border-radius: 4px;
-                padding: 4px;
-            }}
-            QPushButton {{ background: transparent; border: none; }}
-            QPushButton:hover {{ background: rgba(128,128,128,0.2); border-radius: 4px; }}
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            base_p = getattr(sys, "_MEIPASS")
+            arrow_path = os.path.join(
+                base_p,
+                "riemann",
+                "assets",
+                "icons",
+                "chevron-down-white.svg" if is_dark else "chevron-down.svg",
+            )
+        else:
+            base_p = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            )
+            arrow_path = os.path.join(
+                base_p,
+                "assets",
+                "icons",
+                "chevron-down-white.svg" if is_dark else "chevron-down.svg",
+            )
+
+        arrow_url = arrow_path.replace("\\", "/")
+
+        self.toolbar.setStyleSheet(f"""
+            QWidget {{ background: {color.name()}; color: {fg}; }}
+            QPushButton {{ border: 1px solid transparent; padding: 6px; border-radius: 4px; background: transparent; }}
+            QPushButton:hover {{ background: rgba(128, 128, 128, 0.2); }}
+            QPushButton:checked {{ background-color: {checked_bg}; border: 1px solid {checked_border}; }}
+            QComboBox {{ background-color: {input_bg}; color: {sb_fg}; border: 1px solid {input_border}; border-radius: 4px; padding: 4px; }}
+            QComboBox::drop-down {{ border: none; width: 24px; }}
+            QComboBox::down-arrow {{ image: url("{arrow_url}"); width: 16px; height: 16px; }}
         """)
+
+        self.search_bar.setStyleSheet(f"""
+            QWidget {{ background-color: {sb_bg};
+                color: {sb_fg}; }}
+            QLineEdit {{ background-color: {input_bg}; 
+                color: {sb_fg}; 
+                border: 1px solid {input_border}; 
+                border-radius: 4px; 
+                padding: 4px; }}
+            QPushButton {{ background: transparent; 
+                border: none; }}
+            QPushButton:hover {{ background: rgba(128,128,128,0.2); 
+                border-radius: 4px; }}
+        """)
+
+        btn_sec_bg = "#2C2C30" if is_dark else "#E0E0E0"
+        btn_sec_border = "#3F3F46" if is_dark else "#CCCCCC"
+        btn_sec_hover = "#52525B" if is_dark else "#D0D0D0"
+        btn_sec_fg = "#E0E0E0" if is_dark else "#111111"
+
+        if hasattr(self, "btn_secure_export"):
+            self.btn_secure_export.setStyleSheet(f"""
+                QPushButton {{ padding: 6px 14px; border-radius: 4px; background-color: {btn_sec_bg}; color: {btn_sec_fg}; border: 1px solid {btn_sec_border}; }}
+                QPushButton:hover {{ background-color: {btn_sec_hover}; border: 1px solid #999; }}
+            """)
+
+        if hasattr(self, "btn_save"):
+            self._update_icons()
 
     def toggle_theme(self) -> None:
         """
@@ -1988,3 +2087,70 @@ class ReaderTab(
                         print(e)
                     finally:
                         painter.end()
+
+    def _get_icon(self, filename: str) -> QIcon:
+        is_dark = getattr(self, "theme_mode", 0) != 0
+        if (
+            is_dark
+            and filename.endswith(".svg")
+            and not filename.endswith("-white.svg")
+        ):
+            filename = filename.replace(".svg", "-white.svg")
+
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            base_path = getattr(sys, "_MEIPASS")
+            path = os.path.join(base_path, "riemann", "assets", "icons", filename)
+        else:
+            base_path = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            )
+            path = os.path.join(base_path, "assets", "icons", filename)
+
+        if not os.path.exists(path) and "-white.svg" in filename:
+            path = path.replace("-white.svg", ".svg")
+
+        return QIcon(path)
+
+    def _update_icons(self) -> None:
+        """Refreshes all icons dynamically when the theme changes."""
+        self.btn_save.setIcon(self._get_icon("save.svg"))
+        self.btn_rename.setIcon(self._get_icon("rename.svg"))
+        self.btn_export.setIcon(self._get_icon("file-output.svg"))
+        self.btn_print.setIcon(self._get_icon("printer.svg"))
+        self.btn_cite.setIcon(self._get_icon("text-quote.svg"))
+        self.btn_rotate.setIcon(self._get_icon("rotate-cw.svg"))
+        self.btn_rotate_ccw.setIcon(self._get_icon("rotate-ccw.svg"))
+        self.btn_reflow.setIcon(self._get_icon("file-text.svg"))
+        self.btn_facing.setIcon(self._get_icon("book-open.svg"))
+        self.btn_scroll_mode.setIcon(self._get_icon("scroll.svg"))
+        self.btn_annotate.setIcon(self._get_icon("pen-line.svg"))
+        self.btn_snip.setIcon(self._get_icon("crop.svg"))
+        self.btn_prev.setIcon(self._get_icon("chevron-left.svg"))
+        self.btn_next.setIcon(self._get_icon("chevron-right.svg"))
+
+        if getattr(self, "theme_mode", 0) == 0:
+            icon = "sun.svg"
+        elif getattr(self, "theme_mode", 0) == 1:
+            icon = "moon.svg"
+        else:
+            icon = "sun-moon.svg"
+        self.btn_theme.setIcon(self._get_icon(icon))
+
+        self.btn_fullscreen.setIcon(self._get_icon("maximize.svg"))
+        self.btn_ocr.setIcon(self._get_icon("scan-text.svg"))
+        self.btn_search.setIcon(self._get_icon("search.svg"))
+        self.btn_ai_search.setIcon(self._get_icon("sparkles.svg"))
+        self.btn_secure_export.setIcon(self._get_icon("file-lock.svg"))
+        self.btn_sign.setIcon(self._get_icon("pen-line.svg"))
+
+        self.btn_find_prev.setIcon(self._get_icon("chevron-up.svg"))
+        self.btn_find_next.setIcon(self._get_icon("chevron-down.svg"))
+        self.btn_close_search.setIcon(self._get_icon("x.svg"))
+
+        self.btn_ai_find.setIcon(self._get_icon("sparkles.svg"))
+        self.btn_ai_prev.setIcon(self._get_icon("chevron-up.svg"))
+        self.btn_ai_next.setIcon(self._get_icon("chevron-down.svg"))
+        self.btn_close_ai_search.setIcon(self._get_icon("x.svg"))
+
+        if hasattr(self, "anno_toolbar"):
+            self.anno_toolbar._update_icons()

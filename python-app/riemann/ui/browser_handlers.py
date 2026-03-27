@@ -65,15 +65,15 @@ class ScriptInjector:
         if js_code:
             self._insert_script("RiemannBackspace", js_code)
 
-    def inject_smart_dark_mode(self, web_page, is_dark_mode: bool) -> None:
+    def inject_smart_dark_mode(self, web_page, dark_mode: bool) -> None:
         """
         Injects or removes a smart dark mode CSS inversion script on a specific web page.
 
         Args:
             web_page: The QWebEnginePage instance to inject the script into.
-            is_dark_mode (bool): True to enable dark mode, False to disable it.
+            dark_mode (bool): True to enable dark mode, False to disable it.
         """
-        if is_dark_mode:
+        if dark_mode:
             js = get_injection_script("smart_dark_mode.js")
         else:
             js = "var el = document.getElementById('riemann-dark'); if(el) el.remove();"

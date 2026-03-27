@@ -441,6 +441,8 @@ class RiemannWindow(QMainWindow):
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(slot)
 
+        self.enforce_global_stylesheet()
+
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
         """
         Filters events to handle global keyboard shortcuts and mouse hover reveals.
@@ -746,6 +748,7 @@ class RiemannWindow(QMainWindow):
         Dynamically shows or hides the signature dock based on the active tab.
         """
         active_widget = self.tabs_main.currentWidget()
+
         if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
             side_widget = self.tabs_side.currentWidget()
             if side_widget and side_widget != self.tree_signatures:
@@ -757,32 +760,44 @@ class RiemannWindow(QMainWindow):
             if hasattr(active_widget, "current_signatures")
             else []
         )
-        sig_idx = self.tabs_side.indexOf(self.tree_signatures)
 
+        sig_idx = self.tabs_side.indexOf(self.tree_signatures)
         if signatures and not dismissed:
             self.tree_signatures.clear()
             for sig in signatures:
-                icon = (
-                    "✔️"
-                    if (sig.get("valid") and sig.get("is_trusted"))
-                    else ("❓" if sig.get("valid") else "❌")
-                )
                 item = QTreeWidgetItem(self.tree_signatures)
-                item.setText(0, f"{icon} {sig.get('subject', 'Unknown')}")
+                item.setText(0, f"  {sig.get('subject', 'Unknown')}")
+
+                if sig.get("valid"):
+                    if sig.get("is_trusted"):
+                        icon_name = "circle-check.svg"
+                    else:
+                        icon_name = "circle-question-mark.svg"
+                else:
+                    icon_name = "circle-slash.svg"
+
+                icon_path = get_resource_path(
+                    os.path.join("assets", "icons", icon_name)
+                )
+                item.setIcon(0, QIcon(icon_path))
                 item.setText(1, sig.get("field_name", "Unknown"))
+
                 child_cert = QTreeWidgetItem(item)
                 child_cert.setText(0, f"Cert Hash: {sig.get('cert_hash', '')[:15]}...")
+
                 if not sig.get("is_trusted") and sig.get("valid"):
                     child_warn = QTreeWidgetItem(item)
                     child_warn.setText(0, "Identity Unknown (Not in Trust Store)")
                 if not sig.get("valid"):
                     child_err = QTreeWidgetItem(item)
                     child_err.setText(0, "CRITICAL: Document Altered!")
+
             self.tree_signatures.expandAll()
             if sig_idx == -1:
                 self.tabs_side.addTab(self.tree_signatures, "🖊️ Signatures")
             if self.tabs_side.isHidden():
                 self.tabs_side.show()
+
         else:
             if sig_idx != -1:
                 self.tabs_side.removeTab(sig_idx)
@@ -1623,6 +1638,30 @@ class RiemannWindow(QMainWindow):
 
                     if not is_media:
                         wid.web.triggerPageAction(QWebEnginePage.WebAction.Stop)
+
+    def enforce_global_stylesheet(self) -> None:
+        """
+        Forces the application to read and apply the appropriate QSS file,
+        preventing Qt from reverting to native generic tab styles.
+        """
+        css_file = (
+            "modern_dark.css"
+            if getattr(self, "dark_mode", False)
+            else "modern_light.css"
+        )
+
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            base_p = getattr(sys, "_MEIPASS")
+            css_path = os.path.join(base_p, "riemann", "assets", "theme", css_file)
+        else:
+            base_p = os.path.dirname(os.path.abspath(__file__))
+            css_path = os.path.join(base_p, "assets", "theme", css_file)
+
+        if os.path.exists(css_path):
+            with open(css_path, "r", encoding="utf-8") as f:
+                self.setStyleSheet(f.read())
+        else:
+            self.setStyleSheet("")
 
 
 def run() -> None:

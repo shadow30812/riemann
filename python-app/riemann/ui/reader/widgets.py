@@ -2,10 +2,11 @@
 Custom UI Widgets for the Reader Module.
 """
 
+import os
 from typing import List
 
-from PySide6.QtCore import QPoint, QRect, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
+from PySide6.QtCore import QPoint, QRect, QSize, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPolygon
 from PySide6.QtWidgets import QLabel
 
 
@@ -122,15 +123,12 @@ class PageWidget(QLabel):
 
             if status == "VALID":
                 color = QColor(46, 125, 50)
-                icon = "✔️"
                 msg = "Signature Valid"
             elif status == "UNKNOWN":
                 color = QColor(245, 127, 23)
-                icon = "❓"
                 msg = "Identity Unknown"
             else:
                 color = QColor(198, 40, 40)
-                icon = "❌"
                 msg = "Invalid / Modified"
 
             painter.setPen(QPen(color, 3))
@@ -146,8 +144,9 @@ class PageWidget(QLabel):
             painter.drawText(
                 text_rect,
                 Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
-                f"{icon} {msg}\n{subject}",
+                f"{msg}\n{subject}",
             )
+
         if hasattr(self, "selected_text_rects") and self.selected_text_rects:
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(0, 120, 215, 80))
