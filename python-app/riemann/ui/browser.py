@@ -393,6 +393,7 @@ class BrowserTab(QWidget):
         self.script_injector = ScriptInjector(self.profile)
         self.script_injector.inject_ad_skipper()
         self.script_injector.inject_backspace_handler()
+        self.script_injector.inject_emoji_fallback()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -567,6 +568,7 @@ class BrowserTab(QWidget):
 
         self.web = QWebEngineView()
         page = WebPage(self.profile, self.web)
+
         page.settings().setAttribute(
             QWebEngineSettings.WebAttribute.PdfViewerEnabled, False
         )
@@ -579,6 +581,10 @@ class BrowserTab(QWidget):
         page.settings().setAttribute(
             QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True
         )
+        page.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True
+        )
+
         page.featurePermissionRequested.connect(self._on_feature_permission_requested)
         page.fullScreenRequested.connect(self._handle_fullscreen_request)
         self.web.setPage(page)
@@ -900,6 +906,12 @@ class BrowserTab(QWidget):
                         if self.window() and hasattr(self.window(), "new_pdf_tab"):
                             self.window().new_pdf_tab()
                         return True
+
+                    if key == Qt.Key.Key_B:
+                        if self.window() and hasattr(self.window(), "new_browser_tab"):
+                            self.window().new_browser_tab()
+                        return True
+
                     if key == Qt.Key.Key_M:
                         self.btn_music.click()
                         return True
@@ -908,6 +920,7 @@ class BrowserTab(QWidget):
                         if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                             if hasattr(self.window(), "prev_tab"):
                                 self.window().prev_tab()
+
                         else:
                             if hasattr(self.window(), "next_tab"):
                                 self.window().next_tab()

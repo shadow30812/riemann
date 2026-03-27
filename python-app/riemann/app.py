@@ -423,6 +423,17 @@ class RiemannWindow(QMainWindow):
             ("N", self.toggle_theme),
             (Qt.Key.Key_F11, self.toggle_reader_fullscreen),
             (Qt.Key.Key_Escape, self._handle_escape),
+            ("Ctrl+T", self.new_pdf_tab),
+            ("Ctrl+B", self.new_browser_tab),
+            ("Ctrl+N", self.new_window),
+            ("Ctrl+Shift+N", self.new_incognito_window),
+            ("Ctrl+O", self.open_pdf_smart),
+            ("Ctrl+K", self.show_bookmarks),
+            ("Ctrl+J", self.show_downloads),
+            ("Ctrl+L", self.show_library_search),
+            ("Ctrl+H", self.show_history),
+            ("Ctrl+,", self.show_settings),
+            ("Ctrl+D", self.toggle_theme),
         ]
 
         for seq, slot in shortcuts:
@@ -837,15 +848,15 @@ class RiemannWindow(QMainWindow):
         file_menu.addSeparator()
 
         actions = [
-            ("Open PDF", "Ctrl+O", self.open_pdf_smart),
-            ("Open New PDF Tab", "Ctrl+T", lambda: self.new_pdf_tab()),
+            ("Open PDF (Ctrl+O)", None, self.open_pdf_smart),
+            ("Open New PDF Tab (Ctrl+T)", None, lambda: self.new_pdf_tab()),
             (None, None, None),
             ("Split Current PDF", None, self.split_pdf),
             ("Merge PDFs", None, self.join_pdfs),
             (None, None, None),
-            ("New Browser Tab", "Ctrl+B", lambda: self.new_browser_tab()),
-            ("New Window", "Ctrl+N", self.new_window),
-            ("New Incognito Tab", "Ctrl+Shift+N", self.new_incognito_window),
+            ("New Browser Tab (Ctrl+B)", None, lambda: self.new_browser_tab()),
+            ("New Window (Ctrl+N)", None, self.new_window),
+            ("New Incognito Tab (Ctrl+Shift+N)", None, self.new_incognito_window),
             (None, None, None),
             ("Exit (Ctrl+Q)", None, self.close),
         ]
@@ -863,12 +874,12 @@ class RiemannWindow(QMainWindow):
         view_menu = menubar.addMenu("View")
 
         view_actions = [
-            ("Bookmarks", "Ctrl+K", self.show_bookmarks),
-            ("Downloads", "Ctrl+J", self.show_downloads),
-            ("Search Library", "Ctrl+L", self.show_library_search),
-            ("History", "Ctrl+H", self.show_history),
-            ("Settings", "Ctrl+,", self.show_settings),
-            ("Toggle Theme", "Ctrl+D", self.toggle_theme),
+            ("Bookmarks (Ctrl+K)", None, self.show_bookmarks),
+            ("Downloads (Ctrl+J)", None, self.show_downloads),
+            ("Search Library (Ctrl+L)", None, self.show_library_search),
+            ("History (Ctrl+H)", None, self.show_history),
+            ("Settings (Ctrl+,)", None, self.show_settings),
+            ("Toggle Theme (Ctrl+D)", None, self.toggle_theme),
         ]
 
         for name, shortcut, slot in view_actions:

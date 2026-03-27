@@ -5,6 +5,10 @@ This module provides utilities for injecting custom JavaScript into
 QWebEngine profiles to modify web page behavior and appearance.
 """
 
+import os
+import sys
+import urllib.parse
+
 from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineScript
 
 
@@ -111,7 +115,53 @@ class ScriptInjector:
             injection_point=QWebEngineScript.InjectionPoint.DocumentReady,
             world_id=QWebEngineScript.ScriptWorldId.UserWorld,
         )
-        web_page.runJavaScript(js)
+
+        try:
+            web_page.runJavaScript(js, QWebEngineScript.ScriptWorldId.UserWorld)
+        except Exception:
+            web_page.runJavaScript(js)
+
+    def inject_emoji_fallback(self) -> None:
+        """
+        Injects a CSS font-face and global rule to ensure emojis and symbols
+        always have a valid fallback font by referencing the bundled Noto font.
+        """
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            base_path = getattr(sys, "_MEIPASS")
+            font_path = os.path.join(
+                base_path, "riemann", "assets", "fonts", "NotoColorEmoji.ttf"
+            )
+        else:
+            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            font_path = os.path.join(base_path, "assets", "fonts", "NotoColorEmoji.ttf")
+
+        font_uri = "file:///" + urllib.parse.quote(font_path.replace("\\", "/"))
+
+        js = f"""
+        (function() {{
+            if (document.getElementById('riemann-emoji-fallback')) return;
+            
+            var css = `
+                @font-face {{
+                    font-family: "Riemann Noto Emoji";
+                    src: url("{font_uri}") format("truetype");
+                }}
+                body, p, span, div, h1, h2, h3, h4, h5, h6, input, textarea {{ 
+                    font-family: inherit, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Riemann Noto Emoji", "Twemoji Mozilla" !important; 
+                }}
+            `;
+            var style = document.createElement('style');
+            style.id = 'riemann-emoji-fallback';
+            style.innerHTML = css;
+            document.documentElement.appendChild(style);
+        }})();
+        """
+        self._insert_script(
+            "RiemannEmojiFallback",
+            js,
+            injection_point=QWebEngineScript.InjectionPoint.DocumentReady,
+            world_id=QWebEngineScript.ScriptWorldId.UserWorld,
+        )
 
     def _insert_script(
         self,
@@ -129,6 +179,11 @@ class ScriptInjector:
             injection_point: When the script should run based on Qt Injection Points.
             world_id: The isolation world for the script execution.
         """
+        scripts = self.profile.scripts()
+        for existing_script in scripts.toList():
+            if existing_script.name() == name:
+                scripts.remove(existing_script)
+
         script = QWebEngineScript()
         script.setName(name)
         script.setSourceCode(source)

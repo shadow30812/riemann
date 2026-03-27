@@ -39,7 +39,7 @@ from PySide6.QtGui import (
     QWheelEvent,
 )
 from PySide6.QtPrintSupport import QPrintDialog, QPrinter
-from PySide6.QtWebEngineCore import QWebEnginePage
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
@@ -745,17 +745,52 @@ class ReaderTab(
             with open(path, "r", encoding="utf-8") as f:
                 text = f.read()
             full_html = generate_markdown_html(text, self.theme_mode != 0)
-            web_view = self._get_or_create_web_view()
-            web_view.setHtml(full_html)
 
+            if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+                base_path = getattr(sys, "_MEIPASS")
+                font_path = os.path.join(
+                    base_path, "riemann", "assets", "fonts", "NotoColorEmoji.ttf"
+                )
+            else:
+                base_path = os.path.dirname(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                )
+                font_path = os.path.join(
+                    base_path, "assets", "fonts", "NotoColorEmoji.ttf"
+                )
+
+            font_uri = "file:///" + urllib.parse.quote(font_path.replace("\\", "/"))
+
+            emoji_style = f"""
+            <style>
+                @font-face {{
+                    font-family: "Riemann Noto Emoji";
+                    src: url("{font_uri}") format("truetype");
+                }}
+                body, p, span, div, h1, h2, h3, h4, h5, h6, table, th, td, li, pre, code {{ 
+                    font-family: inherit, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Riemann Noto Emoji", "Twemoji Mozilla" !important; 
+                }}
+            </style>
+            """
+
+            full_html += emoji_style
+            web_view = self._get_or_create_web_view()
+
+            web_view.page().settings().setAttribute(
+                QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True
+            )
+
+            web_view.setHtml(full_html)
             self.toolbar.show()
             self.stack.setCurrentIndex(1)
             self.view_mode = ViewMode.REFLOW
+
             if hasattr(self.window(), "_update_window_title"):
                 self.window()._update_window_title()
 
             self.btn_facing.setEnabled(False)
             self.btn_ocr.setEnabled(False)
+
         except Exception as e:
             sys.stderr.write(f"Markdown Load Error: {e}\n")
 
