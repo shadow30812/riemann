@@ -1,4 +1,4 @@
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
      Running unittests src/lib.rs (/media/shadow30812/Windows-SSD/Well/Projects/riemann/target/debug/deps/riemann_ocr_worker-959a84f969afc208)
 
 running 0 tests
@@ -10,8 +10,8 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 running 4 tests
 test test_engine_default ... ok
 test test_engine_new ... ok
-test test_recognize_text_invalid_dimensions ... ok
 test test_recognize_text_empty ... ok
+test test_recognize_text_invalid_dimensions ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -21,7 +21,7 @@ running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
      Running unittests src/lib.rs (/media/shadow30812/Windows-SSD/Well/Projects/riemann/target/debug/deps/riemann_core-0f3c4bf603d3694a)
 
 running 0 tests
@@ -33,7 +33,7 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 running 1 test
 test test_python_gil_acquisition ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
 
 > test
@@ -45,7 +45,7 @@ PASS python-app/riemann/assets/__tests__/audio_engine.test.js
 Test Suites: 2 passed, 2 total
 Tests:       11 passed, 11 total
 Snapshots:   0 total
-Time:        1.162 s
+Time:        0.654 s, estimated 1 s
 Ran all test suites.
 ============================= test session starts ==============================
 platform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0
@@ -56,10 +56,9 @@ collected 9 items
 
 tests/test_main.py .........                                             [100%]
 
-============================== 9 passed in 4.83s ===============================
-[2214536:2214536:0328/142938.478083:ERROR:CONSOLE(1)] "Request Autofill.enable failed. {"code":-32601,"message":"'Autofill.enable' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
-[2214536:2214536:0328/142938.478175:ERROR:CONSOLE(1)] "Request Autofill.setAddresses failed. {"code":-32601,"message":"'Autofill.setAddresses' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
-Failed to make OpenGL context current for clean-up, OpenGL resources will not be destroyed.
+============================== 9 passed in 3.30s ===============================
+[2234018:2234018:0328/153305.811664:ERROR:CONSOLE(1)] "Request Autofill.enable failed. {"code":-32601,"message":"'Autofill.enable' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
+[2234018:2234018:0328/153305.811724:ERROR:CONSOLE(1)] "Request Autofill.setAddresses failed. {"code":-32601,"message":"'Autofill.setAddresses' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
 Release of profile requested but WebEnginePage still not deleted. Expect troubles !
 Release of profile requested but WebEnginePage still not deleted. Expect troubles !
 Release of profile requested but WebEnginePage still not deleted. Expect troubles !
@@ -83,22 +82,23 @@ PySide6 6.10.1 -- Qt runtime 6.10.1 -- Qt compiled 6.10.1
 rootdir: /media/shadow30812/Windows-SSD/Well/Projects/riemann
 configfile: pyproject.toml
 plugins: qt-4.5.0, forked-1.6.0, anyio-4.12.1, mock-3.15.1
-collected 121 items
+collected 133 items
 
 tests/test_ai.py ......                                                  [  4%]
-tests/test_annotations.py .......                                        [ 10%]
-tests/test_browser.py .............................                      [ 34%]
-tests/test_browser_handlers.py ....                                      [ 38%]
-tests/test_components.py ...........                                     [ 47%]
-tests/test_constants.py ..                                               [ 48%]
-tests/test_managers.py .......                                           [ 54%]
-tests/test_metadata.py ....                                              [ 57%]
-tests/test_rendering.py ......                                           [ 62%]
-tests/test_search.py .....                                               [ 66%]
-tests/test_signatures.py .......                                         [ 72%]
-tests/test_tab.py ...............                                        [ 85%]
-tests/test_utils.py ....                                                 [ 88%]
-tests/test_widgets.py ....                                               [ 91%]
+tests/test_annotations.py .......                                        [  9%]
+tests/test_app.py ............                                           [ 18%]
+tests/test_browser.py .............................                      [ 40%]
+tests/test_browser_handlers.py ....                                      [ 43%]
+tests/test_components.py ...........                                     [ 51%]
+tests/test_constants.py ..                                               [ 53%]
+tests/test_managers.py .......                                           [ 58%]
+tests/test_metadata.py ....                                              [ 61%]
+tests/test_rendering.py ......                                           [ 66%]
+tests/test_search.py .....                                               [ 69%]
+tests/test_signatures.py .......                                         [ 75%]
+tests/test_tab.py ...............                                        [ 86%]
+tests/test_utils.py ....                                                 [ 89%]
+tests/test_widgets.py ....                                               [ 92%]
 tests/test_workers.py ..........                                         [100%]
 
-============================= 121 passed in 3.12s ==============================
+============================= 133 passed in 2.09s ==============================
