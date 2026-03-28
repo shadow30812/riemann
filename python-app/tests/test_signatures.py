@@ -44,8 +44,13 @@ def test_detect_signatures_found(mock_open, mock_pdf_reader, reader):
     reader.btn_trust_cert.setVisible.assert_called_with(True)
 
 
+@patch(
+    "riemann.ui.reader.mixins.signatures.certifi.where", return_value="/fake/cert.pem"
+)
+@patch("builtins.open", new_callable=MagicMock)
 @patch("riemann.ui.reader.mixins.signatures.SignatureValidationWorker")
-def test_validate_signatures(mock_worker_cls, reader):
+def test_validate_signatures(mock_worker_cls, mock_open, mock_where, reader):
+    mock_open.return_value.__enter__.return_value.read.return_value = ""
     reader.settings.value.return_value = ["trusted_pem_data"]
 
     reader._validate_signatures("/fake.pdf")

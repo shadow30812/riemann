@@ -1,4 +1,4 @@
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
      Running unittests src/lib.rs (/media/shadow30812/Windows-SSD/Well/Projects/riemann/target/debug/deps/riemann_ocr_worker-959a84f969afc208)
 
 running 0 tests
@@ -10,8 +10,8 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 running 4 tests
 test test_engine_default ... ok
 test test_engine_new ... ok
-test test_recognize_text_empty ... ok
 test test_recognize_text_invalid_dimensions ... ok
+test test_recognize_text_empty ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -21,7 +21,7 @@ running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
      Running unittests src/lib.rs (/media/shadow30812/Windows-SSD/Well/Projects/riemann/target/debug/deps/riemann_core-0f3c4bf603d3694a)
 
 running 0 tests
@@ -33,7 +33,7 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 running 1 test
 test test_python_gil_acquisition ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
 
 
 > test
@@ -45,7 +45,7 @@ PASS python-app/riemann/assets/__tests__/audio_engine.test.js
 Test Suites: 2 passed, 2 total
 Tests:       11 passed, 11 total
 Snapshots:   0 total
-Time:        0.643 s, estimated 1 s
+Time:        1.162 s
 Ran all test suites.
 ============================= test session starts ==============================
 platform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0
@@ -56,57 +56,49 @@ collected 9 items
 
 tests/test_main.py .........                                             [100%]
 
-============================== 9 passed in 3.28s ===============================
-Fatal Python error: Segmentation fault
-
-Current thread 0x0000735d40363740 (most recent call first):
-  File "/media/shadow30812/Windows-SSD/Well/Projects/riemann/python-app/riemann/app.py", line 377 in __init__
-  File "/media/shadow30812/Windows-SSD/Well/Projects/riemann/python-app/tests/test_app.py", line 63 in test_new_windows
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/unittest/mock.py", line 1378 in patched
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/python.py", line 166 in pytest_pyfunc_call
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_callers.py", line 121 in _multicall
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_manager.py", line 120 in _hookexec
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_hooks.py", line 512 in __call__
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/python.py", line 1720 in runtest
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/runner.py", line 179 in pytest_runtest_call
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_callers.py", line 121 in _multicall
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_manager.py", line 120 in _hookexec
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_hooks.py", line 512 in __call__
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/runner.py", line 245 in <lambda>
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/runner.py", line 353 in from_call
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/runner.py", line 244 in call_and_report
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/runner.py", line 137 in runtestprotocol
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/runner.py", line 118 in pytest_runtest_protocol
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_callers.py", line 121 in _multicall
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_manager.py", line 120 in _hookexec
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_hooks.py", line 512 in __call__
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/main.py", line 396 in pytest_runtestloop
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_callers.py", line 121 in _multicall
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_manager.py", line 120 in _hookexec
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_hooks.py", line 512 in __call__
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/main.py", line 372 in _main
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/main.py", line 318 in wrap_session
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/main.py", line 365 in pytest_cmdline_main
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_callers.py", line 121 in _multicall
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_manager.py", line 120 in _hookexec
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pluggy/_hooks.py", line 512 in __call__
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/config/__init__.py", line 199 in main
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/_pytest/config/__init__.py", line 223 in console_main
-  File "/home/shadow30812/miniconda3/envs/riemann/lib/python3.11/site-packages/pytest/__main__.py", line 9 in <module>
-  File "<frozen runpy>", line 88 in _run_code
-  File "<frozen runpy>", line 198 in _run_module_as_main
-
-Extension modules: shiboken6.Shiboken, PySide6.QtCore, PySide6.QtGui, PySide6.QtWidgets, PySide6.QtTest, PySide6.QtPrintSupport, PySide6.QtNetwork, PySide6.QtWebChannel, PySide6.QtWebEngineCore, PySide6.QtWebEngineWidgets, PIL._imaging, PySide6.QtWebSockets, charset_normalizer.md, requests.packages.charset_normalizer.md, requests.packages.chardet.md, _cffi_backend (total: 16)
-/tmp/tmpaga1yq9a: line 16: 2203650 Segmentation fault      (core dumped) python3 -m pytest
-ERROR conda.cli.main_run:execute(142): `conda run python3 -m pytest` failed. (See above for error)
+============================== 9 passed in 4.83s ===============================
+[2214536:2214536:0328/142938.478083:ERROR:CONSOLE(1)] "Request Autofill.enable failed. {"code":-32601,"message":"'Autofill.enable' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
+[2214536:2214536:0328/142938.478175:ERROR:CONSOLE(1)] "Request Autofill.setAddresses failed. {"code":-32601,"message":"'Autofill.setAddresses' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
+Failed to make OpenGL context current for clean-up, OpenGL resources will not be destroyed.
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
+Release of profile requested but WebEnginePage still not deleted. Expect troubles !
 ============================= test session starts ==============================
 platform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0
 PySide6 6.10.1 -- Qt runtime 6.10.1 -- Qt compiled 6.10.1
 rootdir: /media/shadow30812/Windows-SSD/Well/Projects/riemann
 configfile: pyproject.toml
 plugins: qt-4.5.0, forked-1.6.0, anyio-4.12.1, mock-3.15.1
-collected 140 items
+collected 121 items
 
 tests/test_ai.py ......                                                  [  4%]
-tests/test_annotations.py .......                                        [  9%]
-tests/test_app.py F
+tests/test_annotations.py .......                                        [ 10%]
+tests/test_browser.py .............................                      [ 34%]
+tests/test_browser_handlers.py ....                                      [ 38%]
+tests/test_components.py ...........                                     [ 47%]
+tests/test_constants.py ..                                               [ 48%]
+tests/test_managers.py .......                                           [ 54%]
+tests/test_metadata.py ....                                              [ 57%]
+tests/test_rendering.py ......                                           [ 62%]
+tests/test_search.py .....                                               [ 66%]
+tests/test_signatures.py .......                                         [ 72%]
+tests/test_tab.py ...............                                        [ 85%]
+tests/test_utils.py ....                                                 [ 88%]
+tests/test_widgets.py ....                                               [ 91%]
+tests/test_workers.py ..........                                         [100%]
+
+============================= 121 passed in 3.12s ==============================

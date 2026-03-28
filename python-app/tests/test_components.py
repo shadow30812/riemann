@@ -39,10 +39,15 @@ def test_draggable_tab_widget_drag_enter_ignore(qtbot):
 
 
 @patch("os.path.exists", return_value=True)
-@patch("riemann.ui.components.ReaderTab", create=True)
+@patch("riemann.ui.reader.ReaderTab")
 def test_draggable_tab_widget_drop(mock_reader_tab, mock_exists, qtbot):
     widget = DraggableTabWidget()
     qtbot.addWidget(widget)
+
+    dummy_tab = QWidget()
+    dummy_tab.load_document = MagicMock()
+    mock_reader_tab.return_value = dummy_tab
+
     mock_event = MagicMock(spec=QDropEvent)
     mock_event.mimeData().text.return_value = "/fake/path.pdf"
     widget.dropEvent(mock_event)

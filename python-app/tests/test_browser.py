@@ -252,11 +252,11 @@ def test_browser_tab_zoom(mock_injector, qtbot):
 
     tab.modify_zoom(0.5)
     tab.web.setZoomFactor.assert_called_with(1.5)
-    assert tab.lbl_zoom.text() == "150%"
+    assert tab.btn_zoom.text() == "150%"
 
     tab.reset_zoom()
     tab.web.setZoomFactor.assert_called_with(1.0)
-    assert tab.lbl_zoom.text() == "100%"
+    assert tab.btn_zoom.text() == "100%"
 
 
 @patch("riemann.ui.browser.ScriptInjector")
@@ -359,4 +359,4 @@ def test_browser_tab_download_finished(mock_injector, qtbot):
     qtbot.addWidget(tab)
     tab._on_download_finished(True, "Done")
     assert tab.progress.value() == 100
-    assert tab.btn_download.text() == "⬇"
+    assert tab.btn_download.toolTip() == "Download Video via yt-dlp"

@@ -48,7 +48,7 @@ def test_setup_ui_elements_exist(reader_tab):
     assert reader_tab.ai_search_bar is not None
     assert reader_tab.stack is not None
     assert reader_tab.scroll is not None
-    assert reader_tab.web is not None
+    assert getattr(reader_tab, "_web_placeholder", None) is not None
     assert reader_tab.home_page_widget is not None
 
 
@@ -140,13 +140,13 @@ def test_zoom_step(reader_tab):
 
 
 def test_toggle_theme(reader_tab):
-    initial_theme = reader_tab.dark_mode
+    initial_theme = reader_tab.theme_mode
     with (
         patch.object(reader_tab, "apply_theme") as mock_apply,
         patch.object(reader_tab, "update_view") as mock_update,
     ):
         reader_tab.toggle_theme()
-        assert reader_tab.dark_mode is not initial_theme
+        assert reader_tab.theme_mode != initial_theme
         mock_apply.assert_called_once()
         mock_update.assert_called_once()
 

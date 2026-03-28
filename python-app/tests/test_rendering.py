@@ -11,7 +11,7 @@ class DummyRenderingReader(RenderingMixin):
         self.current_page_index = 0
         self.continuous_scroll = False
         self.facing_mode = False
-        self.dark_mode = False
+        self.theme_mode = 0
         self.virtual_threshold = 50
         self._virtual_enabled = False
         self._virtual_range = (0, 0)
@@ -28,8 +28,12 @@ class DummyRenderingReader(RenderingMixin):
         self.search_result = None
 
         self.scroll = MagicMock()
+        self.scroll.verticalScrollBar().maximum.return_value = 100
+        self.scroll.verticalScrollBar().value.return_value = 50
+
         self.scroll_layout = MagicMock()
         self.scroll_content = MagicMock()
+        self.scroll_timer = MagicMock()
         self.txt_page = MagicMock()
         self.lbl_total = MagicMock()
         self.settings = MagicMock()
@@ -37,6 +41,9 @@ class DummyRenderingReader(RenderingMixin):
 
     def devicePixelRatio(self):
         return 1.0
+
+    def ensure_visible(self, index: int) -> None:
+        pass
 
 
 @pytest.fixture
@@ -52,8 +59,8 @@ def test_probe_base_page_size(reader):
 
     reader._probe_base_page_size()
 
-    assert reader._cached_base_size == (600, 800)
-    reader.current_doc.render_page.assert_called_once_with(0, 1.0, 0)
+    assert reader._cached_base_size == (6000, 8000)
+    reader.current_doc.render_page.assert_called_once_with(0, 0.1, 0)
 
 
 def test_calculate_scale_manual(reader):
