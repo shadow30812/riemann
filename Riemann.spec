@@ -41,8 +41,8 @@ def collect_resources():
     binaries += q_binaries
     hiddenimports += q_hidden
 
-    icon_path = os.path.join('python-app', 'riemann', 'assets', 'icon.ico')
-    png_path = os.path.join('python-app', 'riemann', 'assets', 'Icon.png')
+    icon_path = os.path.join('python-app', 'riemann', 'assets', 'icons', 'icon.ico')
+    png_path = os.path.join('python-app', 'riemann', 'assets', 'icons', 'Icon.png')
 
     if os.path.exists(icon_path):
         datas.append((icon_path, 'riemann/assets'))
@@ -123,5 +123,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='python-app/riemann/assets/icon.ico',
+    icon='python-app/riemann/assets/icons/icon.ico',
 )

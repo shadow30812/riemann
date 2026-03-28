@@ -1758,7 +1758,7 @@ def run() -> None:
     server.removeServer(server_name)
     server.listen(server_name)
 
-    icon_path = get_resource_path(os.path.join("assets", "icon.ico"))
+    icon_path = get_resource_path(os.path.join("assets", "icons", "icon.ico"))
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
 
@@ -1808,13 +1808,14 @@ def install_linux_integration():
         icons_dir.mkdir(parents=True, exist_ok=True)
 
         base_path = os.path.dirname(os.path.abspath(__file__))
-        internal_icon_path = os.path.join(base_path, "assets", "Icon.png")
+        internal_icon_path = os.path.join(base_path, "assets", "icons", "Icon.png")
 
         if not os.path.exists(internal_icon_path) and hasattr(sys, "_MEIPASS"):
             internal_icon_path = os.path.join(
                 sys._MEIPASS,  # pyright: ignore[reportAttributeAccessIssue]
                 "riemann",
                 "assets",
+                "icons",
                 "Icon.png",
             )
 

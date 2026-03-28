@@ -114,7 +114,7 @@ def isolated_app_environment(qtbot):
 
 
 def test_get_resource_path():
-    path = get_resource_path("assets/icon.ico")
+    path = get_resource_path("assets/icons/icon.ico")
     assert "assets" in path
     assert "icon.ico" in path
 

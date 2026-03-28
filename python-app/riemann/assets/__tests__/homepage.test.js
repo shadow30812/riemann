@@ -16,7 +16,7 @@ describe('Homepage UI Interactions', () => {
         window.confirm = jest.fn();
         window.__mockLocationHref = '';
 
-        let scriptCode = fs.readFileSync(path.resolve(__dirname, '../homepage.js'), 'utf8');
+        let scriptCode = fs.readFileSync(path.resolve(__dirname, '../homepage/homepage.js'), 'utf8');
         scriptCode = scriptCode.replace(/window\.location\.href/g, 'window.__mockLocationHref');
         scriptCode = scriptCode.replace(/\.innerText/g, '.textContent');
         scriptCode += '\nwindow.saveLinks = saveLinks;\nwindow.renderGrid = renderGrid;\nwindow.showShortcutModal = showShortcutModal;';

@@ -760,7 +760,7 @@ class BrowserTab(QWidget):
         if start_url == "https://www.google.com" or not start_url:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             homepage_path = os.path.abspath(
-                os.path.join(base_dir, "..", "assets", "homepage.html")
+                os.path.join(base_dir, "..", "assets", "homepage", "homepage.html")
             )
 
             if os.path.exists(homepage_path):

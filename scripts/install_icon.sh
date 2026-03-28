@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 # --- Configuration ---
 APP_NAME="Riemann"
 APP_EXEC="dist/Riemann"
-APP_ICON="python-app/riemann/assets/Icon.png"
+APP_ICON="python-app/riemann/assets/icons/Icon.png"
 DESKTOP_FILE_NAME="Riemann.desktop"
 INSTALL_DIR="$HOME/.local/share/applications"
 
