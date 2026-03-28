@@ -43,7 +43,7 @@ else
 fi
 
 echo -e "${BLUE}Running python-app tests...${NC}"
-if cd python-app && python3 -m pytest; then
+if cd python-app && conda run -n riemann python3 -m pytest; then
     echo -e "${GREEN}python-app tests passed!${NC}\n"
     cd ..
 else

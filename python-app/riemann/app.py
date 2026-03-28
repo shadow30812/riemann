@@ -125,6 +125,11 @@ class SettingsDialog(QDialog):
         self.cb_auto_pdf.setChecked(
             parent.settings.value("browser/auto_open_pdf", False, type=bool)
         )
+
+        self.cb_dark = QCheckBox()
+        self.cb_dark.setChecked(parent.dark_mode)
+
+        form_layout.addRow("Enable Dark Mode:", self.cb_dark)
         form_layout.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
         layout.addLayout(form_layout)
 
@@ -351,14 +356,6 @@ class RiemannWindow(QMainWindow):
         self.settings = QSettings("Riemann", "PDFReader")
         self.dark_mode: bool = self.settings.value("darkMode", True, type=bool)
 
-        if self.dark_mode:
-            css_path = os.path.join(
-                os.path.dirname(__file__), "assets", "theme", "modern_dark.css"
-            )
-            if os.path.exists(css_path):
-                with open(css_path, "r", encoding="utf-8") as f:
-                    self.setStyleSheet(f.read())
-
         self.download_manager_dialog = DownloadManager(self)
         self.history_manager = HistoryManager()
         self.history_model = QStringListModel(self.history_manager.get_model_data())
@@ -411,6 +408,8 @@ class RiemannWindow(QMainWindow):
         self.hover_timer.setSingleShot(True)
         self.hover_timer.timeout.connect(self._check_auto_hide)
 
+        self.enforce_global_stylesheet()
+
     def _init_shortcuts(self) -> None:
         """
         Initializes and binds global application keyboard shortcuts.
@@ -420,7 +419,7 @@ class RiemannWindow(QMainWindow):
             ("Ctrl+W", self.close_active_tab),
             ("Ctrl+Shift+T", self.restore_last_closed_tab),
             ("Ctrl+\\", self.toggle_split_view),
-            ("N", self.toggle_theme),
+            ("N", self.toggle_active_tab_theme),
             (Qt.Key.Key_F11, self.toggle_reader_fullscreen),
             (Qt.Key.Key_Escape, self._handle_escape),
             ("Ctrl+T", self.new_pdf_tab),
@@ -433,7 +432,7 @@ class RiemannWindow(QMainWindow):
             ("Ctrl+L", self.show_library_search),
             ("Ctrl+H", self.show_history),
             ("Ctrl+,", self.show_settings),
-            ("Ctrl+D", self.toggle_theme),
+            ("Ctrl+D", self.toggle_ui_theme),
         ]
 
         for seq, slot in shortcuts:
@@ -894,7 +893,7 @@ class RiemannWindow(QMainWindow):
             ("Search Library (Ctrl+L)", None, self.show_library_search),
             ("History (Ctrl+H)", None, self.show_history),
             ("Settings (Ctrl+,)", None, self.show_settings),
-            ("Toggle Theme (Ctrl+D)", None, self.toggle_theme),
+            ("Toggle UI Theme (Ctrl+D)", None, self.toggle_ui_theme),
         ]
 
         for name, shortcut, slot in view_actions:
@@ -926,7 +925,7 @@ class RiemannWindow(QMainWindow):
         dlg = SettingsDialog(self)
         if dlg.exec():
             if dlg.cb_dark.isChecked() != self.dark_mode:
-                self.toggle_theme()
+                self.toggle_ui_theme()
             self.toggle_auto_pdf(dlg.cb_auto_pdf.isChecked())
 
     def new_pdf_tab(
@@ -1267,9 +1266,24 @@ class RiemannWindow(QMainWindow):
                 if hasattr(w, "toolbar"):
                     w.toolbar.setVisible(visible)
 
-    def toggle_theme(self) -> None:
+    def toggle_ui_theme(self) -> None:
         """
-        Toggles the dark mode theme across the application and active tabs.
+        Toggles the global UI dark mode without altering the content of the active tabs.
+        """
+        self.dark_mode = not self.dark_mode
+        self.settings.setValue("darkMode", self.dark_mode)
+        self.enforce_global_stylesheet()
+
+        for tab_widget in (self.tabs_main, self.tabs_side):
+            for i in range(tab_widget.count()):
+                w = tab_widget.widget(i)
+                if hasattr(w, "_update_icons"):
+                    w._update_icons()
+
+    def toggle_active_tab_theme(self) -> None:
+        """
+        Toggles the local content theme (PDF canvas or web page)
+        of the currently focused tab without affecting the global UI.
         """
         target_widget = self.tabs_main.currentWidget()
         if self.tabs_side.isVisible() and self.tabs_side.hasFocus():
@@ -1277,9 +1291,6 @@ class RiemannWindow(QMainWindow):
 
         if hasattr(target_widget, "toggle_theme"):
             target_widget.toggle_theme()
-        else:
-            self.dark_mode = not self.dark_mode
-            self.settings.setValue("darkMode", self.dark_mode)
 
     def close_active_tab(self) -> None:
         """

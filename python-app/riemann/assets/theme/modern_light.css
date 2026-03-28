@@ -1,0 +1,244 @@
+/* =======================================================
+   1. GLOBAL VARIABLES & BASE STYLES
+   ======================================================= */
+* {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+}
+
+QWidget {
+    background-color: #F3F3F3; /* Light gray background */
+    color: #111111;            /* Near black text */
+}
+
+/* =======================================================
+   2. INPUTS & DROPDOWNS (Address bar, Search, Zoom)
+   ======================================================= */
+QLineEdit, QComboBox, QSpinBox {
+    background-color: #FFFFFF;
+    border: 1px solid #CCCCCC;
+    border-radius: 6px;
+    padding: 6px 12px;
+    min-height: 20px;
+    color: #000000;
+    selection-background-color: #007FD4;
+    selection-color: #FFFFFF;
+}
+
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+    border: 1px solid #007FD4; 
+    background-color: #FFFFFF;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #FFFFFF;
+    border: 1px solid #CCCCCC;
+    border-radius: 6px;
+    selection-background-color: #CCE8FF;
+    selection-color: #000000;
+    color: #111111;
+    outline: none;
+    padding: 4px;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 24px;
+    border-left: 1px solid #CCCCCC;
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
+QComboBox::down-arrow {
+    image: url('python-app/riemann/assets/icons/chevron-down.svg');
+    width: 14px;
+    height: 14px;
+}
+
+/* =======================================================
+   3. BUTTONS (Toolbar, Actions)
+   ======================================================= */
+QPushButton, QToolButton {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 4px 8px;
+    min-height: 20px;
+    qproperty-iconSize: 18px 18px;
+    color: #333333;
+}
+
+QPushButton:hover, QToolButton:hover {
+    background-color: #E1E1E1; 
+    color: #000000;
+}
+
+QPushButton:pressed, QToolButton:pressed {
+    background-color: #D1D1D1;
+}
+
+QPushButton:checked, QToolButton:checked {
+    background-color: rgba(0, 127, 212, 0.15); 
+    border: 1px solid #007FD4;
+    color: #007FD4;
+}
+
+/* =======================================================
+   4. TAB WIDGETS (Browser & Reader Tabs)
+   ======================================================= */
+QTabWidget::pane {
+    border: none;
+    border-top: 1px solid #CCCCCC;
+    background-color: #F3F3F3;
+}
+
+QTabBar::tab {
+    background-color: #E6E6E6;
+    color: #666666;
+    padding: 8px 16px;
+    border: none;
+    border-right: 1px solid #D1D1D1;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    min-width: 120px;
+    margin-top: 4px; 
+}
+
+QTabBar::tab:selected {
+    background-color: #F3F3F3; 
+    color: #000000;
+    border-top: 2px solid #007FD4; 
+    margin-top: 0px; 
+    font-weight: bold;
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: #EAEAEA;
+    color: #333333;
+}
+
+/* =======================================================
+   5. SCROLLBARS (Thin, overlay-style)
+   ======================================================= */
+QScrollBar:vertical {
+    border: none;
+    background: #F3F3F3;
+    width: 12px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: #C1C1C1;
+    min-height: 20px;
+    border-radius: 5px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #A8A8A8;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+
+QScrollBar:horizontal {
+    border: none;
+    background: #F3F3F3;
+    height: 12px;
+    margin: 0px;
+}
+QScrollBar::handle:horizontal {
+    background: #C1C1C1;
+    min-width: 20px;
+    border-radius: 5px;
+    margin: 2px;
+}
+QScrollBar::handle:horizontal:hover { background: #A8A8A8; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
+
+/* =======================================================
+   6. MENUS, LISTS & TOP MENU BAR
+   ======================================================= */
+QMenuBar {
+    background-color: #F3F3F3;
+    color: #111111;
+    padding: 4px;
+    font-weight: 500;
+    border-bottom: 1px solid #D1D1D1;
+}
+
+QMenuBar::item {
+    background-color: transparent;
+    padding: 6px 14px;
+    margin: 2px 4px;
+    border-radius: 6px;
+}
+
+QMenuBar::item:selected {
+    background-color: #E1E1E1;
+    color: #000000;
+}
+
+QMenuBar::item:pressed {
+    background-color: rgba(0, 127, 212, 0.2);
+    color: #007FD4;
+}
+
+QMenu, QListWidget, QTreeWidget {
+    background-color: #FFFFFF;
+    border: 1px solid #CCCCCC;
+    border-radius: 8px;
+    padding: 6px 4px;
+    outline: none; 
+}
+
+QMenu::item {
+    padding: 6px 32px 6px 16px;
+    border-radius: 4px;
+    margin: 2px 4px;
+    color: #333333;
+}
+
+QMenu::item:selected, QListWidget::item:selected, QTreeWidget::item:selected {
+    background-color: #007FD4;
+    color: white;
+}
+
+QMenu::separator {
+    height: 1px;
+    background: #E1E1E1;
+    margin: 6px 12px;
+}
+
+/* =======================================================
+   7. SPECIFIC UI COMPONENTS
+   ======================================================= */
+#contentFrame {
+    background-color: #FFFFFF;
+    border: 1px solid #CCCCCC;
+    border-radius: 8px;
+}
+
+/* =======================================================
+   8. SPECIFIC OVERRIDES (Tabs & Bookmarks)
+   ======================================================= */
+
+/* --- Custom Tab Close Button (Uses standard black x.svg) --- */
+QTabBar::close-button {
+    image: url('python-app/riemann/assets/icons/x.svg'); 
+    background: transparent;
+    padding: 2px;
+}
+QTabBar::close-button:hover {
+    background: #D1D1D1;
+    border-radius: 4px;
+}
+
+/* --- Bookmark Button --- */
+QPushButton#bookmarkBtn:checked {
+    background-color: transparent;
+    border: 1px solid transparent;
+    color: #007FD4;
+}
