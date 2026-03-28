@@ -13,14 +13,13 @@ describe('Homepage UI Interactions', () => {
             <input type="text" id="searchInput" />
         `;
 
-        window.prompt = jest.fn();
         window.confirm = jest.fn();
         window.__mockLocationHref = '';
 
         let scriptCode = fs.readFileSync(path.resolve(__dirname, '../homepage.js'), 'utf8');
         scriptCode = scriptCode.replace(/window\.location\.href/g, 'window.__mockLocationHref');
         scriptCode = scriptCode.replace(/\.innerText/g, '.textContent');
-        scriptCode += '\nwindow.saveLinks = saveLinks;\nwindow.renderGrid = renderGrid;';
+        scriptCode += '\nwindow.saveLinks = saveLinks;\nwindow.renderGrid = renderGrid;\nwindow.showShortcutModal = showShortcutModal;';
 
         eval(scriptCode);
     });
@@ -59,20 +58,26 @@ describe('Homepage UI Interactions', () => {
         expect(iframe.style.display).toBe('none');
 
         const encodedPayload = encodeURIComponent(JSON.stringify(testLinks));
-        expect(iframe.src).toBe(`riemann-save.local/?data=${encodedPayload}`);
+        expect(iframe.src).toBe(`https://riemann-save.local/?data=${encodedPayload}`);
     });
 
-    test('Add Link button prompts user and updates grid', () => {
+    test('Add Link button opens custom modal and updates grid', () => {
         window.initHomepage('User', []);
-
-        window.prompt
-            .mockReturnValueOnce('New Site')
-            .mockReturnValueOnce('newsite.com');
 
         const addBtn = document.querySelector('.add-btn');
         addBtn.click();
 
-        expect(window.prompt).toHaveBeenCalledTimes(2);
+        const siteNameInput = document.getElementById('siteName');
+        const siteUrlInput = document.getElementById('siteUrl');
+        const saveBtn = document.getElementById('saveBtn');
+
+        expect(siteNameInput).not.toBeNull();
+        expect(siteUrlInput).not.toBeNull();
+
+        siteNameInput.value = 'New Site';
+        siteUrlInput.value = 'newsite.com';
+
+        saveBtn.click();
 
         expect(window.currentLinks.length).toBe(4);
         expect(window.currentLinks[3].name).toBe('New Site');
