@@ -16,6 +16,12 @@ def get_injection_script(filename: str) -> str:
     """
     Safely resolves the path to an injection script, accounting for PyInstaller's
     temporary MEIPASS directory, and returns its contents.
+
+    Args:
+        filename (str): The name of the JavaScript file to read.
+
+    Returns:
+        str: The raw text contents of the script, or an empty string on failure.
     """
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         base_path = getattr(sys, "_MEIPASS")

@@ -337,12 +337,21 @@ class AnnotationToolbar(QWidget):
         layout.addWidget(self.spin_thick)
 
         layout.addStretch()
-        
+
         for widget_class in (QPushButton, QToolButton, QComboBox):
             for w in self.findChildren(widget_class):
                 w.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def _get_icon(self, filename: str) -> QIcon:
+        """
+        Resolves the target SVG icon relative to the parent application's currently configured theme state.
+
+        Args:
+            filename (str): The original base name of the SVG asset.
+
+        Returns:
+            QIcon: A dynamically resolved Qt icon supporting themed contrast switches.
+        """
         is_dark = False
         if self.parent() and hasattr(self.parent(), "theme_mode"):
             is_dark = self.parent().theme_mode != 0

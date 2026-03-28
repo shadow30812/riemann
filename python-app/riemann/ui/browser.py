@@ -1188,6 +1188,9 @@ class BrowserTab(QWidget):
     def _update_tab_icon(self, icon) -> None:
         """
         Catches the website's favicon and updates the parent tab's icon.
+
+        Args:
+            icon: The QIcon extracted from the rendered webpage.
         """
 
         parent = self.parent()
@@ -1444,6 +1447,12 @@ class BrowserTab(QWidget):
         super().deleteLater()
 
     def changeEvent(self, event: QEvent) -> None:
+        """
+        Intercepts state changes to ensure that the correct web component retains input focus.
+
+        Args:
+            event (QEvent): The state change event triggered by the system.
+        """
         super().changeEvent(event)
         if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
             focus_widget = QApplication.focusWidget()
@@ -1451,6 +1460,15 @@ class BrowserTab(QWidget):
                 self.web.setFocus()
 
     def _get_icon(self, filename: str) -> QIcon:
+        """
+        Resolves and loads the appropriate themed icon based on the browser's current dark mode setting.
+
+        Args:
+            filename (str): The base filename of the SVG/PNG icon to fetch.
+
+        Returns:
+            QIcon: The resolved Qt icon object.
+        """
         is_dark = getattr(self, "dark_mode", False)
         if (
             is_dark

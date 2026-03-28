@@ -51,6 +51,11 @@ class ModelDownloader(QThread):
             def report(block_num: int, block_size: int, total_size: int) -> None:
                 """
                 Intercepts urllib status events translating mathematical offsets into percentage metrics safely.
+
+                Args:
+                    block_num (int): The number of blocks transferred so far.
+                    block_size (int): The size of each transferred block in bytes.
+                    total_size (int): The total expected size of the remote file.
                 """
                 if total_size > 0:
                     percent = int((block_num * block_size * 100) / total_size)

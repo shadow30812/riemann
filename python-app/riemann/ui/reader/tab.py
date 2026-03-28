@@ -947,7 +947,15 @@ class ReaderTab(
         QScroller.scroller(self.scroll.viewport()).setScrollerProperties(props)
 
     def _get_closest_page(self, value: int) -> int:
-        """Calculates the geometric closest page index dynamically."""
+        """
+        Calculates the geometric closest page index dynamically.
+
+        Args:
+            value (int): The current vertical scrollbar position.
+
+        Returns:
+            int: The index of the page closest to the vertical center of the viewport.
+        """
         if not self.current_doc:
             return self.current_page_index
 
@@ -1430,6 +1438,12 @@ class ReaderTab(
     def event(self, event: QEvent) -> bool:
         """
         Intercepts raw system events to support native gestures like pinch-to-zoom on trackpads.
+
+        Args:
+            event (QEvent): The native system event triggered by the user.
+
+        Returns:
+            bool: True if the native gesture event was intercepted and handled; otherwise delegates to the parent class.
         """
         if event.type() == QEvent.Type.NativeGesture:
             if event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
@@ -2089,6 +2103,15 @@ class ReaderTab(
                         painter.end()
 
     def _get_icon(self, filename: str) -> QIcon:
+        """
+        Resolves the appropriate SVG or PNG asset path to construct an icon corresponding to the active theme mode.
+
+        Args:
+            filename (str): The base filename of the requested icon.
+
+        Returns:
+            QIcon: The instantiated Qt icon mapping to the internal resource.
+        """
         is_dark = getattr(self, "theme_mode", 0) != 0
         if (
             is_dark

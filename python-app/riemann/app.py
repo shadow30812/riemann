@@ -558,6 +558,12 @@ class RiemannWindow(QMainWindow):
         self.refresh_signature_panel()
 
     def changeEvent(self, event: QEvent) -> None:
+        """
+        Handles state changes, such as window activation, to restore focus to the correct tab.
+
+        Args:
+            event (QEvent): The state change event triggered by the Qt framework.
+        """
         super().changeEvent(event)
         if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
             target = (
@@ -1503,17 +1509,31 @@ class RiemannWindow(QMainWindow):
                 self._update_window_title()
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        """Accepts the drag event if it contains local files."""
+        """
+        Accepts the drag event if it contains local files.
+
+        Args:
+            event (QDragEnterEvent): The drag enter event containing MIME data."""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
-        """Continuously accepts the drag action as it moves over child widgets."""
+        """
+        Continuously accepts the drag action as it moves over child widgets.
+
+        Args:
+            event (QDragMoveEvent): The drag move event payload.
+        """
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        """Handles dropped files by opening supported types in a new tab."""
+        """
+        Handles dropped files by opening supported types in a new tab.
+
+        Args:
+            event (QDropEvent): The drop event containing the file path payload.
+        """
         for url in event.mimeData().urls():
             if url.isLocalFile():
                 path = url.toLocalFile()
@@ -1522,7 +1542,13 @@ class RiemannWindow(QMainWindow):
         event.acceptProposedAction()
 
     def _show_tab_context_menu(self, pos, tab_widget: QTabWidget) -> None:
-        """Displays the advanced tab management context menu."""
+        """
+        Displays the advanced tab management context menu.
+
+        Args:
+            pos: The local cursor position where the context menu was requested.
+            tab_widget (QTabWidget): The tab widget interacting with the context menu.
+        """
         idx = tab_widget.tabBar().tabAt(pos)
         if idx == -1:
             return
