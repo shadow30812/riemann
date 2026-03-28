@@ -5,4 +5,4 @@ This package provides a hybrid desktop application combining a high-performance
 native Rust PDF engine with a Chromium-based research browser and local AI tooling.
 """
 
-__version__ = "3.2.8"
+__version__ = "4.0.0"

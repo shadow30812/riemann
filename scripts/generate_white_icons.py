@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 def make_icons_white():
     icons_dir = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
+        "..",
         "python-app",
         "riemann",
         "assets",

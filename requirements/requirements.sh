@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-
 set -e
+cd "$(dirname "$0")"
 
 OUTPUT_IN="requirements.in"
 CONDA_ENV_NAME="riemann"
 
 echo "--> Initializing Conda and activating '$CONDA_ENV_NAME'..."
-eval "$(conda shell.bash hook)"
+eval "$(conda shell.bash ok)"
 conda activate "$CONDA_ENV_NAME"
 
 echo "🔍 Generating minimal requirements.in using pip-chill..."

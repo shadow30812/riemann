@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+cd "$(dirname "$0")/.."
+
 # -----------------------------------------------------------------------------
 # Script Name: install_shortcut.sh
 # Description: Generates a Linux .desktop file for Riemann and installs it

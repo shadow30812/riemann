@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_FILE="$SCRIPT_DIR/test_results.log"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOG_FILE="$PROJECT_ROOT/test_results.log"
 FAIL=0
 
+cd "$PROJECT_ROOT"
 > "$LOG_FILE"
 
 run_and_log() {

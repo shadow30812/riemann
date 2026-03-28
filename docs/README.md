@@ -411,6 +411,7 @@ Capabilities:
 * dataset downloads
 * print webview to PDF (allowing users to instantly capture and convert live web research, articles, or documentation into local PDFs for offline reading and annotation)
 * Homepage UI for managing quick-access web links with a sleek modal interface (showShortcutModal) to safely add, edit, and delete custom URL shortcuts with automatic favicon fetching.
+* enhanced fluid zooming with trackpad gesture support
 
 ---
 
@@ -428,11 +429,17 @@ Blocked domains include:
 
 ## Homepage System
 
+PDF Reader homepage includes:
+
+* recently opened files for quick access
+* opening PDFs using file path
+
 Browser homepage includes:
 
 * quick search
 * customizable link cards
 * persistent shortcuts
+* personalized customizable greetings/names via Settings
 
 Communication with Python occurs via:
 
@@ -528,6 +535,8 @@ Capabilities:
 * PDF splitting
 * page extraction
 * document merging
+* native printing support for physical and digital document outputs
+* enhanced fluid zooming with trackpad gesture support
 
 ### PDF Security & Password Management
 
@@ -562,6 +571,8 @@ FIT_HEIGHT
 
 In addition to the standard light mode and naive dark mode, Riemann features an intelligent dark mode designed for late-night research. Instead of applying a simple global color inversion, the rendering engine smartly inverts document backgrounds and text while preserving the visual fidelity and original colors of images, charts, and figures.
 
+**Independent Tab Themes:** Users can now toggle between Light and Dark modes globally for the entire UI, or independently for specific PDF and Browser tabs. This allows you to keep the application in dark mode while viewing a color-sensitive PDF in light mode without affecting the rest of your workspace.
+
 ---
 
 ## Workspace & Tab Management
@@ -584,7 +595,7 @@ Ctrl + Q — Quit active window
 
 Ctrl + , — Settings
 
-Ctrl + D — Toggle Dark Mode (works on both PDFs and websites)
+Ctrl + D — Toggle Global UI Theme (Light/Dark Mode)
 
 F11 — Fullscreen
 
@@ -620,7 +631,7 @@ Ctrl + Shift + N — New Incognito Window
 
 F — Immersive fullscreen (no menu bar)
 
-N — Toggle Dark Mode
+N — Toggle Independent Tab Theme (invert active document without changing global UI)
 
 R — Toggle Reflow Mode
 
@@ -656,11 +667,13 @@ End — Scroll to absolute bottom of the document
 
 ### Browser
 
-Backspace — Back
+Backspace — Previous Page
 
-Alt + Left — Back
+Alt + Left — Previous Page
 
-Alt + Right — Forward
+Alt + Right — Next Page
+
+N — Toggle Independent Tab Theme (invert active document without changing global UI)
 
 F6 — Focus address bar
 
@@ -668,114 +681,15 @@ Ctrl + M — Toggle Music Mode
 
 F12 / Ctrl + Shift + I — Open Web Inspector/DevTools
 
-Ctrl + R — Reload page
+F5 / Ctrl + R — Reload page
 
-Ctrl + Shift + R — Clear cache and reload page
+Ctrl + Shift + R — Clear cache and reload page (may not always reload the page, in that case use this shortcut to simply clear the cache and then reload the page normally or using any keyboard shortcut)
 
 ---
 
 ## Repository Structure
 
-```bash
-riemann/
-├── .editorconfig
-├── .github/
-│   └── workflows/
-│       └── release.yml
-├── .gitignore
-├── Cargo.lock
-├── Cargo.toml
-├── LICENSE
-├── README.md
-├── Riemann.spec
-├── build.sh
-├── build_entry.py
-├── create_model_pack.sh
-├── directory-tree.md
-├── install_icon.sh
-├── justfile
-├── libs/
-│   └── libpdfium.so
-├── nbuild.sh
-├── package-lock.json
-├── package.json
-├── pyproject.toml
-├── python-app/
-│   ├── riemann/
-│   │   ├── __init__.py
-│   │   ├── __main__.py
-│   │   ├── app.py
-│   │   ├── assets/
-│   │   │   ├── __tests__/
-│   │   │   │   ├── audio_engine.test.js
-│   │   │   │   └── homepage.test.js
-│   │   │   ├── audio_engine.js
-│   │   │   ├── homepage.css
-│   │   │   ├── homepage.html
-│   │   │   ├── homepage.js
-│   │   │   ├── Icon.png
-│   │   │   └── icon.ico
-│   │   ├── core/
-│   │   │   ├── constants.py
-│   │   │   └── managers.py
-│   │   ├── ui/
-│   │   │   ├── browser.py
-│   │   │   ├── browser_handlers.py
-│   │   │   ├── components.py
-│   │   │   └── reader/
-│   │   │       ├── __init__.py
-│   │   │       ├── mixins/
-│   │   │       │   ├── ai.py
-│   │   │       │   ├── annotations.py
-│   │   │       │   ├── metadata.py
-│   │   │       │   ├── rendering.py
-│   │   │       │   ├── search.py
-│   │   │       │   └── signatures.py
-│   │   │       ├── tab.py
-│   │   │       ├── utils.py
-│   │   │       ├── widgets.py
-│   │   │       └── workers.py
-│   │   ├── riemann_core.abi3.so
-│   │   └── riemann_core.pyi
-│   └── tests/
-│       ├── test_ai.py
-│       ├── test_annotations.py
-│       ├── test_app.py
-│       ├── test_browser.py
-│       ├── test_browser_handlers.py
-│       ├── test_components.py
-│       ├── test_constants.py
-│       ├── test_managers.py
-│       ├── test_metadata.py
-│       ├── test_rendering.py
-│       ├── test_search.py
-│       ├── test_signatures.py
-│       ├── test_utils.py
-│       ├── test_widgets.py
-│       └── test_workers.py
-├── requirements.txt
-├── riemann-ai/
-│   ├── build_ai.sh
-│   ├── main.py
-│   ├── requirements.txt
-│   └── tests/
-│       └── test_main.py
-├── rust-core/
-│   ├── Cargo.lock
-│   ├── Cargo.toml
-│   ├── src/
-│   │   └── lib.rs
-│   └── tests/
-│       └── test_core.rs
-├── rust-ocr-worker/
-│   ├── Cargo.lock
-│   ├── Cargo.toml
-│   ├── src/
-│   │   └── lib.rs
-│   └── tests/
-│       └── test_ocr.rs
-└── test_runner.sh
-```
+Please check the directory tree [here](directory-tree.md).
 
 ---
 
@@ -824,11 +738,11 @@ Requirements:
 ```bash
 git clone https://github.com/shadow30812/riemann.git
 cd riemann
-pip install -r requirements.txt
+pip install -r requirements/requirements.txt
 just run
 ```
 
-You may also choose to install the pre-compiled optimized binary of the app. Note however that it may not be stable on all systems directly, and you may have to run it with the terminal in case of any missing packages or errors. That being said, the latest binary at the time of writing this README is available at <https://github.com/shadow30812/riemann/releases/download/v3.2.8/Riemann>, compiled in an Ubuntu 24.04.02 LTS machine.
+You may also choose to install the pre-compiled optimized binary of the app. Note however that it may not be stable on all systems directly, and you may have to run it with the terminal in case of any missing packages or errors. That being said, the latest binary at the time of writing this README is available at <https://github.com/shadow30812/riemann/releases/download/v4.0.0/Riemann>, compiled in an Ubuntu 24.04.02 LTS machine.
 
 ---
 
@@ -893,6 +807,9 @@ Optimizations include:
 * virtualized scrolling
 * asynchronous OCR
 * FAISS indexing
+* strict resource cleanup (eliminating phantom tabs and lingering audio processes)
+* thread-safe viewport rendering to prevent race conditions during window resizing
+* cleanly intercepted global focus management
 
 ---
 
@@ -930,7 +847,7 @@ Contributions welcome in:
 
 ## Versioning
 
-V3.2.8 released on 22/03/2026
+V4.0.0 released on 28/03/2026
 
 ## License
 

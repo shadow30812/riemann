@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+cd "$(dirname "$0")/.."
+
 # -----------------------------------------------------------------------------
 # Script Name: build.sh
 # Description: Orchestrates the build process for the Riemann standalone application.

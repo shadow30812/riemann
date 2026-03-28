@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cd "$(dirname "$0")/.."
+
 # -----------------------------------------------------------------------------
 # Script Name: create_model_pack.sh
 # Description: Automates the creation of the 'latex_ocr_modules.zip' dependency pack.

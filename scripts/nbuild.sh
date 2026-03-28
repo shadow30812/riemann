@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+cd "$(dirname "$0")/.."
+
 # --- Configuration ---
 GREEN='\033[0;32m'
 NC='\033[0m'
