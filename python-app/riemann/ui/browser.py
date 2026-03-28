@@ -793,14 +793,17 @@ class BrowserTab(QWidget):
             ok (bool): True if the page loaded successfully.
         """
         if ok and "homepage.html" in self.web.url().toString():
-            try:
-                name = pwd.getpwuid(os.getuid()).pw_gecos.split(",")[0]
-                if not name:
-                    name = os.getlogin()
-            except Exception:
-                name = os.getlogin()
-
             settings = QSettings("Riemann", "PDFReader")
+            name = settings.value("homepage/custom_name", "", type=str)
+
+            if not name:
+                try:
+                    name = pwd.getpwuid(os.getuid()).pw_gecos.split(",")[0]
+                    if not name:
+                        name = os.getlogin()
+                except Exception:
+                    name = os.getlogin()
+
             links = settings.value("homepage_links", "null")
             js_code = f"window.initHomepage('{name}', {links});"
             self.web.page().runJavaScript(js_code)

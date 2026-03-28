@@ -129,8 +129,15 @@ class SettingsDialog(QDialog):
         self.cb_dark = QCheckBox()
         self.cb_dark.setChecked(parent.dark_mode)
 
+        self.txt_custom_name = QLineEdit()
+        self.txt_custom_name.setPlaceholderText("Leave empty for OS default")
+        self.txt_custom_name.setText(
+            parent.settings.value("homepage/custom_name", "", type=str)
+        )
+
         form_layout.addRow("Enable Dark Mode:", self.cb_dark)
         form_layout.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
+        form_layout.addRow("Homepage Greeting Name:", self.txt_custom_name)
         layout.addLayout(form_layout)
 
         group = QGroupBox("Data Management")
@@ -933,6 +940,9 @@ class RiemannWindow(QMainWindow):
             if dlg.cb_dark.isChecked() != self.dark_mode:
                 self.toggle_ui_theme()
             self.toggle_auto_pdf(dlg.cb_auto_pdf.isChecked())
+            self.settings.setValue(
+                "homepage/custom_name", dlg.txt_custom_name.text().strip()
+            )
 
     def new_pdf_tab(
         self, path: Optional[str] = None, restore_state: bool = False
