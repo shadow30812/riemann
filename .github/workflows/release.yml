@@ -138,12 +138,24 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements/wreqs.txt
 
+      - name: Cache vcpkg dependencies
+        uses: actions/cache@v3
+        with:
+          path: C:\vcpkg\installed
+          key: ${{ runner.os }}-vcpkg-ocr-libs
+
+      - name: Install OCR C++ Libraries (vcpkg)
+        shell: pwsh
+        run: |
+          vcpkg integrate install
+          vcpkg install leptonica tesseract --triplet x64-windows
+
       - name: Build Rust Backend
         shell: bash
         run: |
           maturin build --release --out dist-wheels
           pip install dist-wheels/*.whl
-          
+
       - name: Move Rust Extension
         shell: python
         run: |
