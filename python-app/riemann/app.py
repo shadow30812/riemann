@@ -1771,7 +1771,7 @@ def run() -> None:
     server.removeServer(server_name)
     server.listen(server_name)
 
-    icon_path = get_resource_path(os.path.join("assets", "icons", "icon.ico"))
+    icon_path = get_resource_path(os.path.join("assets", "icons", "Icon.png"))
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
 
