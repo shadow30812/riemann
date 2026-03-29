@@ -139,8 +139,11 @@ jobs:
         run: pip install -r requirements/wreqs.txt
 
       - name: Build Rust Backend
-        run: maturin develop --release
-
+        shell: bash
+        run: |
+          maturin build --release --out dist-wheels
+          pip install dist-wheels/*.whl
+          
       - name: Move Rust Extension
         shell: python
         run: |
