@@ -239,7 +239,7 @@ QMenu::separator {
 
 /* --- Custom Tab Close Button --- */
 QTabBar::close-button {
-    image: url('python-app/riemann/assets/icons/x-white.svg'); 
+    image: url('x-white.svg'); 
     background: transparent;
     padding: 2px;
 }

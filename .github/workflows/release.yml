@@ -13,7 +13,47 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      # --- Language Setup ---
+      # =========================
+      # 🔧 CACHING LAYER
+      # =========================
+
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.local
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Cache Rust
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Cache Nuitka
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/Nuitka
+          key: ${{ runner.os }}-nuitka
+
+      - name: Cache AI Sidecar
+        id: cache-ai
+        uses: actions/cache@v3
+        with:
+          path: dist_ai
+          key: ${{ runner.os }}-ai-${{ hashFiles('riemann-ai/**') }}
+
+      # =========================
+      # ⚙️ LANGUAGE SETUP
+      # =========================
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -32,19 +72,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install maturin nuitka zstandard
 
-      # ==========================================
-      # STAGE 1: Compile the AI Sidecar (Nuitka Standalone)
-      # ==========================================
+      # =========================
+      # 🧠 STAGE 1: AI SIDECAR
+      # =========================
+
       - name: Install AI Dependencies
         run: pip install -r riemann-ai/requirements.txt
 
       - name: Compile AI Sidecar (Nuitka)
+        if: steps.cache-ai.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          # --standalone creates a folder with all exposed DLLs, avoiding --onefile extraction issues
+          $EXCLUDES = "--nofollow-import-to=torch --nofollow-import-to=transformers --nofollow-import-to=cv2 --nofollow-import-to=scipy --nofollow-import-to=pandas"
+          $EXCLUDE_ARGS = $EXCLUDES.Split(" ")
+
           python -m nuitka `
               --standalone `
               --output-dir=dist_ai `
+              @EXCLUDE_ARGS `
               riemann-ai/main.py
 
           if ($LASTEXITCODE -ne 0) { 
@@ -56,13 +101,13 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "python-app\riemann\assets\riemann_ai_engine"
-          # Nuitka creates a folder named main.dist when compiling main.py in standalone mode
           Move-Item -Path "dist_ai\main.dist\*" -Destination "python-app\riemann\assets\riemann_ai_engine\" -Force
-          Remove-Item -Recurse -Force dist_ai
+          Remove-Item -Recurse -Force dist_ai -ErrorAction SilentlyContinue
 
-      # ==========================================
-      # STAGE 2: Setup Main App & Build Rust Core
-      # ==========================================
+      # =========================
+      # ⚙️ STAGE 2: MAIN APP
+      # =========================
+
       - name: Install Main App Dependencies
         run: pip install -r requirements/requirements.txt
 
@@ -86,19 +131,18 @@ jobs:
           print(f"Moving {src} -> {dst}")
           shutil.copy2(src, dst)
 
-      # ==========================================
-      # STAGE 3: Final Main App Compilation (Nuitka)
-      # ==========================================
+      # =========================
+      # 🚀 STAGE 3: FINAL BUILD
+      # =========================
+
       - name: Build Main Application (Nuitka)
         shell: pwsh
         run: |
           $env:PYTHONPATH = "$(Get-Location)\python-app"
           
-          # Exact exclusions from your nbuild.ps1 to keep the binary compact
           $EXCLUDES = "--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow-import-to=cv2 --nofollow-import-to=pix2tex --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas --nofollow-import-to=nvidia --nofollow-import-to=fitz --nofollow-import-to=pymupdf"
           $EXCLUDE_ARGS = $EXCLUDES.Split(" ")
 
-          # NOTE: Uncomment the icon flag once your icon.ico file is fixed locally and pushed
           python -m nuitka `
               --onefile `
               --lto=no `
@@ -107,7 +151,6 @@ jobs:
               --include-data-dir=python-app/riemann/assets=riemann/assets `
               --include-data-file=libs/pdfium.dll=pdfium.dll `
               --windows-console-mode=disable `
-              <# --windows-icon-from-ico=python-app/riemann/assets/icons/icon.ico #> `
               --output-dir=dist `
               --output-filename=Riemann.exe `
               @EXCLUDE_ARGS `
@@ -118,9 +161,10 @@ jobs:
               exit $LASTEXITCODE 
           }
 
-      # ==========================================
-      # STAGE 4: Packaging & Release
-      # ==========================================
+      # =========================
+      # 📦 STAGE 4: PACKAGE + RELEASE
+      # =========================
+
       - name: Zip Artifact
         shell: bash
         run: |
