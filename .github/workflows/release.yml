@@ -142,13 +142,13 @@ jobs:
         uses: actions/cache@v3
         with:
           path: C:\vcpkg\installed
-          key: ${{ runner.os }}-vcpkg-ocr-libs
+          key: ${{ runner.os }}-vcpkg-ocr-static-md
 
       - name: Install OCR C++ Libraries (vcpkg)
         shell: pwsh
         run: |
           vcpkg integrate install
-          vcpkg install leptonica tesseract --triplet x64-windows
+          vcpkg install leptonica tesseract --triplet x64-windows-static-md
 
       - name: Build Rust Backend
         shell: bash
