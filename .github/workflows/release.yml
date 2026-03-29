@@ -21,8 +21,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: |
-            ~/.cache/pip
-            ~/.local
+            ~\AppData\Local\pip\Cache
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
@@ -74,6 +73,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install maturin nuitka zstandard
 
+      - name: Debug Python + pip
+        run: |
+          python --version
+          pip --version
+
       # =========================
       # 🧠 STAGE 1: AI SIDECAR
       # =========================
@@ -113,8 +117,20 @@ jobs:
       # ⚙️ STAGE 2: MAIN APP
       # =========================
 
-      - name: Install Main App Dependencies
-        run: pip install -r requirements/requirements.txt
+      - name: Install pip-tools
+        run: pip install pip-tools
+
+      - name: Compile requirements (Windows)
+        run: pip-compile --generate-hashes --resolver=backtracking --output-file requirements/wreqs.txt requirements/requirements.in
+
+      - name: Upload compiled requirements
+        uses: actions/upload-artifact@v4
+        with:
+          name: wreqs
+          path: requirements/wreqs.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements/wreqs.txt
 
       - name: Build Rust Backend
         run: maturin develop --release

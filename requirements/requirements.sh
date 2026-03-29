@@ -6,7 +6,7 @@ OUTPUT_IN="requirements.in"
 CONDA_ENV_NAME="riemann"
 
 echo "--> Initializing Conda and activating '$CONDA_ENV_NAME'..."
-eval "$(conda shell.bash ok)"
+eval "$(conda shell.bash hook)"
 conda activate "$CONDA_ENV_NAME"
 
 echo "🔍 Generating minimal requirements.in using pip-chill..."
@@ -15,9 +15,11 @@ echo "🧹 Cleaning requirements.in (removing editable installs, comments)..."
 sed -i '/^-e/d;/^$/d' requirements.in
 
 echo "📦 Compiling requirements.txt using pip-compile..."
-pip-compile --generate-hashes "$OUTPUT_IN"
+pip-compile --generate-hashes \
+  --output-file xreqs.txt \
+  "$OUTPUT_IN"
 
 echo "✅ Done!"
 echo "Generated:"
 echo "  - requirements.in (minimal deps)"
-echo "  - requirements.txt (fully pinned deps)"
+echo "  - xreqs.txt (fully pinned deps)"
