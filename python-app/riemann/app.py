@@ -1705,13 +1705,21 @@ class RiemannWindow(QMainWindow):
         if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
             base_p = getattr(sys, "_MEIPASS")
             css_path = os.path.join(base_p, "riemann", "assets", "theme", css_file)
+            theme_dir = os.path.join(base_p, "riemann", "assets", "theme")
         else:
             base_p = os.path.dirname(os.path.abspath(__file__))
             css_path = os.path.join(base_p, "assets", "theme", css_file)
+            theme_dir = os.path.join(base_p, "assets", "theme")
 
         if os.path.exists(css_path):
             with open(css_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
+                stylesheet = f.read()
+
+            theme_dir_css = theme_dir.replace("\\", "/")
+            stylesheet = stylesheet.replace("url('", f"url('{theme_dir_css}/")
+            stylesheet = stylesheet.replace('url("', f'url("{theme_dir_css}/')
+
+            self.setStyleSheet(stylesheet)
         else:
             self.setStyleSheet("")
 

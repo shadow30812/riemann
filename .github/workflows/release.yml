@@ -38,17 +38,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Cache Nuitka
+      - name: Cache Nuitka C-Compiler
         uses: actions/cache@v3
         with:
-          path: ~/.cache/Nuitka
-          key: ${{ runner.os }}-nuitka
+          path: ~\AppData\Local\Nuitka\Nuitka\Cache
+          key: ${{ runner.os }}-nuitka-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-nuitka-
 
       - name: Cache AI Sidecar
         id: cache-ai
         uses: actions/cache@v3
         with:
-          path: dist_ai
+          path: python-app/riemann/assets/riemann_ai_engine
           key: ${{ runner.os }}-ai-${{ hashFiles('riemann-ai/**') }}
 
       # =========================
@@ -88,6 +90,8 @@ jobs:
 
           python -m nuitka `
               --standalone `
+              --assume-yes-for-downloads `
+              --module-parameter=torch-disable-jit=yes `
               --output-dir=dist_ai `
               @EXCLUDE_ARGS `
               riemann-ai/main.py
@@ -98,6 +102,7 @@ jobs:
           }
 
       - name: Position AI Engine into Assets
+        if: steps.cache-ai.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "python-app\riemann\assets\riemann_ai_engine"
@@ -145,12 +150,14 @@ jobs:
 
           python -m nuitka `
               --onefile `
+              --assume-yes-for-downloads `
               --lto=no `
               --enable-plugin=pyside6 `
               --include-package=riemann `
               --include-data-dir=python-app/riemann/assets=riemann/assets `
               --include-data-file=libs/pdfium.dll=pdfium.dll `
               --windows-console-mode=disable `
+              <# --windows-icon-from-ico=python-app/riemann/assets/icons/icon.ico #> `
               --output-dir=dist `
               --output-filename=Riemann.exe `
               @EXCLUDE_ARGS `
