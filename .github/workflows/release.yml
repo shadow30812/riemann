@@ -1,4 +1,4 @@
-name: Build and Release
+name: Build and Release (Windows)
 
 on:
   push:
@@ -6,24 +6,9 @@ on:
       - "v*"
 
 jobs:
-  build-and-release:
-    name: Build for ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact_name: Riemann-Linux
-            asset_name: Riemann-Linux
-            pdfium_url: https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz
-          - os: windows-latest
-            artifact_name: Riemann.exe
-            asset_name: Riemann-Windows.exe
-            pdfium_url: https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-win-x64.tgz
-          - os: macos-latest
-            artifact_name: Riemann
-            asset_name: Riemann-macOS
-            pdfium_url: https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-x64.tgz
+  build-windows:
+    name: Build Windows Release
+    runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v3
@@ -42,78 +27,108 @@ jobs:
           toolchain: stable
           override: true
 
-      - name: Install dependencies
+      - name: Install Global Build Tools
         run: |
-          pip install --upgrade pip
-          pip install maturin pyinstaller pyside6
+          python -m pip install --upgrade pip
+          pip install maturin nuitka zstandard
 
-      # --- PDFium Asset Retrieval ---
+      # ==========================================
+      # STAGE 1: Compile the AI Sidecar (Nuitka Standalone)
+      # ==========================================
+      - name: Install AI Dependencies
+        run: pip install -r riemann-ai/requirements.txt
 
-      - name: Download and Extract PDFium
-        shell: python
+      - name: Compile AI Sidecar (Nuitka)
+        shell: pwsh
         run: |
-          import os, urllib.request, tarfile, sys
+          # --standalone creates a folder with all exposed DLLs, avoiding --onefile extraction issues
+          python -m nuitka `
+              --standalone `
+              --output-dir=dist_ai `
+              riemann-ai/main.py
 
-          url = "${{ matrix.pdfium_url }}"
-          os.makedirs("libs", exist_ok=True)
-          print(f"Downloading {url}...")
+          if ($LASTEXITCODE -ne 0) { 
+              Write-Host "FATAL ERROR: AI Engine Nuitka compilation failed." -ForegroundColor Red
+              exit $LASTEXITCODE 
+          }
 
-          file_name = "pdfium.tgz"
-          urllib.request.urlretrieve(url, file_name)
+      - name: Position AI Engine into Assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "python-app\riemann\assets\riemann_ai_engine"
+          # Nuitka creates a folder named main.dist when compiling main.py in standalone mode
+          Move-Item -Path "dist_ai\main.dist\*" -Destination "python-app\riemann\assets\riemann_ai_engine\" -Force
+          Remove-Item -Recurse -Force dist_ai
 
-          print("Extracting...")
-          with tarfile.open(file_name) as tar:
-              # Windows puts dll in bin/, Linux/Mac in lib/
-              for member in tar.getmembers():
-                  if member.name.endswith(".dll") or member.name.endswith(".so") or member.name.endswith(".dylib"):
-                      member.name = os.path.basename(member.name) # Flatten path
-                      tar.extract(member, path="libs")
-                      print(f"Extracted {member.name} to libs/")
-
-      # --- Compilation Steps ---
+      # ==========================================
+      # STAGE 2: Setup Main App & Build Rust Core
+      # ==========================================
+      - name: Install Main App Dependencies
+        run: pip install -r requirements/requirements.txt
 
       - name: Build Rust Backend
         run: maturin develop --release
 
-      - name: Move Rust Extension (Cross-Platform)
+      - name: Move Rust Extension
         shell: python
         run: |
-          import riemann_core, shutil, os
-          # Find where maturin installed the .so/.pyd
-          src = riemann_core.__file__
-          # Determine destination name based on OS
-          ext = ".pyd" if os.name == "nt" else ".abi3.so"
-          dst = os.path.join('python-app', 'riemann', f'riemann_core{ext}')
-
+          import shutil, os, glob
+          import riemann_core
+          
+          base_dir = os.path.dirname(riemann_core.__file__)
+          libs = glob.glob(os.path.join(base_dir, '*.pyd'))
+          
+          if not libs:
+              raise FileNotFoundError("FATAL: Could not find compiled Rust extension in " + base_dir)
+          src = libs[0]
+          
+          dst = os.path.join('python-app', 'riemann', 'riemann_core.pyd')
           print(f"Moving {src} -> {dst}")
           shutil.copy2(src, dst)
 
-      - name: Build with PyInstaller
-        run: pyinstaller Riemann.spec --clean --noconfirm
-
-      # --- Artifact Packaging ---
-
-      - name: Zip Artifact (Windows/Linux)
-        if: matrix.os != 'macos-latest'
+      # ==========================================
+      # STAGE 3: Final Main App Compilation (Nuitka)
+      # ==========================================
+      - name: Build Main Application (Nuitka)
+        shell: pwsh
         run: |
-          # We zip the single file to make it easier to download
-          cd dist
-          if [ "${{ runner.os }}" == "Windows" ]; then
-            7z a ../${{ matrix.asset_name }}.zip Riemann.exe
-          else
-            zip -r ../${{ matrix.asset_name }}.zip Riemann
-          fi
+          $env:PYTHONPATH = "$(Get-Location)\python-app"
+          
+          # Exact exclusions from your nbuild.ps1 to keep the binary compact
+          $EXCLUDES = "--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow-import-to=cv2 --nofollow-import-to=pix2tex --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas --nofollow-import-to=nvidia --nofollow-import-to=fitz --nofollow-import-to=pymupdf"
+          $EXCLUDE_ARGS = $EXCLUDES.Split(" ")
 
-      - name: Zip Artifact (macOS)
-        if: matrix.os == 'macos-latest'
+          # NOTE: Uncomment the icon flag once your icon.ico file is fixed locally and pushed
+          python -m nuitka `
+              --onefile `
+              --lto=no `
+              --enable-plugin=pyside6 `
+              --include-package=riemann `
+              --include-data-dir=python-app/riemann/assets=riemann/assets `
+              --include-data-file=libs/pdfium.dll=pdfium.dll `
+              --windows-console-mode=disable `
+              <# --windows-icon-from-ico=python-app/riemann/assets/icons/icon.ico #> `
+              --output-dir=dist `
+              --output-filename=Riemann.exe `
+              @EXCLUDE_ARGS `
+              build_entry.py
+
+          if ($LASTEXITCODE -ne 0) { 
+              Write-Host "FATAL ERROR: Main App Nuitka compilation failed." -ForegroundColor Red
+              exit $LASTEXITCODE 
+          }
+
+      # ==========================================
+      # STAGE 4: Packaging & Release
+      # ==========================================
+      - name: Zip Artifact
+        shell: bash
         run: |
           cd dist
-          zip -r ../${{ matrix.asset_name }}.zip Riemann
-
-      # --- GitHub Release Publishing ---
+          7z a ../Riemann-Windows.zip Riemann.exe
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: ${{ matrix.asset_name }}.zip
+          files: Riemann-Windows.zip

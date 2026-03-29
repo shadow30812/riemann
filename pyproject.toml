@@ -7,8 +7,48 @@ name = "riemann"
 version = "4.0.0"
 description = "PDF reader and Web browser with integrated music mode"
 requires-python = ">=3.11"
+
+# Install via: pip install .
 dependencies = [
-    "PySide6>=6.5",
+    "Markdown==3.10.1",
+    "PySide6==6.10.1",
+    "bleach==6.3.0",
+    "ipython_pygments_lexers==1.1.1",
+    "jupyter_client==8.8.0",
+    "jupyter_core==5.9.1",
+    "jupyterlab_pygments==0.3.0",
+    "nest_asyncio==1.6.0",
+    "pikepdf==10.5.0",
+    "prompt_toolkit==3.0.52",
+    "pyHanko==0.33.0",
+    "pydantic_core==2.41.5",
+    "pypdf==6.7.5",
+    "stack_data==0.6.3",
+]
+
+[project.optional-dependencies]
+
+# Install via: pip install .[extra]
+extra = [
+    "PyMuPDF==1.27.1",
+    "PyMuPDFb==1.23.22",
+    "pix2tex==0.1.4",
+    "torch",
+    "torchvision",
+    "transformers",
+    "opencv-python-headless", # (cv2)
+    "scipy",
+    "pandas"
+]
+
+# Install via: pip install .[dev]
+dev = [
+    "Nuitka==4.0",
+    "maturin==1.11.5",
+    "pyinstaller==6.18.0",
+    "pytest-qt==4.5.0",
+    "pip-chill==1.0.5",
+    "pipreqs==0.5.0"
 ]
 
 [tool.maturin]

@@ -16,6 +16,7 @@ flexibility.java
 *crash-report*
 riemann_ai_engine/
 *.so
+*.pyd
 build_ai/
 *debug.log
 *.build

@@ -41,7 +41,11 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
+from PySide6.QtWebEngineCore import (
+    QWebEnginePage,
+    QWebEngineProfile,
+    QWebEngineSettings,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -1678,9 +1682,10 @@ class RiemannWindow(QMainWindow):
                     for domain in media_domains:
                         if domain in url_str:
                             is_media = True
-                            url_obj = wid.web.url()
-                            base_url = f"{url_obj.scheme()}://{url_obj.host()}"
-                            wid.web.load(QUrl(base_url))
+                            wid.web.settings().setAttribute(
+                                QWebEngineSettings.WebAttribute.JavascriptEnabled, False
+                            )
+                            wid.web.load(QUrl("about:blank"))
                             break
 
                     if not is_media:
