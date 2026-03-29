@@ -1749,6 +1749,7 @@ def run() -> None:
     install_linux_integration()
     app = QApplication(sys.argv)
     app.setApplicationName("Riemann")
+    app.setDesktopFileName("Riemann.desktop")
 
     window = RiemannWindow()
     args = app.arguments()
@@ -1804,15 +1805,14 @@ def run() -> None:
 
 def install_linux_integration():
     """
-    Detects if running as a frozen Linux executable and installs/updates
+    Detects if running as a Linux executable and installs/updates
     the .desktop shortcut and icon in the user's local share.
     """
-    if not getattr(sys, "frozen", False) or not sys.platform.startswith("linux"):
+    if not sys.platform.startswith("linux"):
         return
 
     try:
         app_name = "Riemann"
-
         home = Path.home()
         apps_dir = home / ".local" / "share" / "applications"
         icons_dir = home / ".local" / "share" / "icons"
@@ -1823,15 +1823,6 @@ def install_linux_integration():
         base_path = os.path.dirname(os.path.abspath(__file__))
         internal_icon_path = os.path.join(base_path, "assets", "icons", "Icon.png")
 
-        if not os.path.exists(internal_icon_path) and hasattr(sys, "_MEIPASS"):
-            internal_icon_path = os.path.join(
-                sys._MEIPASS,  # pyright: ignore[reportAttributeAccessIssue]
-                "riemann",
-                "assets",
-                "icons",
-                "Icon.png",
-            )
-
         if not os.path.exists(internal_icon_path):
             print(f"Warning: Could not find internal icon at {internal_icon_path}")
             return
@@ -1840,24 +1831,27 @@ def install_linux_integration():
         shutil.copy2(internal_icon_path, persistent_icon_path)
 
         desktop_file_path = apps_dir / f"{app_name}.desktop"
-        exe_path = sys.executable
 
-        desktop_entry = f"""[Desktop Entry]
-Type=Application
-Name={app_name}
-GenericName=PDF Reader
-Comment=A standalone PDF reader and manager
-Exec="{exe_path}" %f
-Icon={persistent_icon_path}
-Terminal=false
-Categories=Office;Viewer;Utility;
-StartupWMClass={app_name}
-MimeType=application/pdf;
-"""
+        exe_path = os.path.abspath(sys.argv[0])
+
+        desktop_entry = (
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            f"Name={app_name}\n"
+            "GenericName=PDF Reader\n"
+            "Comment=A standalone PDF reader and manager\n"
+            f'Exec="{exe_path}" %f\n'
+            f"Icon={persistent_icon_path}\n"
+            "Terminal=false\n"
+            "Categories=Office;Viewer;Utility;\n"
+            f"StartupWMClass={app_name}\n"
+            "MimeType=application/pdf;\n"
+        )
 
         with open(desktop_file_path, "w") as f:
             f.write(desktop_entry)
 
+        os.chmod(desktop_file_path, 0o755)
         os.system(f"update-desktop-database {apps_dir} > /dev/null 2>&1")
         print(f"[Riemann] Integrated to desktop menu: {desktop_file_path}")
 

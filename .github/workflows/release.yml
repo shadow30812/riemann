@@ -17,14 +17,14 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       # =========================
       # 🔧 CACHING LAYER
       # =========================
 
       - name: Cache pip
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~\AppData\Local\pip\Cache
@@ -33,7 +33,7 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Cache Rust
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -44,7 +44,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Cache Nuitka C-Compiler
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~\AppData\Local\Nuitka\Nuitka\Cache
           key: ${{ runner.os }}-nuitka-${{ hashFiles('**/requirements*.txt') }}
@@ -53,7 +53,7 @@ jobs:
 
       - name: Cache AI Sidecar
         id: cache-ai
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: python-app/riemann/assets/riemann_ai_engine
           key: ${{ runner.os }}-ai-${{ hashFiles('riemann-ai/**') }}
@@ -63,16 +63,12 @@ jobs:
       # =========================
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Set up Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install Global Build Tools
         run: |
@@ -139,7 +135,7 @@ jobs:
         run: pip install -r requirements/wreqs.txt
 
       - name: Cache vcpkg dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: C:\vcpkg\installed
           key: ${{ runner.os }}-vcpkg-ocr-static-md
@@ -208,6 +204,12 @@ jobs:
       # =========================
       # 📦 STAGE 4: PACKAGE + RELEASE
       # =========================
+          
+      - name: Upload Windows Executable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Riemann-Windows-Exe
+          path: dist/Riemann.exe
 
       - name: Zip Artifact
         shell: bash
@@ -216,7 +218,7 @@ jobs:
           7z a ../Riemann-Windows.zip Riemann.exe
 
       - name: Upload Release Asset
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: Riemann-Windows.zip

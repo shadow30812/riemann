@@ -73,3 +73,8 @@ fi
 log_info "-------------------------------------------------------"
 log_info "SUCCESS! Optimized executable is at: dist/Riemann"
 log_info "-------------------------------------------------------"
+
+log_info "Setting custom GNOME file manager icon for the binary..."
+ICON_PATH="$(pwd)/python-app/riemann/assets/icons/Icon.ico"
+gio set dist/Riemann metadata::custom-icon "file://$ICON_PATH"
+log_info "Done!"
