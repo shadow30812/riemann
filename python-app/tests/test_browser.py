@@ -173,18 +173,6 @@ def test_request_interceptor_whatsapp():
     info.setHttpHeader.assert_called_with(b"User-Agent", interceptor.spoofed_ua)
 
 
-def test_request_interceptor_monkeytype():
-    interceptor = RequestInterceptor()
-    info = MagicMock(spec=QWebEngineUrlRequestInfo)
-    info.requestUrl().toString.return_value = "https://monkeytype.com/api"
-    info.resourceType.return_value = (
-        QWebEngineUrlRequestInfo.ResourceType.ResourceTypeXhr
-    )
-
-    interceptor.interceptRequest(info)
-    info.setHttpHeader.assert_any_call(b"Referer", b"https://monkeytype.com/")
-
-
 @patch("riemann.ui.browser.ScriptInjector")
 def test_browser_tab_init(mock_injector, qtbot):
     tab = BrowserTab(start_url="https://example.com")

@@ -335,6 +335,13 @@ class ReaderTab(
             for w in self.findChildren(widget_class):
                 w.setCursor(Qt.CursorShape.PointingHandCursor)
 
+        self.link_tooltip = QLabel(self)
+        self.link_tooltip.setStyleSheet(
+            "background: #1e1e1e; color: #d4d4d4; padding: 3px 7px; "
+            "border: 1px solid #444; border-radius: 3px; font-size: 11px;"
+        )
+        self.link_tooltip.hide()
+
     def _setup_toolbar_buttons(self, layout: QHBoxLayout) -> None:
         """
         Allocates interactive push buttons resolving respective execution slot relationships natively.
@@ -1314,16 +1321,27 @@ class ReaderTab(
                     and not self.active_drawing
                     and not self.is_snipping
                 ):
-                    if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-                        is_hovering_link = any(
-                            r.contains(event.pos()) for r, _ in source.link_rects
+                    hovered_url = None
+                    for r, url in source.link_rects:
+                        if r.contains(event.pos()):
+                            hovered_url = url
+                            break
+
+                    if hovered_url:
+                        self.link_tooltip.setText(hovered_url)
+                        self.link_tooltip.adjustSize()
+                        self.link_tooltip.move(
+                            10, self.height() - self.link_tooltip.height() - 10
                         )
-                        source.setCursor(
-                            Qt.CursorShape.PointingHandCursor
-                            if is_hovering_link
-                            else Qt.CursorShape.IBeamCursor
-                        )
+                        self.link_tooltip.show()
+                        self.link_tooltip.raise_()
+
+                        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                            source.setCursor(Qt.CursorShape.PointingHandCursor)
+                        else:
+                            source.setCursor(Qt.CursorShape.IBeamCursor)
                     else:
+                        self.link_tooltip.hide()
                         source.setCursor(Qt.CursorShape.IBeamCursor)
 
                 if getattr(self, "is_selecting_text", False):
@@ -1346,8 +1364,12 @@ class ReaderTab(
                             if rect.contains(pos):
                                 self.is_selecting_text = False
                                 source.set_text_selection([])
+                                main_win = self.window()
 
-                                QDesktopServices.openUrl(QUrl(url))
+                                if hasattr(main_win, "new_browser_tab"):
+                                    main_win.new_browser_tab(url)
+                                else:
+                                    QDesktopServices.openUrl(QUrl(url))
                                 return True
 
                 if getattr(self, "is_selecting_text", False):

@@ -5,6 +5,7 @@ This module provides utilities for injecting custom JavaScript into
 QWebEngine profiles to modify web page behavior and appearance.
 """
 
+import base64
 import os
 import sys
 import urllib.parse
@@ -79,6 +80,9 @@ class ScriptInjector:
             web_page: The QWebEnginePage instance to inject the script into.
             dark_mode (bool): True to enable dark mode, False to disable it.
         """
+        if "monkeytype.com" in web_page.url().toString():
+            return
+
         if dark_mode:
             js = get_injection_script("smart_dark_mode.js")
         else:
@@ -114,8 +118,15 @@ class ScriptInjector:
             base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             font_path = os.path.join(base_path, "assets", "fonts", "NotoColorEmoji.ttf")
 
-        font_uri = "file:///" + urllib.parse.quote(font_path.replace("\\", "/"))
-        js_code = js_code.replace("{{FONT_URI}}", font_uri)
+        try:
+            with open(font_path, "rb") as f:
+                font_data = f.read()
+            b64_font = base64.b64encode(font_data).decode("utf-8")
+            data_uri = f"data:font/ttf;base64,{b64_font}"
+            js_code = js_code.replace("{{FONT_URI}}", data_uri)
+        except Exception as e:
+            print(f"[Riemann Error] Failed to encode emoji font: {e}")
+            return
 
         self._insert_script(
             "RiemannEmojiFallback",

@@ -303,7 +303,6 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
             "youtube.com/pagead",
             "google-analytics.com",
             "dmxleo.com",
-            "geo.dailymotion.com",
         ]
         self.spoofed_ua = b"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.7559.59 Safari/537.36"
 
@@ -329,23 +328,6 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
 
         if "whatsapp.com" in url:
             info.setHttpHeader(b"User-Agent", self.spoofed_ua)
-
-        should_inject_referer = (
-            "monkeytype.com" in url or "googleapis.com" in url
-        ) and "accounts.google.com" not in url
-
-        if should_inject_referer:
-            r_type = info.resourceType()
-
-            target_types = [
-                QWebEngineUrlRequestInfo.ResourceType.ResourceTypeMainFrame,
-                QWebEngineUrlRequestInfo.ResourceType.ResourceTypeXhr,
-                QWebEngineUrlRequestInfo.ResourceType.ResourceTypeSubFrame,
-            ]
-
-            if r_type in target_types:
-                info.setHttpHeader(b"Referer", b"https://monkeytype.com/")
-                info.setHttpHeader(b"Origin", b"https://monkeytype.com")
 
 
 class BrowserTab(QWidget):
@@ -773,6 +755,14 @@ class BrowserTab(QWidget):
         for widget_class in (QPushButton, QToolButton, QComboBox):
             for w in self.findChildren(widget_class):
                 w.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.link_tooltip = QLabel(self)
+        self.link_tooltip.setStyleSheet(
+            "background: #1e1e1e; color: #d4d4d4; padding: 3px 7px; "
+            "border: 1px solid #444; border-radius: 3px; font-size: 11px;"
+        )
+        self.link_tooltip.hide()
+        self.web.page().linkHovered.connect(self._on_link_hovered)
 
     def focusInEvent(self, event: Any) -> None:
         """
@@ -1533,3 +1523,14 @@ class BrowserTab(QWidget):
             self.btn_find_prev.setIcon(self._get_icon("chevron-up.svg"))
             self.btn_find_next.setIcon(self._get_icon("chevron-down.svg"))
             self.btn_close_find.setIcon(self._get_icon("x.svg"))
+
+    def _on_link_hovered(self, url: str) -> None:
+        """Shows target URL at the bottom left when hovering over links, matching native browser UX."""
+        if url:
+            self.link_tooltip.setText(url)
+            self.link_tooltip.adjustSize()
+            self.link_tooltip.move(10, self.height() - self.link_tooltip.height() - 10)
+            self.link_tooltip.show()
+            self.link_tooltip.raise_()
+        else:
+            self.link_tooltip.hide()
