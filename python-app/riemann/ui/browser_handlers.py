@@ -8,7 +8,6 @@ QWebEngine profiles to modify web page behavior and appearance.
 import base64
 import os
 import sys
-import urllib.parse
 
 from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineScript
 
@@ -133,6 +132,22 @@ class ScriptInjector:
             js_code,
             injection_point=QWebEngineScript.InjectionPoint.DocumentReady,
             world_id=QWebEngineScript.ScriptWorldId.UserWorld,
+        )
+
+    def inject_whatsapp_ua(self) -> None:
+        """Injects a modern Chrome User-Agent strictly for WhatsApp to bypass block screens."""
+        js_code = """
+        if (window.location.hostname.includes('whatsapp.com')) {
+            Object.defineProperty(navigator, 'userAgent', {
+                get: function () { return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"; }
+            });
+        }
+        """
+        self._insert_script(
+            "RiemannWhatsAppUA",
+            js_code,
+            injection_point=QWebEngineScript.InjectionPoint.DocumentCreation,
+            world_id=QWebEngineScript.ScriptWorldId.MainWorld,
         )
 
     def _insert_script(

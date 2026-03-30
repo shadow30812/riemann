@@ -380,6 +380,7 @@ class BrowserTab(QWidget):
         self.script_injector.inject_ad_skipper()
         self.script_injector.inject_backspace_handler()
         self.script_injector.inject_emoji_fallback()
+        self.script_injector.inject_whatsapp_ua()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

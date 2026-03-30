@@ -208,14 +208,14 @@ jobs:
       - name: Upload Windows Executable Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Riemann-Windows-Exe
-          path: dist/Riemann.exe
+          name: Riemann-Windows-Standalone
+          path: dist/build_entry.dist/
 
       - name: Zip Artifact
         shell: bash
         run: |
           cd dist
-          7z a ../Riemann-Windows.zip Riemann.exe
+          7z a ../Riemann-Windows.zip build_entry.dist/
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
