@@ -95,6 +95,10 @@ type FormWidget = (usize, (f32, f32, f32, f32), String, String, bool);
 /// Tuple structure: `(text_content, bounds_tuple)`.
 type TextSegment = (String, (f32, f32, f32, f32));
 
+/// Type definition for link data.
+/// Tuple structure: `(url, bounds_tuple)`.
+type Link = (String, (f32, f32, f32, f32));
+
 /// Encapsulates the output of a page render operation.
 ///
 /// This struct is exposed to Python to provide the raw pixel data along with
@@ -597,6 +601,48 @@ impl RiemannDocument {
             }
         }
         Ok(widgets)
+    }
+
+    /// Extracts clickable links and their bounding boxes.
+    ///
+    /// # Returns
+    /// A list of tuples `(url, (left, top, right, bottom))`.
+    fn get_links(&self, page_index: u16) -> PyResult<Vec<Link>> {
+        let doc_guard = self.inner.lock().unwrap();
+        let pages = doc_guard.0.pages();
+
+        if (page_index as usize) >= (pages.len() as usize) {
+            return Ok(Vec::new());
+        }
+
+        let page = pages
+            .get(page_index)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+
+        let mut links = Vec::new();
+
+        let page_links = page.links();
+        for link in page_links.iter() {
+            if let Some(action) = link.action() {
+                if let Some(uri_action) = action.as_uri_action() {
+                    if let Ok(uri) = uri_action.uri() {
+                        let rect = link.rect().map_err(|e| {
+                            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string())
+                        })?;
+                        links.push((
+                            uri,
+                            (
+                                rect.left().value,
+                                rect.top().value,
+                                rect.right().value,
+                                rect.bottom().value,
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(links)
     }
 }
 

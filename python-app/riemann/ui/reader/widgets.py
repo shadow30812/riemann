@@ -2,11 +2,10 @@
 Custom UI Widgets for the Reader Module.
 """
 
-import os
 from typing import List
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPolygon
+from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
 from PySide6.QtWidgets import QLabel
 
 
@@ -26,12 +25,15 @@ class PageWidget(QLabel):
         super().__init__(parent)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
         self.temp_points: List[QPoint] = []
         self.temp_pen = QPen()
         self.markup_rects: List[QRect] = []
         self.markup_color: QColor = QColor()
+
         self.signature_overlays: List[dict] = []
         self.selected_text_rects: List[QRect] = []
+        self.link_rects: List[tuple[QRect, str]] = []
 
     def set_text_selection(self, rects: List[QRect]) -> None:
         """

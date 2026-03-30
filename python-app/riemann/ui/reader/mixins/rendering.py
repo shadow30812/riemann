@@ -7,7 +7,7 @@ Handles layout calculation, virtualization, and PDF page rendering.
 import sys
 from typing import Dict, Tuple
 
-from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtCore import QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygon, QTransform
 from PySide6.QtWidgets import QApplication, QCheckBox, QHBoxLayout, QLineEdit, QWidget
 
@@ -265,6 +265,7 @@ class RenderingMixin:
             w, h = pix.width() / dpr, pix.height() / dpr
 
             self._render_forms(idx, scale, w, h)
+            self._render_links(idx, scale, w, h)
             self._render_overlays(idx, pix, scale, w, h)
 
             rotation = getattr(self, "rotation", 0)
@@ -350,6 +351,41 @@ class RenderingMixin:
                     self.form_widgets[idx].append(ctrl)
         except Exception:
             pass
+
+    def _render_links(
+        self, idx: int, scale: float, logical_w: float, logical_h: float
+    ) -> None:
+        """Extracts and scales link bounding boxes from the PDF to the UI widget."""
+        scaled_links = []
+        try:
+            if hasattr(self.current_doc, "get_links"):
+                links = self.current_doc.get_links(idx)
+                for url, (l, t, r, b) in links:
+                    x = int(l * scale)
+                    w_rect = int((r - l) * scale)
+                    h_rect = int((t - b) * scale)
+                    y = int(logical_h - (t * scale))
+                    if h_rect < 0:
+                        y += h_rect
+                        h_rect = abs(h_rect)
+
+                    rotation = getattr(self, "rotation", 0)
+                    if rotation == 90:
+                        x, y = int(logical_h) - y - h_rect, x
+                        w_rect, h_rect = h_rect, w_rect
+                    elif rotation == 180:
+                        x, y = int(logical_w) - x - w_rect, int(logical_h) - y - h_rect
+                    elif rotation == 270:
+                        x, y = y, int(logical_w) - x - w_rect
+                        w_rect, h_rect = h_rect, w_rect
+
+                    rect = QRect(x, y, max(1, w_rect), h_rect)
+                    scaled_links.append((rect, url))
+        except Exception as e:
+            sys.stderr.write(f"Link extraction error page {idx}: {e}\n")
+
+        if idx in self.page_widgets:
+            self.page_widgets[idx].link_rects = scaled_links
 
     def _render_overlays(
         self, idx: int, pix: QPixmap, scale: float, lw: float, lh: float

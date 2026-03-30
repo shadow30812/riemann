@@ -782,12 +782,7 @@ class ReaderTab(
 
         except Exception as e:
             err_str = str(e).lower()
-            if (
-                "password" in err_str
-                or "encrypted" in err_str
-                or "format error" in err_str
-                or "error" in err_str
-            ):
+            if "password" in err_str or "encrypted" in err_str:
                 error_text = (
                     "Incorrect password. Please try again." if is_retry else None
                 )
@@ -798,6 +793,11 @@ class ReaderTab(
                         self.load_document(path, restore_state, pw, is_retry=True)
                 return
 
+            QMessageBox.critical(
+                self,
+                "Document Load Error",
+                f"Could not load the document. Please ensure it is a valid PDF format.\n\nDetails: {str(e)}",
+            )
             sys.stderr.write(f"Load error: {e}\n")
 
     def _load_markdown(self, path: str) -> None:
@@ -1307,23 +1307,55 @@ class ReaderTab(
                 self.current_selected_text = ""
                 return True
 
-            elif event.type() == QEvent.Type.MouseMove and getattr(
-                self, "is_selecting_text", False
-            ):
-                drag_rect = QRect(self.text_select_start, event.pos()).normalized()
-                rects, text = self._get_intersecting_text_data(page_idx, drag_rect)
-                source.set_text_selection(rects)
-                self.current_selected_text = text
+            elif event.type() == QEvent.Type.MouseMove:
+                if (
+                    hasattr(source, "link_rects")
+                    and not getattr(self, "is_selecting_text", False)
+                    and not self.active_drawing
+                    and not self.is_snipping
+                ):
+                    if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                        is_hovering_link = any(
+                            r.contains(event.pos()) for r, _ in source.link_rects
+                        )
+                        source.setCursor(
+                            Qt.CursorShape.PointingHandCursor
+                            if is_hovering_link
+                            else Qt.CursorShape.IBeamCursor
+                        )
+                    else:
+                        source.setCursor(Qt.CursorShape.IBeamCursor)
+
+                if getattr(self, "is_selecting_text", False):
+                    drag_rect = QRect(self.text_select_start, event.pos()).normalized()
+                    rects, text = self._get_intersecting_text_data(page_idx, drag_rect)
+                    source.set_text_selection(rects)
+                    self.current_selected_text = text
                 return True
 
-            elif event.type() == QEvent.Type.MouseButtonRelease and getattr(
-                self, "is_selecting_text", False
-            ):
-                self.is_selecting_text = False
-                drag_rect = QRect(self.text_select_start, event.pos()).normalized()
-                rects, text = self._get_intersecting_text_data(page_idx, drag_rect)
-                source.set_text_selection(rects)
-                self.current_selected_text = text
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                if (
+                    event.button() == Qt.MouseButton.LeftButton
+                    and event.modifiers() == Qt.KeyboardModifier.ControlModifier
+                    and not self.active_drawing
+                    and not self.is_snipping
+                ):
+                    if hasattr(source, "link_rects"):
+                        pos = event.pos()
+                        for rect, url in source.link_rects:
+                            if rect.contains(pos):
+                                self.is_selecting_text = False
+                                source.set_text_selection([])
+
+                                QDesktopServices.openUrl(QUrl(url))
+                                return True
+
+                if getattr(self, "is_selecting_text", False):
+                    self.is_selecting_text = False
+                    drag_rect = QRect(self.text_select_start, event.pos()).normalized()
+                    rects, text = self._get_intersecting_text_data(page_idx, drag_rect)
+                    source.set_text_selection(rects)
+                    self.current_selected_text = text
                 return True
 
             elif (
