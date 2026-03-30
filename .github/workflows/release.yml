@@ -182,7 +182,7 @@ jobs:
           $EXCLUDE_ARGS = $EXCLUDES.Split(" ")
 
           python -m nuitka `
-              --onefile `
+              --standalone `
               --assume-yes-for-downloads `
               --lto=no `
               --enable-plugin=pyside6 `
