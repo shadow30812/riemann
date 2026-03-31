@@ -3,11 +3,9 @@
 
     var css = `
         @font-face {
-            font-family: "Riemann Noto Emoji";
-            src: url("{{FONT_URI}}") format("truetype");
-        }
-        body, p, span, div, h1, h2, h3, h4, h5, h6, input, textarea { 
-            font-family: inherit, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Riemann Noto Emoji", "Twemoji Mozilla" !important; 
+        font-family: "Riemann Noto Emoji";
+        src: url("{{FONT_URI}}") format("truetype");
+        unicode-range: U+1F300-1F9FF, U+2600-26FF, U+2700-27BF;
         }
     `;
     var style = document.createElement('style');

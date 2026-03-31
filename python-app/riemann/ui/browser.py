@@ -1027,6 +1027,12 @@ class BrowserTab(QWidget):
         new_factor = max(0.1, min(self.web.zoomFactor() + delta, 5.0))
         self.web.setZoomFactor(new_factor)
         self.btn_zoom.setText(f"{int(new_factor * 100)}%")
+        domain = self.web.url().host()
+
+        if domain:
+            QSettings("Riemann", "BrowserSettings").setValue(
+                f"zoom/{domain}", new_factor
+            )
 
     def reset_zoom(self) -> None:
         """
@@ -1034,6 +1040,10 @@ class BrowserTab(QWidget):
         """
         self.web.setZoomFactor(1.0)
         self.btn_zoom.setText("100%")
+        domain = self.web.url().host()
+
+        if domain:
+            QSettings("Riemann", "BrowserSettings").setValue(f"zoom/{domain}", 1.0)
 
     def toggle_search(self) -> None:
         """
@@ -1108,6 +1118,14 @@ class BrowserTab(QWidget):
             url (QUrl): Native object tracking active site addressing correctly.
         """
         s_url = url.toString()
+
+        domain = url.host()
+        if domain:
+            saved_zoom = float(
+                QSettings("Riemann", "BrowserSettings").value(f"zoom/{domain}", 1.0)
+            )
+            self.web.setZoomFactor(saved_zoom)
+            self.btn_zoom.setText(f"{int(saved_zoom * 100)}%")
 
         if "homepage.html" in s_url:
             self.txt_url.setText("")
