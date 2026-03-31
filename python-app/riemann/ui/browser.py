@@ -9,11 +9,13 @@ audio processing injection (Riemann Audio), and download management.
 import os
 import pwd
 import re
+import shutil
 import subprocess
 import sys
 import urllib.parse
 from typing import Any, Optional
 
+import yt_dlp
 from PySide6.QtCore import (
     QEvent,
     QObject,
@@ -27,6 +29,8 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QShortcut
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
     QWebEnginePage,
@@ -40,13 +44,17 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QCompleter,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMenu,
     QProgressBar,
     QPushButton,
+    QSlider,
+    QStyle,
     QTabWidget,
     QToolButton,
     QVBoxLayout,
@@ -72,6 +80,31 @@ def get_resource_path(relative_path: str) -> str:
         base_path = os.path.dirname(os.path.abspath(__file__))
 
     return os.path.join(base_path, relative_path)
+
+
+class YtDlpStreamWorker(QThread):
+    finished = Signal(str)
+    error = Signal(str)
+
+    def __init__(self, url):
+        super().__init__()
+        self.url = url
+
+    def run(self):
+        ydl_opts: dict[str, Any] = {
+            "format": "best[ext=mp4]",
+            "quiet": True,
+            "noplaylist": True,
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(self.url, download=False)
+                if info and "url" in info:
+                    self.finished.emit(info["url"])
+                else:
+                    self.error.emit("No URL found in response")
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class YtDlpWorker(QThread):
@@ -211,6 +244,8 @@ class WebPage(QWebEnginePage):
         popup_view.destroyed.connect(lambda: self._cleanup_popup(popup_view))
 
         page = WebPage(self.profile(), popup_view)
+        page.windowCloseRequested.connect(popup_view.close)
+
         popup_view.setPage(page)
         popup_view.show()
         return page
@@ -524,6 +559,17 @@ class BrowserTab(QWidget):
         self.btn_video_speed.setToolTip("Toggle Video Speed Controller")
         self.btn_video_speed.clicked.connect(self.toggle_video_mode)
 
+        self.btn_stream = QPushButton()
+        self.btn_stream.setIcon(
+            QIcon(
+                get_resource_path(os.path.join("..", "assets", "icons", "airplay.svg"))
+            )
+        )
+        self.btn_stream.setIconSize(icon_size)
+        self.btn_stream.setFixedWidth(30)
+        self.btn_stream.setToolTip("Stream Video Externally")
+        self.btn_stream.clicked.connect(self.stream_video)
+
         self.btn_download = QPushButton()
         self.btn_download.setIcon(
             QIcon(
@@ -578,6 +624,7 @@ class BrowserTab(QWidget):
         tb_layout.addWidget(self.btn_music)
         tb_layout.addWidget(self.btn_video_speed)
         tb_layout.addWidget(self.btn_theme_toggle)
+        tb_layout.addWidget(self.btn_stream)
         tb_layout.addWidget(self.btn_download)
         tb_layout.addWidget(self.btn_print_pdf)
         tb_layout.addWidget(self.btn_zoom)
@@ -1600,6 +1647,7 @@ class BrowserTab(QWidget):
         self.btn_music.setIcon(self._get_icon("music.svg"))
         self.btn_video_speed.setIcon(self._get_icon("gauge.svg"))
 
+        self.btn_stream.setIcon(self._get_icon("airplay.svg"))
         dl_icon = (
             "circle-stop.svg"
             if getattr(self, "dl_worker", None) and self.dl_worker.isRunning()
@@ -1635,3 +1683,192 @@ class BrowserTab(QWidget):
                     parent.tabBar().update()
                 break
             parent = parent.parent()
+
+    def stream_video(self) -> None:
+        """
+        Presents a dropdown of available media players (VLC, MPV, Native).
+        """
+        raw_url = self.web.url().toString().strip()
+
+        if raw_url.startswith("-") or not (
+            raw_url.startswith("http://") or raw_url.startswith("https://")
+        ):
+            self.show_toast("Invalid or insecure URL for streaming.")
+            return
+
+        available_players = []
+
+        if shutil.which("mpv"):
+            available_players.append("MPV")
+        if shutil.which("vlc"):
+            available_players.append("VLC")
+
+        available_players.append("Built-in Player")
+
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Select Media Player",
+            "Choose a player to stream this video:",
+            available_players,
+            0,
+            False,
+        )
+
+        if not ok:
+            return
+
+        self.selected_player = choice
+
+        if choice == "MPV":
+            self.show_toast("Opening in MPV...")
+            try:
+                subprocess.Popen(
+                    [str(shutil.which("mpv")), "--keep-open=yes", raw_url],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                self.show_toast("Failed to start MPV.")
+        else:
+            self.show_toast(f"Extracting stream for {choice}...")
+            self.stream_worker = YtDlpStreamWorker(raw_url)
+            self.stream_worker.finished.connect(self._on_stream_extracted)
+            self.stream_worker.error.connect(
+                lambda e: self.show_toast(f"Stream error: {e}")
+            )
+            self.stream_worker.start()
+
+    def _on_stream_extracted(self, direct_url: str) -> None:
+        """Routes the extracted raw video stream to the selected player."""
+        if self.selected_player == "VLC":
+            try:
+                subprocess.Popen(
+                    [str(shutil.which("vlc")), direct_url],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception as e:
+                print(f"[ERROR] VLC failed: {e}")
+                self.show_toast("Failed to start VLC. Falling back to native player.")
+                self._start_playback(direct_url)
+        else:
+            self._start_playback(direct_url)
+
+    def _start_playback(self, direct_url: str):
+        self.video_window = QDialog(self)
+        self.video_window.setWindowTitle("Riemann Media Player - Buffering...")
+        self.video_window.resize(2000, 500)
+
+        layout = QVBoxLayout(self.video_window)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.video_widget = QVideoWidget()
+        layout.addWidget(self.video_widget)
+
+        progress_layout = QHBoxLayout()
+        progress_layout.setContentsMargins(10, 0, 10, 0)
+
+        self.time_label = QLabel("00:00 / 00:00")
+        self.position_slider = QSlider(Qt.Orientation.Horizontal)
+        self.position_slider.setRange(0, 0)
+
+        progress_layout.addWidget(self.position_slider)
+        progress_layout.addWidget(self.time_label)
+        layout.addLayout(progress_layout)
+
+        controls_layout = QHBoxLayout()
+        controls_layout.setContentsMargins(10, 5, 10, 10)
+        controls_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.btn_rewind = QPushButton()
+        self.btn_rewind.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_MediaSeekBackward)
+        )
+
+        self.btn_play_pause = QPushButton()
+        self.btn_play_pause.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause)
+        )
+
+        self.btn_forward = QPushButton()
+        self.btn_forward.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_MediaSeekForward)
+        )
+
+        for btn in [self.btn_rewind, self.btn_play_pause, self.btn_forward]:
+            btn.setFixedSize(40, 40)
+            controls_layout.addWidget(btn)
+
+        layout.addLayout(controls_layout)
+
+        self.audio_output = QAudioOutput()
+        self.player = QMediaPlayer()
+        self.player.setAudioOutput(self.audio_output)
+        self.player.setVideoOutput(self.video_widget)
+
+        self.btn_play_pause.clicked.connect(self._toggle_play_pause)
+        self.btn_rewind.clicked.connect(
+            lambda: self.player.setPosition(max(0, self.player.position() - 10000))
+        )
+        self.btn_forward.clicked.connect(
+            lambda: self.player.setPosition(self.player.position() + 10000)
+        )
+        self.position_slider.sliderMoved.connect(self.player.setPosition)
+
+        self.player.mediaStatusChanged.connect(self._on_media_status_changed)
+        self.player.playbackStateChanged.connect(self._on_playback_state_changed)
+        self.player.positionChanged.connect(self._update_slider)
+        self.player.durationChanged.connect(self._update_duration)
+
+        self.player.setSource(QUrl(direct_url))
+        self.video_window.show()
+
+    def _format_time(self, ms: int) -> str:
+        seconds = ms // 1000
+        m, s = divmod(seconds, 60)
+        h, m = divmod(m, 60)
+        if h > 0:
+            return f"{h}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+
+    def _update_slider(self, position: int):
+        if not self.position_slider.isSliderDown():
+            self.position_slider.setValue(position)
+
+        pos_str = self._format_time(position)
+        dur_str = self._format_time(self.player.duration())
+        self.time_label.setText(f"{pos_str} / {dur_str}")
+
+    def _update_duration(self, duration: int):
+        self.position_slider.setRange(0, duration)
+
+    def _toggle_play_pause(self):
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.player.pause()
+        else:
+            self.player.play()
+
+    def _on_playback_state_changed(self, state):
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.btn_play_pause.setIcon(
+                self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause)
+            )
+        else:
+            self.btn_play_pause.setIcon(
+                self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay)
+            )
+
+    def _on_media_status_changed(self, status):
+        """Prevents the player from skipping and sputtering by pausing until buffered."""
+        if status == QMediaPlayer.MediaStatus.BufferingMedia:
+            self.video_window.setWindowTitle("Riemann Media Player - Buffering...")
+            self.player.pause()
+        elif status in (
+            QMediaPlayer.MediaStatus.BufferedMedia,
+            QMediaPlayer.MediaStatus.LoadedMedia,
+        ):
+            self.video_window.setWindowTitle("Riemann Media Player")
+            self.player.play()
+        elif status == QMediaPlayer.MediaStatus.EndOfMedia:
+            self.video_window.setWindowTitle("Riemann Media Player - Finished")
+            self.player.stop()
