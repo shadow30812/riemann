@@ -1831,7 +1831,6 @@ def install_linux_integration():
         shutil.copy2(internal_icon_path, persistent_icon_path)
 
         desktop_file_path = apps_dir / f"{app_name}.desktop"
-
         exe_path = os.path.abspath(sys.argv[0])
 
         desktop_entry = (
