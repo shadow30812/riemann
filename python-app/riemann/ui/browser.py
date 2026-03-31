@@ -514,6 +514,16 @@ class BrowserTab(QWidget):
         self.btn_music.setToolTip("Toggle Audiophile Music Mode")
         self.btn_music.clicked.connect(self.toggle_music_mode)
 
+        self.btn_video_speed = QPushButton()
+        self.btn_video_speed.setIcon(
+            QIcon(get_resource_path(os.path.join("..", "assets", "icons", "gauge.svg")))
+        )
+        self.btn_video_speed.setIconSize(icon_size)
+        self.btn_video_speed.setFixedWidth(30)
+        self.btn_video_speed.setCheckable(True)
+        self.btn_video_speed.setToolTip("Toggle Video Speed Controller")
+        self.btn_video_speed.clicked.connect(self.toggle_video_mode)
+
         self.btn_download = QPushButton()
         self.btn_download.setIcon(
             QIcon(
@@ -566,6 +576,7 @@ class BrowserTab(QWidget):
         tb_layout.addWidget(self.btn_bookmark)
         tb_layout.addWidget(self.btn_mute)
         tb_layout.addWidget(self.btn_music)
+        tb_layout.addWidget(self.btn_video_speed)
         tb_layout.addWidget(self.btn_theme_toggle)
         tb_layout.addWidget(self.btn_download)
         tb_layout.addWidget(self.btn_print_pdf)
@@ -654,11 +665,11 @@ class BrowserTab(QWidget):
         self.web.urlChanged.connect(self._update_url_bar)
         self.web.loadProgress.connect(self.progress.setValue)
         self.web.iconChanged.connect(self._update_tab_icon)
+        self.web.titleChanged.connect(self._update_tab_title)
 
         self.web.loadFinished.connect(lambda: self.progress.setValue(0))
         self.web.loadFinished.connect(self._restore_music_mode)
         self.web.loadFinished.connect(self._on_homepage_load_finished)
-        self.web.titleChanged.connect(self._update_tab_title)
 
         self.shortcut_reload = QShortcut(QKeySequence("F5"), self)
         self.shortcut_reload.setContext(Qt.ShortcutContext.WindowShortcut)
@@ -712,6 +723,10 @@ class BrowserTab(QWidget):
         self.shortcut_music.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_music.activated.connect(self.btn_music.click)
 
+        self.shortcut_video = QShortcut(QKeySequence("Ctrl+G"), self)
+        self.shortcut_video.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.shortcut_video.activated.connect(self.btn_video_speed.click)
+
         self.shortcut_devtools_func = QShortcut(QKeySequence("F12"), self)
         self.shortcut_devtools_func.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_devtools_func.activated.connect(self.open_devtools)
@@ -764,6 +779,7 @@ class BrowserTab(QWidget):
         )
         self.link_tooltip.hide()
         self.web.page().linkHovered.connect(self._on_link_hovered)
+        self.web.page().recentlyAudibleChanged.connect(self._on_audio_state_changed)
 
     def focusInEvent(self, event: Any) -> None:
         """
@@ -1278,6 +1294,60 @@ class BrowserTab(QWidget):
         full_script = base_js + "\n" + command
         self.web.page().runJavaScript(full_script)
 
+    def get_video_script(self) -> str:
+        """
+        Extracts foundational Javascript processing payloads natively bundled into application assets reliably.
+        """
+        try:
+            candidate_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..",
+                "assets",
+                "video_engine.js",
+            )
+
+            if not os.path.exists(candidate_path):
+                candidate_path = os.path.join(
+                    os.path.dirname(sys.executable),
+                    "riemann",
+                    "assets",
+                    "video_engine.js",
+                )
+
+            if not os.path.exists(candidate_path):
+                print(f"[Riemann Error] Video Engine not found at: {candidate_path}")
+                self.show_toast("Error: Missing video_engine.js")
+                return ""
+
+            with open(candidate_path, "r", encoding="utf-8") as f:
+                return f.read()
+
+        except Exception as e:
+            print(f"[ERROR] Failed to load video script: {e}")
+            return ""
+
+    def toggle_video_mode(self) -> None:
+        """
+        Coordinates client-side video injection dynamically.
+        """
+        is_active = self.btn_video_speed.isChecked()
+
+        base_js = self.get_video_script()
+        if not base_js:
+            print("[ERROR] Aborting injection: Script content is empty.")
+            self.btn_video_speed.setChecked(False)
+            return
+
+        if is_active:
+            command = "if(window.RiemannVideo) window.RiemannVideo.enable();"
+            self.show_toast("Video Mode ON")
+        else:
+            command = "if(window.RiemannVideo) window.RiemannVideo.disable();"
+            self.show_toast("Video Mode OFF")
+
+        full_script = base_js + "\n" + command
+        self.web.page().runJavaScript(full_script)
+
     def _restore_music_mode(self) -> None:
         """
         Reinitializes musical DSP properties securely restoring previous toggles accurately consistently implicitly.
@@ -1528,6 +1598,7 @@ class BrowserTab(QWidget):
             )
         )
         self.btn_music.setIcon(self._get_icon("music.svg"))
+        self.btn_video_speed.setIcon(self._get_icon("gauge.svg"))
 
         dl_icon = (
             "circle-stop.svg"
@@ -1553,3 +1624,14 @@ class BrowserTab(QWidget):
             self.link_tooltip.raise_()
         else:
             self.link_tooltip.hide()
+
+    def _on_audio_state_changed(self, audible: bool) -> None:
+        parent = self.parent()
+        while parent:
+            if isinstance(parent, QTabWidget):
+                idx = parent.indexOf(self)
+                if idx != -1:
+                    parent.tabBar().setTabData(idx, "playing" if audible else None)
+                    parent.tabBar().update()
+                break
+            parent = parent.parent()

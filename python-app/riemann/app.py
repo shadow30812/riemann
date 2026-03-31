@@ -722,6 +722,16 @@ class RiemannWindow(QMainWindow):
         self._restore_tabs_from_settings("session/main_tabs", self.tabs_main)
         self._restore_tabs_from_settings("session/side_tabs", self.tabs_side)
 
+        main_idx = self.settings.value("session/main_active_idx", -1, type=int)
+        if isinstance(main_idx, int):
+            if main_idx >= 0 and main_idx < self.tabs_main.count():
+                self.tabs_main.setCurrentIndex(main_idx)
+
+        side_idx = self.settings.value("session/side_active_idx", -1, type=int)
+        if isinstance(side_idx, int):
+            if side_idx >= 0 and side_idx < self.tabs_side.count():
+                self.tabs_side.setCurrentIndex(side_idx)
+
         if self.tabs_side.count() > 0:
             self.tabs_side.show()
             if self.settings.value("splitter/state"):
@@ -839,8 +849,11 @@ class RiemannWindow(QMainWindow):
         icon_path = get_resource_path(os.path.join("assets", "icons", "pdf.png"))
         pdf_icon = QIcon(icon_path)
 
-        idx = target_widget.addTab(reader, pdf_icon, os.path.basename(path))
-        target_widget.setCurrentIndex(idx)
+        current_idx = target_widget.currentIndex()
+        insert_idx = current_idx + 1 if current_idx != -1 else target_widget.count()
+
+        target_widget.insertTab(insert_idx, reader, pdf_icon, os.path.basename(path))
+        target_widget.setCurrentIndex(insert_idx)
 
     def _add_browser_tab(self, url: str, target_widget: QTabWidget) -> None:
         """
@@ -859,8 +872,11 @@ class RiemannWindow(QMainWindow):
         browser = BrowserTab(url, profile=use_profile, dark_mode=self.dark_mode)
         browser.completer.setModel(self.history_model)
 
-        idx = target_widget.addTab(browser, "Loading...")
-        target_widget.setCurrentIndex(idx)
+        current_idx = target_widget.currentIndex()
+        insert_idx = current_idx + 1 if current_idx != -1 else target_widget.count()
+
+        target_widget.insertTab(insert_idx, browser, "Loading...")
+        target_widget.setCurrentIndex(insert_idx)
 
         browser.web.urlChanged.connect(lambda qurl: self._update_tab_title(browser))
         browser.web.loadFinished.connect(lambda ok: self._update_tab_title(browser))
@@ -967,7 +983,12 @@ class RiemannWindow(QMainWindow):
             icon_path = get_resource_path(os.path.join("assets", "icons", "pdf.png"))
             pdf_icon = QIcon(icon_path)
 
-            self.tabs_main.addTab(reader, pdf_icon, "New Tab")
+            current_idx = self.tabs_main.currentIndex()
+            insert_idx = (
+                current_idx + 1 if current_idx != -1 else self.tabs_main.count()
+            )
+
+            self.tabs_main.insertTab(insert_idx, reader, pdf_icon, "New Tab")
             self.tabs_main.setCurrentWidget(reader)
 
     def new_browser_tab(
@@ -1001,10 +1022,13 @@ class RiemannWindow(QMainWindow):
             url, profile=tab_profile, dark_mode=self.dark_mode, incognito=is_incognito
         )
         browser.completer.setModel(self.history_model)
-
         label = "Incognito" if incognito else "Loading..."
-        target.addTab(browser, label)
-        new_tab = target.widget(target.count() - 1)
+
+        current_idx = target.currentIndex()
+        insert_idx = current_idx + 1 if current_idx != -1 else target.count()
+
+        target.insertTab(insert_idx, browser, label)
+        new_tab = target.widget(insert_idx)
 
         browser.web.urlChanged.connect(lambda qurl: self._update_tab_title(browser))
         browser.web.loadFinished.connect(lambda ok: self._update_tab_title(browser))
@@ -1241,8 +1265,12 @@ class RiemannWindow(QMainWindow):
 
         self.settings.setValue("session/main_tabs", get_files(self.tabs_main))
         self.settings.setValue("session/side_tabs", get_files(self.tabs_side))
+
         self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/state", self.saveState())
+
+        self.settings.setValue("session/main_active_idx", self.tabs_main.currentIndex())
+        self.settings.setValue("session/side_active_idx", self.tabs_side.currentIndex())
 
         self.settings.sync()
         self._kill_all_media_safely()

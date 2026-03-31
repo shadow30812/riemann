@@ -12,11 +12,15 @@ from typing import Optional
 from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import (
     QAction,
+    QColor,
+    QCursor,
     QDrag,
     QDragEnterEvent,
     QDropEvent,
     QIcon,
+    QLinearGradient,
     QMouseEvent,
+    QPainter,
 )
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -89,6 +93,20 @@ class DraggableTabBar(QTabBar):
     reordering them visually.
     """
 
+    _dragged_widget = None
+    _dragged_title = ""
+    _dragged_icon = QIcon()
+    _dragged_data = None
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_start_pos = event.pos()
+        super().mousePressEvent(event)
+
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """
         Initiates a drag operation when a tab is actively dragged by the user.
@@ -97,33 +115,118 @@ class DraggableTabBar(QTabBar):
             event (QMouseEvent): The mouse move event triggering the check.
         """
         if event.buttons() != Qt.MouseButton.LeftButton:
+            super().mouseMoveEvent(event)
             return
-
-        global_pos = event.globalPosition().toPoint()
-        pos_in_widget = self.mapFromGlobal(global_pos)
-
-        tab_index = self.tabAt(pos_in_widget)
-        if tab_index < 0:
-            return
-
-        widget = self.parent().widget(tab_index)
-        if not hasattr(widget, "current_path") or not widget.current_path:
-            return
-
-        mime = QMimeData()
-        mime.setText(widget.current_path)
-
-        drag = QDrag(self)
-        drag.setMimeData(mime)
-
-        pixmap = widget.grab()
-        drag.setPixmap(pixmap.scaled(200, 150, Qt.AspectRatioMode.KeepAspectRatio))
-        drag.setHotSpot(QPoint(100, 75))
-
-        if drag.exec(Qt.DropAction.MoveAction) == Qt.DropAction.MoveAction:
-            self.parent().removeTab(tab_index)
 
         super().mouseMoveEvent(event)
+
+        if hasattr(self, "drag_start_pos"):
+            if abs(event.pos().y() - self.drag_start_pos.y()) > 40:
+                tab_index = self.tabAt(self.drag_start_pos)
+                if tab_index < 0:
+                    return
+
+                tab_widget = self.parent()
+                if not isinstance(tab_widget, QTabWidget):
+                    return
+
+                widget = tab_widget.widget(tab_index)
+                if not widget:
+                    return
+
+                tab_text = self.tabText(tab_index)
+                tab_icon = self.tabIcon(tab_index)
+                tab_data = self.tabData(tab_index)
+
+                DraggableTabBar._dragged_widget = widget
+                DraggableTabBar._dragged_title = tab_text
+                DraggableTabBar._dragged_icon = tab_icon
+                DraggableTabBar._dragged_data = tab_data
+
+                mime = QMimeData()
+                mime.setData("application/x-riemann-tab", b"tab")
+
+                drag = QDrag(self)
+                drag.setMimeData(mime)
+
+                pixmap = widget.grab()
+                drag.setPixmap(
+                    pixmap.scaled(200, 150, Qt.AspectRatioMode.KeepAspectRatio)
+                )
+                drag.setHotSpot(QPoint(100, 75))
+
+                tab_widget.removeTab(tab_index)
+                result = drag.exec(Qt.DropAction.MoveAction)
+
+                if result == Qt.DropAction.IgnoreAction:
+                    main_window = self.window()
+                    global_pos = QCursor.pos()
+
+                    if not main_window.geometry().contains(global_pos):
+                        new_window = type(main_window)()
+                        new_window.setGeometry(
+                            global_pos.x() - 100,
+                            global_pos.y() - 100,
+                            main_window.width(),
+                            main_window.height(),
+                        )
+                        new_window.show()
+
+                        target_tab_widget = new_window.findChild(QTabWidget)
+                        if target_tab_widget:
+                            new_idx = target_tab_widget.addTab(
+                                widget, tab_icon, tab_text
+                            )
+                            target_tab_widget.tabBar().setTabData(new_idx, tab_data)
+                            target_tab_widget.setCurrentIndex(new_idx)
+                        else:
+                            tab_widget.insertTab(tab_index, widget, tab_icon, tab_text)
+                            tab_widget.setCurrentIndex(tab_index)
+
+                    else:
+                        tab_widget.insertTab(tab_index, widget, tab_icon, tab_text)
+                        self.setTabData(tab_index, tab_data)
+                        tab_widget.setCurrentIndex(tab_index)
+
+                DraggableTabBar._dragged_widget = None
+
+    def dragEnterEvent(self, event) -> None:
+        """Accept the drag if it is an internal Riemann tab."""
+        if event.mimeData().hasFormat("application/x-riemann-tab"):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event) -> None:
+        """Handle dropping a tab from another window directly onto this tab bar."""
+        if event.mimeData().hasFormat("application/x-riemann-tab"):
+            widget = DraggableTabBar._dragged_widget
+            if widget:
+                tab_widget = self.parent()
+                if isinstance(tab_widget, QTabWidget):
+                    idx = tab_widget.addTab(
+                        widget,
+                        DraggableTabBar._dragged_icon,
+                        DraggableTabBar._dragged_title,
+                    )
+                    self.setTabData(idx, DraggableTabBar._dragged_data)
+                    tab_widget.setCurrentIndex(idx)
+                    event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
+
+    def paintEvent(self, event) -> None:
+        """Draws native tabs, then overlays a gradient on media-playing tabs."""
+        super().paintEvent(event)
+        painter = QPainter(self)
+        for i in range(self.count()):
+            if self.tabData(i) == "playing":
+                rect = self.tabRect(i)
+                gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
+                gradient.setColorAt(0, QColor(255, 69, 0, 50))
+                gradient.setColorAt(1, QColor(138, 43, 226, 50))
+                painter.fillRect(rect, gradient)
+        painter.end()
 
     def contextMenuEvent(self, event):
         """
