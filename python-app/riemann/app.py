@@ -790,23 +790,30 @@ class RiemannWindow(QMainWindow):
         sig_idx = self.tabs_side.indexOf(self.tree_signatures)
         if signatures and not dismissed:
             self.tree_signatures.clear()
+            suffix = "-white" if self.dark_mode else ""
+
             for sig in signatures:
                 item = QTreeWidgetItem(self.tree_signatures)
                 item.setText(0, f"  {sig.get('subject', 'Unknown')}")
 
                 if sig.get("valid"):
                     if sig.get("is_trusted"):
-                        icon_name = "circle-check.svg"
+                        icon_name = "circle-check"
                     else:
-                        icon_name = "circle-question-mark.svg"
+                        icon_name = "circle-question-mark"
                 else:
-                    icon_name = "circle-slash.svg"
+                    icon_name = "circle-slash"
 
                 icon_path = get_resource_path(
-                    os.path.join("assets", "icons", icon_name)
+                    os.path.join("assets", "icons", f"{icon_name}{suffix}.svg")
                 )
                 item.setIcon(0, QIcon(icon_path))
                 item.setText(1, sig.get("field_name", "Unknown"))
+
+                pen_path = get_resource_path(
+                    os.path.join("assets", "icons", f"pen-line{suffix}.svg")
+                )
+                item.setIcon(1, QIcon(pen_path))
 
                 child_cert = QTreeWidgetItem(item)
                 child_cert.setText(0, f"Cert Hash: {sig.get('cert_hash', '')[:15]}...")
@@ -820,7 +827,7 @@ class RiemannWindow(QMainWindow):
 
             self.tree_signatures.expandAll()
             if sig_idx == -1:
-                self.tabs_side.addTab(self.tree_signatures, "🖊️ Signatures")
+                self.tabs_side.addTab(self.tree_signatures, "Signatures")
             if self.tabs_side.isHidden():
                 self.tabs_side.show()
 
@@ -1327,6 +1334,8 @@ class RiemannWindow(QMainWindow):
                 w = tab_widget.widget(i)
                 if hasattr(w, "_update_icons"):
                     w._update_icons()
+
+        self.refresh_signature_panel()
 
     def toggle_active_tab_theme(self) -> None:
         """

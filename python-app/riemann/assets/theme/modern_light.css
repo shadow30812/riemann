@@ -51,7 +51,7 @@ QComboBox::drop-down {
 }
 
 QComboBox::down-arrow {
-    image: url('python-app/riemann/assets/icons/chevron-down.svg');
+    image: url('../icons/chevron-down.svg');
     width: 14px;
     height: 14px;
 }

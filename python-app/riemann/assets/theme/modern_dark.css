@@ -52,7 +52,7 @@ QComboBox::drop-down {
 
 /* Inserts your downloaded SVG as the arrow */
 QComboBox::down-arrow {
-    image: url('python-app/riemann/assets//icons/chevron-down.svg');
+    image: url('../icons/chevron-down.svg');
     width: 14px;
     height: 14px;
 }

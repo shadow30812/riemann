@@ -435,9 +435,11 @@ class ReaderTab(
         self.btn_prev.clicked.connect(self.prev_view)
 
         self.txt_page = QLineEdit()
-        self.txt_page.setFixedWidth(50)
         self.txt_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.txt_page.returnPressed.connect(self.on_page_input_return)
+
+        self.txt_page.textChanged.connect(self._update_page_input_width)
+        self._update_page_input_width(self.txt_page.text())
 
         self.lbl_total = QLabel("/ 0")
 
@@ -463,7 +465,6 @@ class ReaderTab(
         )
         self.combo_zoom.currentIndexChanged.connect(self.on_zoom_selected)
         self.combo_zoom.lineEdit().returnPressed.connect(self.on_zoom_text_entered)
-        self.combo_zoom.setFixedWidth(120)
 
         self.btn_theme = QPushButton()
         self.btn_theme.setIcon(
@@ -560,6 +561,15 @@ class ReaderTab(
         ]
         for w in widgets:
             layout.addWidget(w)
+
+    def _update_page_input_width(self, text: str = "") -> None:
+        """Dynamically adjusts the width of the page number input box based on content length."""
+        if not text:
+            text = self.txt_page.text() or "0"
+
+        fm = self.txt_page.fontMetrics()
+        width = fm.horizontalAdvance(text) + 40
+        self.txt_page.setFixedWidth(max(40, min(width, 80)))
 
     def _setup_search_bar(self) -> None:
         """
@@ -720,7 +730,7 @@ class ReaderTab(
 
         if self.window() and hasattr(self.window(), "history_manager"):
             recent_pdfs = self.window().history_manager.history.get("pdf", [])
-            for path in recent_pdfs[:10]:
+            for path in recent_pdfs[:13]:
                 if os.path.exists(path):
                     name = os.path.basename(path)
                     item = QListWidgetItem(f"📄 {name}")
@@ -1616,15 +1626,23 @@ class ReaderTab(
         self.rendered_pages.clear()
         self.update_view()
 
+        current_scale = self.calculate_scale()
+        pct = int(current_scale * 100)
+
         if self.zoom_mode == ZoomMode.AUTO_FIT:
-            txt = "Auto Fit"
+            txt = f"Auto Fit ({pct}%)"
         elif self.zoom_mode == ZoomMode.FIT_WIDTH:
-            txt = "Fit Width"
+            txt = f"Fit Width ({pct}%)"
         elif self.zoom_mode == ZoomMode.FIT_HEIGHT:
-            txt = "Fit Height"
+            txt = f"Fit Height ({pct}%)"
         else:
-            txt = f"{int(self.manual_scale * 100)}%"
+            txt = f"{pct}%"
+
         self.combo_zoom.setCurrentText(txt)
+
+        fm = self.combo_zoom.fontMetrics()
+        max_width = fm.horizontalAdvance(txt) + 40
+        self.combo_zoom.setFixedWidth(max(100, max_width))
 
     def _update_all_widget_sizes(self) -> None:
         """
@@ -1810,13 +1828,15 @@ class ReaderTab(
         self.list_recent.setCursor(Qt.CursorShape.PointingHandCursor)
         self.list_recent.itemClicked.connect(self._on_recent_item_clicked)
 
+        self.list_recent.setMinimumWidth(400)
+
         right_layout.addWidget(recent_label)
         right_layout.addWidget(self.list_recent)
 
         layout.addStretch(1)
         layout.addLayout(left_layout, 2)
         layout.addStretch(1)
-        layout.addLayout(right_layout, 2)
+        layout.addLayout(right_layout, 3)
         layout.addStretch(1)
 
     def _on_home_path_entered(self) -> None:
