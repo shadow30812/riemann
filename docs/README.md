@@ -230,6 +230,7 @@ Advantages:
 
 * Added full support for click-and-drag text selection directly within the PDF image viewport.
 * Quick "Search Web" functionality directly from selected PDF text.
+* Clickable Web Links: Automatically detects and allows interaction with hyperlinked URLs embedded directly within PDF documents.
 
 ---
 
@@ -412,6 +413,9 @@ Capabilities:
 * print webview to PDF (allowing users to instantly capture and convert live web research, articles, or documentation into local PDFs for offline reading and annotation)
 * Homepage UI for managing quick-access web links with a sleek modal interface (showShortcutModal) to safely add, edit, and delete custom URL shortcuts with automatic favicon fetching.
 * enhanced fluid zooming with trackpad gesture support
+* Video Engine: Injects an overlay into HTML5 videos to provide granular playback speed control.
+* Video Streaming (yt-dlp): Bypasses QtWebEngine's unsupported codec limitations by extracting media streams and piping them directly to native desktop players (MPV/VLC/QtMultimedia).
+* Domain-Specific Zoom Memory: Automatically remembers and applies your preferred zoom scale on a per-subdomain basis.
 
 ---
 
@@ -582,6 +586,8 @@ Riemann provides advanced window and tab management to help organize complex res
 * **Advanced Tab Controls:** Context menus on tabs allow users to quickly *Duplicate Tab*, *Close Tabs to the Right*, or *Close Other Tabs* to declutter the workspace.
 * **Drag-and-Drop:** Documents can be opened instantly by dragging and dropping PDF files directly anywhere over the application's title bar.
 * **Mute Tab Audio:** Individual web or document tabs can be muted directly from the tab bar, silencing noisy web pages without interrupting Riemann's dedicated focus audio engine or system volume.
+* **Session Restoration:** Automatically remembers and reopens your active tabs (both PDFs and websites) across application restarts.
+* **Advanced Drag-and-Drop:** Robust tab reordering and the ability to open documents instantly by dragging and dropping PDF files directly over the tab bar.
 
 ---
 
@@ -679,6 +685,8 @@ F6 — Focus address bar
 
 Ctrl + M — Toggle Music Mode
 
+Ctrl + G — Toggle Video Speed Controller
+
 F12 / Ctrl + Shift + I — Open Web Inspector/DevTools
 
 F5 / Ctrl + R — Reload page
@@ -742,7 +750,9 @@ pip install -r requirements/requirements.txt
 just run
 ```
 
-You may also choose to install the pre-compiled optimized binary of the app. Note however that it may not be stable on all systems directly, and you may have to run it with the terminal in case of any missing packages or errors. That being said, the latest binary at the time of writing this README is available at <https://github.com/shadow30812/riemann/releases/download/v4.0.0/Riemann>, compiled in an Ubuntu 24.04.02 LTS machine.
+You may also choose to install the pre-compiled optimized binary of the app. Note however that it may not be stable on all systems directly, and you may have to run it with the terminal in case of any missing packages or errors. That being said, the latest binary at the time of writing this README is available at <https://github.com/shadow30812/riemann/releases/download/v4.1.0/Riemann>, compiled in an Ubuntu 24.04.02 LTS machine.
+
+There also exists a Windows executable at <https://github.com/shadow30812/riemann/releases/download/v4.1.0/Riemann.exe> but it might be very unstable. For best performance, it is highly recommended to run the application on a Linux distribution.
 
 ---
 
@@ -847,7 +857,7 @@ Contributions welcome in:
 
 ## Versioning
 
-V4.0.0 released on 28/03/2026
+V4.1.0 released on 01/04/2026
 
 ## License
 

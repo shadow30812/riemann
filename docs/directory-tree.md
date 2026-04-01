@@ -1,152 +1,161 @@
 ```
 riemann/
 ├── .editorconfig
-├── .github/
-│   └── workflows/
-│       └── release.yml
 ├── .gitignore
 ├── Cargo.lock
 ├── Cargo.toml
 ├── LICENSE
 ├── Riemann.spec
 ├── build_entry.py
+├── justfile
+├── package-lock.json
+├── package.json
+├── pyproject.toml
+├── .github/
+│   └── workflows/
+│       └── release.yml
 ├── docs/
 │   ├── DevGuide.md
 │   ├── README.md
 │   └── directory-tree.md
-├── justfile
 ├── libs/
-│   └── libpdfium.so
+│   ├── libpdfium.so
+│   └── pdfium.dll
 ├── logs/
 │   └── test_results.log
-├── package-lock.json
-├── package.json
-├── pyproject.toml
 ├── python-app/
 │   ├── riemann/
 │   │   ├── __init__.py
 │   │   ├── __main__.py
 │   │   ├── app.py
+│   │   ├── riemann_core.pyi
 │   │   ├── assets/
-│   │   │   ├── Icon.png
-│   │   │   ├── __tests__/
-│   │   │   │   ├── audio_engine.test.js
-│   │   │   │   └── homepage.test.js
 │   │   │   ├── audio_engine.js
+│   │   │   ├── video_engine.js
 │   │   │   ├── browser.png
-│   │   │   ├── fonts/
-│   │   │   │   └── NotoColorEmoji.ttf
 │   │   │   ├── homepage.css
 │   │   │   ├── homepage.html
 │   │   │   ├── homepage.js
+│   │   │   ├── Icon.png
 │   │   │   ├── icon.ico
+│   │   │   ├── __tests__/
+│   │   │   │   ├── audio_engine.test.js
+│   │   │   │   └── homepage.test.js
+│   │   │   ├── fonts/
+│   │   │   │   └── NotoColorEmoji.ttf
 │   │   │   ├── icons/
-│   │   │   │   ├── book-open-white.svg
+│   │   │   │   ├── airplay.svg
+│   │   │   │   ├── airplay-white.svg
 │   │   │   │   ├── book-open.svg
-│   │   │   │   ├── bookmark-filled-white.svg
-│   │   │   │   ├── bookmark-filled.svg
-│   │   │   │   ├── bookmark-white.svg
+│   │   │   │   ├── book-open-white.svg
 │   │   │   │   ├── bookmark.svg
-│   │   │   │   ├── browser-white.svg
+│   │   │   │   ├── bookmark-white.svg
+│   │   │   │   ├── bookmark-filled.svg
+│   │   │   │   ├── bookmark-filled-white.svg
 │   │   │   │   ├── browser.png
 │   │   │   │   ├── browser.svg
-│   │   │   │   ├── check-white.svg
+│   │   │   │   ├── browser-white.svg
 │   │   │   │   ├── check.svg
-│   │   │   │   ├── chevron-down-white.svg
+│   │   │   │   ├── check-white.svg
 │   │   │   │   ├── chevron-down.svg
-│   │   │   │   ├── chevron-left-white.svg
+│   │   │   │   ├── chevron-down-white.svg
 │   │   │   │   ├── chevron-left.svg
-│   │   │   │   ├── chevron-right-white.svg
+│   │   │   │   ├── chevron-left-white.svg
 │   │   │   │   ├── chevron-right.svg
-│   │   │   │   ├── chevron-up-white.svg
+│   │   │   │   ├── chevron-right-white.svg
 │   │   │   │   ├── chevron-up.svg
-│   │   │   │   ├── circle-arrow-left-white.svg
+│   │   │   │   ├── chevron-up-white.svg
 │   │   │   │   ├── circle-arrow-left.svg
-│   │   │   │   ├── circle-arrow-right-white.svg
+│   │   │   │   ├── circle-arrow-left-white.svg
 │   │   │   │   ├── circle-arrow-right.svg
-│   │   │   │   ├── circle-check-white.svg
+│   │   │   │   ├── circle-arrow-right-white.svg
 │   │   │   │   ├── circle-check.svg
-│   │   │   │   ├── circle-question-mark-white.svg
+│   │   │   │   ├── circle-check-white.svg
 │   │   │   │   ├── circle-question-mark.svg
-│   │   │   │   ├── circle-slash-white.svg
+│   │   │   │   ├── circle-question-mark-white.svg
 │   │   │   │   ├── circle-slash.svg
-│   │   │   │   ├── circle-stop-white.svg
+│   │   │   │   ├── circle-slash-white.svg
 │   │   │   │   ├── circle-stop.svg
-│   │   │   │   ├── crop-white.svg
+│   │   │   │   ├── circle-stop-white.svg
 │   │   │   │   ├── crop.svg
-│   │   │   │   ├── cursor-white.svg
+│   │   │   │   ├── crop-white.svg
 │   │   │   │   ├── cursor.svg
-│   │   │   │   ├── download-white.svg
+│   │   │   │   ├── cursor-white.svg
 │   │   │   │   ├── download.svg
-│   │   │   │   ├── eraser-white.svg
+│   │   │   │   ├── download-white.svg
 │   │   │   │   ├── eraser.svg
-│   │   │   │   ├── file-lock-white.svg
+│   │   │   │   ├── eraser-white.svg
 │   │   │   │   ├── file-lock.svg
-│   │   │   │   ├── file-output-white.svg
+│   │   │   │   ├── file-lock-white.svg
 │   │   │   │   ├── file-output.svg
-│   │   │   │   ├── file-text-white.svg
+│   │   │   │   ├── file-output-white.svg
 │   │   │   │   ├── file-text.svg
-│   │   │   │   ├── highlighter-white.svg
+│   │   │   │   ├── file-text-white.svg
+│   │   │   │   ├── gauge.svg
+│   │   │   │   ├── gauge-white.svg
 │   │   │   │   ├── highlighter.svg
-│   │   │   │   ├── incognito-white.svg
+│   │   │   │   ├── highlighter-white.svg
+│   │   │   │   ├── Icon.ico
+│   │   │   │   ├── Icon.png
 │   │   │   │   ├── incognito.svg
-│   │   │   │   ├── maximize-white.svg
+│   │   │   │   ├── incognito-white.svg
 │   │   │   │   ├── maximize.svg
-│   │   │   │   ├── moon-white.svg
+│   │   │   │   ├── maximize-white.svg
 │   │   │   │   ├── moon.svg
-│   │   │   │   ├── music-white.svg
+│   │   │   │   ├── moon-white.svg
 │   │   │   │   ├── music.svg
-│   │   │   │   ├── palette-white.svg
+│   │   │   │   ├── music-white.svg
 │   │   │   │   ├── palette.svg
-│   │   │   │   ├── pdf-white.svg
+│   │   │   │   ├── palette-white.svg
 │   │   │   │   ├── pdf.png
 │   │   │   │   ├── pdf.svg
-│   │   │   │   ├── pen-line-white.svg
+│   │   │   │   ├── pdf-white.svg
 │   │   │   │   ├── pen-line.svg
-│   │   │   │   ├── printer-white.svg
+│   │   │   │   ├── pen-line-white.svg
 │   │   │   │   ├── printer.svg
-│   │   │   │   ├── redo-white.svg
+│   │   │   │   ├── printer-white.svg
 │   │   │   │   ├── redo.svg
-│   │   │   │   ├── rename-white.svg
+│   │   │   │   ├── redo-white.svg
 │   │   │   │   ├── rename.svg
-│   │   │   │   ├── rotate-ccw-white.svg
+│   │   │   │   ├── rename-white.svg
 │   │   │   │   ├── rotate-ccw.svg
-│   │   │   │   ├── rotate-cw-white.svg
+│   │   │   │   ├── rotate-ccw-white.svg
 │   │   │   │   ├── rotate-cw.svg
-│   │   │   │   ├── save-white.svg
+│   │   │   │   ├── rotate-cw-white.svg
 │   │   │   │   ├── save.svg
-│   │   │   │   ├── scan-text-white.svg
+│   │   │   │   ├── save-white.svg
 │   │   │   │   ├── scan-text.svg
-│   │   │   │   ├── scroll-white.svg
+│   │   │   │   ├── scan-text-white.svg
 │   │   │   │   ├── scroll.svg
-│   │   │   │   ├── search-white.svg
+│   │   │   │   ├── scroll-white.svg
 │   │   │   │   ├── search.svg
-│   │   │   │   ├── sparkles-white.svg
+│   │   │   │   ├── search-white.svg
 │   │   │   │   ├── sparkles.svg
-│   │   │   │   ├── square-dashed-white.svg
+│   │   │   │   ├── sparkles-white.svg
 │   │   │   │   ├── square-dashed.svg
-│   │   │   │   ├── sticky-note-white.svg
+│   │   │   │   ├── square-dashed-white.svg
 │   │   │   │   ├── sticky-note.svg
-│   │   │   │   ├── strikethrough-white.svg
+│   │   │   │   ├── sticky-note-white.svg
 │   │   │   │   ├── strikethrough.svg
-│   │   │   │   ├── sun-moon-white.svg
-│   │   │   │   ├── sun-moon.svg
-│   │   │   │   ├── sun-white.svg
+│   │   │   │   ├── strikethrough-white.svg
 │   │   │   │   ├── sun.svg
-│   │   │   │   ├── text-quote-white.svg
+│   │   │   │   ├── sun-white.svg
+│   │   │   │   ├── sun-moon.svg
+│   │   │   │   ├── sun-moon-white.svg
 │   │   │   │   ├── text-quote.svg
-│   │   │   │   ├── type-white.svg
+│   │   │   │   ├── text-quote-white.svg
 │   │   │   │   ├── type.svg
-│   │   │   │   ├── underline-white.svg
+│   │   │   │   ├── type-white.svg
 │   │   │   │   ├── underline.svg
-│   │   │   │   ├── undo-white.svg
+│   │   │   │   ├── underline-white.svg
 │   │   │   │   ├── undo.svg
-│   │   │   │   ├── volume-on-white.svg
+│   │   │   │   ├── undo-white.svg
 │   │   │   │   ├── volume-on.svg
-│   │   │   │   ├── volume-x-white.svg
+│   │   │   │   ├── volume-on-white.svg
 │   │   │   │   ├── volume-x.svg
-│   │   │   │   ├── x-white.svg
-│   │   │   │   └── x.svg
+│   │   │   │   ├── volume-x-white.svg
+│   │   │   │   ├── x.svg
+│   │   │   │   └── x-white.svg
 │   │   │   ├── injections/
 │   │   │   │   ├── ad_skipper.js
 │   │   │   │   ├── backspace_handler.js
@@ -154,28 +163,29 @@ riemann/
 │   │   │   │   └── smart_dark_mode.js
 │   │   │   └── theme/
 │   │   │       ├── modern_dark.css
-│   │   │       └── modern_light.css
+│   │   │       ├── modern_light.css
+│   │   │       ├── x.svg
+│   │   │       └── x-white.svg
 │   │   ├── core/
 │   │   │   ├── constants.py
 │   │   │   └── managers.py
-│   │   ├── riemann_core.pyi
 │   │   └── ui/
 │   │       ├── browser.py
 │   │       ├── browser_handlers.py
 │   │       ├── components.py
 │   │       └── reader/
 │   │           ├── __init__.py
-│   │           ├── mixins/
-│   │           │   ├── ai.py
-│   │           │   ├── annotations.py
-│   │           │   ├── metadata.py
-│   │           │   ├── rendering.py
-│   │           │   ├── search.py
-│   │           │   └── signatures.py
 │   │           ├── tab.py
 │   │           ├── utils.py
 │   │           ├── widgets.py
-│   │           └── workers.py
+│   │           ├── workers.py
+│   │           └── mixins/
+│   │               ├── ai.py
+│   │               ├── annotations.py
+│   │               ├── metadata.py
+│   │               ├── rendering.py
+│   │               ├── search.py
+│   │               └── signatures.py
 │   └── tests/
 │       ├── test_ai.py
 │       ├── test_annotations.py
@@ -196,7 +206,9 @@ riemann/
 ├── requirements/
 │   ├── requirements.in
 │   ├── requirements.sh
-│   └── requirements.txt
+│   ├── requirements.txt
+│   ├── wreqs.txt
+│   └── xreqs.txt
 ├── riemann-ai/
 │   ├── build_ai.sh
 │   ├── main.py
@@ -222,6 +234,8 @@ riemann/
     ├── create_model_pack.sh
     ├── generate_white_icons.py
     ├── install_icon.sh
+    ├── nbuild.ps1
     ├── nbuild.sh
+    ├── replace_exec.sh
     └── test_runner.sh
 ```

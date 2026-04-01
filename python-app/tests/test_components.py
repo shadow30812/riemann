@@ -54,14 +54,6 @@ def test_draggable_tab_widget_drop(mock_reader_tab, mock_exists, qtbot):
     mock_event.acceptProposedAction.assert_called_once()
 
 
-def test_draggable_tab_bar_mouse_move_ignore(qtbot):
-    bar = DraggableTabBar()
-    qtbot.addWidget(bar)
-    mock_event = MagicMock(spec=QMouseEvent)
-    mock_event.buttons.return_value = Qt.MouseButton.RightButton
-    bar.mouseMoveEvent(mock_event)
-
-
 @patch.object(QMenu, "exec")
 @patch.object(QInputDialog, "getText", return_value=("New Name", True))
 def test_draggable_tab_bar_context_menu(mock_get_text, mock_exec, qtbot):

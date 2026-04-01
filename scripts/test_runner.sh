@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOG_FILE="$PROJECT_ROOT/test_results.log"
+LOG_FILE="$PROJECT_ROOT/logs/test_results.log"
 FAIL=0
 
 cd "$PROJECT_ROOT"

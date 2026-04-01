@@ -99,10 +99,26 @@ class DraggableTabBar(QTabBar):
     _dragged_data = None
 
     def __init__(self, parent=None):
+        """
+        Initializes the draggable tab bar component.
+
+        Args:
+            parent (Optional[QWidget]): The parent widget context, if any. Defaults to None.
+        """
         super().__init__(parent)
         self.setAcceptDrops(True)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        """
+        Handles mouse press events to initialize drag tracking.
+
+        Records the localized starting coordinates of a left-click, which is subsequently
+        used by `mouseMoveEvent` to determine whether the user has moved the mouse far
+        enough to trigger a tab drag operation.
+
+        Args:
+            event (QMouseEvent): The Qt mouse event containing interaction details.
+        """
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_start_pos = event.pos()
         super().mousePressEvent(event)

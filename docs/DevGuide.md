@@ -35,6 +35,8 @@ When modifying Riemann, always ask: *Is this a UI event, a heavy computation, or
   * **Chromium Flags:** The run() method explicitly sets environment variables like \--autoplay-policy=no-user-gesture-required (vital for the Web Audio engine) and \--disable-features=AudioServiceOutOfProcess to ensure stability across Linux environments.  
   * **IPC & Single-Instance:** Riemann uses a QLocalServer (RiemannSingleInstance). If a user opens a second PDF via their file manager, the secondary process detects the running server, pipes the file paths over a TCP socket as a | delimited string, and instantly terminates. The primary instance intercepts this in handle\_connection() and opens the new tabs.  
   * **The Media Kill-Switch:** The \_kill\_all\_media\_safely() method is a critical stability workaround. Chromium media threads (like YouTube) can outlive the Python Garbage Collector during a sudden window close, causing Segmentation Faults. This method forces all media tabs to navigate to their root domain (youtube.com instead of a video URL) to cleanly sever the audio/video stream before C++ teardown.  
+  * **Serialization of tabs:** The \_restore\_session() and \_restore\_tabs\_from\_settings() methods serialize the active state of tabs_main and tabs_side on closeEvent and deserialize them on boot to recreate the exact workspace.
+
 * **What to modify here:**  
   * Adding new global hotkeys (def \_init\_shortcuts).  
   * Changing split-view routing logic (def toggle\_split\_view).  
@@ -64,7 +66,7 @@ The PDF Reader avoids the "God Object" anti-pattern by utilizing a **mixin archi
 
 ### **mixins/annotations.py**
 
-* **What it is:** Handles interactive overlays. It maps physical mouse clicks (screen coordinates) into PDF-space coordinates using the current zoom scale.  
+* **What it is:** Handles interactive overlays. It maps physical mouse clicks (screen coordinates) into PDF-space coordinates using the current zoom scale. Additionally, the module detects hyperlinked bounding boxes in the PDF, allowing users to interact with embedded web links directly.  
 * **What to modify here:** Adding new annotation shapes (e.g., arrows, polygons), modifying the Undo/Redo stack size, or changing the JSON serialization format for local annotation storage.
 
 ### **mixins/search.py**
@@ -89,8 +91,10 @@ The PDF Reader avoids the "God Object" anti-pattern by utilizing a **mixin archi
 ### **browser.py (BrowserTab)**
 
 * **What it is:** An integrated Chromium tab using QWebEngineView.  
-* **Deep Dive Mechanics:** WebEngine operates in separate OS processes. BrowserTab bridges Python to the DOM via runJavaScript and sets up DevTools windows. It distinguishes between persistent and incognito sessions by assigning either a shared or off-the-record QWebEngineProfile.  
+* **Deep Dive Mechanics:** WebEngine operates in separate OS processes. BrowserTab bridges Python to the DOM via runJavaScript and sets up DevTools windows. It distinguishes between persistent and incognito sessions by assigning either a shared or off-the-record QWebEngineProfile. Browser scale factors are saved and persisted locally per host domain using QSettings("Riemann", "BrowserSettings").  
 * **What to modify here:** Handling custom downloads (e.g., routing YouTube URLs to yt-dlp), injecting custom context menus into the web view, or implementing print-to-PDF functions.
+
+* **Video Streaming** via YtDlpStreamWorker utilizes yt-dlp in background QThread workers to extract raw stream URLs for proprietary codecs that QtWebEngine cannot natively decode.
 
 ### **browser\_handlers.py**
 
@@ -117,6 +121,11 @@ Riemann utilizes standard web technologies for internal features, bypassing Qt's
 * **What it is:** A pure Web Audio API implementation that acts as Riemann's "Music Mode".  
 * **Deep Dive Mechanics:** It constructs an extensive DSP (Digital Signal Processing) graph: Source \-\> PreAmp \-\> Saturation (WaveShaper) \-\> Mid/Side EQ \-\> High/Low Shelves \-\> Reverb (Convolver) \-\> Compressor \-\> Limiter \-\> Destination. The AnalyserNode drives the visual FFT equalizer in the UI.  
 * **What to modify here:** Adding new audio nodes (like a low-pass filter for a "muffled" effect), tweaking the Q-factor of the EQ bands, or altering the saturation curve math.
+
+### **video\_engine.js**
+
+* **What it is:** Hook injected via PySide allowing DOM manipulation of HTML5 \<video> tags.  
+* **Deep Dive Mechanics:** Explain that it creates a floating UI overlay with an interval-based observer to force-sync the video element's playbackRate with the user's custom speed settings.
 
 ### **injections/smart\_dark\_mode.js & injections/ad\_skipper.js**
 

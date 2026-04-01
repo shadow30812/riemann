@@ -83,14 +83,36 @@ def get_resource_path(relative_path: str) -> str:
 
 
 class YtDlpStreamWorker(QThread):
+    """
+    Background worker thread for extracting raw media stream URLs using yt-dlp.
+
+    This thread queries the provided target URL to extract a direct playback link
+    (e.g., an mp4 stream) without downloading the entire media file. This is utilized
+    primarily for piping proprietary or unsupported video codecs directly to native
+    media players like VLC or MPV.
+    """
+
     finished = Signal(str)
     error = Signal(str)
 
     def __init__(self, url):
+        """
+        Initializes the stream extraction worker.
+
+        Args:
+            url (str): The source web URL containing the media to be extracted.
+        """
         super().__init__()
         self.url = url
 
     def run(self):
+        """
+        Executes the yt-dlp metadata extraction process asynchronously.
+
+        Runs yt-dlp to parse the media URL. Emits the `finished` signal with the raw
+        stream URL if successful, or emits the `error` signal with a description of the
+        failure if extraction fails or no URL is found in the response.
+        """
         ydl_opts: dict[str, Any] = {
             "format": "best[ext=mp4]",
             "quiet": True,

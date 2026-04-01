@@ -1820,11 +1820,19 @@ def run() -> None:
         client = server.nextPendingConnection()
 
         def read_data():
+            """
+            Reads incoming file paths asynchronously from the local IPC socket connection.
+
+            Called when a secondary application instance attempts to open new files. It parses
+            the incoming pipe-delimited payload and opens the requested documents or URLs as
+            new tabs within the existing primary window.
+            """
             msg = client.readAll().data().decode("utf-8")
             if msg:
                 for path in msg.split("|"):
                     if os.path.isfile(path):
                         window.new_pdf_tab(path)
+
             window.activateWindow()
             window.raise_()
             client.disconnectFromServer()
