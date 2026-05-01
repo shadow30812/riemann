@@ -528,7 +528,7 @@ class ReaderTab(
         self.btn_secure_export.clicked.connect(self.export_secure_pdf)
 
         self.btn_sign = QPushButton()
-        self.btn_sign.setIcon(self._get_icon("pen-line.svg"))
+        self.btn_sign.setIcon(self._get_icon("signature.svg"))
         self.btn_sign.setIconSize(icon_size)
         self.btn_sign.setToolTip("Sign Document (PKCS#12)")
         self.btn_sign.clicked.connect(self.initiate_signing_flow)
@@ -2238,7 +2238,7 @@ class ReaderTab(
         self.btn_search.setIcon(self._get_icon("search.svg"))
         self.btn_ai_search.setIcon(self._get_icon("sparkles.svg"))
         self.btn_secure_export.setIcon(self._get_icon("file-lock.svg"))
-        self.btn_sign.setIcon(self._get_icon("pen-line.svg"))
+        self.btn_sign.setIcon(self._get_icon("signature.svg"))
 
         self.btn_find_prev.setIcon(self._get_icon("chevron-up.svg"))
         self.btn_find_next.setIcon(self._get_icon("chevron-down.svg"))

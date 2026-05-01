@@ -12,3 +12,4 @@ prompt_toolkit==3.0.52
 pyHanko==0.33.0
 pydantic_core==2.41.5
 stack_data==0.6.3
+yt-dlp @ git+https://github.com/yt-dlp/yt-dlp.git

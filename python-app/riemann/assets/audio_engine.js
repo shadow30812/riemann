@@ -145,7 +145,7 @@
             this.nodes.limiter.connect(this.nodes.analyser);
 
             this.initialized = true;
-            this.loadPreset(this.currentPreset);
+            this.toggleSmartMode();
             this.startSmartLoop();
         }
 

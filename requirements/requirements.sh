@@ -10,16 +10,20 @@ eval "$(conda shell.bash hook)"
 conda activate "$CONDA_ENV_NAME"
 
 echo "🔍 Generating minimal requirements.in using pip-chill..."
-pip-chill | grep -vE "^riemann(==.*)?$|^riemann_app(==.*)?$" > "$OUTPUT_IN"
+pip-chill | grep -vE "^riemann(==.*)?$|^riemann_app(==.*)?$|^yt-dlp(==.*)?$" > "$OUTPUT_IN"
+
 echo "🧹 Cleaning requirements.in (removing editable installs, comments)..."
-sed -i '/^-e/d;/^$/d' requirements.in
+sed -i '/^-e/d;/^$/d' "$OUTPUT_IN"
+
+echo "🔗 Appending latest yt-dlp from git..."
+echo "yt-dlp @ git+https://github.com/yt-dlp/yt-dlp.git" >> "$OUTPUT_IN"
 
 echo "📦 Compiling requirements.txt using pip-compile..."
-pip-compile --generate-hashes \
+pip-compile \
   --output-file xreqs.txt \
   "$OUTPUT_IN"
 
 echo "✅ Done!"
 echo "Generated:"
-echo "  - requirements.in (minimal deps)"
+echo "  - requirements.in (minimal deps, including git yt-dlp)"
 echo "  - xreqs.txt (fully pinned deps)"
