@@ -101,6 +101,27 @@
             header.appendChild(closeBtn);
             container.appendChild(header);
 
+            let isDragging = false, startX, startY, initialX, initialY;
+            header.style.cursor = 'move';
+            header.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                const rect = container.getBoundingClientRect();
+                initialX = rect.left;
+                initialY = rect.top;
+                container.style.right = 'auto';
+                container.style.bottom = 'auto';
+                container.style.left = `${initialX}px`;
+                container.style.top = `${initialY}px`;
+            });
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                container.style.left = `${initialX + (e.clientX - startX)}px`;
+                container.style.top = `${initialY + (e.clientY - startY)}px`;
+            });
+            document.addEventListener('mouseup', () => { isDragging = false; });
+
             const presetGrid = document.createElement('div');
             Object.assign(presetGrid.style, {
                 display: 'grid',

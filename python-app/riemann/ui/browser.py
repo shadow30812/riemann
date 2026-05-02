@@ -42,6 +42,7 @@ from PySide6.QtWebEngineCore import (
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QCompleter,
     QDialog,
@@ -129,6 +130,92 @@ class YtDlpStreamWorker(QThread):
             self.error.emit(str(e))
 
 
+class MockDownloadItem(QObject):
+    """
+    A duck-typed mock of QWebEngineDownloadRequest.
+    Allows yt-dlp to report its progress directly into the native Download Manager.
+    """
+
+    stateChanged = Signal(QWebEngineDownloadRequest.DownloadState)
+    isFinishedChanged = Signal()
+    receivedBytesChanged = Signal()
+    totalBytesChanged = Signal()
+
+    def __init__(self, url: str, download_dir: str, parent=None):
+        super().__init__(parent)
+        self._url = url
+        self._dir = download_dir
+        self._filename = "yt-dlp-media.mp4"
+        self._state = QWebEngineDownloadRequest.DownloadState.DownloadInProgress
+        self._total = 100
+        self._received = 0
+        self.worker: Optional["YtDlpWorker"] = None
+
+    # Required Mock Methods
+    def id(self) -> int:
+        return id(self)
+
+    def downloadFileName(self) -> str:
+        return self._filename
+
+    def downloadDirectory(self) -> str:
+        return self._dir
+
+    def state(self) -> QWebEngineDownloadRequest.DownloadState:
+        return self._state
+
+    def totalBytes(self) -> int:
+        return self._total
+
+    def receivedBytes(self) -> int:
+        return self._received
+
+    def url(self) -> QUrl:
+        return QUrl(self._url)
+
+    def mimeType(self) -> str:
+        return "video/mp4"
+
+    def isFinished(self) -> bool:
+        return self._state != QWebEngineDownloadRequest.DownloadState.DownloadInProgress
+
+    def isPaused(self) -> bool:
+        return False
+
+    def interruptReason(self) -> int:
+        return 0
+
+    def pause(self) -> None:
+        pass
+
+    def resume(self) -> None:
+        pass
+
+    def accept(self) -> None:
+        pass
+
+    def cancel(self) -> None:
+        if self.worker:
+            self.worker.stop()
+        self._state = QWebEngineDownloadRequest.DownloadState.DownloadCancelled
+        self.stateChanged.emit(self._state)
+        self.isFinishedChanged.emit()
+
+    def update_progress(self, percent: int) -> None:
+        self._received = percent
+        self.receivedBytesChanged.emit()
+
+    def finish(self, success: bool, msg: str) -> None:
+        if success:
+            self._state = QWebEngineDownloadRequest.DownloadState.DownloadCompleted
+            self._received = self._total
+            self.receivedBytesChanged.emit()
+        else:
+            self._state = QWebEngineDownloadRequest.DownloadState.DownloadInterrupted
+        self.stateChanged.emit(self._state)
+        self.isFinishedChanged.emit()
+
+
 class YtDlpWorker(QThread):
     """
     Background worker thread for executing yt-dlp media downloads.
@@ -138,17 +225,19 @@ class YtDlpWorker(QThread):
     progress = Signal(int)
     finished = Signal(bool, str)
 
-    def __init__(self, url: str, download_dir: str) -> None:
+    def __init__(self, url: str, download_dir: str, dl_opts: dict) -> None:
         """
         Initializes the yt-dlp download worker.
 
         Args:
             url (str): The target media URL to download.
             download_dir (str): The local directory path to save the downloaded file.
+            dl_opts (dict): Dictionary containing user-selected download options.
         """
         super().__init__()
         self.url = url
         self.download_dir = download_dir
+        self.dl_opts = dl_opts
         self.process: Optional[subprocess.Popen] = None
         self.is_cancelled = False
 
@@ -158,20 +247,50 @@ class YtDlpWorker(QThread):
         and emits signals reflecting the operation's state.
         """
         try:
-            cmd = [
-                "yt-dlp",
-                "--newline",
-                "--write-subs",
-                "--write-auto-subs",
-                "--sub-langs",
-                "en.*",
-                "--embed-subs",
-                "--merge-output-format",
-                "mp4",
-                "-o",
-                os.path.join(self.download_dir, "%(title)s.%(ext)s"),
-                self.url,
-            ]
+            cmd = ["yt-dlp", "--newline"]
+
+            if self.dl_opts.get("playlist"):
+                cmd.append("--yes-playlist")
+                pl_start = self.dl_opts.get("playlist_start")
+                pl_end = self.dl_opts.get("playlist_end")
+
+                if pl_start and pl_start.isdigit():
+                    cmd.extend(["--playlist-start", pl_start])
+                if pl_end and pl_end.isdigit():
+                    cmd.extend(["--playlist-end", pl_end])
+            else:
+                cmd.append("--no-playlist")
+
+            cookies_browser = self.dl_opts.get("cookies", "none")
+            if cookies_browser != "none":
+                cmd.extend(["--cookies-from-browser", cookies_browser])
+
+            cmd.extend(["-f", self.dl_opts.get("format", "best")])
+
+            if self.dl_opts.get("audio_only"):
+                cmd.append("-x")
+                audio_fmt = self.dl_opts.get("audio_format", "best")
+                if audio_fmt != "best":
+                    cmd.extend(["--audio-format", audio_fmt])
+            else:
+                cmd.extend(["--merge-output-format", "mp4"])
+
+            if self.dl_opts.get("subtitles") and not self.dl_opts.get("audio_only"):
+                cmd.extend(
+                    [
+                        "--write-subs",
+                        "--write-auto-subs",
+                        "--sub-langs",
+                        "en.*",
+                        "--embed-subs",
+                        "--compat-options",
+                        "no-keep-subs",
+                    ]
+                )
+
+            cmd.extend(["-o", os.path.join(self.download_dir, "%(title)s.%(ext)s")])
+            cmd.append(self.url)
+
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -212,6 +331,116 @@ class YtDlpWorker(QThread):
         self.is_cancelled = True
         if self.process:
             self.process.terminate()
+
+
+class YtDlpSettingsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Download Settings")
+        self.setFixedSize(360, 360)
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
+
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("Video Quality:"))
+        self.combo_video = QComboBox()
+        self.combo_video.addItems(
+            [
+                "Best Available",
+                "4K (2160p)",
+                "QHD (1440p)",
+                "FHD (1080p)",
+                "HD (720p)",
+                "SD (480p)",
+                "LoQ (144p)",
+                "Audio Only",
+            ]
+        )
+        self.combo_video.setStyleSheet("padding: 5px;")
+        layout.addWidget(self.combo_video)
+
+        layout.addWidget(QLabel("Audio Format (for Audio Only):"))
+        self.combo_audio = QComboBox()
+        self.combo_audio.addItems(["best", "mp3", "m4a", "flac", "wav"])
+        self.combo_audio.setStyleSheet("padding: 5px;")
+        layout.addWidget(self.combo_audio)
+
+        self.chk_subs = QCheckBox("Download and embed English subtitles")
+        self.chk_subs.setChecked(True)
+        layout.addWidget(self.chk_subs)
+
+        self.chk_playlist = QCheckBox("Download playlist (if applicable)")
+        self.chk_playlist.setChecked(False)
+        layout.addWidget(self.chk_playlist)
+
+        pl_layout = QHBoxLayout()
+        pl_layout.addWidget(QLabel("Playlist Range:"))
+        self.txt_pl_start = QLineEdit()
+        self.txt_pl_start.setPlaceholderText("Start (e.g. 1)")
+        self.txt_pl_end = QLineEdit()
+        self.txt_pl_end.setPlaceholderText("End (e.g. 12)")
+        pl_layout.addWidget(self.txt_pl_start)
+        pl_layout.addWidget(self.txt_pl_end)
+        layout.addLayout(pl_layout)
+
+        layout.addWidget(QLabel("Extract Cookies From (Bypass Blocks):"))
+        self.combo_cookies = QComboBox()
+        self.combo_cookies.addItems(
+            ["None", "chrome", "edge", "firefox", "brave", "opera", "safari", "vivaldi"]
+        )
+        self.combo_cookies.setStyleSheet("padding: 5px;")
+        layout.addWidget(self.combo_cookies)
+
+        btn_layout = QHBoxLayout()
+        self.btn_ok = QPushButton("Download")
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_ok.setStyleSheet(
+            "background-color: #ff4500; color: white; font-weight: bold;"
+        )
+
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addWidget(self.btn_ok)
+        layout.addLayout(btn_layout)
+
+        self.btn_ok.clicked.connect(self.accept)
+        self.btn_cancel.clicked.connect(self.reject)
+
+    def get_options(self) -> dict:
+        v_idx = self.combo_video.currentIndex()
+        audio_only = v_idx == 5
+
+        if audio_only:
+            fmt = "bestaudio/best"
+        elif v_idx == 0:
+            fmt = "bestvideo+bestaudio/best"
+        elif v_idx == 1:
+            fmt = "bestvideo[height<=2160]+bestaudio/best"
+        elif v_idx == 2:
+            fmt = "bestvideo[height<=1440]+bestaudio/best"
+        elif v_idx == 3:
+            fmt = "bestvideo[height<=1080]+bestaudio/best"
+        elif v_idx == 4:
+            fmt = "bestvideo[height<=720]+bestaudio/best"
+        elif v_idx == 5:
+            fmt = "bestvideo[height<=480]+bestaudio/best"
+        elif v_idx == 6:
+            fmt = "bestvideo[height<=144]+bestaudio/best"
+        else:
+            fmt = "best"
+
+        return {
+            "format": fmt,
+            "audio_only": audio_only,
+            "audio_format": self.combo_audio.currentText(),
+            "subtitles": self.chk_subs.isChecked(),
+            "playlist": self.chk_playlist.isChecked(),
+            "playlist_start": self.txt_pl_start.text().strip(),
+            "playlist_end": self.txt_pl_end.text().strip(),
+            "cookies": self.combo_cookies.currentText().lower(),
+        }
 
 
 class WebPage(QWebEnginePage):
@@ -690,7 +919,7 @@ class BrowserTab(QWidget):
                 border-radius: 2px;
             }
         """)
-        layout.addWidget(self.progress)
+        layout.insertWidget(0, self.progress)
 
         self.lbl_toast = QLabel(self)
         self.lbl_toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1492,30 +1721,54 @@ class BrowserTab(QWidget):
             self.show_toast("Invalid URL for download.")
             return
 
-        default_dir = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.DownloadLocation
-        )
-        dest_dir = QFileDialog.getExistingDirectory(
-            self, "Select Download Directory", default_dir
-        )
-        if not dest_dir:
-            return
+        dialog = YtDlpSettingsDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            dl_opts = dialog.get_options()
 
-        self.show_toast("Starting download...")
-        self.progress.setValue(0)
+            default_dir = QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.DownloadLocation
+            )
+            dest_dir = QFileDialog.getExistingDirectory(
+                self, "Select Download Directory", default_dir
+            )
+            if not dest_dir:
+                return
 
-        self.btn_download.setIcon(self._get_icon("circle-stop.svg"))
-        self.btn_download.setToolTip("Cancel Download")
-        try:
-            self.btn_download.clicked.disconnect()
-        except RuntimeError:
-            pass
-        self.btn_download.clicked.connect(self.cancel_download)
+            self.show_toast("Starting download...")
+            self.progress.setValue(0)
 
-        self.dl_worker = YtDlpWorker(url, dest_dir)
-        self.dl_worker.progress.connect(self.progress.setValue)
-        self.dl_worker.finished.connect(self._on_download_finished)
-        self.dl_worker.start()
+            self.btn_download.setIcon(self._get_icon("circle-stop.svg"))
+            self.btn_download.setToolTip("Cancel Download")
+            try:
+                self.btn_download.clicked.disconnect()
+            except RuntimeError:
+                pass
+            self.btn_download.clicked.connect(self.cancel_download)
+
+            self.dl_worker = YtDlpWorker(url, dest_dir, dl_opts)
+
+            self.mock_dl_item = MockDownloadItem(url, dest_dir, self)
+            self.mock_dl_item.worker = self.dl_worker
+
+            try:
+                if self.window() and hasattr(self.window(), "download_manager_dialog"):
+                    self.window().download_manager_dialog.add_download(
+                        self.mock_dl_item
+                    )
+            except Exception as e:
+                print(f"[Warning] Could not link yt-dlp to Download Manager: {e}")
+
+            self.dl_worker.progress.connect(self.progress.setValue)
+            self.dl_worker.progress.connect(self.mock_dl_item.update_progress)
+
+            self.dl_worker.finished.connect(
+                lambda success, msg: [
+                    self._on_download_finished(success, msg),
+                    self.mock_dl_item.finish(success, msg),
+                ]
+            )
+
+            self.dl_worker.start()
 
     def cancel_download(self) -> None:
         """

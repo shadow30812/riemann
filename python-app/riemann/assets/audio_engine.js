@@ -122,7 +122,6 @@
             this.nodes.analyser.fftSize = 512;
             this.nodes.analyser.smoothingTimeConstant = 0.85;
 
-            // Connect Graph
             this.nodes.preAmp.connect(this.nodes.saturator);
             this.nodes.saturator.connect(this.nodes.splitter);
 
@@ -387,7 +386,6 @@
                 display: 'none', flexDirection: 'column', gap: '10px'
             });
 
-            // Header Section
             const header = document.createElement('div');
             header.style.display = 'flex';
             header.style.justifyContent = 'space-between';
@@ -423,7 +421,27 @@
             header.appendChild(closeBtn);
             container.appendChild(header);
 
-            // Preset Selector
+            let isDragging = false, startX, startY, initialX, initialY;
+            header.style.cursor = 'move';
+            header.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                const rect = container.getBoundingClientRect();
+                initialX = rect.left;
+                initialY = rect.top;
+                container.style.right = 'auto';
+                container.style.bottom = 'auto';
+                container.style.left = `${initialX}px`;
+                container.style.top = `${initialY}px`;
+            });
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                container.style.left = `${initialX + (e.clientX - startX)}px`;
+                container.style.top = `${initialY + (e.clientY - startY)}px`;
+            });
+            document.addEventListener('mouseup', () => { isDragging = false; });
+
             const presetRow = document.createElement('div');
             presetRow.style.display = 'flex';
             const select = document.createElement('select');
@@ -442,7 +460,6 @@
             presetRow.appendChild(select);
             container.appendChild(presetRow);
 
-            // Slider Factory
             const createSlider = (label, id, min, max, val, callback) => {
                 const row = document.createElement('div');
                 row.style.display = 'flex';
@@ -482,7 +499,6 @@
             createSlider('TREBLE', 'treble', -20, 20, p.treble, v => this.setParam('highShelf', 'gain', v));
             createSlider('AIR', 'air', 0, 1, p.air, v => this.setParam('reverbGain', 'gain', v));
 
-            // Visualizer Canvas
             const canvas = document.createElement('canvas');
             canvas.width = 250; canvas.height = 60;
             canvas.style.marginTop = '8px';

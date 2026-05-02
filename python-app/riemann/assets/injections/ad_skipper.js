@@ -24,6 +24,9 @@
 
         const skipBtns = document.querySelectorAll(skipSelectors.join(', '));
         skipBtns.forEach(b => { b.click(); });
+
+        const confirmBtn = document.querySelector('yt-confirm-dialog-renderer yt-button-renderer[dialog-confirm], .yt-video-pause-prompt-dialog-renderer paper-button');
+        if (confirmBtn) { confirmBtn.click(); }
     };
     setInterval(clearAds, 50);
 })();
