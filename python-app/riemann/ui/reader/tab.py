@@ -22,6 +22,7 @@ from PySide6.QtCore import (
     QRect,
     QSettings,
     QSize,
+    QStandardPaths,
     Qt,
     QTimer,
     QUrl,
@@ -85,6 +86,31 @@ try:
 except ImportError as e:
     print(f"CRITICAL: Could not import riemann_core backend.\nError: {e}")
     sys.exit(1)
+
+
+def get_dialog_directory(settings: QSettings) -> str:
+    """Calculates the optimal starting directory for file dialogs."""
+    default_dir = settings.value("app/default_dir", "", type=str)
+    if default_dir and os.path.exists(default_dir):
+        return default_dir
+
+    last_dir = settings.value("app/last_dir", "", type=str)
+    if last_dir and os.path.exists(last_dir):
+        return last_dir
+
+    return QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.DocumentsLocation
+    )
+
+
+def save_last_directory(settings: QSettings, file_path: str) -> None:
+    """Saves the directory of the provided file path to settings."""
+    if file_path:
+        directory = (
+            os.path.dirname(file_path) if os.path.isfile(file_path) else file_path
+        )
+        if os.path.exists(directory):
+            settings.setValue("app/last_dir", directory)
 
 
 class ReaderTab(
@@ -889,12 +915,16 @@ class ReaderTab(
             QMessageBox.warning(self, "Save Error", "No document loaded.")
             return
 
-        suggested = os.path.basename(self.current_path)
+        start_dir = get_dialog_directory(self.settings)
         dest, _ = QFileDialog.getSaveFileName(
-            self, "Save PDF As", suggested, "PDF Files (*.pdf)"
+            self,
+            "Save PDF As",
+            os.path.join(start_dir, os.path.basename(self.current_path)),
+            "PDF Files (*.pdf)",
         )
 
         if dest:
+            save_last_directory(self.settings, dest)
             try:
                 shutil.copy2(self.current_path, dest)
                 QMessageBox.information(self, "Success", f"Saved to {dest}")
@@ -912,13 +942,18 @@ class ReaderTab(
         default_name = (
             os.path.splitext(os.path.basename(self.current_path))[0] + "_notes.md"
         )
+        start_dir = get_dialog_directory(self.settings)
         dest_path, _ = QFileDialog.getSaveFileName(
-            self, "Export Notes", default_name, "Markdown (*.md)"
+            self,
+            "Export Notes",
+            os.path.join(start_dir, default_name),
+            "Markdown (*.md)",
         )
 
         if not dest_path:
             return
 
+        save_last_directory(self.settings, dest_path)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             with open(dest_path, "w", encoding="utf-8") as f:
@@ -1150,8 +1185,12 @@ class ReaderTab(
         """
         Surfaces interactive system menus prompting selection processes loading file responses effectively mapping input data correctly.
         """
-        path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF (*.pdf)")
+        start_dir = get_dialog_directory(self.settings)
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open PDF", start_dir, "PDF (*.pdf)"
+        )
         if path:
+            save_last_directory(self.settings, path)
             self.load_document(path)
 
     def scroll_page(self, direction: int) -> None:
@@ -1924,16 +1963,21 @@ class ReaderTab(
         if not ok or not password:
             return
 
+        start_dir = get_dialog_directory(self.settings)
         save_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save Encrypted PDF",
-            self.current_path.replace(".pdf", "_secure.pdf"),
+            os.path.join(
+                start_dir,
+                os.path.basename(self.current_path).replace(".pdf", "_secure.pdf"),
+            ),
             "PDF Files (*.pdf)",
         )
 
         if not save_path:
             return
 
+        save_last_directory(self.settings, save_path)
         try:
             with pikepdf.Pdf.open(self.current_path) as pdf:
                 encryption = pikepdf.Encryption(

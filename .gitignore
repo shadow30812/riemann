@@ -27,3 +27,4 @@ commands.txt
 *sandbox*
 *.log
 !test_results.log
+target.*

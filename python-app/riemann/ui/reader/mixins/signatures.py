@@ -5,6 +5,7 @@ from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign import signers
 from pyhanko.sign.fields import SigFieldSpec, append_signature_field
+from PySide6.QtCore import QSettings, QStandardPaths
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -22,6 +23,31 @@ from PySide6.QtWidgets import (
 )
 
 from ..workers import SignatureValidationWorker
+
+
+def get_dialog_directory(settings: QSettings) -> str:
+    """Calculates the optimal starting directory for file dialogs."""
+    default_dir = settings.value("app/default_dir", "", type=str)
+    if default_dir and os.path.exists(default_dir):
+        return default_dir
+
+    last_dir = settings.value("app/last_dir", "", type=str)
+    if last_dir and os.path.exists(last_dir):
+        return last_dir
+
+    return QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.DocumentsLocation
+    )
+
+
+def save_last_directory(settings: QSettings, file_path: str) -> None:
+    """Saves the directory of the provided file path to settings."""
+    if file_path:
+        directory = (
+            os.path.dirname(file_path) if os.path.isfile(file_path) else file_path
+        )
+        if os.path.exists(directory):
+            settings.setValue("app/last_dir", directory)
 
 
 class CertificateViewerDialog(QDialog):
@@ -83,10 +109,17 @@ class CertificateViewerDialog(QDialog):
         """
         Triggers a local filesystem saving routine outputting the certificate's PEM format string blocks.
         """
+        settings = QSettings("Riemann", "PDFReader")
+        start_dir = get_dialog_directory(settings)
+
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Certificate", "certificate.pem", "PEM Files (*.pem)"
+            self,
+            "Save Certificate",
+            os.path.join(start_dir, "certificate.pem"),
+            "PEM Files (*.pem)",
         )
         if path:
+            save_last_directory(settings, path)
             try:
                 with open(path, "w") as f:
                     f.write(self.cert_details.get("cert_pem", ""))
@@ -306,11 +339,13 @@ class SignaturesMixin:
             QMessageBox.warning(self, "Sign Error", "No document loaded.")
             return
 
+        start_dir = get_dialog_directory(self.settings)
         cert_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Certificate", "", "PKCS#12 Files (*.pfx *.p12)"
+            self, "Select Certificate", start_dir, "PKCS#12 Files (*.pfx *.p12)"
         )
 
         if cert_path:
+            save_last_directory(self.settings, cert_path)
             password, ok = QInputDialog.getText(
                 self,
                 "Certificate Password",

@@ -83,6 +83,31 @@ def get_resource_path(relative_path: str) -> str:
     return os.path.join(base_path, relative_path)
 
 
+def get_dialog_directory(settings: QSettings) -> str:
+    """Calculates the optimal starting directory for file dialogs."""
+    default_dir = settings.value("app/default_dir", "", type=str)
+    if default_dir and os.path.exists(default_dir):
+        return default_dir
+
+    last_dir = settings.value("app/last_dir", "", type=str)
+    if last_dir and os.path.exists(last_dir):
+        return last_dir
+
+    return QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.DocumentsLocation
+    )
+
+
+def save_last_directory(settings: QSettings, file_path: str) -> None:
+    """Saves the directory of the provided file path to settings."""
+    if file_path:
+        directory = (
+            os.path.dirname(file_path) if os.path.isfile(file_path) else file_path
+        )
+        if os.path.exists(directory):
+            settings.setValue("app/last_dir", directory)
+
+
 class YtDlpStreamWorker(QThread):
     """
     Background worker thread for extracting raw media stream URLs using yt-dlp.
@@ -141,17 +166,16 @@ class MockDownloadItem(QObject):
     receivedBytesChanged = Signal()
     totalBytesChanged = Signal()
 
-    def __init__(self, url: str, download_dir: str, parent=None):
+    def __init__(self, url: str, download_dir: str, filename: str, parent=None):
         super().__init__(parent)
         self._url = url
         self._dir = download_dir
-        self._filename = "yt-dlp-media.mp4"
+        self._filename = filename
         self._state = QWebEngineDownloadRequest.DownloadState.DownloadInProgress
         self._total = 100
         self._received = 0
         self.worker: Optional["YtDlpWorker"] = None
 
-    # Required Mock Methods
     def id(self) -> int:
         return id(self)
 
@@ -1660,26 +1684,47 @@ class BrowserTab(QWidget):
         Args:
             download_item (QWebEngineDownloadRequest): Engine specific data handler structurally.
         """
-        default_dir = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.DownloadLocation
-        )
-
-        suggested_name = download_item.downloadFileName()
+        app_settings = QSettings("Riemann", "PDFReader")
+        start_dir = get_dialog_directory(app_settings)
 
         path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save File",
-            os.path.join(default_dir, suggested_name),
+            self, "Save File", os.path.join(start_dir, download_item.downloadFileName())
         )
 
         if not path:
             download_item.cancel()
             return
 
+        save_last_directory(app_settings, path)
         download_item.setDownloadDirectory(os.path.dirname(path))
         download_item.setDownloadFileName(os.path.basename(path))
         download_item.accept()
 
+        self.show_toast(f"Starting: {download_item.downloadFileName()}")
+
+        def update_prog(received: int, total: int):
+            total = download_item.totalBytes()
+            received = download_item.receivedBytes()
+            if total > 0:
+                self.progress.setValue(int((received / total) * 100))
+
+        download_item.downloadProgress.connect(update_prog)
+
+        def on_state_changed(state):
+            if state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
+                self.show_toast("Download complete!")
+                self.progress.setValue(0)
+                self._check_pdf_open(
+                    state, download_item, download_item.downloadDirectory()
+                )
+            elif state == QWebEngineDownloadRequest.DownloadState.DownloadCancelled:
+                self.show_toast("Download cancelled.")
+                self.progress.setValue(0)
+            elif state == QWebEngineDownloadRequest.DownloadState.DownloadInterrupted:
+                self.show_toast("Download failed.")
+                self.progress.setValue(0)
+
+        download_item.stateChanged.connect(on_state_changed)
         if self.window() and hasattr(self.window(), "download_manager_dialog"):
             self.window().download_manager_dialog.add_download(download_item)
 
@@ -1725,15 +1770,16 @@ class BrowserTab(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             dl_opts = dialog.get_options()
 
-            default_dir = QStandardPaths.writableLocation(
-                QStandardPaths.StandardLocation.DownloadLocation
-            )
+            app_settings = QSettings("Riemann", "PDFReader")
+            start_dir = get_dialog_directory(app_settings)
             dest_dir = QFileDialog.getExistingDirectory(
-                self, "Select Download Directory", default_dir
+                self, "Select Download Directory", start_dir
             )
+
             if not dest_dir:
                 return
 
+            save_last_directory(app_settings, dest_dir)
             self.show_toast("Starting download...")
             self.progress.setValue(0)
 
@@ -1745,9 +1791,21 @@ class BrowserTab(QWidget):
                 pass
             self.btn_download.clicked.connect(self.cancel_download)
 
-            self.dl_worker = YtDlpWorker(url, dest_dir, dl_opts)
+            raw_title = self.web.title() or "Video_Download"
+            safe_title = re.sub(r'[\\/*?:"<>|]', "", raw_title).replace(" ", "_")
+            
+            is_audio = dl_opts.get("audio_only")
+            audio_fmt = dl_opts.get("audio_format", "best")
 
-            self.mock_dl_item = MockDownloadItem(url, dest_dir, self)
+            if is_audio:
+                ext = "mp3" if audio_fmt == "best" else audio_fmt
+            else:
+                ext = "mp4"
+
+            filename = f"{safe_title}.{ext}"
+
+            self.dl_worker = YtDlpWorker(url, dest_dir, dl_opts)
+            self.mock_dl_item = MockDownloadItem(url, dest_dir, filename, self)
             self.mock_dl_item.worker = self.dl_worker
 
             try:
@@ -1788,21 +1846,21 @@ class BrowserTab(QWidget):
 
     def print_to_pdf(self) -> None:
         """Renders the current web page directly to a PDF and opens it in Riemann."""
-        default_dir = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.DocumentsLocation
-        )
-        suggested_name = (
-            f"{self.web.title()}.pdf" if self.web.title() else "webpage.pdf"
-        )
+        app_settings = QSettings("Riemann", "PDFReader")
+        start_dir = get_dialog_directory(app_settings)
 
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Save Webpage as PDF",
-            os.path.join(default_dir, suggested_name),
+            os.path.join(
+                start_dir,
+                f"{self.web.title()}.pdf" if self.web.title() else "webpage.pdf",
+            ),
             "PDF Files (*.pdf)",
         )
 
         if path:
+            save_last_directory(app_settings, path)
             self.show_toast("Rendering PDF...")
 
             def handle_pdf_print(file_path, success):

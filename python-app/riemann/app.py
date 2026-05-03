@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QHeaderView,
     QInputDialog,
     QLineEdit,
@@ -101,6 +102,31 @@ def get_resource_path(relative_path: str) -> str:
     return os.path.join(base_path, relative_path)
 
 
+def get_dialog_directory(settings: QSettings) -> str:
+    """Calculates the optimal starting directory for file dialogs."""
+    default_dir = settings.value("app/default_dir", "", type=str)
+    if default_dir and os.path.exists(default_dir):
+        return default_dir
+
+    last_dir = settings.value("app/last_dir", "", type=str)
+    if last_dir and os.path.exists(last_dir):
+        return last_dir
+
+    return QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.DocumentsLocation
+    )
+
+
+def save_last_directory(settings: QSettings, file_path: str) -> None:
+    """Saves the directory of the provided file path to settings."""
+    if file_path:
+        directory = (
+            os.path.dirname(file_path) if os.path.isfile(file_path) else file_path
+        )
+        if os.path.exists(directory):
+            settings.setValue("app/last_dir", directory)
+
+
 class SettingsDialog(QDialog):
     """
     A modal dialog for configuring application-wide settings.
@@ -139,6 +165,22 @@ class SettingsDialog(QDialog):
             parent.settings.value("homepage/custom_name", "", type=str)
         )
 
+        self.txt_default_dir = QLineEdit()
+        self.txt_default_dir.setPlaceholderText(
+            "Leave empty to use last opened directory"
+        )
+        self.txt_default_dir.setText(
+            parent.settings.value("app/default_dir", "", type=str)
+        )
+
+        self.btn_browse_dir = QPushButton("Browse...")
+        self.btn_browse_dir.clicked.connect(self.browse_default_dir)
+
+        dir_layout = QHBoxLayout()
+        dir_layout.addWidget(self.txt_default_dir)
+        dir_layout.addWidget(self.btn_browse_dir)
+
+        form_layout.addRow("Default Dialog Directory:", dir_layout)
         form_layout.addRow("Enable Dark Mode:", self.cb_dark)
         form_layout.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
         form_layout.addRow("Homepage Greeting Name:", self.txt_custom_name)
@@ -241,6 +283,17 @@ class SettingsDialog(QDialog):
                 self.parent_win.web_profile.clearHttpCache()
 
             QMessageBox.information(self, "Success", "All data has been cleared.")
+
+    def browse_default_dir(self) -> None:
+        """Opens a dialog to select the default directory."""
+        start_dir = self.txt_default_dir.text() or QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        )
+        directory = QFileDialog.getExistingDirectory(
+            self, "Select Default Directory", start_dir
+        )
+        if directory:
+            self.txt_default_dir.setText(directory)
 
 
 class LibrarySearchDialog(QDialog):
@@ -591,11 +644,13 @@ class RiemannWindow(QMainWindow):
         """
         current = self.tabs_main.currentWidget()
         source_path = ""
+        start_dir = get_dialog_directory(self.settings)
+
         if isinstance(current, ReaderTab) and current.current_path:
             source_path = current.current_path
         else:
             source_path, _ = QFileDialog.getOpenFileName(
-                self, "Select PDF to Split", "", "PDF Files (*.pdf)"
+                self, "Select PDF to Split", start_dir, "PDF Files (*.pdf)"
             )
         if not source_path:
             return
@@ -606,12 +661,17 @@ class RiemannWindow(QMainWindow):
         if not ok or not pages_str.strip():
             return
 
+        current_dir = get_dialog_directory(self.settings)
         dest_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Split PDF As", "split.pdf", "PDF Files (*.pdf)"
+            self,
+            "Save Split PDF As",
+            os.path.join(current_dir, "split.pdf"),
+            "PDF Files (*.pdf)",
         )
         if not dest_path:
             return
 
+        save_last_directory(self.settings, dest_path)
         try:
             reader = PdfReader(source_path)
             writer = PdfWriter()
@@ -650,8 +710,9 @@ class RiemannWindow(QMainWindow):
         """
         Utility to merge multiple PDFs into one using pypdf.
         """
+        start_dir = get_dialog_directory(self.settings)
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select PDFs to Merge", "", "PDF Files (*.pdf)"
+            self, "Select PDFs to Merge", start_dir, "PDF Files (*.pdf)"
         )
         if not paths or len(paths) < 2:
             if paths:
@@ -660,12 +721,17 @@ class RiemannWindow(QMainWindow):
                 )
             return
 
+        save_dir = os.path.dirname(paths[0])
         dest_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Merged PDF As", "merged.pdf", "PDF Files (*.pdf)"
+            self,
+            "Save Merged PDF As",
+            os.path.join(save_dir, "merged.pdf"),
+            "PDF Files (*.pdf)",
         )
         if not dest_path:
             return
 
+        save_last_directory(self.settings, dest_path)
         paths.sort()
         try:
             writer = PdfWriter()
@@ -970,6 +1036,9 @@ class RiemannWindow(QMainWindow):
             self.settings.setValue(
                 "homepage/custom_name", dlg.txt_custom_name.text().strip()
             )
+            self.settings.setValue(
+                "app/default_dir", dlg.txt_default_dir.text().strip()
+            )
 
     def new_pdf_tab(
         self, path: Optional[str] = None, restore_state: bool = False
@@ -1069,15 +1138,17 @@ class RiemannWindow(QMainWindow):
         Opens in the current tab if it's an empty reader, otherwise opens a new tab.
         Supports selecting multiple files.
         """
+        start_dir = get_dialog_directory(self.settings)
         paths, _ = QFileDialog.getOpenFileNames(
             self,
             "Open Document",
-            "",
+            start_dir,
             "Documents (*.pdf *.md);;PDF Files (*.pdf);;Markdown (*.md)",
         )
         if not paths:
             return
 
+        save_last_directory(self.settings, paths[0])
         first_path = paths[0]
         self.add_to_history(first_path)
         current = self.tabs_main.currentWidget()
