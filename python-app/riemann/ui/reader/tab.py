@@ -1186,12 +1186,22 @@ class ReaderTab(
         Surfaces interactive system menus prompting selection processes loading file responses effectively mapping input data correctly.
         """
         start_dir = get_dialog_directory(self.settings)
-        path, _ = QFileDialog.getOpenFileName(
+        paths, _ = QFileDialog.getOpenFileNames(
             self, "Open PDF", start_dir, "PDF (*.pdf)"
         )
-        if path:
-            save_last_directory(self.settings, path)
-            self.load_document(path)
+        if not paths:
+            return
+
+        save_last_directory(self.settings, paths[0])
+        self.load_document(paths[0])
+
+        if len(paths) > 1:
+            main_win = self.window()
+            if hasattr(main_win, "new_pdf_tab"):
+                for path in paths[1:]:
+                    if hasattr(main_win, "add_to_history"):
+                        main_win.add_to_history(path, "pdf")
+                    main_win.new_pdf_tab(path)
 
     def scroll_page(self, direction: int) -> None:
         """
