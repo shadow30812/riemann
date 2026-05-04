@@ -51,6 +51,7 @@ export PYTHONPATH=$PYTHONPATH:$(pwd)/python-app
 EXCLUDES="--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow-import-to=cv2 --nofollow-import-to=pix2tex"
 EXCLUDES="$EXCLUDES --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas"
 EXCLUDES="$EXCLUDES --nofollow-import-to=nvidia --nofollow-import-to=fitz --nofollow-import-to=pymupdf" 
+EXCLUDES="$EXCLUDES --nofollow-import-to=yt_dlp.extractor.lazy_extractors --nofollow-import-to=pygments"
 
 python3 -m nuitka \
     --onefile \

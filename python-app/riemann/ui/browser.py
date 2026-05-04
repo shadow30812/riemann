@@ -242,7 +242,7 @@ class MockDownloadItem(QObject):
 
 class YtDlpWorker(QThread):
     """
-    Background worker thread for executing yt-dlp media downloads.
+    Background worker thread for executing yt-dlp media downloads via the Python API.
     Reports progress and completion status asynchronously to the main thread.
     """
 
@@ -262,99 +262,95 @@ class YtDlpWorker(QThread):
         self.url = url
         self.download_dir = download_dir
         self.dl_opts = dl_opts
-        self.process: Optional[subprocess.Popen] = None
         self.is_cancelled = False
 
     def run(self) -> None:
         """
-        Executes the yt-dlp subprocess, parses stdout for progress metrics,
-        and emits signals reflecting the operation's state.
+        Executes the yt-dlp Python API, mapping user options to internal flags,
+        and manages the download lifecycle safely within the process.
         """
+        ydl_opts = {
+            "outtmpl": os.path.join(self.download_dir, "%(title)s.%(ext)s"),
+            "quiet": True,
+            "no_warnings": True,
+            "progress_hooks": [self.progress_hook],
+        }
+
+        if self.dl_opts.get("playlist"):
+            ydl_opts["noplaylist"] = False
+            pl_start = self.dl_opts.get("playlist_start")
+            pl_end = self.dl_opts.get("playlist_end")
+
+            if pl_start and pl_start.isdigit():
+                ydl_opts["playliststart"] = int(pl_start)
+            if pl_end and pl_end.isdigit():
+                ydl_opts["playlistend"] = int(pl_end)
+        else:
+            ydl_opts["noplaylist"] = True
+
+        cookies_browser = self.dl_opts.get("cookies", "none")
+        if cookies_browser != "none":
+            ydl_opts["cookiesfrombrowser"] = (cookies_browser,)
+
+        ydl_opts["format"] = self.dl_opts.get("format", "best")
+        postprocessors = []
+
+        if self.dl_opts.get("audio_only"):
+            audio_fmt = self.dl_opts.get("audio_format", "best")
+            pp = {"key": "FFmpegExtractAudio"}
+            if audio_fmt != "best":
+                pp["preferredcodec"] = audio_fmt
+            postprocessors.append(pp)
+        else:
+            ydl_opts["merge_output_format"] = "mp4"
+
+        if self.dl_opts.get("subtitles") and not self.dl_opts.get("audio_only"):
+            ydl_opts["writesubtitles"] = True
+            ydl_opts["writeautomaticsub"] = True
+            ydl_opts["subtitleslangs"] = ["en.*"]
+            ydl_opts["compat_opts"] = ["no-keep-subs"]
+            postprocessors.append({"key": "FFmpegEmbedSubtitle"})
+
+        if postprocessors:
+            ydl_opts["postprocessors"] = postprocessors
+
         try:
-            cmd = ["yt-dlp", "--newline"]
-
-            if self.dl_opts.get("playlist"):
-                cmd.append("--yes-playlist")
-                pl_start = self.dl_opts.get("playlist_start")
-                pl_end = self.dl_opts.get("playlist_end")
-
-                if pl_start and pl_start.isdigit():
-                    cmd.extend(["--playlist-start", pl_start])
-                if pl_end and pl_end.isdigit():
-                    cmd.extend(["--playlist-end", pl_end])
-            else:
-                cmd.append("--no-playlist")
-
-            cookies_browser = self.dl_opts.get("cookies", "none")
-            if cookies_browser != "none":
-                cmd.extend(["--cookies-from-browser", cookies_browser])
-
-            cmd.extend(["-f", self.dl_opts.get("format", "best")])
-
-            if self.dl_opts.get("audio_only"):
-                cmd.append("-x")
-                audio_fmt = self.dl_opts.get("audio_format", "best")
-                if audio_fmt != "best":
-                    cmd.extend(["--audio-format", audio_fmt])
-            else:
-                cmd.extend(["--merge-output-format", "mp4"])
-
-            if self.dl_opts.get("subtitles") and not self.dl_opts.get("audio_only"):
-                cmd.extend(
-                    [
-                        "--write-subs",
-                        "--write-auto-subs",
-                        "--sub-langs",
-                        "en.*",
-                        "--embed-subs",
-                        "--compat-options",
-                        "no-keep-subs",
-                    ]
-                )
-
-            cmd.extend(["-o", os.path.join(self.download_dir, "%(title)s.%(ext)s")])
-            cmd.append(self.url)
-
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-
-            if self.process.stdout is None:
-                self.finished.emit(False, "Failed to start yt-dlp")
-                return
-
-            for line in self.process.stdout:
-                if self.is_cancelled:
-                    break
-                match = re.search(r"\[download\]\s+([\d\.]+)%", line)
-                if match:
-                    val = float(match.group(1))
-                    self.progress.emit(int(val))
-
-            self.process.wait()
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([self.url])
 
             if self.is_cancelled:
                 self.finished.emit(False, "Download cancelled.")
-            elif self.process.returncode == 0:
-                self.finished.emit(True, "Download complete!")
             else:
-                self.finished.emit(False, "Download failed.")
-        except FileNotFoundError:
-            self.finished.emit(False, "Error: yt-dlp is not installed or not in PATH.")
+                self.finished.emit(True, "Download complete!")
+
         except Exception as e:
-            self.finished.emit(False, str(e))
+            if self.is_cancelled:
+                self.finished.emit(False, "Download cancelled.")
+            else:
+                self.finished.emit(False, str(e))
+
+    def progress_hook(self, d: dict) -> None:
+        """
+        Internal hook called by yt-dlp to report download progress.
+        Also acts as our cancellation trigger by throwing an exception if the user aborts.
+        """
+        if self.is_cancelled:
+            raise Exception("Download aborted by user.")
+
+        if d.get("status") == "downloading":
+            percent_str = d.get("_percent_str", "0%")
+            percent_str = re.sub(r"\x1b\[[0-9;]*m", "", percent_str)
+            try:
+                val = float(percent_str.replace("%", "").strip())
+                self.progress.emit(int(val))
+            except ValueError:
+                pass
 
     def stop(self) -> None:
         """
-        Terminates the active yt-dlp subprocess safely.
+        Flags the thread for cancellation. The progress_hook will catch this on the next tick.
         """
         self.is_cancelled = True
-        if self.process:
-            self.process.terminate()
 
 
 class YtDlpSettingsDialog(QDialog):
@@ -1793,7 +1789,7 @@ class BrowserTab(QWidget):
 
             raw_title = self.web.title() or "Video_Download"
             safe_title = re.sub(r'[\\/*?:"<>|]', "", raw_title).replace(" ", "_")
-            
+
             is_audio = dl_opts.get("audio_only")
             audio_fmt = dl_opts.get("audio_format", "best")
 
