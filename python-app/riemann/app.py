@@ -1196,24 +1196,27 @@ class RiemannWindow(QMainWindow):
         Toggles the horizontal split-screen view.
         Moves the current tab to the side view if opening, or hides it if empty.
         """
-        if self.tabs_side.isHidden():
-            self.tabs_side.show()
-
-            def resize_splitter():
-                sizes = self.splitter.sizes()
-                if sum(sizes) > 0 and sizes[1] == 0:
-                    total = sum(sizes)
-                    self.splitter.setSizes([int(total * 0.7), int(total * 0.3)])
-
-            QTimer.singleShot(10, resize_splitter)
-
         current = self.tabs_main.currentWidget()
-        if current:
-            idx = self.tabs_main.indexOf(current)
-            text = self.tabs_main.tabText(idx)
-            self.tabs_main.removeTab(idx)
-            self.tabs_side.addTab(current, text)
-            self.tabs_side.setCurrentWidget(current)
+        if not current:
+            return
+
+        was_hidden = self.tabs_side.isHidden()
+        idx = self.tabs_main.indexOf(current)
+        text = self.tabs_main.tabText(idx)
+        self.tabs_main.removeTab(idx)
+
+        if was_hidden:
+            self.tabs_side.show()
+            QApplication.processEvents()
+
+            total = self.splitter.width()
+            self.splitter.setSizes([int(total * 0.7), int(total * 0.3)])
+
+        new_idx = self.tabs_side.addTab(current, text)
+        self.tabs_side.setCurrentIndex(new_idx)
+
+        current.show()
+        current.setFocus()
 
     def _record_closed_tab(self, widget: QWidget) -> None:
         """
