@@ -62,6 +62,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QScroller,
     QScrollerProperties,
+    QSizePolicy,
     QStackedWidget,
     QTabWidget,
     QToolButton,
@@ -289,6 +290,7 @@ class ReaderTab(
 
         self.toolbar = QWidget()
         self.toolbar.setFixedHeight(50)
+        self.toolbar.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.toolbar.installEventFilter(self)
 
         self.toolbar_anim = QPropertyAnimation(self.toolbar, b"maximumHeight")
@@ -317,6 +319,9 @@ class ReaderTab(
 
         self.signature_banner = QWidget()
         self.signature_banner.setVisible(False)
+        self.anno_toolbar.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
         self.signature_banner.setFixedHeight(40)
         banner_layout = QHBoxLayout(self.signature_banner)
 

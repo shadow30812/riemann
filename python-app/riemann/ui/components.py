@@ -59,32 +59,52 @@ class DraggableTabWidget(QTabWidget):
 
     def dragEnterEvent(self, e: QDragEnterEvent) -> None:
         """
-        Accepts drag events that contain text representing file paths.
+        Accepts drag events that contain text representing file paths
+        or internal Riemann tabs.
 
         Args:
             e (QDragEnterEvent): The drag enter event instance.
         """
-        if e.mimeData().hasText():
+        if e.mimeData().hasText() or e.mimeData().hasFormat(
+            "application/x-riemann-tab"
+        ):
             e.accept()
         else:
             e.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
         """
-        Handles dropping a file path to create a new document tab.
+        Handles dropping either an internal tab (to switch split views)
+        or an external file path (to create a new document).
 
         Args:
             event (QDropEvent): The drop event containing the file path payload.
         """
-        file_path = event.mimeData().text()
-        if os.path.exists(file_path):
-            from .reader import ReaderTab
+        if event.mimeData().hasFormat("application/x-riemann-tab"):
+            widget = DraggableTabBar._dragged_widget
+            if widget:
+                idx = self.addTab(
+                    widget,
+                    DraggableTabBar._dragged_icon,
+                    DraggableTabBar._dragged_title,
+                )
+                self.tabBar().setTabData(idx, DraggableTabBar._dragged_data)
+                self.setCurrentIndex(idx)
+                event.acceptProposedAction()
+            return
 
-            reader = ReaderTab()
-            reader.load_document(file_path)
-            self.addTab(reader, os.path.basename(file_path))
-            self.setCurrentWidget(reader)
-            event.acceptProposedAction()
+        if event.mimeData().hasText():
+            file_path = event.mimeData().text()
+            file_path = file_path.replace("file://", "").strip()
+
+            if os.path.exists(file_path):
+                from .reader import ReaderTab
+
+                reader = ReaderTab()
+                reader.load_document(file_path)
+                self.addTab(reader, os.path.basename(file_path))
+                self.setCurrentWidget(reader)
+                event.acceptProposedAction()
 
 
 class DraggableTabBar(QTabBar):

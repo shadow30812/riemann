@@ -438,6 +438,7 @@ class RiemannWindow(QMainWindow):
         self.closed_tabs_stack: List[dict] = []
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setChildrenCollapsible(False)
+        self.splitter.setHandleWidth(8)
         self.setCentralWidget(self.splitter)
 
         self.tabs_main = DraggableTabWidget()
@@ -456,6 +457,10 @@ class RiemannWindow(QMainWindow):
         self.tabs_side.setTabsClosable(True)
         self.tabs_side.tabCloseRequested.connect(self.close_side_tab)
         self.tabs_side.currentChanged.connect(self._update_window_title)
+        self.tabs_side.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.tabs_side.setMinimumWidth(250)
         self.tabs_side.tabBar().setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu
         )
@@ -1018,7 +1023,8 @@ class RiemannWindow(QMainWindow):
             ("History (Ctrl+H)", None, self.show_history),
             ("Settings (Ctrl+,)", None, self.show_settings),
             ("Toggle UI Theme (Ctrl+D)", None, self.toggle_ui_theme),
-            ("Toggle Side Panel (Ctrl+\\)", None, self.toggle_split_view),
+            ("Toggle Split View (Ctrl+\\)", None, self.toggle_split_view),
+            ("Show Signature Panel", None, self.force_show_signatures),
         ]
 
         for name, shortcut, slot in view_actions:
@@ -1192,17 +1198,14 @@ class RiemannWindow(QMainWindow):
         """
         if self.tabs_side.isHidden():
             self.tabs_side.show()
-            sizes = self.splitter.sizes()
-            if sum(sizes) > 0 and sizes[1] == 0:
-                total = sum(sizes)
-                self.splitter.setSizes([int(total * 0.7), int(total * 0.3)])
 
-            active_main = self.tabs_main.currentWidget()
-            if active_main:
-                active_main._sig_panel_dismissed = False
-                self.refresh_signature_panel()
-        else:
-            self.tabs_side.hide()
+            def resize_splitter():
+                sizes = self.splitter.sizes()
+                if sum(sizes) > 0 and sizes[1] == 0:
+                    total = sum(sizes)
+                    self.splitter.setSizes([int(total * 0.7), int(total * 0.3)])
+
+            QTimer.singleShot(10, resize_splitter)
 
         current = self.tabs_main.currentWidget()
         if current:
@@ -1861,6 +1864,13 @@ class RiemannWindow(QMainWindow):
             self.setStyleSheet(stylesheet)
         else:
             self.setStyleSheet("")
+
+    def force_show_signatures(self) -> None:
+        """Manually un-dismisses and reopens the signature panel."""
+        active_main = self.tabs_main.currentWidget()
+        if active_main:
+            active_main._sig_panel_dismissed = False
+            self.refresh_signature_panel()
 
 
 def run() -> None:
