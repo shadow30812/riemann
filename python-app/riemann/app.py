@@ -75,6 +75,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .core.features import (
+    CompressDialog,
+    ConvertDialog,
+    DocumentCompressor,
+    DocumentConverter,
+)
 from .core.managers import (
     BookmarksManager,
     DownloadManager,
@@ -990,12 +996,15 @@ class RiemannWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        actions = [
+        file_actions = [
             ("Open PDF (Ctrl+O)", None, self.open_pdf_smart),
             ("Open New PDF Tab (Ctrl+T)", None, lambda: self.new_pdf_tab()),
             (None, None, None),
             ("Split Current PDF", None, self.split_pdf),
             ("Merge PDFs", None, self.join_pdfs),
+            (None, None, None),
+            ("Convert Document...", None, self.show_convert_dialog),
+            ("Compress Document...", None, self.show_compress_dialog),
             (None, None, None),
             ("New Browser Tab (Ctrl+B)", None, lambda: self.new_browser_tab()),
             ("New Window (Ctrl+N)", None, self.new_window),
@@ -1004,7 +1013,7 @@ class RiemannWindow(QMainWindow):
             ("Exit (Ctrl+Q)", None, self.close),
         ]
 
-        for name, shortcut, slot in actions:
+        for name, shortcut, slot in file_actions:
             if name is None:
                 file_menu.addSeparator()
             else:
@@ -1874,6 +1883,36 @@ class RiemannWindow(QMainWindow):
         if active_main:
             active_main._sig_panel_dismissed = False
             self.refresh_signature_panel()
+
+    def show_convert_dialog(self) -> None:
+        """Triggers the new conversion interface."""
+        dialog = ConvertDialog(self)
+        if dialog.exec():
+            out_path = dialog.txt_output.text()
+            if out_path.endswith(".html") and os.path.exists(out_path):
+                reply = QMessageBox.question(
+                    self,
+                    "Open Output",
+                    "Conversion successful. Open the HTML file in a new tab now?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self.new_browser_tab(f"file:///{out_path.replace(chr(92), '/')}")
+
+    def show_compress_dialog(self) -> None:
+        """Triggers the new compression interface."""
+        dialog = CompressDialog(self)
+        if dialog.exec():
+            out_path = dialog.txt_output.text()
+            if out_path.endswith(".pdf") and os.path.exists(out_path):
+                reply = QMessageBox.question(
+                    self,
+                    "Open Output",
+                    "Compression successful. Open the compressed PDF in a new tab?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self.new_pdf_tab(out_path)
 
 
 def run() -> None:

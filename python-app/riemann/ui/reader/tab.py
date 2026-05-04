@@ -24,6 +24,7 @@ from PySide6.QtCore import (
     QSize,
     QStandardPaths,
     Qt,
+    QThread,
     QTimer,
     QUrl,
     Signal,
@@ -112,6 +113,24 @@ def save_last_directory(settings: QSettings, file_path: str) -> None:
         )
         if os.path.exists(directory):
             settings.setValue("app/last_dir", directory)
+
+
+class DocumentLoadWorker(QThread):
+    finished = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, engine, path, password):
+        super().__init__()
+        self.engine = engine
+        self.path = path
+        self.password = password
+
+    def run(self):
+        try:
+            doc = self.engine.load_document(self.path, self.password)
+            self.finished.emit(doc)
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class ReaderTab(
@@ -798,6 +817,7 @@ class ReaderTab(
     ) -> None:
         """
         Consumes filepath strings mapping logic execution parsing rendering either markdown or PDF binary streams.
+        Loads document using a background thread to prevent UI freezing.
 
         Args:
             path (str): Full validated filesystem pathway containing data.
@@ -808,65 +828,92 @@ class ReaderTab(
             self._load_markdown(path)
             return
 
-        try:
-            self.current_doc = self.engine.load_document(path, password)
-            self._probe_base_page_size()
-            self.current_path = path
-            self._update_tab_title(os.path.basename(path))
+        self.load_progress = QProgressDialog(
+            f"Loading {os.path.basename(path)}...", None, 0, 0, self
+        )
+        self.load_progress.setWindowTitle("Please Wait")
+        self.load_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self.load_progress.setCancelButton(None)
+        self.load_progress.show()
 
-            if is_retry and hasattr(self, "show_toast"):
-                QTimer.singleShot(
-                    50, lambda: self.show_toast("Document unlocked successfully.")
-                )
+        self._load_path = path
+        self._load_restore_state = restore_state
+        self._load_password = password
+        self._load_is_retry = is_retry
 
-            self.toolbar.show()
-            self.stack.setCurrentIndex(0)
-            self.view_mode = ViewMode.IMAGE
-            if hasattr(self.window(), "_update_window_title"):
-                self.window()._update_window_title()
+        self.load_worker = DocumentLoadWorker(self.engine, path, password)
+        self.load_worker.finished.connect(self._on_document_loaded)
+        self.load_worker.error.connect(self._on_document_load_error)
+        self.load_worker.start()
 
-            self.settings.setValue("lastFile", path)
-            self.load_annotations()
-            QTimer.singleShot(500, lambda: self._detect_signatures(path))
-            QTimer.singleShot(1000, self.index_pdf_for_ai)
+    def _on_document_loaded(self, doc):
+        """Callback for when the thread successfully returns the PDF."""
+        self.load_progress.accept()
+        self.current_doc = doc
 
-            if restore_state:
-                saved_page = self.settings.value("lastPage", 0, type=int)
-                saved_scroll = self.settings.value("lastScrollY", 0, type=int)
-                self.current_page_index = min(
-                    saved_page, self.current_doc.page_count - 1
-                )
-                self.rebuild_layout()
-                self.update_view()
-                QTimer.singleShot(
-                    100, lambda: self.scroll.verticalScrollBar().setValue(saved_scroll)
-                )
-            else:
-                self.current_page_index = 0
-                self.rebuild_layout()
-                self.update_view()
+        path = self._load_path
+        restore_state = self._load_restore_state
+        is_retry = self._load_is_retry
 
-            QTimer.singleShot(2000, self.extract_document_metadata)
+        self._probe_base_page_size()
+        self.current_path = path
+        self._update_tab_title(os.path.basename(path))
 
-        except Exception as e:
-            err_str = str(e).lower()
-            if "password" in err_str or "encrypted" in err_str:
-                error_text = (
-                    "Incorrect password. Please try again." if is_retry else None
-                )
-                dialog = PasswordDialog(self, error_msg=error_text)
-                if dialog.exec():
-                    pw = dialog.get_password()
-                    if pw:
-                        self.load_document(path, restore_state, pw, is_retry=True)
-                return
-
-            QMessageBox.critical(
-                self,
-                "Document Load Error",
-                f"Could not load the document. Please ensure it is a valid PDF format.\n\nDetails: {str(e)}",
+        if is_retry and hasattr(self, "show_toast"):
+            QTimer.singleShot(
+                50, lambda: self.show_toast("Document unlocked successfully.")
             )
-            sys.stderr.write(f"Load error: {e}\n")
+
+        self.toolbar.show()
+        self.stack.setCurrentIndex(0)
+        self.view_mode = ViewMode.IMAGE
+        if hasattr(self.window(), "_update_window_title"):
+            self.window()._update_window_title()
+
+        self.settings.setValue("lastFile", path)
+        self.load_annotations()
+        QTimer.singleShot(500, lambda: self._detect_signatures(path))
+        QTimer.singleShot(1000, self.index_pdf_for_ai)
+
+        if restore_state:
+            saved_page = self.settings.value("lastPage", 0, type=int)
+            saved_scroll = self.settings.value("lastScrollY", 0, type=int)
+            self.current_page_index = min(saved_page, self.current_doc.page_count - 1)
+            self.rebuild_layout()
+            self.update_view()
+            QTimer.singleShot(
+                100, lambda: self.scroll.verticalScrollBar().setValue(saved_scroll)
+            )
+        else:
+            self.current_page_index = 0
+            self.rebuild_layout()
+            self.update_view()
+
+        QTimer.singleShot(2000, self.extract_document_metadata)
+
+    def _on_document_load_error(self, err_str):
+        """Callback if the background thread encounters a loading exception."""
+        self.load_progress.accept()
+        path = self._load_path
+        restore_state = self._load_restore_state
+        is_retry = self._load_is_retry
+
+        err_str_lower = err_str.lower()
+        if "password" in err_str_lower or "encrypted" in err_str_lower:
+            error_text = "Incorrect password. Please try again." if is_retry else None
+            dialog = PasswordDialog(self, error_msg=error_text)
+            if dialog.exec():
+                pw = dialog.get_password()
+                if pw:
+                    self.load_document(path, restore_state, pw, is_retry=True)
+            return
+
+        QMessageBox.critical(
+            self,
+            "Document Load Error",
+            f"Could not load the document. Please ensure it is a valid PDF format.\n\nDetails: {err_str}",
+        )
+        sys.stderr.write(f"Load error: {err_str}\n")
 
     def _load_markdown(self, path: str) -> None:
         """
