@@ -63,6 +63,8 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
+    QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -180,10 +182,18 @@ class SettingsDialog(QDialog):
         dir_layout.addWidget(self.txt_default_dir)
         dir_layout.addWidget(self.btn_browse_dir)
 
+        self.spin_autoscroll = QSpinBox()
+        self.spin_autoscroll.setRange(1, 100)
+        self.spin_autoscroll.setValue(
+            parent.settings.value("app/autoscroll_speed", 5, type=int)
+        )
+        self.spin_autoscroll.setSuffix(" px/tick")
+
         form_layout.addRow("Default Dialog Directory:", dir_layout)
         form_layout.addRow("Enable Dark Mode:", self.cb_dark)
         form_layout.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
         form_layout.addRow("Homepage Greeting Name:", self.txt_custom_name)
+        form_layout.addRow("Auto-Scroll Speed:", self.spin_autoscroll)
         layout.addLayout(form_layout)
 
         group = QGroupBox("Data Management")
@@ -427,6 +437,7 @@ class RiemannWindow(QMainWindow):
 
         self.closed_tabs_stack: List[dict] = []
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
         self.setCentralWidget(self.splitter)
 
         self.tabs_main = DraggableTabWidget()
@@ -456,6 +467,13 @@ class RiemannWindow(QMainWindow):
 
         self.tree_signatures = QTreeWidget()
         self.tree_signatures.setHeaderLabels(["Identity", "Details"])
+        self.tree_signatures.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.tree_signatures.setMinimumWidth(250)
+        self.tree_signatures.header().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
 
         self.library_manager = LibraryManager()
 
@@ -1000,6 +1018,7 @@ class RiemannWindow(QMainWindow):
             ("History (Ctrl+H)", None, self.show_history),
             ("Settings (Ctrl+,)", None, self.show_settings),
             ("Toggle UI Theme (Ctrl+D)", None, self.toggle_ui_theme),
+            ("Toggle Side Panel (Ctrl+\\)", None, self.toggle_split_view),
         ]
 
         for name, shortcut, slot in view_actions:
@@ -1039,6 +1058,7 @@ class RiemannWindow(QMainWindow):
             self.settings.setValue(
                 "app/default_dir", dlg.txt_default_dir.text().strip()
             )
+            self.settings.setValue("app/autoscroll_speed", dlg.spin_autoscroll.value())
 
     def new_pdf_tab(
         self, path: Optional[str] = None, restore_state: bool = False
@@ -1143,7 +1163,7 @@ class RiemannWindow(QMainWindow):
             self,
             "Open Document",
             start_dir,
-            "Documents (*.pdf *.md);;PDF Files (*.pdf);;Markdown (*.md)",
+            "Supported Files (*.pdf *.PDF *.md);;All Files (*)",
         )
         if not paths:
             return
@@ -1172,6 +1192,17 @@ class RiemannWindow(QMainWindow):
         """
         if self.tabs_side.isHidden():
             self.tabs_side.show()
+            sizes = self.splitter.sizes()
+            if sum(sizes) > 0 and sizes[1] == 0:
+                total = sum(sizes)
+                self.splitter.setSizes([int(total * 0.7), int(total * 0.3)])
+
+            active_main = self.tabs_main.currentWidget()
+            if active_main:
+                active_main._sig_panel_dismissed = False
+                self.refresh_signature_panel()
+        else:
+            self.tabs_side.hide()
 
         current = self.tabs_main.currentWidget()
         if current:

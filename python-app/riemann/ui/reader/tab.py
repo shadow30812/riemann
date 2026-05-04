@@ -194,6 +194,10 @@ class ReaderTab(
         self.scroll_timer.setInterval(150)
         self.scroll_timer.timeout.connect(self.real_scroll_handler)
 
+        self.autoscroll_timer = QTimer(self)
+        self.autoscroll_timer.setInterval(30)
+        self.autoscroll_timer.timeout.connect(self._do_autoscroll)
+
         self._init_shortcuts()
 
     def _init_shortcuts(self) -> None:
@@ -441,6 +445,20 @@ class ReaderTab(
         self.btn_scroll_mode.setChecked(self.continuous_scroll)
         self.btn_scroll_mode.clicked.connect(self.toggle_scroll_mode)
 
+        self.btn_autoscroll_up = QPushButton()
+        self.btn_autoscroll_up.setIcon(self._get_icon("move-up.svg"))
+        self.btn_autoscroll_up.setIconSize(icon_size)
+        self.btn_autoscroll_up.setToolTip("Auto-Scroll Up")
+        self.btn_autoscroll_up.setCheckable(True)
+        self.btn_autoscroll_up.clicked.connect(lambda: self.toggle_autoscroll(-1))
+
+        self.btn_autoscroll_down = QPushButton()
+        self.btn_autoscroll_down.setIcon(self._get_icon("move-down.svg"))
+        self.btn_autoscroll_down.setIconSize(icon_size)
+        self.btn_autoscroll_down.setToolTip("Auto-Scroll Down")
+        self.btn_autoscroll_down.setCheckable(True)
+        self.btn_autoscroll_down.clicked.connect(lambda: self.toggle_autoscroll(1))
+
         self.btn_annotate = QPushButton()
         self.btn_annotate.setIcon(self._get_icon("pen-line.svg"))
         self.btn_annotate.setIconSize(icon_size)
@@ -570,6 +588,8 @@ class ReaderTab(
             self.btn_reflow,
             self.btn_facing,
             self.btn_scroll_mode,
+            self.btn_autoscroll_up,
+            self.btn_autoscroll_down,
             self.btn_search,
             self.btn_ai_search,
             self.btn_annotate,
@@ -1187,7 +1207,10 @@ class ReaderTab(
         """
         start_dir = get_dialog_directory(self.settings)
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Open PDF", start_dir, "PDF (*.pdf)"
+            self,
+            "Open PDF",
+            start_dir,
+            "Supported Files (*.pdf *.PDF *.md);;All Files (*)",
         )
         if not paths:
             return
@@ -2230,6 +2253,42 @@ class ReaderTab(
                     finally:
                         painter.end()
 
+    def toggle_autoscroll(self, direction: int) -> None:
+        """Toggles the document auto-scrolling state and direction."""
+        self.autoscroll_dir = direction
+
+        if direction == 1:
+            self.btn_autoscroll_up.setChecked(False)
+            if self.btn_autoscroll_down.isChecked():
+                self.autoscroll_timer.start()
+            else:
+                self.autoscroll_timer.stop()
+        else:
+            self.btn_autoscroll_down.setChecked(False)
+            if self.btn_autoscroll_up.isChecked():
+                self.autoscroll_timer.start()
+            else:
+                self.autoscroll_timer.stop()
+
+    def _do_autoscroll(self) -> None:
+        """Executes the incremental auto-scroll tick."""
+        vbar = self.scroll.verticalScrollBar()
+        speed = self.settings.value("app/autoscroll_speed", 5, type=int)
+        new_val = vbar.value() + (speed * getattr(self, "autoscroll_dir", 1))
+
+        if new_val >= vbar.maximum() and getattr(self, "autoscroll_dir", 1) == 1:
+            vbar.setValue(vbar.maximum())
+            self.btn_autoscroll_down.setChecked(False)
+            self.autoscroll_timer.stop()
+
+        elif new_val <= 0 and getattr(self, "autoscroll_dir", 1) == -1:
+            vbar.setValue(0)
+            self.btn_autoscroll_up.setChecked(False)
+            self.autoscroll_timer.stop()
+
+        else:
+            vbar.setValue(new_val)
+
     def _get_icon(self, filename: str) -> QIcon:
         """
         Resolves the appropriate SVG or PNG asset path to construct an icon corresponding to the active theme mode.
@@ -2278,6 +2337,8 @@ class ReaderTab(
         self.btn_snip.setIcon(self._get_icon("crop.svg"))
         self.btn_prev.setIcon(self._get_icon("chevron-left.svg"))
         self.btn_next.setIcon(self._get_icon("chevron-right.svg"))
+        self.btn_autoscroll_up.setIcon(self._get_icon("move-up.svg"))
+        self.btn_autoscroll_down.setIcon(self._get_icon("move-down.svg"))
 
         if getattr(self, "theme_mode", 0) == 0:
             icon = "sun.svg"
