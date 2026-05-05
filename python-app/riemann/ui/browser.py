@@ -6,6 +6,7 @@ It includes support for persistent profiles, ad-blocking, dark mode injection,
 audio processing injection (Riemann Audio), and download management.
 """
 
+import json
 import os
 import pwd
 import re
@@ -28,7 +29,15 @@ from PySide6.QtCore import (
     QUrl,
     Signal,
 )
-from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWebEngineCore import (
@@ -630,6 +639,9 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
         url = info.requestUrl().toString().lower()
         if any(domain in url for domain in self.blocked_domains):
             info.block(True)
+            settings = QSettings("Riemann", "PDFReader")
+            current_blocks = settings.value("browser/ads_blocked", 0, type=int)
+            settings.setValue("browser/ads_blocked", current_blocks + 1)
             return
 
         if "whatsapp.com" in url:
@@ -739,6 +751,11 @@ class BrowserTab(QWidget):
         self.completer.setFilterMode(Qt.MatchFlag.MatchContains)
         self.completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self.txt_url.setCompleter(self.completer)
+
+        self.action_security = self.txt_url.addAction(
+            QIcon(get_resource_path(os.path.join("..", "assets", "icons", "file.svg"))),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
 
         if self.incognito:
             self.btn_incognito_icon = QPushButton()
@@ -1461,6 +1478,17 @@ class BrowserTab(QWidget):
             self.web.setZoomFactor(saved_zoom)
             self.btn_zoom.setText(f"{int(saved_zoom * 100)}%")
 
+        scheme = url.scheme()
+        if scheme == "https":
+            self.action_security.setIcon(self._get_icon("lock.svg"))
+            self.action_security.setToolTip("Connection is secure")
+        elif scheme == "http":
+            self.action_security.setIcon(self._get_icon("lock-open.svg"))
+            self.action_security.setToolTip("Connection is not secure")
+        else:
+            self.action_security.setIcon(self._get_icon("file.svg"))
+            self.action_security.setToolTip("Local File")
+
         if "homepage.html" in s_url:
             self.txt_url.setText("")
             self.txt_url.setPlaceholderText("Search the web or enter URL...")
@@ -1991,6 +2019,16 @@ class BrowserTab(QWidget):
             self.btn_find_next.setIcon(self._get_icon("chevron-down.svg"))
             self.btn_close_find.setIcon(self._get_icon("x.svg"))
 
+        if hasattr(self, "action_security"):
+            url = self.web.url()
+            scheme = url.scheme() if url else ""
+            if scheme == "https":
+                self.action_security.setIcon(self._get_icon("lock.svg"))
+            elif scheme == "http":
+                self.action_security.setIcon(self._get_icon("lock-open.svg"))
+            else:
+                self.action_security.setIcon(self._get_icon("file.svg"))
+
     def _on_link_hovered(self, url: str) -> None:
         """Shows target URL at the bottom left when hovering over links, matching native browser UX."""
         if url:
@@ -2201,3 +2239,17 @@ class BrowserTab(QWidget):
         elif status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.video_window.setWindowTitle("Riemann Media Player - Finished")
             self.player.stop()
+
+    def _get_shifted_icon(self, icon_name: str, up_offset: int = 2) -> QIcon:
+        """Offsets an icon upwards to fix QLineEdit action vertical alignment issues."""
+        base_icon = self._get_icon(icon_name)
+        pixmap = base_icon.pixmap(16, 16)
+
+        shifted = QPixmap(16, 16)
+        shifted.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(shifted)
+        painter.drawPixmap(0, -up_offset, pixmap)
+        painter.end()
+
+        return QIcon(shifted)

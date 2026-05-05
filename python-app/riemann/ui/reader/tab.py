@@ -1900,7 +1900,14 @@ class ReaderTab(
             QListWidget { background: transparent; border: none; font-size: 14px; outline: none; }
             QListWidget::item { padding: 12px; border-radius: 8px; margin-bottom: 6px; background: rgba(30, 30, 35, 0.8); border: 1px solid #222; }
             QListWidget::item:hover { background: rgba(255, 69, 0, 0.1); border-color: #ff4500; }
+            
+            #dropZone {
+                border: 3px dashed #555;
+                border-radius: 15px;
+                background: rgba(30, 30, 35, 0.4);
+            }
         """)
+
         layout = QHBoxLayout(self.home_page_widget)
         layout.setContentsMargins(60, 60, 60, 60)
 
@@ -1919,6 +1926,17 @@ class ReaderTab(
         )
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        self.drop_zone = QLabel("Drop PDF Here")
+        self.drop_zone.setObjectName("dropZone")
+        self.drop_zone.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.drop_zone.setStyleSheet(
+            "font-size: 24px; color: #888; font-weight: bold; letter-spacing: 2px;"
+        )
+        self.drop_zone.setMinimumHeight(150)
+        self.drop_zone.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+
         self.txt_open_path = QLineEdit()
         self.txt_open_path.setPlaceholderText(
             "Paste PDF absolute path here and press Enter..."
@@ -1932,6 +1950,8 @@ class ReaderTab(
         left_layout.addStretch()
         left_layout.addWidget(title)
         left_layout.addWidget(subtitle)
+        left_layout.addWidget(self.drop_zone)
+        left_layout.addSpacing(30)
         left_layout.addWidget(self.txt_open_path)
         left_layout.addSpacing(20)
 

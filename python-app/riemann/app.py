@@ -16,9 +16,11 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = bundle_dir
 
 import shutil
+import time
 from pathlib import Path
 from typing import List, Optional
 
+import psutil
 from pypdf import PdfReader, PdfWriter
 from PySide6.QtCore import (
     QEvent,
@@ -57,6 +59,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
+    QLabel,
     QLineEdit,
     QListWidget,
     QMainWindow,
@@ -75,12 +78,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .core.features import (
-    CompressDialog,
-    ConvertDialog,
-    DocumentCompressor,
-    DocumentConverter,
-)
+from .core.features import CompressDialog, ConvertDialog
 from .core.managers import (
     BookmarksManager,
     DownloadManager,
@@ -408,6 +406,7 @@ class RiemannWindow(QMainWindow):
             restore_session (bool): If True, attempts to restore tabs from the last session.
         """
         super().__init__()
+        self._start_time = time.time()
         self.incognito = incognito
         self.restore_session = restore_session
         self.external_files = external_files or []
@@ -519,7 +518,7 @@ class RiemannWindow(QMainWindow):
             ("Ctrl+B", self.new_browser_tab),
             ("Ctrl+N", self.new_window),
             ("Ctrl+Shift+N", self.new_incognito_window),
-            ("Ctrl+O", self.open_pdf_smart),
+            ("Ctrl+O", self.open_file_smart),
             ("Ctrl+K", self.show_bookmarks),
             ("Ctrl+J", self.show_downloads),
             ("Ctrl+L", self.show_library_search),
@@ -974,10 +973,13 @@ class RiemannWindow(QMainWindow):
         browser = BrowserTab(url, profile=use_profile, dark_mode=self.dark_mode)
         browser.completer.setModel(self.history_model)
 
+        icon_path = get_resource_path(os.path.join("assets", "icons", "browser.png"))
+        default_icon = QIcon(icon_path)
+
         current_idx = target_widget.currentIndex()
         insert_idx = current_idx + 1 if current_idx != -1 else target_widget.count()
 
-        target_widget.insertTab(insert_idx, browser, "Loading...")
+        target_widget.insertTab(insert_idx, browser, default_icon, "Loading...")
         target_widget.setCurrentIndex(insert_idx)
 
         browser.web.urlChanged.connect(lambda qurl: self._update_tab_title(browser))
@@ -995,10 +997,10 @@ class RiemannWindow(QMainWindow):
         self.recent_menu.aboutToShow.connect(self._populate_recent_menu)
 
         file_menu.addSeparator()
-
         file_actions = [
-            ("Open PDF (Ctrl+O)", None, self.open_pdf_smart),
-            ("Open New PDF Tab (Ctrl+T)", None, lambda: self.new_pdf_tab()),
+            ("Open file (Ctrl+O)", None, self.open_file_smart),
+            ("New PDF Tab (Ctrl+T)", None, lambda: self.new_pdf_tab()),
+            ("New Browser Page (Ctrl+B)", None, lambda: self.new_browser_tab()),
             (None, None, None),
             ("Split Current PDF", None, self.split_pdf),
             ("Merge PDFs", None, self.join_pdfs),
@@ -1006,7 +1008,6 @@ class RiemannWindow(QMainWindow):
             ("Convert Document...", None, self.show_convert_dialog),
             ("Compress Document...", None, self.show_compress_dialog),
             (None, None, None),
-            ("New Browser Tab (Ctrl+B)", None, lambda: self.new_browser_tab()),
             ("New Window (Ctrl+N)", None, self.new_window),
             ("New Incognito Tab (Ctrl+Shift+N)", None, self.new_incognito_window),
             (None, None, None),
@@ -1024,7 +1025,6 @@ class RiemannWindow(QMainWindow):
                     action.triggered.connect(slot)
 
         view_menu = menubar.addMenu("View")
-
         view_actions = [
             ("Bookmarks (Ctrl+K)", None, self.show_bookmarks),
             ("Downloads (Ctrl+J)", None, self.show_downloads),
@@ -1041,6 +1041,26 @@ class RiemannWindow(QMainWindow):
             if shortcut:
                 action.setShortcut(shortcut)
             action.triggered.connect(slot)
+
+        if psutil:
+            self._last_net_io = psutil.net_io_counters()
+            self._last_net_time = time.time()
+
+        self.metrics_label = QLabel(" Uptime: 00:00:00 ")
+        self.metrics_label.setTextFormat(Qt.TextFormat.RichText)
+        self.metrics_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.metrics_label.setStyleSheet(
+            "color: #888; font-size: 11px; padding-right: 15px; font-weight: bold;"
+        )
+
+        self.metrics_label.setMinimumWidth(500)
+        self.menuBar().setCornerWidget(self.metrics_label, Qt.Corner.TopRightCorner)
+
+        self.metrics_timer = QTimer(self)
+        self.metrics_timer.timeout.connect(self._update_global_metrics)
+        self.metrics_timer.start(2000)
 
     def _populate_recent_menu(self) -> None:
         """Dynamically populates the Recent menu with the latest PDFs."""
@@ -1167,9 +1187,10 @@ class RiemannWindow(QMainWindow):
         self.incognito_window = RiemannWindow(incognito=True)
         self.incognito_window.show()
 
-    def open_pdf_smart(self) -> None:
+    def open_file_smart(self) -> None:
         """
-        Handles the "Open PDF" action.
+        Handles the "Open Document" action.
+        Routes PDFs/Markdown to ReaderTab and HTML/CSS/JS to BrowserTab.
         Opens in the current tab if it's an empty reader, otherwise opens a new tab.
         Supports selecting multiple files.
         """
@@ -1178,27 +1199,38 @@ class RiemannWindow(QMainWindow):
             self,
             "Open Document",
             start_dir,
-            "Supported Files (*.pdf *.PDF *.md);;All Files (*)",
+            "Supported Files (*.pdf *.PDF *.md *.html *.css *.js);;All Files (*)",
         )
         if not paths:
             return
 
         save_last_directory(self.settings, paths[0])
-        first_path = paths[0]
-        self.add_to_history(first_path)
-        current = self.tabs_main.currentWidget()
 
-        if isinstance(current, ReaderTab) and not current.current_path:
-            current.load_document(first_path)
-            self.tabs_main.setTabText(
-                self.tabs_main.currentIndex(), os.path.basename(first_path)
-            )
-        else:
-            self.new_pdf_tab(first_path)
-
-        for path in paths[1:]:
+        for i, path in enumerate(paths):
             self.add_to_history(path)
-            self.new_pdf_tab(path)
+            is_web_file = path.lower().endswith((".html", ".css", ".js"))
+
+            if i == 0:
+                current = self.tabs_main.currentWidget()
+                if (
+                    not is_web_file
+                    and isinstance(current, ReaderTab)
+                    and not current.current_path
+                ):
+                    current.load_document(path)
+                    self.tabs_main.setTabText(
+                        self.tabs_main.currentIndex(), os.path.basename(path)
+                    )
+                elif is_web_file:
+                    self.new_browser_tab(f"file:///{path.replace(chr(92), '/')}")
+                else:
+                    self.new_pdf_tab(path)
+
+            else:
+                if is_web_file:
+                    self.new_browser_tab(f"file:///{path.replace(chr(92), '/')}")
+                else:
+                    self.new_pdf_tab(path)
 
     def toggle_split_view(self) -> None:
         """
@@ -1445,6 +1477,9 @@ class RiemannWindow(QMainWindow):
         self.dark_mode = not self.dark_mode
         self.settings.setValue("darkMode", self.dark_mode)
         self.enforce_global_stylesheet()
+
+        if hasattr(self, "_update_global_metrics"):
+            self._update_global_metrics()
 
         for tab_widget in (self.tabs_main, self.tabs_side):
             for i in range(tab_widget.count()):
@@ -1707,6 +1742,8 @@ class RiemannWindow(QMainWindow):
                 path = url.toLocalFile()
                 if path.lower().endswith(".pdf") or path.lower().endswith(".md"):
                     self.new_pdf_tab(path)
+                elif path.lower().endswith((".html", ".css", ".js")):
+                    self.new_browser_tab(f"file:///{path.replace(chr(92), '/')}")
         event.acceptProposedAction()
 
     def _show_tab_context_menu(self, pos, tab_widget: QTabWidget) -> None:
@@ -1913,6 +1950,84 @@ class RiemannWindow(QMainWindow):
                 )
                 if reply == QMessageBox.StandardButton.Yes:
                     self.new_pdf_tab(out_path)
+
+    def _get_icon_img_tag(self, icon_base: str) -> str:
+        """Generates an HTML img tag pointing to the correct local SVG based on dark mode."""
+        suffix = "-white" if getattr(self, "dark_mode", False) else ""
+        icon_name = f"{icon_base}{suffix}.svg"
+
+        path = get_resource_path(os.path.join("assets", "icons", icon_name))
+        if not os.path.exists(path) and suffix:
+            path = get_resource_path(
+                os.path.join("assets", "icons", f"{icon_base}.svg")
+            )
+
+        path = path.replace(os.sep, "/")
+        return f'<img src="file:///{path}" width="14" height="14" style="vertical-align: middle;">'
+
+    def _update_global_metrics(self) -> None:
+        """Updates the global metrics ticker in the menu bar with icons and real speeds."""
+        uptime_seconds = int(time.time() - getattr(self, "_start_time", time.time()))
+        m, s = divmod(uptime_seconds, 60)
+        h, m = divmod(m, 60)
+        uptime_str = f"{h:02d}:{m:02d}:{s:02d}"
+
+        mem_str = "--"
+        net_str = f"{self._get_icon_img_tag('arrow-big-down-dash')} -- MB/s &nbsp; {self._get_icon_img_tag('arrow-big-up-dash')} -- MB/s"
+        bat_str = f"{self._get_icon_img_tag('battery')} --%"
+
+        if psutil:
+            try:
+                process = psutil.Process(os.getpid())
+                mem_bytes = process.memory_info().rss
+                for child in process.children(recursive=True):
+                    mem_bytes += child.memory_info().rss
+                mem_mb = mem_bytes / (1024 * 1024)
+                mem_str = f"{mem_mb:.1f} MB"
+
+                current_net_io = psutil.net_io_counters()
+                current_time = time.time()
+
+                if getattr(self, "_last_net_io", None):
+                    dt = current_time - self._last_net_time
+                    if dt > 0:
+                        recv_speed = (
+                            (current_net_io.bytes_recv - self._last_net_io.bytes_recv)
+                            / dt
+                            / (1024 * 1024)
+                        )
+                        sent_speed = (
+                            (current_net_io.bytes_sent - self._last_net_io.bytes_sent)
+                            / dt
+                            / (1024 * 1024)
+                        )
+                        net_str = f"{self._get_icon_img_tag('arrow-big-down-dash')} {recv_speed:.2f} MB/s &nbsp; {self._get_icon_img_tag('arrow-big-up-dash')} {sent_speed:.2f} MB/s"
+
+                self._last_net_io = current_net_io
+                self._last_net_time = current_time
+
+                battery = psutil.sensors_battery()
+                if battery:
+                    if battery.power_plugged:
+                        bat_icon = "battery-charging"
+                    elif battery.percent > 80:
+                        bat_icon = "battery-full"
+                    elif battery.percent > 30:
+                        bat_icon = "battery-medium"
+                    elif battery.percent > 10:
+                        bat_icon = "battery-low"
+                    else:
+                        bat_icon = "battery"
+
+                    bat_str = (
+                        f"{self._get_icon_img_tag(bat_icon)} {battery.percent:.2f}%"
+                    )
+            except Exception:
+                pass
+
+        self.metrics_label.setText(
+            f" Uptime: {uptime_str} &nbsp;|&nbsp; Mem: {mem_str} &nbsp;|&nbsp; {net_str} &nbsp;|&nbsp; {bat_str} "
+        )
 
 
 def run() -> None:
