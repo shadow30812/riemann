@@ -1,13 +1,15 @@
 Markdown==3.10.1
 Nuitka==4.0
-PyMuPDF==1.27.1
+PyMuPDF==1.27.2.3
 PyMuPDFb==1.23.22
 PySide6==6.10.1
+faster-whisper==1.2.1
 ipython_pygments_lexers==1.1.1
 jupyter_client==8.8.0
 jupyter_core==5.9.1
 jupyterlab_pygments==0.3.0
 nest_asyncio==1.6.0
+opencv-python==4.13.0.92
 prompt_toolkit==3.0.52
 pyHanko==0.33.0
 pydantic_core==2.41.5

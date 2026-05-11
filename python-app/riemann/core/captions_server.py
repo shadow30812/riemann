@@ -2,6 +2,7 @@ import numpy as np
 from PySide6.QtCore import QByteArray, QObject, QThread, Signal, Slot
 from PySide6.QtNetwork import QHostAddress
 from PySide6.QtWebSockets import QWebSocket, QWebSocketServer
+from PySide6.QtWidgets import QApplication
 
 
 class WhisperWorker(QThread):
@@ -16,7 +17,7 @@ class WhisperWorker(QThread):
     def _process_chunk(self, byte_data: bytes, client_ws: object):
         """Processes the 32-bit float audio array using faster-whisper."""
         try:
-            from riemann.core import captions
+            from ..core import captions
 
             audio_array = np.frombuffer(byte_data, dtype=np.float32)
             text = captions.process_audio_chunk(audio_array)
@@ -34,6 +35,8 @@ class WhisperWorker(QThread):
 
 
 class CaptionsServer(QObject):
+    chunk_received = Signal(bytes, object)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.server = QWebSocketServer(
@@ -41,9 +44,17 @@ class CaptionsServer(QObject):
         )
         self.clients = []
 
+        self.worker_thread = QThread()
         self.worker = WhisperWorker()
-        self.worker.start()
+        self.worker.moveToThread(self.worker_thread)
+
+        self.chunk_received.connect(self.worker._process_chunk)
         self.worker.transcription_ready.connect(self.send_transcription)
+        self.worker_thread.start()
+
+        app = QApplication.instance()
+        if app:
+            app.aboutToQuit.connect(self.stop)
 
         if self.server.listen(QHostAddress.SpecialAddress.LocalHost):
             self.port = self.server.serverPort()

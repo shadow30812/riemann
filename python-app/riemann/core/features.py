@@ -1,5 +1,6 @@
 import csv
 import os
+import subprocess
 import zipfile
 
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressDialog,
     QPushButton,
     QRadioButton,
     QSlider,
@@ -675,3 +677,132 @@ class CompressionWorker(QThread):
             self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))
+
+
+class CaptionGeneratorWorker(QThread):
+    progress = Signal(str)
+    finished = Signal(bool, str)
+
+    def __init__(self, video_path):
+        super().__init__()
+        self.video_path = video_path
+
+    def format_timestamp(self, seconds: float) -> str:
+        """Formats seconds into the standard SRT timestamp format."""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        millis = int((seconds - int(seconds)) * 1000)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+    def run(self):
+        try:
+            from faster_whisper import WhisperModel
+
+            self.progress.emit("Loading Whisper 'base' model...")
+            model = WhisperModel(
+                "base", device="cpu", compute_type="int8", cpu_threads=8
+            )
+
+            self.progress.emit("Transcribing audio (this may take a few minutes)...")
+
+            segments, info = model.transcribe(
+                self.video_path,
+                beam_size=1,
+                task="translate",
+                vad_filter=True,
+                condition_on_previous_text=False,
+            )
+
+            srt_path = os.path.splitext(self.video_path)[0] + ".srt"
+
+            self.progress.emit("Writing subtitle file...")
+            with open(srt_path, "w", encoding="utf-8") as f:
+                for i, segment in enumerate(segments, start=1):
+                    start = self.format_timestamp(segment.start)
+                    end = self.format_timestamp(segment.end)
+                    f.write(f"{i}\n{start} --> {end}\n{segment.text.strip()}\n\n")
+
+            self.progress.emit("Embedding subtitles into video container...")
+            output_path = os.path.splitext(self.video_path)[0] + "_captioned.mp4"
+
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                self.video_path,
+                "-i",
+                srt_path,
+                "-c",
+                "copy",
+                "-c:s",
+                "mov_text",
+                output_path,
+            ]
+
+            subprocess.run(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True
+            )
+
+            self.finished.emit(True, f"Successfully created:\n{output_path}")
+
+        except ImportError:
+            self.finished.emit(False, "faster-whisper is not installed.")
+        except subprocess.CalledProcessError:
+            self.finished.emit(
+                False, "FFmpeg failed. Ensure it is installed on your system."
+            )
+        except Exception as e:
+            self.finished.emit(False, f"An error occurred: {str(e)}")
+
+
+def trigger_local_caption_generation(parent_window):
+    """
+    Opens a file dialog, respects app settings, and triggers the background captioning worker.
+    """
+    app_settings = QSettings("Riemann", "PDFReader")
+    default_dir = app_settings.value("app/default_dir", "", type=str)
+
+    if not default_dir or not os.path.exists(default_dir):
+        default_dir = app_settings.value(
+            "app/last_dir", "", type=str
+        ) or QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.MoviesLocation
+        )
+
+    video_path, _ = QFileDialog.getOpenFileName(
+        parent_window,
+        "Select Video for Captioning",
+        default_dir,
+        "Video Files (*.mp4 *.mkv *.avi *.mov *.webm);;All Files (*)",
+    )
+
+    if not video_path:
+        return
+
+    app_settings.setValue("app/last_dir", os.path.dirname(video_path))
+
+    progress_dialog = QProgressDialog("Initializing...", None, 0, 0, parent_window)
+    progress_dialog.setWindowTitle("Generating Captions")
+    progress_dialog.setModal(True)
+    progress_dialog.setMinimumDuration(0)
+
+    progress_dialog.setCancelButton(None)
+    worker = CaptionGeneratorWorker(video_path)
+
+    parent_window._caption_worker = worker
+    parent_window._caption_dialog = progress_dialog
+
+    worker.progress.connect(progress_dialog.setLabelText)
+
+    def on_finished(success, message):
+        progress_dialog.close()
+        if success:
+            QMessageBox.information(parent_window, "Success", message)
+        else:
+            QMessageBox.warning(parent_window, "Error", message)
+
+    worker.finished.connect(on_finished)
+
+    worker.start()
+    progress_dialog.show()

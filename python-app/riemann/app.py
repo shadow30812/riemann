@@ -33,6 +33,7 @@ from PySide6.QtCore import (
     QUrl,
 )
 from PySide6.QtGui import (
+    QAction,
     QCloseEvent,
     QCursor,
     QDragEnterEvent,
@@ -79,7 +80,11 @@ from PySide6.QtWidgets import (
 )
 
 from .core.dependencies import DependenciesDialog
-from .core.features import CompressDialog, ConvertDialog
+from .core.features import (
+    CompressDialog,
+    ConvertDialog,
+    trigger_local_caption_generation,
+)
 from .core.managers import (
     BookmarksManager,
     DownloadManager,
@@ -1021,6 +1026,11 @@ class RiemannWindow(QMainWindow):
             (None, None, None),
             ("Convert Document...", None, self.show_convert_dialog),
             ("Compress Document...", None, self.show_compress_dialog),
+            (
+                "Generate Captions...",
+                None,
+                lambda: trigger_local_caption_generation(self),
+            ),
             (None, None, None),
             ("New Window (Ctrl+N)", None, self.new_window),
             ("New Incognito Tab (Ctrl+Shift+N)", None, self.new_incognito_window),

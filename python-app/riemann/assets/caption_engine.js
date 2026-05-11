@@ -39,13 +39,57 @@
                 fontFamily: 'sans-serif',
                 fontSize: '22px',
                 zIndex: '2147483647',
-                pointerEvents: 'none',
+                pointerEvents: 'auto',
+                cursor: 'grab',
                 textAlign: 'center',
                 display: 'none',
                 textShadow: '1px 1px 2px black',
                 transition: 'opacity 0.2s',
-                maxWidth: '80%'
+                maxWidth: '80%',
+                userSelect: 'none'
             });
+
+            let isDragging = false;
+            let offsetX = 0, offsetY = 0;
+
+            this.overlay.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                this.overlay.style.cursor = 'grabbing';
+
+                if (this.overlay.style.transform !== 'none') {
+                    const rect = this.overlay.getBoundingClientRect();
+                    this.overlay.style.transform = 'none';
+                    this.overlay.style.left = `${rect.left}px`;
+                    this.overlay.style.top = `${rect.top}px`;
+                    this.overlay.style.bottom = 'auto';
+                }
+
+                const rect = this.overlay.getBoundingClientRect();
+                offsetX = e.clientX - rect.left;
+                offsetY = e.clientY - rect.top;
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                this.overlay.style.left = `${e.clientX - offsetX}px`;
+                this.overlay.style.top = `${e.clientY - offsetY}px`;
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    this.overlay.style.cursor = 'grab';
+                }
+            });
+
+            let currentFontSize = 22;
+            this.overlay.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                currentFontSize += (e.deltaY < 0) ? 2 : -2;
+                currentFontSize = Math.max(12, Math.min(64, currentFontSize));
+                this.overlay.style.fontSize = `${currentFontSize}px`;
+            }, { passive: false });
+
             document.body.appendChild(this.overlay);
         }
 
@@ -77,28 +121,37 @@
                 source.connect(this.processor);
                 this.processor.connect(this.audioCtx.destination);
 
-                let audioBuffer = [];
-                let bufferSize = 0;
-                const TARGET_SAMPLES = 16000 * 3;  
+                let rollingBuffer = [];
+                let newSamplesCount = 0;
+
+                const SAMPLE_RATE = 16000;
+                const CONTEXT_WINDOW = SAMPLE_RATE * 3;
+                const UPDATE_INTERVAL = SAMPLE_RATE * 0.8;
 
                 this.processor.onaudioprocess = (e) => {
                     if (!this.enabled || this.ws.readyState !== WebSocket.OPEN) return;
 
-                    const pcm = e.inputBuffer.getChannelData(0);
-                    audioBuffer.push(new Float32Array(pcm));
-                    bufferSize += pcm.length;
+                    const pcm = new Float32Array(e.inputBuffer.getChannelData(0));
+                    rollingBuffer.push(pcm);
+                    newSamplesCount += pcm.length;
 
-                    if (bufferSize >= TARGET_SAMPLES) {
-                        const merged = new Float32Array(bufferSize);
+                    if (newSamplesCount >= UPDATE_INTERVAL) {
+                        let totalLength = rollingBuffer.reduce((acc, arr) => acc + arr.length, 0);
+
+                        while (totalLength > CONTEXT_WINDOW && rollingBuffer.length > 1) {
+                            const removed = rollingBuffer.shift();
+                            totalLength -= removed.length;
+                        }
+
+                        const merged = new Float32Array(totalLength);
                         let offset = 0;
-                        for (let chunk of audioBuffer) {
+                        for (let chunk of rollingBuffer) {
                             merged.set(chunk, offset);
                             offset += chunk.length;
                         }
-                        this.ws.send(merged.buffer);
 
-                        audioBuffer = [];
-                        bufferSize = 0;
+                        this.ws.send(merged.buffer);
+                        newSamplesCount = 0;
                     }
                 };
             };
