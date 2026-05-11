@@ -78,6 +78,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .core.dependencies import DependenciesDialog
 from .core.features import CompressDialog, ConvertDialog
 from .core.managers import (
     BookmarksManager,
@@ -219,11 +220,19 @@ class SettingsDialog(QDialog):
         btn_clear_all.setStyleSheet("color: #d32f2f; font-weight: bold;")
         btn_clear_all.clicked.connect(self.clear_all_data)
 
+        btn_manage_deps = QPushButton("Manage External Dependencies")
+        btn_manage_deps.setStyleSheet(
+            "background-color: #1976D2; color: white; font-weight: bold;"
+        )
+        btn_manage_deps.clicked.connect(self.open_dependency_manager)
+
         group_layout.addWidget(btn_clear_history)
         group_layout.addWidget(btn_clear_downloads)
         group_layout.addWidget(btn_clear_cookies)
         group_layout.addWidget(btn_clear_cache)
         group_layout.addWidget(btn_clear_all)
+        layout.addSpacing(10)
+        group_layout.addWidget(btn_manage_deps)
         layout.addWidget(group)
 
         self.button_box = QDialogButtonBox(
@@ -308,6 +317,11 @@ class SettingsDialog(QDialog):
         )
         if directory:
             self.txt_default_dir.setText(directory)
+
+    def open_dependency_manager(self) -> None:
+        """Opens the UI to install/uninstall heavy dynamically loaded dependencies."""
+        dlg = DependenciesDialog(self)
+        dlg.exec()
 
 
 class LibrarySearchDialog(QDialog):

@@ -2,7 +2,6 @@ import csv
 import os
 import zipfile
 
-import fitz
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 from PySide6.QtCore import (
     QBuffer,
@@ -37,14 +36,25 @@ class DocumentConverter:
     @staticmethod
     def pdf_to_images(pdf_path: str, output_dir: str, dpi: int = 150) -> list[str]:
         """Renders PDF pages to PNG images."""
+        try:
+            import fitz
+        except ImportError:
+            raise Exception(
+                "Conversion requires PyMuPDF (fitz), which is excluded from this build."
+            )
+
         os.makedirs(output_dir, exist_ok=True)
         saved_paths = []
+        base_name = os.path.splitext(os.path.basename(pdf_path))[0]
 
         with fitz.open(pdf_path) as doc:
             for page_num in range(len(doc)):
                 page = doc.load_page(page_num)
                 pix = page.get_pixmap(dpi=dpi)
-                out_path = os.path.join(output_dir, f"page_{page_num + 1}.png")
+
+                filename = f"{base_name}_page_{page_num + 1}.png"
+                out_path = os.path.join(output_dir, filename)
+
                 pix.save(out_path)
                 saved_paths.append(out_path)
 
@@ -53,6 +63,13 @@ class DocumentConverter:
     @staticmethod
     def images_to_pdf(image_paths: list[str], output_path: str) -> None:
         """Combines multiple images into a single PDF."""
+        try:
+            import fitz
+        except ImportError:
+            raise Exception(
+                "Conversion requires PyMuPDF (fitz), which is excluded from this build."
+            )
+
         doc = fitz.open()
         for img_path in image_paths:
             img = fitz.open(img_path)
@@ -71,6 +88,13 @@ class DocumentConverter:
     @staticmethod
     def pdf_to_text(pdf_path: str, output_path: str, as_markdown: bool = False) -> None:
         """Extracts text from a PDF, optionally formatting as simple Markdown."""
+        try:
+            import fitz
+        except ImportError:
+            raise Exception(
+                "Conversion requires PyMuPDF (fitz), which is excluded from this build."
+            )
+
         with fitz.open(pdf_path) as doc:
             with open(output_path, "w", encoding="utf-8") as f:
                 if as_markdown:
@@ -85,6 +109,12 @@ class DocumentConverter:
     @staticmethod
     def pdf_to_html(pdf_path: str, output_path: str) -> None:
         """Extracts text and layout to raw HTML."""
+        try:
+            import fitz
+        except ImportError:
+            raise Exception(
+                "Conversion requires PyMuPDF (fitz), which is excluded from this build."
+            )
         with fitz.open(pdf_path) as doc:
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write("<html><body>\n")
@@ -190,6 +220,12 @@ class DocumentCompressor:
         Lossless: Cleans up internal structures, deflates streams.
         Custom: Re-encodes embedded images to JPEG at the specified quality.
         """
+        try:
+            import fitz
+        except ImportError:
+            raise Exception(
+                "Compression requires PyMuPDF (fitz), which is excluded from this build."
+            )
         doc = fitz.open(input_path)
 
         if not lossless:
