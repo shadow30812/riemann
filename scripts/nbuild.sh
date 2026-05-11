@@ -52,6 +52,7 @@ EXCLUDES="--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow
 EXCLUDES="$EXCLUDES --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas"
 EXCLUDES="$EXCLUDES --nofollow-import-to=nvidia --nofollow-import-to=fitz --nofollow-import-to=pymupdf" 
 EXCLUDES="$EXCLUDES --nofollow-import-to=yt_dlp.extractor.lazy_extractors --nofollow-import-to=pygments"
+EXCLUDES="$EXCLUDES --nofollow-import-to=faster_whisper --nofollow-import-to=ctranslate2 --nofollow-import-to=huggingface_hub --nofollow-import-to=tokenizers"
 
 python3 -m nuitka \
     --onefile \

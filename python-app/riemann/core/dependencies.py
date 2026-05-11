@@ -92,6 +92,7 @@ class DependenciesDialog(QDialog):
             "Pandas (Data Parsing)": "pandas",
             "YT-DLP (Video Streaming Engine)": "yt-dlp",
             "Pygments (Markdown Syntax)": "Pygments",
+            "Faster-Whisper (Live Captions)": "faster-whisper",
         }
 
         self.populate_table()

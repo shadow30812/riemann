@@ -6,7 +6,6 @@ It includes support for persistent profiles, ad-blocking, dark mode injection,
 audio processing injection (Riemann Audio), and download management.
 """
 
-import json
 import os
 import pwd
 import re
@@ -16,7 +15,11 @@ import sys
 import urllib.parse
 from typing import Any, Optional
 
-import yt_dlp
+try:
+    import yt_dlp
+except ImportError:
+    pass
+
 from PySide6.QtCore import (
     QEvent,
     QObject,
@@ -71,6 +74,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..core.captions_server import CaptionsServer
 from .browser_handlers import ScriptInjector
 
 
@@ -813,6 +817,21 @@ class BrowserTab(QWidget):
         self.btn_bookmark.setToolTip("Bookmark this page")
         self.btn_bookmark.clicked.connect(self.toggle_bookmark)
 
+        self.btn_captions = QPushButton()
+        self.btn_captions.setIcon(
+            QIcon(
+                get_resource_path(
+                    os.path.join("..", "assets", "icons", "captions-off.svg")
+                )
+            )
+        )
+        self.btn_captions.setIconSize(icon_size)
+        self.btn_captions.setObjectName("captionsBtn")
+        self.btn_captions.setFixedWidth(30)
+        self.btn_captions.setCheckable(True)
+        self.btn_captions.setToolTip("Toggle Live Captions (Any Language to English)")
+        self.btn_captions.clicked.connect(self.toggle_captions)
+
         self.btn_mute = QPushButton()
         self.btn_mute.setIcon(
             QIcon(
@@ -908,6 +927,7 @@ class BrowserTab(QWidget):
 
         tb_layout.addWidget(self.txt_url)
         tb_layout.addWidget(self.btn_bookmark)
+        tb_layout.addWidget(self.btn_captions)
         tb_layout.addWidget(self.btn_mute)
         tb_layout.addWidget(self.btn_music)
         tb_layout.addWidget(self.btn_video_speed)
@@ -1106,6 +1126,11 @@ class BrowserTab(QWidget):
         for widget_class in (QPushButton, QToolButton, QComboBox):
             for w in self.findChildren(widget_class):
                 w.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        app = QApplication.instance()
+        if not hasattr(app, "captions_server"):
+            app.captions_server = CaptionsServer()
+        self.captions_server = app.captions_server
 
         self.link_tooltip = QLabel(self)
         self.link_tooltip.setStyleSheet(
@@ -1540,6 +1565,42 @@ class BrowserTab(QWidget):
             bm.add(title, url)
             self.show_toast("Bookmark Added")
         self._update_bookmark_icon(url)
+
+    def toggle_captions(self) -> None:
+        """Toggles the live captioning overlay on the web page."""
+        is_enabled = self.btn_captions.isChecked()
+        icon_name = "captions.svg" if is_enabled else "captions-off.svg"
+        self.btn_captions.setIcon(self._get_icon(icon_name))
+
+        if is_enabled:
+            js_payload = self.get_captions_script()
+            port = self.captions_server.port if self.captions_server else 8765
+            self.web.page().runJavaScript(f"""
+                window.RIEMANN_CAPTIONS_PORT = {port};
+                {js_payload}
+                if (window.RiemannCaptions) window.RiemannCaptions.enable();
+            """)
+            self.show_toast("Live Captions Enabled")
+        else:
+            self.web.page().runJavaScript(
+                "if (window.RiemannCaptions) window.RiemannCaptions.disable();"
+            )
+            self.show_toast("Live Captions Disabled")
+
+    def get_captions_script(self) -> str:
+        """Loads the raw Javascript payload for the captions overlay engine."""
+        try:
+            candidate_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..",
+                "assets",
+                "caption_engine.js",
+            )
+            with open(candidate_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception as e:
+            print(f"[ERROR] Failed to load captions script: {e}")
+            return ""
 
     def _update_tab_title(self, title: str) -> None:
         """
@@ -1994,6 +2055,12 @@ class BrowserTab(QWidget):
             )
         self.btn_bookmark.setIcon(
             self._get_icon("bookmark-filled.svg" if is_bm else "bookmark.svg")
+        )
+
+        self.btn_captions.setIcon(
+            self._get_icon(
+                "captions.svg" if self.btn_captions.isChecked() else "captions-off.svg"
+            )
         )
 
         self.btn_mute.setIcon(

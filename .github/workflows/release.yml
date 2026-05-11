@@ -123,7 +123,7 @@ jobs:
         run: pip install pip-tools
 
       - name: Compile requirements (Windows)
-        run: pip-compile --generate-hashes --resolver=backtracking --output-file requirements/wreqs.txt requirements/requirements.in
+        run: pip-compile --resolver=backtracking --output-file requirements/wreqs.txt requirements/requirements.in
 
       - name: Upload compiled requirements
         uses: actions/upload-artifact@v4
@@ -178,7 +178,11 @@ jobs:
         run: |
           $env:PYTHONPATH = "$(Get-Location)\python-app"
           
-          $EXCLUDES = "--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow-import-to=cv2 --nofollow-import-to=pix2tex --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas --nofollow-import-to=nvidia --nofollow-import-to=fitz --nofollow-import-to=pymupdf"
+          EXCLUDES="--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow-import-to=cv2 --nofollow-import-to=pix2tex"
+          EXCLUDES="$EXCLUDES --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas"
+          EXCLUDES="$EXCLUDES --nofollow-import-to=nvidia --nofollow-import-to=fitz --nofollow-import-to=pymupdf" 
+          EXCLUDES="$EXCLUDES --nofollow-import-to=yt_dlp.extractor.lazy_extractors --nofollow-import-to=pygments"
+          EXCLUDES="$EXCLUDES --nofollow-import-to=faster_whisper --nofollow-import-to=ctranslate2 --nofollow-import-to=huggingface_hub --nofollow-import-to=tokenizers"
           $EXCLUDE_ARGS = $EXCLUDES.Split(" ")
 
           python -m nuitka `
