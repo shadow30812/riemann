@@ -1640,14 +1640,14 @@ class ReaderTab(
                     0.1, min(self.manual_scale * (1.0 + delta), 5.0)
                 )
                 self.zoom_mode = ZoomMode.MANUAL
+                if hasattr(self, "apply_visual_zoom"):
+                    self.apply_visual_zoom()
 
                 if not hasattr(self, "_zoom_debounce_timer"):
                     self._zoom_debounce_timer = QTimer(self)
                     self._zoom_debounce_timer.setSingleShot(True)
-                    self._zoom_debounce_timer.setInterval(100)
-                    self._zoom_debounce_timer.timeout.connect(
-                        self.on_zoom_changed_internal
-                    )
+                    self._zoom_debounce_timer.setInterval(250)
+                    self._zoom_debounce_timer.timeout.connect(self.on_zoom_finished)
 
                 self._zoom_debounce_timer.start()
                 return True
@@ -1739,17 +1739,34 @@ class ReaderTab(
                 pass
         self.on_zoom_changed_internal()
 
-    def on_zoom_changed_internal(self) -> None:
+    def on_zoom_finished(self) -> None:
         """
-        Executes unified internal state rebuild updating explicit dimension mappings enforcing redrawing completely robustly efficiently safely natively.
+        Fired when the user finishes zooming (debounce).
+        Triggers a high-res re-render of the visible pages without destroying widgets.
         """
         self.settings.setValue("zoomMode", self.zoom_mode.value)
         self.settings.setValue("zoomScale", self.manual_scale)
-        self._update_all_widget_sizes()
-        self.rebuild_layout()
+
         self.rendered_pages.clear()
         self.update_view()
+        self._update_zoom_combo_text()
 
+    def on_zoom_changed_internal(self) -> None:
+        """Triggered by UI buttons, shortcuts, or explicit zoom changes."""
+        self.settings.setValue("zoomMode", self.zoom_mode.value)
+        self.settings.setValue("zoomScale", self.manual_scale)
+
+        if hasattr(self, "apply_visual_zoom"):
+            self.apply_visual_zoom()
+        else:
+            self._update_all_widget_sizes()
+
+        self.rendered_pages.clear()
+        self.update_view()
+        self._update_zoom_combo_text()
+
+    def _update_zoom_combo_text(self) -> None:
+        """Helper to update the UI combobox with the current scale."""
         current_scale = self.calculate_scale()
         pct = int(current_scale * 100)
 
@@ -1763,7 +1780,6 @@ class ReaderTab(
             txt = f"{pct}%"
 
         self.combo_zoom.setCurrentText(txt)
-
         fm = self.combo_zoom.fontMetrics()
         max_width = fm.horizontalAdvance(txt) + 40
         self.combo_zoom.setFixedWidth(max(100, max_width))

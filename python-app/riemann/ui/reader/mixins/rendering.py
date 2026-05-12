@@ -184,9 +184,12 @@ class RenderingMixin:
         lbl = PageWidget()
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setProperty("pageIndex", index)
+        lbl.setScaledContents(True)
+
         w, h = self._get_target_page_size()
         lbl.setFixedSize(w, h)
         bg = "#333" if self.theme_mode != 0 else "#fff"
+
         lbl.setStyleSheet(f"background-color: {bg}; border: 1px solid #555;")
         lbl.installEventFilter(self)
         return lbl
@@ -610,3 +613,23 @@ class RenderingMixin:
         self.rotation = (self.rotation - 90) % 360
         self._cached_base_size = None
         self.on_zoom_changed_internal()
+
+    def apply_visual_zoom(self) -> None:
+        """
+        Updates the physical dimensions of the layout and active widgets immediately
+        without waiting for the backend to re-render or rebuilding the DOM.
+        """
+        self._update_all_widget_sizes()
+
+        if self._virtual_enabled and self._cached_base_size:
+            _, base_h = self._cached_base_size
+            scale = self.calculate_scale()
+            page_height = int(base_h * scale) + self.scroll_layout.spacing()
+
+            start, end = self._virtual_range
+            if getattr(self, "_top_spacer", None):
+                self._top_spacer.setFixedHeight(max(0, start * page_height))
+
+            if getattr(self, "_bottom_spacer", None) and self.current_doc:
+                count = self.current_doc.page_count
+                self._bottom_spacer.setFixedHeight(max(0, (count - end) * page_height))
