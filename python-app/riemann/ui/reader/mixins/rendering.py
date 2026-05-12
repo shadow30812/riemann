@@ -51,6 +51,7 @@ class RenderingMixin:
         target_max = sb.maximum()
 
         self.page_widgets.clear()
+        self.rendered_pages.clear()
         self._virtual_enabled = False
         self._virtual_range = (0, 0)
 
