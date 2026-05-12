@@ -8,7 +8,16 @@ import sys
 from typing import Dict, Tuple
 
 from PySide6.QtCore import QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygon, QTransform
+from PySide6.QtGui import (
+    QColor,
+    QCursor,
+    QImage,
+    QPainter,
+    QPen,
+    QPixmap,
+    QPolygon,
+    QTransform,
+)
 from PySide6.QtWidgets import QApplication, QCheckBox, QHBoxLayout, QLineEdit, QWidget
 
 from ....core.constants import ViewMode, ZoomMode
@@ -617,8 +626,28 @@ class RenderingMixin:
     def apply_visual_zoom(self) -> None:
         """
         Updates the physical dimensions of the layout and active widgets immediately
+        while mathematically anchoring the document to prevent bouncing/vibration
         without waiting for the backend to re-render or rebuilding the DOM.
         """
+        if not hasattr(self, "scroll") or not self.scroll:
+            return
+
+        viewport = self.scroll.viewport()
+        vbar = self.scroll.verticalScrollBar()
+        hbar = self.scroll.horizontalScrollBar()
+
+        mouse_pos = viewport.mapFromGlobal(QCursor.pos())
+        if viewport.rect().contains(mouse_pos):
+            mx, my = mouse_pos.x(), mouse_pos.y()
+        else:
+            mx, my = viewport.width() / 2, viewport.height() / 2
+
+        old_total_h = vbar.maximum() + viewport.height()
+        old_total_w = hbar.maximum() + viewport.width()
+
+        ratio_y = (vbar.value() + my) / old_total_h if old_total_h > 0 else 0
+        ratio_x = (hbar.value() + mx) / old_total_w if old_total_w > 0 else 0
+
         self._update_all_widget_sizes()
 
         if self._virtual_enabled and self._cached_base_size:
@@ -633,3 +662,23 @@ class RenderingMixin:
             if getattr(self, "_bottom_spacer", None) and self.current_doc:
                 count = self.current_doc.page_count
                 self._bottom_spacer.setFixedHeight(max(0, (count - end) * page_height))
+
+        QApplication.processEvents()
+
+        new_total_h = vbar.maximum() + viewport.height()
+        new_total_w = hbar.maximum() + viewport.width()
+
+        target_y = (ratio_y * new_total_h) - my
+        target_x = (ratio_x * new_total_w) - mx
+
+        was_v_blocked = vbar.signalsBlocked()
+        was_h_blocked = hbar.signalsBlocked()
+
+        vbar.blockSignals(True)
+        hbar.blockSignals(True)
+
+        vbar.setValue(int(target_y))
+        hbar.setValue(int(target_x))
+
+        vbar.blockSignals(was_v_blocked)
+        hbar.blockSignals(was_h_blocked)
