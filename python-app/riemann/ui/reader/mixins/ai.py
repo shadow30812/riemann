@@ -498,11 +498,20 @@ class AiMixin:
 
     def _kill_ai_engine(self) -> None:
         """
-        Safely terminates the child AI engine subprocess during application teardown.
+        Safely terminates the child AI engine subprocess and cleans up WebSockets
+        during application teardown or when the parent tab is closed.
         """
+        if hasattr(self, "_ws_client") and self._ws_client.isValid():
+            self._ws_client.close()
+            self._ws_client.deleteLater()
+
         process = getattr(self, "ai_process", None)
         if process:
             process.terminate()
+            try:
+                process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
             self.ai_process = None
 
         if (

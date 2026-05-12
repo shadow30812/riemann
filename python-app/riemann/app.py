@@ -1337,6 +1337,8 @@ class RiemannWindow(QMainWindow):
                 if widget.web.page():
                     widget.web.page().deleteLater()
                 widget.web.deleteLater()
+            elif isinstance(widget, ReaderTab):
+                widget.cleanup()
             widget.deleteLater()
 
         self.tabs_main.removeTab(index)
@@ -1358,6 +1360,8 @@ class RiemannWindow(QMainWindow):
                 widget.web.setHtml("")
                 if widget.web.page():
                     widget.web.page().deleteLater()
+            elif isinstance(widget, ReaderTab):
+                widget.cleanup()
 
             if widget == getattr(self, "tree_signatures", None):
                 active_main = self.tabs_main.currentWidget()

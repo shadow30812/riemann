@@ -1065,10 +1065,23 @@ class ReaderTab(
         QScroller.grabGesture(
             self.scroll.viewport(), QScroller.ScrollerGestureType.LeftMouseButtonGesture
         )
-        props = QScroller.scroller(self.scroll.viewport()).scrollerProperties()
-        props.setScrollMetric(QScrollerProperties.ScrollMetric.DecelerationFactor, 0.5)
-        props.setScrollMetric(QScrollerProperties.ScrollMetric.MaximumVelocity, 0.8)
-        QScroller.scroller(self.scroll.viewport()).setScrollerProperties(props)
+        scroller = QScroller.scroller(self.scroll.viewport())
+        props = scroller.scrollerProperties()
+        props.setScrollMetric(QScrollerProperties.ScrollMetric.DecelerationFactor, 0.01)
+        props.setScrollMetric(QScrollerProperties.ScrollMetric.MaximumVelocity, 25)
+
+        props.setScrollMetric(
+            QScrollerProperties.ScrollMetric.ScrollingCurve, QEasingCurve.Type.OutCubic
+        )
+        props.setScrollMetric(
+            QScrollerProperties.ScrollMetric.DragVelocitySmoothingFactor, 0.8
+        )
+        props.setScrollMetric(
+            QScrollerProperties.ScrollMetric.VerticalOvershootPolicy,
+            QScrollerProperties.OvershootPolicy.OvershootAlwaysOn,
+        )
+
+        scroller.setScrollerProperties(props)
 
     def _get_closest_page(self, value: int) -> int:
         """
@@ -2454,3 +2467,28 @@ class ReaderTab(
 
         if hasattr(self, "anno_toolbar"):
             self.anno_toolbar._update_icons()
+
+    def cleanup(self) -> None:
+        """Explicitly severs references to heavy resources to trigger native destructors."""
+        self.scroll_timer.stop()
+        self.autoscroll_timer.stop()
+        if hasattr(self, "_zoom_debounce_timer"):
+            self._zoom_debounce_timer.stop()
+
+        self.rendered_pages.clear()
+        self.text_segments_cache.clear()
+        self.form_values_cache.clear()
+
+        for w in self.page_widgets.values():
+            w.clear()
+        self.page_widgets.clear()
+
+        self.current_doc = None
+        self.engine = None
+
+        if hasattr(self, "web"):
+            self.web.setHtml("")
+            self.web.deleteLater()
+
+        if hasattr(self, "_kill_ai_engine"):
+            self._kill_ai_engine()
