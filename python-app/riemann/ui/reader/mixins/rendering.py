@@ -573,8 +573,9 @@ class RenderingMixin:
         try:
             max_w, max_h = 0, 0
             test_scale = 0.1
+            probe_limit = min(5, self.current_doc.page_count)
 
-            for i in range(self.current_doc.page_count):
+            for i in range(probe_limit):
                 res = self.current_doc.render_page(i, test_scale, 0)
 
                 w = int(res.width / test_scale)

@@ -5,6 +5,7 @@ The main aggregator class that combines all mixins to provide
 the full PDF reading experience.
 """
 
+import gc
 import os
 import shutil
 import sys
@@ -39,6 +40,7 @@ from PySide6.QtGui import (
     QPainter,
     QPalette,
     QPixmap,
+    QPixmapCache,
     QShortcut,
     QWheelEvent,
 )
@@ -2475,13 +2477,39 @@ class ReaderTab(
         if hasattr(self, "_zoom_debounce_timer"):
             self._zoom_debounce_timer.stop()
 
+        if hasattr(self, "load_worker") and self.load_worker:
+            try:
+                self.load_worker.finished.disconnect()
+                self.load_worker.error.disconnect()
+            except Exception:
+                pass
+            self.load_worker.engine = None
+            if self.load_worker.isRunning():
+                self.load_worker.quit()
+                self.load_worker.wait(1000)
+            self.load_worker.deleteLater()
+            self.load_worker = None
+
         self.rendered_pages.clear()
         self.text_segments_cache.clear()
         self.form_values_cache.clear()
 
         for w in self.page_widgets.values():
             w.clear()
+            w.deleteLater()
         self.page_widgets.clear()
+
+        for widgets_list in self.form_widgets.values():
+            for fw in widgets_list:
+                fw.deleteLater()
+        self.form_widgets.clear()
+
+        if hasattr(self, "current_doc") and self.current_doc:
+            if hasattr(self.current_doc, "close"):
+                try:
+                    self.current_doc.close()
+                except Exception:
+                    pass
 
         self.current_doc = None
         self.engine = None
@@ -2492,3 +2520,6 @@ class ReaderTab(
 
         if hasattr(self, "_kill_ai_engine"):
             self._kill_ai_engine()
+
+        QPixmapCache.clear()
+        gc.collect()
