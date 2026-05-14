@@ -200,7 +200,7 @@ class ReaderTab(
         self.search_result: Optional[Tuple[int, List[Tuple[float, ...]]]] = None
         self.text_segments_cache: Dict[int, List[Tuple[str, Tuple[float, ...]]]] = {}
 
-        self.virtual_threshold: int = 300
+        self.virtual_threshold: int = 15
         self._virtual_enabled: bool = False
         self._top_spacer: Optional[QWidget] = None
         self._bottom_spacer: Optional[QWidget] = None
@@ -1105,7 +1105,11 @@ class ReaderTab(
             _, base_h = self._cached_base_size
             ph = int(base_h * self.calculate_scale()) + self.scroll_layout.spacing()
             if ph > 0:
-                return min(self.current_doc.page_count - 1, max(0, int(center / ph)))
+                return (
+                    min(self.current_doc.page_count - 1, max(0, int(center / ph) * 2))
+                    if getattr(self, "facing_mode", False)
+                    else min(self.current_doc.page_count - 1, max(0, int(center / ph)))
+                )
 
         closest, min_dist = self.current_page_index, inf
         for idx, widget in self.page_widgets.items():
@@ -1161,17 +1165,14 @@ class ReaderTab(
 
         if closest != self.current_page_index:
             self.current_page_index = closest
-
-        if closest != self.current_page_index:
-            self.current_page_index = closest
             if self.current_doc:
                 self.txt_page.setText(str(closest + 1))
 
         if self._virtual_enabled:
             s, e = self._virtual_range
             count = self.current_doc.page_count
-            if (self.current_page_index > e - 10 and e < count) or (
-                self.current_page_index < s + 10 and s > 0
+            if (self.current_page_index > e - 5 and e < count) or (
+                self.current_page_index < s + 3 and s > 0
             ):
                 self.rebuild_layout()
 
@@ -1194,7 +1195,12 @@ class ReaderTab(
             _, bh = self._cached_base_size
             ph = int(bh * self.calculate_scale()) + self.scroll_layout.spacing()
             top = self._top_spacer.height() if self._top_spacer else 0
-            y = top + max(0, index - start) * ph
+
+            y = (
+                top + max(0, (index // 2) - (start // 2)) * ph
+                if getattr(self, "facing_mode", False)
+                else top + max(0, index - start) * ph
+            )
             self.scroll.verticalScrollBar().setValue(
                 max(0, int(y - self.scroll.viewport().height() / 2))
             )

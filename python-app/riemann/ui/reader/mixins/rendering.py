@@ -91,7 +91,6 @@ class RenderingMixin:
         def _finalize_rebuild():
             self.current_page_index = target_page
             self._ignore_scroll = False
-            self.ensure_visible(target_page)
 
         QTimer.singleShot(50, _finalize_rebuild)
 
@@ -104,10 +103,13 @@ class RenderingMixin:
             count (int): The total number of pages in the current document.
         """
         self._virtual_enabled = True
-        buf_before = 30
-        buf_after = 40
+        buf_before = 5
+        buf_after = 10
         start = max(0, self.current_page_index - buf_before)
         end = min(count, self.current_page_index + buf_after)
+
+        if getattr(self, "facing_mode", False) and start % 2 != 0:
+            start = max(0, start - 1)
         self._virtual_range = (start, end)
 
         if not self._cached_base_size:
@@ -117,14 +119,25 @@ class RenderingMixin:
         scale = self.calculate_scale()
         page_height = int(base_h * scale) + self.scroll_layout.spacing()
 
+        top_spacer_height = (
+            (start // 2) * page_height
+            if getattr(self, "facing_mode", False)
+            else start * page_height
+        )
+        bottom_spacer_height = (
+            max(0, (((count + 1) // 2) - ((end + 1) // 2)) * page_height)
+            if getattr(self, "facing_mode", False)
+            else max(0, (count - end) * page_height)
+        )
+
         self._top_spacer = QWidget()
-        self._top_spacer.setFixedHeight(max(0, start * page_height))
+        self._top_spacer.setFixedHeight(max(0, top_spacer_height))
         self.scroll_layout.addWidget(self._top_spacer)
 
         self._create_widgets_for_range(start, end)
 
         self._bottom_spacer = QWidget()
-        self._bottom_spacer.setFixedHeight(max(0, (count - end) * page_height))
+        self._bottom_spacer.setFixedHeight(bottom_spacer_height)
         self.scroll_layout.addWidget(self._bottom_spacer)
 
     def _build_standard_layout(self, count: int) -> None:
@@ -656,14 +669,24 @@ class RenderingMixin:
             _, base_h = self._cached_base_size
             scale = self.calculate_scale()
             page_height = int(base_h * scale) + self.scroll_layout.spacing()
-
             start, end = self._virtual_range
-            if getattr(self, "_top_spacer", None):
-                self._top_spacer.setFixedHeight(max(0, start * page_height))
 
+            doc_count = self.current_doc.page_count if self.current_doc else end
+            top_spacer_height = (
+                (start // 2) * page_height
+                if getattr(self, "facing_mode", False)
+                else start * page_height
+            )
+            bottom_spacer_height = (
+                max(0, (((doc_count + 1) // 2) - ((end + 1) // 2)) * page_height)
+                if getattr(self, "facing_mode", False)
+                else max(0, (doc_count - end) * page_height)
+            )
+
+            if getattr(self, "_top_spacer", None):
+                self._top_spacer.setFixedHeight(max(0, top_spacer_height))
             if getattr(self, "_bottom_spacer", None) and self.current_doc:
-                count = self.current_doc.page_count
-                self._bottom_spacer.setFixedHeight(max(0, (count - end) * page_height))
+                self._bottom_spacer.setFixedHeight(max(0, bottom_spacer_height))
 
         QApplication.processEvents()
 
