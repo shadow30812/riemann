@@ -5,6 +5,28 @@ const defaultLinks = [
 ];
 
 /**
+ * Advanced fallback sequence for offline/missing favicons:
+ * 1. Native website's /favicon.ico (If Google's API drops)
+ * 2. Riemann's injected Local Icon Cache (If completely offline)
+ * 3. Default Riemann Globe Icon (If all else fails)
+ */
+window.handleIconError = function (img, hostname) {
+    if (!img.dataset.stage) {
+        img.dataset.stage = '1';
+        img.src = 'https://' + hostname + '/favicon.ico';
+    } else if (img.dataset.stage === '1') {
+        img.dataset.stage = '2';
+        if (window.cachedIcons && window.cachedIcons[hostname]) {
+            img.src = window.cachedIcons[hostname];
+        } else {
+            img.outerHTML = '<div class="icon">🌐</div>';
+        }
+    } else {
+        img.outerHTML = '<div class="icon">🌐</div>';
+    }
+};
+
+/**
  * Serializes and saves the user's quick links to the host application via a custom URL scheme.
  *
  * @param {Array<Object>} links - Array of link objects containing name and url properties.
@@ -109,7 +131,7 @@ function renderGrid(links) {
         }
 
         const iconHtml = hostname
-            ? `<img src="https://www.google.com/s2/favicons?domain=${hostname}&sz=64" class="icon-img" alt="icon" onerror="this.outerHTML='<div class=\\'icon\\'>🌐</div>'">`
+            ? `<img src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(link.url)}&sz=64" class="icon-img" alt="icon" onerror="window.handleIconError(this, '${hostname}')">`
             : `<div class="icon">🌐</div>`;
 
         a.innerHTML = `${iconHtml}<div class="title">${link.name}</div>`;

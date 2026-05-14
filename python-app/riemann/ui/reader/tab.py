@@ -10,7 +10,6 @@ import os
 import shutil
 import sys
 import urllib.parse
-from math import inf
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pikepdf

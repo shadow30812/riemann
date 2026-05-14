@@ -6,6 +6,8 @@ It includes support for persistent profiles, ad-blocking, dark mode injection,
 audio processing injection (Riemann Audio), and download management.
 """
 
+import base64
+import json
 import os
 import pwd
 import re
@@ -21,7 +23,10 @@ except ImportError:
     pass
 
 from PySide6.QtCore import (
+    QBuffer,
+    QByteArray,
     QEvent,
+    QIODevice,
     QObject,
     QSettings,
     QSize,
@@ -1172,7 +1177,13 @@ class BrowserTab(QWidget):
                     name = os.getlogin()
 
             links = settings.value("homepage_links", "null")
-            js_code = f"window.initHomepage('{name}', {links});"
+            fav_settings = QSettings("Riemann", "FaviconCache")
+            cached_icons = {}
+            for key in fav_settings.allKeys():
+                cached_icons[key] = fav_settings.value(key, "", type=str)
+            icons_json = json.dumps(cached_icons)
+
+            js_code = f"window.cachedIcons = {icons_json}; window.initHomepage('{name}', {links});"
             self.web.page().runJavaScript(js_code)
 
     def _on_feature_permission_requested(
@@ -1643,6 +1654,22 @@ class BrowserTab(QWidget):
                 break
 
             parent = parent.parent()
+
+        if not icon.isNull():
+            url = self.web.url()
+            host = url.host()
+            if host and host not in ["riemann-save.local", "newtab"]:
+                pixmap = icon.pixmap(64, 64)
+                if not pixmap.isNull():
+                    byte_array = QByteArray()
+                    buffer = QBuffer(byte_array)
+                    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                    pixmap.save(buffer, "PNG")
+                    b64_data = base64.b64encode(byte_array.data()).decode("utf-8")
+                    data_uri = f"data:image/png;base64,{b64_data}"
+
+                    fav_settings = QSettings("Riemann", "FaviconCache")
+                    fav_settings.setValue(host, data_uri)
 
     def get_audio_script(self) -> str:
         """
