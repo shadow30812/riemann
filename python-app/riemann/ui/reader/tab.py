@@ -14,6 +14,7 @@ from math import inf
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pikepdf
+import shiboken6
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
@@ -2485,9 +2486,18 @@ class ReaderTab(
                 pass
             self.load_worker.engine = None
             if self.load_worker.isRunning():
+                self.load_worker.requestInterruption()
                 self.load_worker.quit()
-                self.load_worker.wait(1000)
-            self.load_worker.deleteLater()
+
+                if not self.load_worker.wait(1000):
+                    print("Worker thread stuck! Forcing termination...")
+                    self.load_worker.terminate()
+                    self.load_worker.wait()
+
+            try:
+                self.load_worker.deleteLater()
+            except RuntimeError:
+                pass
             self.load_worker = None
 
         self.rendered_pages.clear()
@@ -2496,6 +2506,9 @@ class ReaderTab(
 
         for w in self.page_widgets.values():
             w.clear()
+            w.setParent(None)
+            if hasattr(self, "scroll_layout"):
+                self.scroll_layout.removeWidget(w)
             w.deleteLater()
         self.page_widgets.clear()
 
@@ -2505,21 +2518,43 @@ class ReaderTab(
         self.form_widgets.clear()
 
         if hasattr(self, "current_doc") and self.current_doc:
-            if hasattr(self.current_doc, "close"):
-                try:
-                    self.current_doc.close()
-                except Exception:
-                    pass
+            try:
+                self.current_doc.close()
+            except Exception:
+                pass
 
         self.current_doc = None
         self.engine = None
 
         if hasattr(self, "web"):
-            self.web.setHtml("")
-            self.web.deleteLater()
+            try:
+                if shiboken6.isValid(self.web):
+                    self.web.stop()
+                    page = self.web.page()
+                    if page and shiboken6.isValid(page):
+                        profile = page.profile()
+                        if profile:
+                            profile.clearHttpCache()
+                        page.deleteLater()
+
+                    self.web.setHtml("")
+                    self.web.setParent(None)
+                    self.web.deleteLater()
+            except RuntimeError:
+                pass
+
+            self.web = None
 
         if hasattr(self, "_kill_ai_engine"):
             self._kill_ai_engine()
 
+        if hasattr(self, "window") and hasattr(self.window(), "_caption_worker"):
+            worker = self.window()._caption_worker
+            if worker and worker.isRunning():
+                worker.requestInterruption()
+                worker.quit()
+                worker.wait(1000)
+
         QPixmapCache.clear()
+        QApplication.processEvents()
         gc.collect()

@@ -6,8 +6,10 @@ application entry point. It orchestrates the UI layout, tab management
 (split-view), global keyboard shortcuts, and session persistence.
 """
 
+import gc
 import os
 import sys
+import tracemalloc
 
 # os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "9222")
 
@@ -33,7 +35,6 @@ from PySide6.QtCore import (
     QUrl,
 )
 from PySide6.QtGui import (
-    QAction,
     QCloseEvent,
     QCursor,
     QDragEnterEvent,
@@ -41,6 +42,7 @@ from PySide6.QtGui import (
     QDropEvent,
     QIcon,
     QKeySequence,
+    QPixmapCache,
     QShortcut,
 )
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -94,6 +96,8 @@ from .core.managers import (
 from .ui.browser import BrowserTab
 from .ui.components import DraggableTabWidget
 from .ui.reader import ReaderTab
+
+tracemalloc.start()
 
 
 def get_resource_path(relative_path: str) -> str:
@@ -520,6 +524,54 @@ class RiemannWindow(QMainWindow):
         self.hover_timer.timeout.connect(self._check_auto_hide)
 
         self.enforce_global_stylesheet()
+
+        from PySide6.QtGui import QKeySequence, QShortcut
+
+        self.mem_shortcut = QShortcut(QKeySequence("Ctrl+M"), self)
+        self.mem_shortcut.activated.connect(self._diagnose_memory_leak)
+
+    def _diagnose_memory_leak(self):
+        print("\n" + "=" * 40)
+        print("🔍 RUNNING MEMORY DIAGNOSTICS...")
+        print("=" * 40)
+
+        gc.collect()
+
+        print("\n[ SURVIVING C++ / QT OBJECTS ]")
+        counts = {}
+        for obj in gc.get_objects():
+            try:
+                t_name = type(obj).__name__
+                if t_name in [
+                    "PageWidget",
+                    "QPixmap",
+                    "QImage",
+                    "PdfReader",
+                    "QLabel",
+                    "QWebEnginePage",
+                    "RenderingMixin",
+                ]:
+                    counts[t_name] = counts.get(t_name, 0) + 1
+            except Exception:
+                pass
+
+        if not counts:
+            print("  No suspect Qt objects found in memory.")
+        else:
+            for obj_type, count in sorted(
+                counts.items(), key=lambda x: x[1], reverse=True
+            ):
+                print(f"  🚨 Found {count} orphaned instance(s) of {obj_type}")
+
+        print("\n[ TOP 5 RAW MEMORY HOGS (Lines of Code) ]")
+        snapshot = tracemalloc.take_snapshot()
+        top_stats = snapshot.statistics("lineno")
+
+        for index, stat in enumerate(top_stats[:5], 1):
+            size_mb = stat.size / 1024 / 1024
+            print(f"  {index}. {stat.traceback[0]} -> {size_mb:.2f} MB")
+
+        print("=" * 40 + "\n")
 
     def _init_shortcuts(self) -> None:
         """
@@ -1339,9 +1391,15 @@ class RiemannWindow(QMainWindow):
                 widget.web.deleteLater()
             elif isinstance(widget, ReaderTab):
                 widget.cleanup()
-            widget.deleteLater()
 
         self.tabs_main.removeTab(index)
+        try:
+            import shiboken6
+
+            if shiboken6.isValid(widget):
+                widget.deleteLater()
+        except RuntimeError:
+            pass
         self._check_all_tabs_closed()
 
     def close_side_tab(self, index: int) -> None:
@@ -1368,7 +1426,13 @@ class RiemannWindow(QMainWindow):
                 if active_main:
                     active_main._sig_panel_dismissed = True
             else:
-                widget.deleteLater()
+                try:
+                    import shiboken6
+
+                    if shiboken6.isValid(widget):
+                        widget.deleteLater()
+                except RuntimeError:
+                    pass
 
         self.tabs_side.removeTab(index)
         if self.tabs_side.count() == 0:
@@ -2084,6 +2148,8 @@ def run() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("Riemann")
     app.setDesktopFileName("Riemann.desktop")
+
+    QPixmapCache.setCacheLimit(153600)
 
     window = RiemannWindow()
     args = app.arguments()

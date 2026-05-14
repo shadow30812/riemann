@@ -13,6 +13,7 @@ import sys
 import threading
 from typing import Any
 
+import psutil
 from PIL import Image
 from PySide6.QtCore import QBuffer, QObject, QRect, Qt, QTimer, QUrl, Signal
 from PySide6.QtWebSockets import QWebSocket
@@ -507,11 +508,23 @@ class AiMixin:
 
         process = getattr(self, "ai_process", None)
         if process:
-            process.terminate()
             try:
-                process.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                process.kill()
+                parent = psutil.Process(process.pid)
+                children = parent.children(recursive=True)
+
+                for child in children:
+                    child.terminate()
+
+                parent.terminate()
+                gone, alive = psutil.wait_procs(children + [parent], timeout=2.0)
+                for p in alive:
+                    p.kill()
+
+            except psutil.NoSuchProcess:
+                pass
+            except Exception as e:
+                print(f"Error killing AI tree: {e}")
+
             self.ai_process = None
 
         if (
