@@ -1099,32 +1099,19 @@ class ReaderTab(
         if not self.current_doc:
             return self.current_page_index
 
-        center = value + (self.scroll.viewport().height() / 2)
+        scale = self.calculate_scale()
+        base_h = self._cached_base_size[1] if self._cached_base_size else 842
+        ph = int(base_h * scale) + self.scroll_layout.spacing()
+        threshold_y = value + (self.scroll.viewport().height() / 2)
 
-        if self._virtual_enabled and self._cached_base_size:
-            _, base_h = self._cached_base_size
-            ph = int(base_h * self.calculate_scale()) + self.scroll_layout.spacing()
-            if ph > 0:
-                return (
-                    min(self.current_doc.page_count - 1, max(0, int(center / ph) * 2))
-                    if getattr(self, "facing_mode", False)
-                    else min(self.current_doc.page_count - 1, max(0, int(center / ph)))
-                )
+        if ph <= 0:
+            return self.current_page_index
 
-        closest, min_dist = self.current_page_index, inf
-        for idx, widget in self.page_widgets.items():
-            try:
-                row_widget = widget.parentWidget()
-                if not row_widget:
-                    continue
-                w_center = row_widget.pos().y() + (widget.height() / 2)
-                dist = abs(w_center - center)
-                if dist < min_dist:
-                    min_dist = dist
-                    closest = idx
-            except Exception:
-                continue
-        return closest
+        return (
+            min(self.current_doc.page_count - 1, max(0, int(threshold_y / ph) * 2))
+            if getattr(self, "facing_mode", False)
+            else min(self.current_doc.page_count - 1, max(0, int(threshold_y / ph)))
+        )
 
     def defer_scroll_update(self, value: int) -> None:
         """
@@ -1780,6 +1767,9 @@ class ReaderTab(
 
         if hasattr(self, "apply_visual_zoom"):
             self.apply_visual_zoom()
+            self.current_page_index = self._get_closest_page(
+                self.scroll.verticalScrollBar().value()
+            )
         else:
             self._update_all_widget_sizes()
 
