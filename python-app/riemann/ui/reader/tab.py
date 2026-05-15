@@ -518,6 +518,12 @@ class ReaderTab(
         self.btn_next.setIconSize(icon_size)
         self.btn_next.clicked.connect(self.next_view)
 
+        self.btn_zoom_out = QPushButton()
+        self.btn_zoom_out.setIcon(self._get_icon("minus.svg"))
+        self.btn_zoom_out.setIconSize(icon_size)
+        self.btn_zoom_out.setToolTip("Zoom Out")
+        self.btn_zoom_out.clicked.connect(lambda: self.zoom_step(0.9))
+
         self.combo_zoom = QComboBox()
         self.combo_zoom.setEditable(True)
         self.combo_zoom.addItems(
@@ -535,6 +541,12 @@ class ReaderTab(
         )
         self.combo_zoom.currentIndexChanged.connect(self.on_zoom_selected)
         self.combo_zoom.lineEdit().returnPressed.connect(self.on_zoom_text_entered)
+
+        self.btn_zoom_in = QPushButton()
+        self.btn_zoom_in.setIcon(self._get_icon("plus.svg"))
+        self.btn_zoom_in.setIconSize(icon_size)
+        self.btn_zoom_in.setToolTip("Zoom In")
+        self.btn_zoom_in.clicked.connect(lambda: self.zoom_step(1.1))
 
         self.btn_theme = QPushButton()
         self.btn_theme.setIcon(
@@ -626,7 +638,9 @@ class ReaderTab(
             self.txt_page,
             self.lbl_total,
             self.btn_next,
+            self.btn_zoom_out,
             self.combo_zoom,
+            self.btn_zoom_in,
             self.btn_theme,
             self.btn_fullscreen,
             self.btn_secure_export,
@@ -1276,11 +1290,6 @@ class ReaderTab(
 
         if self.window() and isinstance(self.window(), RiemannWindow):
             self.window().toggle_reader_fullscreen()
-
-    def update_fullscreen_icon(self, state: int) -> None:
-        """Updates the fullscreen button icon based on the window state."""
-        icons = {0: "panel-top.svg", 1: "maximize.svg", 2: "minimize.svg"}
-        self.btn_fullscreen.setIcon(self._get_icon(icons.get(state, "maximize.svg")))
 
     def open_pdf_dialog(self) -> None:
         """
@@ -2283,6 +2292,25 @@ class ReaderTab(
                 else:
                     self.setFocus()
 
+    def focusNextPrevChild(self, next: bool) -> bool:
+        """
+        Intercepts Tab and Shift+Tab to intuitively cycle PDF pages
+        instead of relying on Qt's default focus chain which resets to page 0.
+        """
+        focus_widget = QApplication.focusWidget()
+
+        if isinstance(focus_widget, (QLineEdit, QComboBox)):
+            return super().focusNextPrevChild(next)
+
+        if getattr(self, "view_mode", None) == ViewMode.IMAGE:
+            if next:
+                self.next_view()
+            else:
+                self.prev_view()
+            return True
+
+        return super().focusNextPrevChild(next)
+
     def _get_or_create_web_view(self) -> QWebEngineView:
         """Instantiates the Chromium view only when actively needed."""
         if not hasattr(self, "web"):
@@ -2456,16 +2484,23 @@ class ReaderTab(
         self.btn_rename.setIcon(self._get_icon("rename.svg"))
         self.btn_export.setIcon(self._get_icon("file-output.svg"))
         self.btn_print.setIcon(self._get_icon("printer.svg"))
+        
         self.btn_cite.setIcon(self._get_icon("text-quote.svg"))
         self.btn_rotate.setIcon(self._get_icon("rotate-cw.svg"))
         self.btn_rotate_ccw.setIcon(self._get_icon("rotate-ccw.svg"))
         self.btn_reflow.setIcon(self._get_icon("file-text.svg"))
         self.btn_facing.setIcon(self._get_icon("book-open.svg"))
+
         self.btn_scroll_mode.setIcon(self._get_icon("scroll.svg"))
         self.btn_annotate.setIcon(self._get_icon("pen-line.svg"))
         self.btn_snip.setIcon(self._get_icon("crop.svg"))
         self.btn_prev.setIcon(self._get_icon("chevron-left.svg"))
         self.btn_next.setIcon(self._get_icon("chevron-right.svg"))
+
+        if hasattr(self, "btn_zoom_out") or hasattr(self, "btn_zoom_in"):
+            self.btn_zoom_out.setIcon(self._get_icon("minus.svg"))
+            self.btn_zoom_in.setIcon(self._get_icon("plus.svg"))
+
         self.btn_autoscroll_up.setIcon(self._get_icon("move-up.svg"))
         self.btn_autoscroll_down.setIcon(self._get_icon("move-down.svg"))
 
@@ -2477,9 +2512,15 @@ class ReaderTab(
             icon = "sun-moon.svg"
         self.btn_theme.setIcon(self._get_icon(icon))
 
-        state = getattr(self.window(), "_fullscreen_state", 0)
-        self.update_fullscreen_icon(state)
-        
+        icons = {0: "panel-top.svg", 1: "maximize.svg", 2: "minimize.svg"}
+        self.btn_fullscreen.setIcon(
+            self._get_icon(
+                icons.get(
+                    getattr(self.window(), "_fullscreen_state", 0), "maximize.svg"
+                )
+            )
+        )
+
         self.btn_ocr.setIcon(self._get_icon("scan-text.svg"))
         self.btn_search.setIcon(self._get_icon("search.svg"))
         self.btn_ai_search.setIcon(self._get_icon("sparkles.svg"))
