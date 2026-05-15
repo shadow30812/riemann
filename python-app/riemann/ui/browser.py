@@ -699,6 +699,10 @@ class BrowserTab(QWidget):
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
+        self._audio_timer = QTimer(self)
+        self._audio_timer.setSingleShot(True)
+        self._audio_timer.timeout.connect(self._clear_audio_state)
+
         self.request_interceptor = RequestInterceptor(self)
         self.profile.setUrlRequestInterceptor(self.request_interceptor)
         self.profile.downloadRequested.connect(self._handle_download)
@@ -2135,12 +2139,23 @@ class BrowserTab(QWidget):
             self.link_tooltip.hide()
 
     def _on_audio_state_changed(self, audible: bool) -> None:
+        if audible:
+            self._audio_timer.stop()
+            self._set_tab_playing_state("playing")
+        else:
+            self._audio_timer.start(1500)
+
+    def _clear_audio_state(self) -> None:
+        self._set_tab_playing_state(None)
+
+    def _set_tab_playing_state(self, state: str | None) -> None:
+        """Helper to propagate the playing state to the parent tab bar."""
         parent = self.parent()
         while parent:
             if isinstance(parent, QTabWidget):
                 idx = parent.indexOf(self)
                 if idx != -1:
-                    parent.tabBar().setTabData(idx, "playing" if audible else None)
+                    parent.tabBar().setTabData(idx, state)
                     parent.tabBar().update()
                 break
             parent = parent.parent()
