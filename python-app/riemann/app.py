@@ -92,6 +92,7 @@ from .core.managers import (
     DownloadManager,
     HistoryManager,
     LibraryManager,
+    YtDlpDownloadManager,
 )
 from .ui.browser import BrowserTab
 from .ui.components import DraggableTabWidget
@@ -459,6 +460,7 @@ class RiemannWindow(QMainWindow):
         self.dark_mode: bool = self.settings.value("darkMode", True, type=bool)
 
         self.download_manager_dialog = DownloadManager(self)
+        self.ytdlp_manager_dialog = YtDlpDownloadManager(self)
         self.history_manager = HistoryManager()
         self.history_model = QStringListModel(self.history_manager.get_model_data())
         self.bookmarks_manager = BookmarksManager()
@@ -592,6 +594,7 @@ class RiemannWindow(QMainWindow):
             ("Ctrl+O", self.open_file_smart),
             ("Ctrl+K", self.show_bookmarks),
             ("Ctrl+J", self.show_downloads),
+            ("Ctrl+Shift+J", self.show_ytdlp_downloads),
             ("Ctrl+L", self.show_library_search),
             ("Ctrl+H", self.show_history),
             ("Ctrl+,", self.show_settings),
@@ -1113,6 +1116,7 @@ class RiemannWindow(QMainWindow):
         view_actions = [
             ("Bookmarks (Ctrl+K)", None, self.show_bookmarks),
             ("Downloads (Ctrl+J)", None, self.show_downloads),
+            ("yt-dlp Downloads (Ctrl+Shift+J)", None, self.show_ytdlp_downloads),
             ("Search Library (Ctrl+L)", None, self.show_library_search),
             ("History (Ctrl+H)", None, self.show_history),
             ("Settings (Ctrl+,)", None, self.show_settings),
@@ -2154,6 +2158,13 @@ class RiemannWindow(QMainWindow):
         self.metrics_label.setText(
             f" Uptime: {uptime_str} &nbsp;|&nbsp; Mem: {mem_str} &nbsp;|&nbsp; {net_str} &nbsp;|&nbsp; {bat_str} "
         )
+
+    def show_ytdlp_downloads(self) -> None:
+        """
+        Shows the dedicated yt-dlp non-modal download manager dialog.
+        """
+        self.ytdlp_manager_dialog.show()
+        self.ytdlp_manager_dialog.raise_()
 
 
 def run() -> None:

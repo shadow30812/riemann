@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.parse
 from typing import Any, Optional
 
@@ -173,98 +174,14 @@ class YtDlpStreamWorker(QThread):
             self.error.emit(str(e))
 
 
-class MockDownloadItem(QObject):
-    """
-    A duck-typed mock of QWebEngineDownloadRequest.
-    Allows yt-dlp to report its progress directly into the native Download Manager.
-    """
-
-    stateChanged = Signal(QWebEngineDownloadRequest.DownloadState)
-    isFinishedChanged = Signal()
-    receivedBytesChanged = Signal()
-    totalBytesChanged = Signal()
-
-    def __init__(self, url: str, download_dir: str, filename: str, parent=None):
-        super().__init__(parent)
-        self._url = url
-        self._dir = download_dir
-        self._filename = filename
-        self._state = QWebEngineDownloadRequest.DownloadState.DownloadInProgress
-        self._total = 100
-        self._received = 0
-        self.worker: Optional["YtDlpWorker"] = None
-
-    def id(self) -> int:
-        return id(self)
-
-    def downloadFileName(self) -> str:
-        return self._filename
-
-    def downloadDirectory(self) -> str:
-        return self._dir
-
-    def state(self) -> QWebEngineDownloadRequest.DownloadState:
-        return self._state
-
-    def totalBytes(self) -> int:
-        return self._total
-
-    def receivedBytes(self) -> int:
-        return self._received
-
-    def url(self) -> QUrl:
-        return QUrl(self._url)
-
-    def mimeType(self) -> str:
-        return "video/mp4"
-
-    def isFinished(self) -> bool:
-        return self._state != QWebEngineDownloadRequest.DownloadState.DownloadInProgress
-
-    def isPaused(self) -> bool:
-        return False
-
-    def interruptReason(self) -> int:
-        return 0
-
-    def pause(self) -> None:
-        pass
-
-    def resume(self) -> None:
-        pass
-
-    def accept(self) -> None:
-        pass
-
-    def cancel(self) -> None:
-        if self.worker:
-            self.worker.stop()
-        self._state = QWebEngineDownloadRequest.DownloadState.DownloadCancelled
-        self.stateChanged.emit(self._state)
-        self.isFinishedChanged.emit()
-
-    def update_progress(self, percent: int) -> None:
-        self._received = percent
-        self.receivedBytesChanged.emit()
-
-    def finish(self, success: bool, msg: str) -> None:
-        if success:
-            self._state = QWebEngineDownloadRequest.DownloadState.DownloadCompleted
-            self._received = self._total
-            self.receivedBytesChanged.emit()
-        else:
-            self._state = QWebEngineDownloadRequest.DownloadState.DownloadInterrupted
-        self.stateChanged.emit(self._state)
-        self.isFinishedChanged.emit()
-
-
 class YtDlpWorker(QThread):
     """
     Background worker thread for executing yt-dlp media downloads via the Python API.
-    Reports progress and completion status asynchronously to the main thread.
+    Emits rich dictionary metrics to supply detailed information to the YtDlpDownloadManager.
     """
 
     progress = Signal(int)
+    progress_details = Signal(dict)
     finished = Signal(bool, str)
 
     def __init__(self, url: str, download_dir: str, dl_opts: dict) -> None:
@@ -281,6 +198,7 @@ class YtDlpWorker(QThread):
         self.download_dir = download_dir
         self.dl_opts = dl_opts
         self.is_cancelled = False
+        self._last_emit_time = 0.0
 
     def run(self) -> None:
         """
@@ -292,6 +210,7 @@ class YtDlpWorker(QThread):
             "quiet": True,
             "no_warnings": True,
             "progress_hooks": [self.progress_hook],
+            "ignoreerrors": True,
         }
 
         if self.dl_opts.get("playlist"):
@@ -311,8 +230,10 @@ class YtDlpWorker(QThread):
             ydl_opts["cookiesfrombrowser"] = (cookies_browser,)
 
         ydl_opts["format"] = self.dl_opts.get("format", "best")
-        postprocessors = []
+        if self.dl_opts.get("format_sort"):
+            ydl_opts["format_sort"] = self.dl_opts["format_sort"]
 
+        postprocessors = []
         if self.dl_opts.get("audio_only"):
             audio_fmt = self.dl_opts.get("audio_format", "best")
             pp = {"key": "FFmpegExtractAudio"}
@@ -337,11 +258,17 @@ class YtDlpWorker(QThread):
                 ydl.download([self.url])
 
             if self.is_cancelled:
+                self.cleanup_remnants()
                 self.finished.emit(False, "Download cancelled.")
             else:
                 self.finished.emit(True, "Download complete!")
 
+        except KeyboardInterrupt:
+            self.cleanup_remnants()
+            self.finished.emit(False, "Download cancelled.")
+
         except Exception as e:
+            self.cleanup_remnants()
             if self.is_cancelled:
                 self.finished.emit(False, "Download cancelled.")
             else:
@@ -353,22 +280,85 @@ class YtDlpWorker(QThread):
         Also acts as our cancellation trigger by throwing an exception if the user aborts.
         """
         if self.is_cancelled:
-            raise Exception("Download aborted by user.")
+            raise KeyboardInterrupt("Download aborted by user.")
 
-        if d.get("status") == "downloading":
-            percent_str = d.get("_percent_str", "0%")
-            percent_str = re.sub(r"\x1b\[[0-9;]*m", "", percent_str)
+        current_time = time.time()
+        is_finished = d.get("status") == "finished"
+
+        if not is_finished and (current_time - self._last_emit_time < 0.1):
+            return
+
+        self._last_emit_time = current_time
+        dl_bytes = d.get("downloaded_bytes", 0)
+        tot_bytes = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+
+        if tot_bytes > 0:
+            pct_val = int((dl_bytes / tot_bytes) * 100)
+        else:
             try:
-                val = float(percent_str.replace("%", "").strip())
-                self.progress.emit(int(val))
+                pct_val = int(
+                    float(
+                        (
+                            re.sub(r"\x1b\[[0-9;]*m", "", d.get("_percent_str", "0%"))
+                            .replace("%", "")
+                            .strip()
+                        )
+                    )
+                )
             except ValueError:
-                pass
+                pct_val = 0
+
+        if is_finished:
+            pct_val = 100
+
+        info = d.get("info_dict", {})
+        req_downloads = info.get("requested_downloads", [info])
+        total_combined_bytes = sum(
+            [
+                req.get("filesize") or req.get("filesize_approx") or 0
+                for req in req_downloads
+            ]
+        )
+
+        data = {
+            "status": d.get("status"),
+            "downloaded_bytes": d.get("downloaded_bytes", 0),
+            "total_bytes": d.get("total_bytes") or d.get("total_bytes_estimate") or 0,
+            "total_combined_bytes": total_combined_bytes,
+            "speed": d.get("speed", 0),
+            "eta": d.get("eta", 0),
+            "playlist_index": info.get("playlist_index"),
+            "playlist_count": info.get("playlist_count"),
+            "filename": d.get("filename", ""),
+            "video_id": info.get("id", d.get("filename", "Unknown_ID")),
+            "title": info.get("title", "Unknown Title"),
+            "percentage": pct_val,
+        }
+
+        if d.get("status") in ["downloading", "finished"]:
+            self.progress_details.emit(data)
+            self.progress.emit(pct_val)
 
     def stop(self) -> None:
         """
         Flags the thread for cancellation. The progress_hook will catch this on the next tick.
         """
         self.is_cancelled = True
+
+    def cleanup_remnants(self) -> None:
+        """Deletes dangling .part and .ytdl files left behind after a cancellation."""
+        try:
+            if not os.path.exists(self.download_dir):
+                return
+            for f in os.listdir(self.download_dir):
+                if f.endswith(".ytdl"):
+                    file_path = os.path.join(self.download_dir, f)
+                    try:
+                        os.remove(file_path)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
 
 class YtDlpSettingsDialog(QDialog):
@@ -448,29 +438,28 @@ class YtDlpSettingsDialog(QDialog):
 
     def get_options(self) -> dict:
         v_idx = self.combo_video.currentIndex()
-        audio_only = v_idx == 5
+        audio_only = v_idx == 7
 
-        if audio_only:
-            fmt = "bestaudio/best"
-        elif v_idx == 0:
-            fmt = "bestvideo+bestaudio/best"
-        elif v_idx == 1:
-            fmt = "bestvideo[height<=2160]+bestaudio/best"
-        elif v_idx == 2:
-            fmt = "bestvideo[height<=1440]+bestaudio/best"
-        elif v_idx == 3:
-            fmt = "bestvideo[height<=1080]+bestaudio/best"
-        elif v_idx == 4:
-            fmt = "bestvideo[height<=720]+bestaudio/best"
-        elif v_idx == 5:
-            fmt = "bestvideo[height<=480]+bestaudio/best"
-        elif v_idx == 6:
-            fmt = "bestvideo[height<=144]+bestaudio/best"
-        else:
-            fmt = "best"
+        fmt = "bestaudio/best" if audio_only else "bestvideo*+bestaudio/best"
+        format_sort = []
+
+        if not audio_only:
+            if v_idx == 1:
+                format_sort = ["res:2160"]
+            elif v_idx == 2:
+                format_sort = ["res:1440"]
+            elif v_idx == 3:
+                format_sort = ["res:1080"]
+            elif v_idx == 4:
+                format_sort = ["res:720"]
+            elif v_idx == 5:
+                format_sort = ["res:480"]
+            elif v_idx == 6:
+                format_sort = ["res:144"]
 
         return {
             "format": fmt,
+            "format_sort": format_sort,
             "audio_only": audio_only,
             "audio_format": self.combo_audio.currentText(),
             "subtitles": self.chk_subs.isChecked(),
@@ -565,8 +554,7 @@ class WebPage(QWebEnginePage):
             line (int): The line number where the log originated.
             source (str): The source file or script identifier.
         """
-        self.level = level
-        print(f"[JS] {message} (Line {line} in {source})\n\nlevel- {level}")
+        pass
 
     def acceptNavigationRequest(
         self, url: QUrl, _type: QWebEnginePage.NavigationType, isMainFrame: bool
@@ -1901,6 +1889,7 @@ class BrowserTab(QWidget):
 
             self.btn_download.setIcon(self._get_icon("circle-stop.svg"))
             self.btn_download.setToolTip("Cancel Download")
+
             try:
                 self.btn_download.clicked.disconnect()
             except RuntimeError:
@@ -1908,40 +1897,21 @@ class BrowserTab(QWidget):
             self.btn_download.clicked.connect(self.cancel_download)
 
             raw_title = self.web.title() or "Video_Download"
-            safe_title = re.sub(r'[\\/*?:"<>|]', "", raw_title).replace(" ", "_")
-
-            is_audio = dl_opts.get("audio_only")
-            audio_fmt = dl_opts.get("audio_format", "best")
-
-            if is_audio:
-                ext = "mp3" if audio_fmt == "best" else audio_fmt
-            else:
-                ext = "mp4"
-
-            filename = f"{safe_title}.{ext}"
-
             self.dl_worker = YtDlpWorker(url, dest_dir, dl_opts)
-            self.mock_dl_item = MockDownloadItem(url, dest_dir, filename, self)
-            self.mock_dl_item.worker = self.dl_worker
 
             try:
-                if self.window() and hasattr(self.window(), "download_manager_dialog"):
-                    self.window().download_manager_dialog.add_download(
-                        self.mock_dl_item
+                if self.window() and hasattr(self.window(), "ytdlp_manager_dialog"):
+                    self.window().ytdlp_manager_dialog.add_download(
+                        self.dl_worker,
+                        raw_title,
+                        dest_dir,
+                        dl_opts.get("playlist", False),
                     )
             except Exception as e:
-                print(f"[Warning] Could not link yt-dlp to Download Manager: {e}")
+                print(f"[Warning] Could not link to yt-dlp Download Manager: {e}")
 
             self.dl_worker.progress.connect(self.progress.setValue)
-            self.dl_worker.progress.connect(self.mock_dl_item.update_progress)
-
-            self.dl_worker.finished.connect(
-                lambda success, msg: [
-                    self._on_download_finished(success, msg),
-                    self.mock_dl_item.finish(success, msg),
-                ]
-            )
-
+            self.dl_worker.finished.connect(self._on_download_finished)
             self.dl_worker.start()
 
     def cancel_download(self) -> None:
@@ -1951,6 +1921,7 @@ class BrowserTab(QWidget):
         if hasattr(self, "dl_worker") and self.dl_worker.isRunning():
             self.show_toast("Cancelling download...")
             self.dl_worker.stop()
+            self.progress.setValue(0)
 
     def toggle_mute(self) -> None:
         """Mutes or unmutes the audio output specifically for this web tab."""

@@ -8,6 +8,7 @@ complex metadata querying and JSON for lightweight list persistence.
 
 import hashlib
 import json
+import math
 import os
 import sqlite3
 from typing import Any, Callable, Dict, List, Optional
@@ -24,9 +25,12 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -787,3 +791,231 @@ class PasswordDialog(QDialog):
             The raw string value from the password input field.
         """
         return self.txt_password.text()
+
+
+class YtDlpDownloadManager(QDialog):
+    """
+    A dedicated dialog for managing yt-dlp downloads.
+    Uses a dynamic QTreeWidget to nest Playlists -> Videos -> Individual File Stream Parts.
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("yt-dlp Downloads")
+        self.resize(900, 450)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowCloseButtonHint)
+
+        layout = QVBoxLayout(self)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(
+            [
+                "Title / Filename",
+                "Progress",
+                "Size",
+                "Speed & ETA",
+                "Status",
+                "Controls",
+            ]
+        )
+
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.tree.setColumnWidth(1, 150)
+        self.tree.header().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.tree.header().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.tree.header().setSectionResizeMode(
+            4, QHeaderView.ResizeMode.ResizeToContents
+        )
+
+        self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.tree.setAlternatingRowColors(True)
+        layout.addWidget(self.tree)
+
+        btn_layout = QHBoxLayout()
+        btn_clear = QPushButton("Clear Completed")
+        btn_clear.clicked.connect(self._cleanup_completed)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_clear)
+        layout.addLayout(btn_layout)
+
+        self.tasks = []
+
+    def format_size(self, bytes_val: float) -> str:
+        if not bytes_val or bytes_val <= 0:
+            return "0 B"
+        sizes = ["B", "KB", "MB", "GB", "TB"]
+        i = int(math.floor(math.log(bytes_val, 1024)))
+        p = math.pow(1024, i)
+        s = round(bytes_val / p, 2)
+        return f"{s} {sizes[i]}"
+
+    def format_time(self, seconds: float) -> str:
+        if not seconds or seconds < 0:
+            return "00:00"
+        m, s = divmod(int(seconds), 60)
+        h, m = divmod(m, 60)
+        if h > 0:
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+
+    def _create_progress_bar(self, height=14) -> QProgressBar:
+        pb = QProgressBar()
+        pb.setValue(0)
+        pb.setFixedHeight(height)
+        pb.setStyleSheet("""
+            QProgressBar { border: 1px solid #555; border-radius: 3px; text-align: center; color: white; font-size: 10px; }
+            QProgressBar::chunk { background-color: #ff4500; }
+        """)
+        return pb
+
+    def add_download(
+        self, worker, title: str, dest_dir: str, is_playlist: bool
+    ) -> None:
+        root_item = QTreeWidgetItem(self.tree)
+        root_item.setText(0, ("📂 Playlist: " if is_playlist else "🎬 Task: ") + title)
+        root_item.setExpanded(True)
+
+        root_prog = self._create_progress_bar(16)
+        self.tree.setItemWidget(root_item, 1, root_prog)
+
+        root_item.setText(2, "Calculating...")
+        root_item.setText(4, "Initializing")
+
+        ctrl_widget = QWidget()
+        h_layout = QHBoxLayout(ctrl_widget)
+        h_layout.setContentsMargins(2, 2, 2, 2)
+        btn_cancel = QPushButton("⏹ Cancel")
+        btn_cancel.clicked.connect(lambda: worker.stop())
+        h_layout.addWidget(btn_cancel)
+        self.tree.setItemWidget(root_item, 5, ctrl_widget)
+
+        task_info = {
+            "worker": worker,
+            "root_item": root_item,
+            "root_prog": root_prog,
+            "dest_dir": dest_dir,
+            "videos": {},
+            "is_finished": False,
+        }
+        self.tasks.append(task_info)
+
+        worker.progress_details.connect(
+            lambda data, w=worker: self.update_progress(w, data)
+        )
+        worker.finished.connect(
+            lambda success, msg, w=worker: self.on_finished(w, success, msg)
+        )
+
+        self.show()
+        self.raise_()
+
+    def update_progress(self, worker, data: dict) -> None:
+        task = next((t for t in self.tasks if t["worker"] == worker), None)
+        if not task:
+            return
+
+        vid_id = data.get("video_id", "unknown_id")
+        vid_title = data.get("title", "Unknown Title")
+        filename = data.get("filename", "Unknown_Part")
+        percent = data.get("percentage", 0)
+
+        if vid_id not in task["videos"]:
+            vid_item = QTreeWidgetItem(task["root_item"])
+            vid_item.setText(0, "↳ " + vid_title)
+            vid_item.setExpanded(True)
+            task["videos"][vid_id] = {"item": vid_item, "parts": {}}
+
+        vid_data = task["videos"][vid_id]
+
+        if filename not in vid_data["parts"]:
+            part_item = QTreeWidgetItem(vid_data["item"])
+            part_item.setText(0, "📄 " + os.path.basename(filename))
+            part_prog = self._create_progress_bar(12)
+            self.tree.setItemWidget(part_item, 1, part_prog)
+            vid_data["parts"][filename] = {"item": part_item, "prog": part_prog}
+
+        part_data = vid_data["parts"][filename]
+        part_item = part_data["item"]
+        part_prog = part_data["prog"]
+        part_prog.setValue(percent)
+
+        dl_bytes = data.get("downloaded_bytes", 0)
+        tot_bytes = data.get("total_bytes", 0)
+        size_str = (
+            f"{self.format_size(dl_bytes)} / {self.format_size(tot_bytes)}"
+            if tot_bytes
+            else self.format_size(dl_bytes)
+        )
+
+        part_item.setText(2, size_str)
+        speed = data.get("speed", 0)
+        eta = data.get("eta", 0)
+        part_item.setText(
+            3,
+            f"{self.format_size(speed)}/s - {self.format_time(eta)}"
+            if speed
+            else "Processing...",
+        )
+
+        status = data.get("status", "Unknown")
+        if status == "finished":
+            part_item.setText(4, "Merged / Done")
+            part_prog.setValue(100)
+            task["root_prog"].setValue(100)
+        else:
+            part_item.setText(4, "Downloading")
+            task["root_prog"].setValue(percent)
+
+        p_idx = data.get("playlist_index")
+        p_count = data.get("playlist_count")
+        if p_idx and p_count:
+            task["root_item"].setText(4, f"Video {p_idx} of {p_count}")
+
+    def on_finished(self, worker, success: bool, msg: str) -> None:
+        task = next((t for t in self.tasks if t["worker"] == worker), None)
+        if not task:
+            return
+
+        task["is_finished"] = True
+        root_item = task["root_item"]
+
+        if success:
+            task["root_prog"].setValue(100)
+            root_item.setText(3, "Completed")
+            root_item.setText(4, "Done")
+        else:
+            task["root_prog"].setValue(0)
+            root_item.setText(3, "Cancelled / Failed")
+            root_item.setText(4, msg)
+
+        ctrl_widget = self.tree.itemWidget(root_item, 5)
+        if ctrl_widget:
+            h_layout = ctrl_widget.layout()
+            for i in reversed(range(h_layout.count())):
+                item = h_layout.itemAt(i).widget()
+                if item:
+                    item.setParent(None)
+
+            btn_open = QPushButton("📂 Open Folder")
+            btn_open.clicked.connect(
+                lambda _, path=task["dest_dir"]: QDesktopServices.openUrl(
+                    QUrl.fromLocalFile(path)
+                )
+            )
+            h_layout.addWidget(btn_open)
+
+    def _cleanup_completed(self) -> None:
+        tasks_to_remove = [
+            task for task in self.tasks if task.get("is_finished", False)
+        ]
+        for task in tasks_to_remove:
+            idx = self.tree.indexOfTopLevelItem(task["root_item"])
+            if idx != -1:
+                self.tree.takeTopLevelItem(idx)
+
+        self.tasks = [t for t in self.tasks if not t.get("is_finished", False)]
