@@ -2021,7 +2021,10 @@ class BrowserTab(QWidget):
         """
         if hasattr(self, "web") and self.web:
             self.web.page().setAudioMuted(True)
-            self.web.setHtml("")
+            self.web.page().runJavaScript(
+                "window.onbeforeunload = null; "
+                "document.querySelectorAll('audio, video').forEach(media => media.pause());"
+            )
         super().deleteLater()
 
     def changeEvent(self, event: QEvent) -> None:
