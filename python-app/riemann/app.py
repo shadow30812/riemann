@@ -865,6 +865,15 @@ class RiemannWindow(QMainWindow):
         if self.incognito:
             return
 
+        if item.lower().endswith(".pdf") or item.lower().endswith(".md"):
+            item_type = "pdf"
+        elif (
+            item.lower().endswith(".html")
+            or item.lower().endswith(".css")
+            or item.lower().endswith(".js")
+        ):
+            item_type = "web"
+
         self.history_manager.add(item, item_type)
         self.history_model.setStringList(self.history_manager.get_model_data())
 
@@ -1285,6 +1294,7 @@ class RiemannWindow(QMainWindow):
         for i, path in enumerate(paths):
             self.add_to_history(path)
             is_web_file = path.lower().endswith((".html", ".css", ".js"))
+            self.add_to_history(path, "web" if is_web_file else "pdf")
 
             if i == 0:
                 current = self.tabs_main.currentWidget()
@@ -1445,14 +1455,14 @@ class RiemannWindow(QMainWindow):
         """
         if self.tabs_main.count() == 0 and self.tabs_side.count() == 0:
             if getattr(self, "_reader_fullscreen", False):
-                self.toggle_reader_fullscreen()
+                self.exit_fullscreen()
 
     def _handle_escape(self) -> None:
         """
         Handles the Escape key event to exit fullscreen.
         """
         if getattr(self, "_reader_fullscreen", False):
-            self.toggle_reader_fullscreen()
+            self.exit_fullscreen()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """
@@ -1524,29 +1534,53 @@ class RiemannWindow(QMainWindow):
         self._kill_all_media_safely()
         super().closeEvent(event)
 
+    def exit_fullscreen(self) -> None:
+        """Helper to fully exit any fullscreen reading states."""
+        self._fullscreen_state = 0
+        self._reader_fullscreen = False
+        self.menuBar().show()
+
+        self.tabs_main.tabBar().show()
+        self.tabs_side.tabBar().show()
+        self._set_tabs_toolbar_visible(True)
+
+        if getattr(self, "_was_maximized", False):
+            self.showMaximized()
+        else:
+            self.showNormal()
+
+        active_tab = self.tabs_main.currentWidget()
+        if hasattr(active_tab, "update_fullscreen_icon"):
+            active_tab.update_fullscreen_icon(0)
+
     def toggle_reader_fullscreen(self) -> None:
         """
-        Toggles global fullscreen mode.
-        Hides UI elements (menu bar, tab bars, toolbars) for immersive reading.
+        Toggles global fullscreen mode cycling through 3 states:
+        Normal -> Reading Mode (toolbar visible) -> Pure Fullscreen.
         """
-        if not getattr(self, "_reader_fullscreen", False):
-            self._reader_fullscreen = True
+        state = getattr(self, "_fullscreen_state", 0)
+        active_tab = self.tabs_main.currentWidget()
+        if not active_tab and self.tabs_side.isVisible():
+            active_tab = self.tabs_side.currentWidget()
+
+        if state == 0:
+            self._fullscreen_state = 1
             self._was_maximized = self.isMaximized()
             self.menuBar().hide()
             self.tabs_main.tabBar().hide()
             self.tabs_side.tabBar().hide()
-            self._set_tabs_toolbar_visible(False)
-            self.showFullScreen()
-        else:
-            self._reader_fullscreen = False
-            self.menuBar().show()
-            self.tabs_main.tabBar().show()
-            self.tabs_side.tabBar().show()
             self._set_tabs_toolbar_visible(True)
-            if self._was_maximized:
-                self.showMaximized()
-            else:
-                self.showNormal()
+            self._reader_fullscreen = True
+            self.showFullScreen()
+            if hasattr(active_tab, "update_fullscreen_icon"):
+                active_tab.update_fullscreen_icon(1)
+        elif state == 1:
+            self._fullscreen_state = 2
+            self._set_tabs_toolbar_visible(False)
+            if hasattr(active_tab, "update_fullscreen_icon"):
+                active_tab.update_fullscreen_icon(2)
+        else:
+            self.exit_fullscreen()
 
     def _set_tabs_toolbar_visible(self, visible: bool) -> None:
         """

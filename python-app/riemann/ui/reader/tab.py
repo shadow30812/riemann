@@ -1230,7 +1230,13 @@ class ReaderTab(
             self._get_or_create_web_view()
         self.stack.setCurrentIndex(1 if self.view_mode == ViewMode.REFLOW else 0)
         self.btn_reflow.setChecked(self.view_mode == ViewMode.REFLOW)
-        self.update_view()
+
+        if not hasattr(self, "_rebuild_debounce_timer"):
+            self._rebuild_debounce_timer = QTimer(self)
+            self._rebuild_debounce_timer.setSingleShot(True)
+            self._rebuild_debounce_timer.setInterval(200)
+            self._rebuild_debounce_timer.timeout.connect(self._do_rebuild_and_render)
+        self._rebuild_debounce_timer.start()
 
     def toggle_facing_mode(self) -> None:
         """
@@ -1239,8 +1245,13 @@ class ReaderTab(
         self.facing_mode = not self.facing_mode
         self.settings.setValue("facingMode", self.facing_mode)
         self.btn_facing.setChecked(self.facing_mode)
-        self.rebuild_layout()
-        self.update_view()
+
+        if not hasattr(self, "_rebuild_debounce_timer"):
+            self._rebuild_debounce_timer = QTimer(self)
+            self._rebuild_debounce_timer.setSingleShot(True)
+            self._rebuild_debounce_timer.setInterval(200)
+            self._rebuild_debounce_timer.timeout.connect(self._do_rebuild_and_render)
+        self._rebuild_debounce_timer.start()
 
     def toggle_scroll_mode(self) -> None:
         """
@@ -1249,8 +1260,13 @@ class ReaderTab(
         self.continuous_scroll = not self.continuous_scroll
         self.settings.setValue("continuousScrollMode", self.continuous_scroll)
         self.btn_scroll_mode.setChecked(self.continuous_scroll)
-        self.rebuild_layout()
-        self.update_view()
+
+        if not hasattr(self, "_rebuild_debounce_timer"):
+            self._rebuild_debounce_timer = QTimer(self)
+            self._rebuild_debounce_timer.setSingleShot(True)
+            self._rebuild_debounce_timer.setInterval(200)
+            self._rebuild_debounce_timer.timeout.connect(self._do_rebuild_and_render)
+        self._rebuild_debounce_timer.start()
 
     def toggle_reader_fullscreen(self) -> None:
         """
@@ -1260,6 +1276,11 @@ class ReaderTab(
 
         if self.window() and isinstance(self.window(), RiemannWindow):
             self.window().toggle_reader_fullscreen()
+
+    def update_fullscreen_icon(self, state: int) -> None:
+        """Updates the fullscreen button icon based on the window state."""
+        icons = {0: "panel-top.svg", 1: "maximize.svg", 2: "minimize.svg"}
+        self.btn_fullscreen.setIcon(self._get_icon(icons.get(state, "maximize.svg")))
 
     def open_pdf_dialog(self) -> None:
         """
@@ -1561,7 +1582,8 @@ class ReaderTab(
 
         if key == Qt.Key.Key_Escape:
             if getattr(self, "_reader_fullscreen", False):
-                self.toggle_reader_fullscreen()
+                if hasattr(self.window(), "exit_fullscreen"):
+                    self.window().exit_fullscreen()
                 event.accept()
                 return
 
@@ -1771,10 +1793,14 @@ class ReaderTab(
             )
         else:
             self._update_all_widget_sizes()
-
-        self.rendered_pages.clear()
-        self.update_view()
         self._update_zoom_combo_text()
+
+        if not hasattr(self, "_zoom_debounce_timer"):
+            self._zoom_debounce_timer = QTimer(self)
+            self._zoom_debounce_timer.setSingleShot(True)
+            self._zoom_debounce_timer.setInterval(250)
+            self._zoom_debounce_timer.timeout.connect(self.on_zoom_finished)
+        self._zoom_debounce_timer.start()
 
     def _update_zoom_combo_text(self) -> None:
         """Helper to update the UI combobox with the current scale."""
@@ -1906,9 +1932,13 @@ class ReaderTab(
         self.theme_mode = (self.theme_mode + 1) % 3
         self.settings.setValue("themeMode", self.theme_mode)
         self.apply_theme()
-        self.rebuild_layout()
-        self.rendered_pages.clear()
-        self.update_view()
+
+        if not hasattr(self, "_rebuild_debounce_timer"):
+            self._rebuild_debounce_timer = QTimer(self)
+            self._rebuild_debounce_timer.setSingleShot(True)
+            self._rebuild_debounce_timer.setInterval(200)
+            self._rebuild_debounce_timer.timeout.connect(self._do_rebuild_and_render)
+        self._rebuild_debounce_timer.start()
 
         mode_names = ["Light Mode", "Fast Dark Mode", "Smart Dark Mode"]
         self.show_toast(f"Theme set to: {mode_names[self.theme_mode]}")
@@ -2447,7 +2477,9 @@ class ReaderTab(
             icon = "sun-moon.svg"
         self.btn_theme.setIcon(self._get_icon(icon))
 
-        self.btn_fullscreen.setIcon(self._get_icon("maximize.svg"))
+        state = getattr(self.window(), "_fullscreen_state", 0)
+        self.update_fullscreen_icon(state)
+        
         self.btn_ocr.setIcon(self._get_icon("scan-text.svg"))
         self.btn_search.setIcon(self._get_icon("search.svg"))
         self.btn_ai_search.setIcon(self._get_icon("sparkles.svg"))
@@ -2472,6 +2504,8 @@ class ReaderTab(
         self.autoscroll_timer.stop()
         if hasattr(self, "_zoom_debounce_timer"):
             self._zoom_debounce_timer.stop()
+        if hasattr(self, "_rebuild_debounce_timer"):
+            self._rebuild_debounce_timer.stop()
 
         if hasattr(self, "load_worker") and self.load_worker:
             try:

@@ -94,6 +94,12 @@ class RenderingMixin:
 
         QTimer.singleShot(50, _finalize_rebuild)
 
+    def _do_rebuild_and_render(self) -> None:
+        """Debounced executor for expensive layout and render rebuilds."""
+        self.rebuild_layout()
+        self.rendered_pages.clear()
+        self.update_view()
+
     def _build_virtual_layout(self, count: int) -> None:
         """
         Constructs a virtualized UI layout utilizing top and bottom spacer blocks
