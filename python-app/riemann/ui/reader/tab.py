@@ -1551,12 +1551,10 @@ class ReaderTab(
 
                 elif event.type() == QEvent.Type.MouseMove and self.active_drawing:
                     if self.current_tool.startswith("markup"):
-                        rects, _ = self._get_linear_text_selection(
-                            page_idx, self.active_drawing[0], event.pos()
-                        )
+                        rect = QRect(self.active_drawing[0], event.pos()).normalized()
                         preview_color = QColor(self.pen_color)
                         preview_color.setAlpha(100)
-                        source.set_markup_preview(rects, preview_color)
+                        source.set_markup_preview([rect], preview_color)
 
                     elif self.current_tool in ("rect", "oval"):
                         self.active_drawing.append(
@@ -2411,84 +2409,92 @@ class ReaderTab(
         scale = self.calculate_scale()
         rotation = getattr(self, "rotation", 0)
 
-        if page_idx not in self.text_segments_cache:
-            self.text_segments_cache[page_idx] = self.current_doc.get_text_segments(
-                page_idx
-            )
+        cache_key = (page_idx, scale, logical_w, logical_h, rotation)
+        if not hasattr(self, "_char_geometry_cache"):
+            self._char_geometry_cache = {}
 
-        segments = self.text_segments_cache[page_idx]
-        raw_chars = []
-
-        for seg_idx, (text, (l, t, r, b)) in enumerate(segments):
-            char_count = len(text)
-            if char_count == 0:
-                continue
-
-            char_w = (r - l) / char_count
-
-            for i, char in enumerate(text):
-                if not char.strip():
-                    continue
-
-                char_l = l + i * char_w
-                char_r = char_l + char_w
-
-                x = int(char_l * scale)
-                w_rect = int((char_r - char_l) * scale)
-                h_rect = int((t - b) * scale)
-                y = int(logical_h - (t * scale))
-
-                if h_rect < 0:
-                    y += h_rect
-                    h_rect = abs(h_rect)
-
-                if h_rect > logical_h * 0.5 or w_rect > logical_w * 0.5:
-                    continue
-
-                if rotation == 90:
-                    x, y = int(logical_h) - y - h_rect, x
-                    w_rect, h_rect = h_rect, w_rect
-                elif rotation == 180:
-                    x, y = int(logical_w) - x - w_rect, int(logical_h) - y - h_rect
-                elif rotation == 270:
-                    x, y = y, int(logical_w) - x - w_rect
-                    w_rect, h_rect = h_rect, w_rect
-
-                char_rect = QRect(x, y, max(1, w_rect), h_rect)
-                raw_chars.append((char, char_rect, seg_idx))
-
-        if not raw_chars:
-            return [], ""
-
-        raw_chars.sort(key=lambda c: c[1].center().y())
-
-        lines = []
-        current_line = []
-        all_chars = []
-
-        for char_data in raw_chars:
-            rect = char_data[1]
-            if not current_line:
-                current_line.append(char_data)
-            else:
-                avg_cy = sum(c[1].center().y() for c in current_line) / len(
-                    current_line
+        if cache_key not in self._char_geometry_cache:
+            if page_idx not in self.text_segments_cache:
+                self.text_segments_cache[page_idx] = self.current_doc.get_text_segments(
+                    page_idx
                 )
 
-                if abs(rect.center().y() - avg_cy) < rect.height() * 0.6:
+            segments = self.text_segments_cache[page_idx]
+            raw_chars = []
+
+            for seg_idx, (text, (l, t, r, b)) in enumerate(segments):
+                char_count = len(text)
+                if char_count == 0:
+                    continue
+
+                char_w = (r - l) / char_count
+
+                for i, char in enumerate(text):
+                    if not char.strip():
+                        continue
+
+                    char_l = l + i * char_w
+                    char_r = char_l + char_w
+
+                    x = int(char_l * scale)
+                    w_rect = int((char_r - char_l) * scale)
+                    h_rect = int((t - b) * scale)
+                    y = int(logical_h - (t * scale))
+
+                    if h_rect < 0:
+                        y += h_rect
+                        h_rect = abs(h_rect)
+
+                    if h_rect > logical_h * 0.5 or w_rect > logical_w * 0.5:
+                        continue
+
+                    if rotation == 90:
+                        x, y = int(logical_h) - y - h_rect, x
+                        w_rect, h_rect = h_rect, w_rect
+                    elif rotation == 180:
+                        x, y = int(logical_w) - x - w_rect, int(logical_h) - y - h_rect
+                    elif rotation == 270:
+                        x, y = y, int(logical_w) - x - w_rect
+                        w_rect, h_rect = h_rect, w_rect
+
+                    char_rect = QRect(x, y, max(1, w_rect), h_rect)
+                    raw_chars.append((char, char_rect, seg_idx))
+
+            raw_chars.sort(key=lambda c: c[1].center().y())
+
+            lines = []
+            current_line = []
+            all_chars = []
+
+            for char_data in raw_chars:
+                rect = char_data[1]
+                if not current_line:
                     current_line.append(char_data)
                 else:
-                    lines.append(current_line)
-                    current_line = [char_data]
+                    avg_cy = sum(c[1].center().y() for c in current_line) / len(
+                        current_line
+                    )
 
-        if current_line:
-            lines.append(current_line)
+                    if abs(rect.center().y() - avg_cy) < rect.height() * 0.6:
+                        current_line.append(char_data)
+                    else:
+                        lines.append(current_line)
+                        current_line = [char_data]
 
-        for line in lines:
-            line.sort(key=lambda c: c[1].center().x())
+            if current_line:
+                lines.append(current_line)
 
-            for char, rect, seg_idx in line:
-                all_chars.append((char, rect, seg_idx))
+            for line in lines:
+                line.sort(key=lambda c: c[1].center().x())
+
+                for char, rect, seg_idx in line:
+                    all_chars.append((char, rect, seg_idx))
+
+            self._char_geometry_cache[cache_key] = all_chars
+
+        all_chars = self._char_geometry_cache[cache_key]
+        if not all_chars:
+            return [], ""
 
         def get_closest_idx(pos: QPoint) -> int:
             best_idx = -1
@@ -2531,6 +2537,7 @@ class ReaderTab(
                 ):
                     if not selected_chars or selected_chars[-1] != "\n":
                         selected_chars.append("\n")
+
                 elif seg_idx != prev_seg:
                     if not selected_chars or (
                         not selected_chars[-1].isspace() and not char.isspace()
