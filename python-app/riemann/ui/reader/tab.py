@@ -1463,19 +1463,47 @@ class ReaderTab(
                             event.pos().x() / source.width(),
                             event.pos().y() / source.height(),
                         )
-                        self.create_new_annotation(page_idx, rx, ry)
+                        self.create_new_annotation(page_idx, rx, ry, type="note")
                         return True
+
+                    elif self.current_tool == "text":
+                        rx, ry = self._map_to_unrotated(
+                            event.pos().x() / source.width(),
+                            event.pos().y() / source.height(),
+                        )
+                        self.create_new_annotation(page_idx, rx, ry, type="text")
+                        return True
+
+                    elif self.current_tool in ("stamp_tick", "stamp_cross"):
+                        rx, ry = self._map_to_unrotated(
+                            event.pos().x() / source.width(),
+                            event.pos().y() / source.height(),
+                        )
+                        self._add_anno_data(
+                            page_idx,
+                            {
+                                "type": "stamp",
+                                "subtype": self.current_tool,
+                                "rel_pos": (rx, ry),
+                                "color": self.pen_color,
+                            },
+                        )
+                        return True
+
                     elif self.current_tool in (
                         "pen",
                         "highlight",
                         "markup_highlight",
                         "markup_underline",
                         "markup_strikeout",
+                        "rect",
+                        "oval",
                     ):
-                        self.active_drawing = [event.pos()]
+                        self.active_drawing = [QPoint(event.pos().x(), event.pos().y())]
                         if self.current_tool.startswith("markup"):
                             self.current_markup_rects = []
                         return True
+
                     elif self.current_tool == "eraser":
                         self._handle_eraser_click(source, event.pos(), page_idx)
                         return True
@@ -1484,8 +1512,16 @@ class ReaderTab(
                     if self.current_tool.startswith("markup"):
                         rect = QRect(self.active_drawing[0], event.pos()).normalized()
                         source.set_markup_preview([rect], QColor(255, 255, 0, 100))
+
+                    elif self.current_tool in ("rect", "oval"):
+                        self.active_drawing.append(
+                            QPoint(event.pos().x(), event.pos().y())
+                        )
+
                     else:
-                        self.active_drawing.append(event.pos())
+                        self.active_drawing.append(
+                            QPoint(event.pos().x(), event.pos().y())
+                        )
                         source.set_temp_stroke(
                             self.active_drawing,
                             self.pen_color,
@@ -1503,7 +1539,7 @@ class ReaderTab(
                         pts = []
                         for p in self.active_drawing:
                             pts.append(self._map_to_unrotated(p.x() / w, p.y() / h))
-                        
+
                         self._add_anno_data(
                             page_idx,
                             {
@@ -1515,6 +1551,47 @@ class ReaderTab(
                             },
                         )
                         source.clear_temp_stroke()
+                        self.active_drawing = []
+                        return True
+
+                    elif self.current_tool in ("rect", "oval") and self.active_drawing:
+                        w, h = source.width(), source.height()
+                        p1 = self.active_drawing[0]
+                        p2 = self.active_drawing[-1]
+                        rx1, ry1 = self._map_to_unrotated(p1.x() / w, p1.y() / h)
+                        rx2, ry2 = self._map_to_unrotated(p2.x() / w, p2.y() / h)
+                        self._add_anno_data(
+                            page_idx,
+                            {
+                                "type": "drawing",
+                                "subtype": self.current_tool,
+                                "points": [(rx1, ry1), (rx2, ry2)],
+                                "color": self.pen_color,
+                                "thickness": self.pen_thickness,
+                            },
+                        )
+                        self.active_drawing = []
+                        return True
+
+                    elif self.current_tool.startswith("markup") and self.active_drawing:
+                        w, h = source.width(), source.height()
+                        rect = QRect(self.active_drawing[0], event.pos()).normalized()
+                        rx1, ry1 = self._map_to_unrotated(
+                            rect.left() / w, rect.top() / h
+                        )
+                        rx2, ry2 = self._map_to_unrotated(
+                            rect.right() / w, rect.bottom() / h
+                        )
+                        self._add_anno_data(
+                            page_idx,
+                            {
+                                "type": "markup",
+                                "subtype": self.current_tool.replace("markup_", ""),
+                                "rect": [rx1, ry1, rx2, ry2],
+                                "color": self.pen_color,
+                            },
+                        )
+                        source.set_markup_preview([], QColor(0, 0, 0, 0))
                         self.active_drawing = []
                         return True
 
