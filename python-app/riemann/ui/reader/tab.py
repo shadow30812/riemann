@@ -1503,16 +1503,17 @@ class ReaderTab(
                         pts = []
                         for p in self.active_drawing:
                             pts.append(self._map_to_unrotated(p.x() / w, p.y() / h))
-                            self._add_anno_data(
-                                page_idx,
-                                {
-                                    "type": "drawing",
-                                    "subtype": self.current_tool,
-                                    "points": pts,
-                                    "color": self.pen_color,
-                                    "thickness": self.pen_thickness,
-                                },
-                            )
+                        
+                        self._add_anno_data(
+                            page_idx,
+                            {
+                                "type": "drawing",
+                                "subtype": self.current_tool,
+                                "points": pts,
+                                "color": self.pen_color,
+                                "thickness": self.pen_thickness,
+                            },
+                        )
                         source.clear_temp_stroke()
                         self.active_drawing = []
                         return True
@@ -2339,21 +2340,8 @@ class ReaderTab(
         for line in lines:
             line.sort(key=lambda c: c[1].center().x())
 
-            sorted_h = sorted([c[1].height() for c in line])
-            median_h = sorted_h[len(sorted_h) // 2] if sorted_h else 10
-
-            sorted_cy = sorted([c[1].center().y() for c in line])
-            median_cy = sorted_cy[len(sorted_cy) // 2] if sorted_cy else 10
-
-            new_h = int(median_h * 0.85)
-            new_y = int(median_cy - (new_h / 2) + (median_h * 0.05))
-
             for char, rect, seg_idx in line:
-                new_w = int(rect.width() * 0.95)
-                new_x = int(rect.x() + (rect.width() * 0.025))
-
-                normalized_rect = QRect(new_x, new_y, max(1, new_w), new_h)
-                all_chars.append((char, normalized_rect, seg_idx))
+                all_chars.append((char, rect, seg_idx))
 
         def get_closest_idx(pos: QPoint) -> int:
             best_idx = -1

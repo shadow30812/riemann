@@ -514,8 +514,39 @@ class AnnotationToolbar(QWidget):
 
         return QIcon(path)
 
+    def update_theme(self, is_dark: bool) -> None:
+        """Dynamically updates the toolbar's CSS to match the active theme."""
+        bg = "#2a2a2a" if is_dark else "#e0e0e0"
+        fg = "#ffffff" if is_dark else "#000000"
+        menu_bg = "#333333" if is_dark else "#f0f0f0"
+        border = "#555" if is_dark else "#ccc"
+        btn_hover = "#444" if is_dark else "#d0d0d0"
+        btn_checked = "#555" if is_dark else "#b0b0b0"
+
+        self.setStyleSheet(f"""
+            QWidget {{ background-color: {bg}; border-bottom: 1px solid {border}; color: {fg}; }}
+            QToolButton {{ border: none; padding: 4px; border-radius: 4px; font-size: 16px; color: {fg}; }}
+            QToolButton:hover {{ background-color: {btn_hover}; }}
+            QToolButton:checked {{ background-color: {btn_checked}; border: 1px solid #888; }}
+            QToolButton::menu-indicator {{ image: none; }}
+            QMenu {{ background-color: {menu_bg}; color: {fg}; border: 1px solid #888; }}
+            QMenu::item:selected {{ background-color: {btn_hover}; color: {fg}; }}
+            QSpinBox {{ background-color: {menu_bg}; color: {fg}; selection-background-color: #50a0ff; selection-color: #ffffff; }}
+        """)
+
     def _update_icons(self) -> None:
         """Refreshes all annotation icons dynamically when the theme changes."""
+        is_dark = False
+        current_parent = self.parent()
+        
+        while current_parent:
+            if hasattr(current_parent, "theme_mode"):
+                is_dark = current_parent.theme_mode != 0
+                break
+            current_parent = current_parent.parent()
+
+        self.update_theme(is_dark)
+
         self.btn_nav.setIcon(self._get_icon("browser.svg"))
         self.btn_note.setIcon(self._get_icon("sticky-note.svg"))
         self.btn_text.setIcon(self._get_icon("type.svg"))
