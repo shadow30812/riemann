@@ -1385,6 +1385,44 @@ class ReaderTab(
         Returns:
             bool: Handled flag skipping native execution reliably protecting custom routines fully efficiently safely.
         """
+        if event.type() == QEvent.Type.KeyPress:
+            if source == getattr(self, "scroll", None) or isinstance(
+                source, PageWidget
+            ):
+                key = event.key()
+                if getattr(self, "view_mode", None) == ViewMode.IMAGE:
+                    if key == Qt.Key.Key_Left:
+                        self.prev_view()
+                        return True
+                    elif key == Qt.Key.Key_Right:
+                        self.next_view()
+                        return True
+
+                    if not getattr(self, "continuous_scroll", True):
+                        vbar = self.scroll.verticalScrollBar()
+                        if vbar.maximum() == 0:
+                            if key == Qt.Key.Key_Up:
+                                self.prev_view()
+                                return True
+                            elif key == Qt.Key.Key_Down:
+                                self.next_view()
+                                return True
+
+                    if key == Qt.Key.Key_Up:
+                        vbar = self.scroll.verticalScrollBar()
+                        vbar.setValue(vbar.value() - 50)
+                        return True
+                    elif key == Qt.Key.Key_Down:
+                        vbar = self.scroll.verticalScrollBar()
+                        vbar.setValue(vbar.value() + 50)
+                        return True
+                    elif key == Qt.Key.Key_Space:
+                        mod = event.modifiers()
+                        self.scroll_page(
+                            -1 if mod & Qt.KeyboardModifier.ShiftModifier else 1
+                        )
+                        return True
+
         if isinstance(source, PageWidget):
             page_idx = source.property("pageIndex")
 
@@ -1647,13 +1685,25 @@ class ReaderTab(
                 self.scroll_page(-1 if mod & Qt.KeyboardModifier.ShiftModifier else 1)
 
             elif key == Qt.Key.Key_Up:
-                self.scroll.verticalScrollBar().setValue(
-                    self.scroll.verticalScrollBar().value() - 50
-                )
+                if (
+                    not self.continuous_scroll
+                    and self.scroll.verticalScrollBar().maximum() == 0
+                ):
+                    self.prev_view()
+                else:
+                    self.scroll.verticalScrollBar().setValue(
+                        self.scroll.verticalScrollBar().value() - 50
+                    )
             elif key == Qt.Key.Key_Down:
-                self.scroll.verticalScrollBar().setValue(
-                    self.scroll.verticalScrollBar().value() + 50
-                )
+                if (
+                    not self.continuous_scroll
+                    and self.scroll.verticalScrollBar().maximum() == 0
+                ):
+                    self.next_view()
+                else:
+                    self.scroll.verticalScrollBar().setValue(
+                        self.scroll.verticalScrollBar().value() + 50
+                    )
 
             elif key == Qt.Key.Key_Home:
                 self.scroll.verticalScrollBar().setValue(0)
@@ -2484,7 +2534,7 @@ class ReaderTab(
         self.btn_rename.setIcon(self._get_icon("rename.svg"))
         self.btn_export.setIcon(self._get_icon("file-output.svg"))
         self.btn_print.setIcon(self._get_icon("printer.svg"))
-        
+
         self.btn_cite.setIcon(self._get_icon("text-quote.svg"))
         self.btn_rotate.setIcon(self._get_icon("rotate-cw.svg"))
         self.btn_rotate_ccw.setIcon(self._get_icon("rotate-ccw.svg"))
