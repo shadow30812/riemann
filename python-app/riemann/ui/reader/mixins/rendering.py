@@ -4,7 +4,9 @@ Rendering Mixin.
 Handles layout calculation, virtualization, and PDF page rendering.
 """
 
+import os
 import sys
+import urllib.parse
 from typing import Dict, Tuple
 
 from PySide6.QtCore import QPoint, QRect, Qt, QTimer
@@ -21,7 +23,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QCheckBox, QHBoxLayout, QLineEdit, QWidget
 
 from ....core.constants import ViewMode, ZoomMode
-from ..utils import generate_reflow_html
+from ..utils import generate_markdown_html, generate_reflow_html
 from ..widgets import PageWidget
 
 
@@ -576,10 +578,60 @@ class RenderingMixin:
                 "lastScrollY", self.scroll.verticalScrollBar().value()
             )
         else:
-            if self.current_doc:
+            if hasattr(self, "web") and self.web:
+                self.web.setZoomFactor(self.calculate_scale())
+
+            if getattr(self, "current_doc", None):
                 txt = self.current_doc.get_page_text(self.current_page_index)
                 html_content = generate_reflow_html(txt, self.theme_mode != 0)
                 self.web.setHtml(html_content)
+
+            elif getattr(
+                self, "current_path", None
+            ) and self.current_path.lower().endswith(".md"):
+                try:
+                    with open(self.current_path, "r", encoding="utf-8") as f:
+                        text = f.read()
+                    full_html = generate_markdown_html(text, self.theme_mode != 0)
+
+                    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+                        base_path = getattr(sys, "_MEIPASS")
+                        font_path = os.path.join(
+                            base_path,
+                            "riemann",
+                            "assets",
+                            "fonts",
+                            "NotoColorEmoji.ttf",
+                        )
+
+                    else:
+                        base_path = os.path.dirname(
+                            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                        )
+                        font_path = os.path.join(
+                            base_path, "assets", "fonts", "NotoColorEmoji.ttf"
+                        )
+
+                    font_uri = "file:///" + urllib.parse.quote(
+                        font_path.replace("\\", "/")
+                    )
+
+                    emoji_style = f"""
+                    <style>
+                        @font-face {{
+                            font-family: "Riemann Noto Emoji";
+                            src: url("{font_uri}") format("truetype");
+                        }}
+                        body, p, span, div, h1, h2, h3, h4, h5, h6, table, th, td, li, pre, code {{ 
+                            font-family: inherit, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Riemann Noto Emoji", "Twemoji Mozilla" !important; 
+                        }}
+                    </style>
+                    """
+
+                    full_html += emoji_style
+                    self.web.setHtml(full_html)
+                except Exception as e:
+                    sys.stderr.write(f"Markdown Reload Error: {e}\n")
 
     def _probe_base_page_size(self) -> None:
         """

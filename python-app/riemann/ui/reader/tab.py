@@ -980,6 +980,7 @@ class ReaderTab(
             web_view.page().settings().setAttribute(
                 QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True
             )
+            web_view.setZoomFactor(self.calculate_scale())
 
             web_view.setHtml(full_html)
             self.toolbar.show()
@@ -1242,6 +1243,8 @@ class ReaderTab(
         )
         if self.view_mode == ViewMode.REFLOW:
             self._get_or_create_web_view()
+            self.web.setZoomFactor(self.calculate_scale())
+
         self.stack.setCurrentIndex(1 if self.view_mode == ViewMode.REFLOW else 0)
         self.btn_reflow.setChecked(self.view_mode == ViewMode.REFLOW)
 
@@ -1751,6 +1754,15 @@ class ReaderTab(
         """
         mod = event.modifiers()
 
+        if mod & Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self.zoom_step(1.1)
+            elif delta < 0:
+                self.zoom_step(0.9)
+            event.accept()
+            return
+
         if mod & Qt.KeyboardModifier.AltModifier:
             delta = event.angleDelta().y()
             if delta != 0:
@@ -1845,6 +1857,13 @@ class ReaderTab(
         self.settings.setValue("zoomMode", self.zoom_mode.value)
         self.settings.setValue("zoomScale", self.manual_scale)
 
+        if (
+            getattr(self, "view_mode", None) == ViewMode.REFLOW
+            and hasattr(self, "web")
+            and self.web
+        ):
+            self.web.setZoomFactor(self.calculate_scale())
+
         if hasattr(self, "apply_visual_zoom"):
             self.apply_visual_zoom()
             self.current_page_index = self._get_closest_page(
@@ -1908,6 +1927,9 @@ class ReaderTab(
         color = QColor(30, 30, 30) if is_dark else QColor(240, 240, 240)
         pal.setColor(QPalette.ColorRole.Window, color)
         self.setPalette(pal)
+
+        if hasattr(self, "web") and self.web:
+            self.web.page().setBackgroundColor(color)
 
         bg_scroll = "#222" if is_dark else "#eee"
         self.scroll_content.setStyleSheet(
@@ -2368,6 +2390,11 @@ class ReaderTab(
             self.web.installEventFilter(self)
             self.stack.removeWidget(self._web_placeholder)
             self.stack.insertWidget(1, self.web)
+            self.web.page().setBackgroundColor(
+                QColor(30, 30, 30)
+                if getattr(self, "theme_mode", 0) != 0
+                else QColor(240, 240, 240)
+            )
         return self.web
 
     def print_document(self) -> None:
