@@ -248,18 +248,44 @@ class AnnotationsMixin:
         if hasattr(self, "_map_to_unrotated"):
             rx, ry = self._map_to_unrotated(rx, ry)
 
-        best, min_dist = -1, 0.08
+        best, min_dist = -1, 0.06
+
         for i, anno in enumerate(self.annotations[pid]):
             dist = 1.0
-            if anno.get("type") in ("note", "text"):
-                ax, ay = anno["rel_pos"]
+            atype = anno.get("type")
+
+            if atype in ("note", "text", "stamp"):
+                ax, ay = anno.get("rel_pos", (0, 0))
                 dist = ((rx - ax) ** 2 + (ry - ay) ** 2) ** 0.5
-            elif anno.get("type") == "drawing":
+
+            elif atype == "drawing":
                 pts = anno.get("points", [])
                 if pts:
-                    dist = min(
-                        [((rx - px) ** 2 + (ry - py) ** 2) ** 0.5 for px, py in pts]
-                    )
+                    if anno.get("subtype") in ("rect", "oval") and len(pts) == 2:
+                        x1, y1 = pts[0]
+                        x2, y2 = pts[1]
+                        l, r = min(x1, x2), max(x1, x2)
+                        top, b = min(y1, y2), max(y1, y2)
+                        if ((l - 0.05) <= rx <= (r + 0.05)) and (
+                            (top - 0.05) <= ry <= (b + 0.05)
+                        ):
+                            dist = 0.0
+                    else:
+                        dist = min(
+                            [((rx - px) ** 2 + (ry - py) ** 2) ** 0.5 for px, py in pts]
+                        )
+
+            elif atype == "markup":
+                rects = anno.get("rects", [])
+                if rects:
+                    for l, t, r, b in rects:
+                        left, right = min(l, r), max(l, r)
+                        top, bottom = min(t, b), max(t, b)
+                        if (left - 0.05) <= rx <= (right + 0.05) and (
+                            top - 0.05
+                        ) <= ry <= (bottom + 0.05):
+                            dist = 0.0
+                            break
 
             if dist < min_dist:
                 min_dist = dist

@@ -477,14 +477,14 @@ class RenderingMixin:
         elif atype == "drawing":
             points = anno.get("points", [])
             if points:
-                poly = QPolygon(
-                    [QPoint(int(p[0] * lw), int(p[1] * lh)) for p in points]
-                )
                 c = QColor(anno["color"])
                 w = anno["thickness"]
-                if anno.get("subtype") == "highlight":
+                subtype = anno.get("subtype", "pen")
+
+                if subtype == "highlight":
                     c.setAlpha(80)
                     w *= 3
+
                 painter.setPen(
                     QPen(
                         c,
@@ -495,7 +495,43 @@ class RenderingMixin:
                     )
                 )
                 painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawPolyline(poly)
+
+                if subtype in ("rect", "oval") and len(points) == 2:
+                    p1 = QPoint(int(points[0][0] * lw), int(points[0][1] * lh))
+                    p2 = QPoint(int(points[1][0] * lw), int(points[1][1] * lh))
+                    rect = QRect(p1, p2).normalized()
+                    if subtype == "rect":
+                        painter.drawRect(rect)
+                    else:
+                        painter.drawEllipse(rect)
+                else:
+                    poly = QPolygon(
+                        [QPoint(int(p[0] * lw), int(p[1] * lh)) for p in points]
+                    )
+                    painter.drawPolyline(poly)
+
+        elif atype == "stamp":
+            pos = anno.get("rel_pos", (0, 0))
+            subtype = anno.get("subtype", "stamp_tick")
+            c = QColor(anno.get("color", "#ff0000"))
+
+            painter.setPen(
+                QPen(
+                    c,
+                    max(2, int(4 * scale)),
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                )
+            )
+            cx, cy = int(pos[0] * lw), int(pos[1] * lh)
+            size = int(12 * scale)
+
+            if subtype == "stamp_tick":
+                painter.drawLine(cx - size, cy, cx - size // 3, cy + size)
+                painter.drawLine(cx - size // 3, cy + size, cx + size, cy - size)
+            elif subtype == "stamp_cross":
+                painter.drawLine(cx - size, cy - size, cx + size, cy + size)
+                painter.drawLine(cx - size, cy + size, cx + size, cy - size)
 
         elif atype == "markup" and "rects" in anno:
             subtype = anno.get("subtype", "highlight")

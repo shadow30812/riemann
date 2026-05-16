@@ -1517,6 +1517,13 @@ class ReaderTab(
                         self.active_drawing.append(
                             QPoint(event.pos().x(), event.pos().y())
                         )
+                        source.set_shape_preview(
+                            self.active_drawing[0],
+                            event.pos(),
+                            self.current_tool,
+                            self.pen_color,
+                            self.pen_thickness,
+                        )
 
                     else:
                         self.active_drawing.append(
@@ -1571,6 +1578,7 @@ class ReaderTab(
                             },
                         )
                         self.active_drawing = []
+                        source.clear_temp_stroke()
                         return True
 
                     elif self.current_tool.startswith("markup") and self.active_drawing:
@@ -1587,7 +1595,7 @@ class ReaderTab(
                             {
                                 "type": "markup",
                                 "subtype": self.current_tool.replace("markup_", ""),
-                                "rect": [rx1, ry1, rx2, ry2],
+                                "rects": [[rx1, ry1, rx2, ry2]],
                                 "color": self.pen_color,
                             },
                         )

@@ -2,7 +2,7 @@
 Custom UI Widgets for the Reader Module.
 """
 
-from typing import List
+from typing import List, Optional
 
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
@@ -34,6 +34,12 @@ class PageWidget(QLabel):
         self.signature_overlays: List[dict] = []
         self.selected_text_rects: List[QRect] = []
         self.link_rects: List[tuple[QRect, str]] = []
+
+        self.temp_shape_p1: Optional[QPoint] = None
+        self.temp_shape_p2: Optional[QPoint] = None
+        self.temp_shape_type: str = ""
+        self.temp_shape_color: str = ""
+        self.temp_shape_thick: int = 1
 
     def set_text_selection(self, rects: List[QRect]) -> None:
         """
@@ -86,12 +92,25 @@ class PageWidget(QLabel):
         self.markup_color = color
         self.update()
 
+    def set_shape_preview(
+        self, p1: QPoint, p2: QPoint, shape_type: str, color: str, thick: int
+    ) -> None:
+        """Sets the preview points for dragging rectangles and ovals."""
+        self.temp_shape_p1 = p1
+        self.temp_shape_p2 = p2
+        self.temp_shape_type = shape_type
+        self.temp_shape_color = color
+        self.temp_shape_thick = thick
+        self.update()
+
     def clear_temp_stroke(self) -> None:
         """
         Clears all temporary visual strokes and selection preview rectangles.
         """
         self.temp_points = []
         self.markup_rects = []
+        self.temp_shape_p1 = None
+        self.temp_shape_p2 = None
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -113,6 +132,15 @@ class PageWidget(QLabel):
             painter.setBrush(self.markup_color)
             for r in self.markup_rects:
                 painter.drawRect(r)
+
+        if self.temp_shape_p1 and self.temp_shape_p2:
+            painter.setPen(QPen(QColor(self.temp_shape_color), self.temp_shape_thick))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            rect = QRect(self.temp_shape_p1, self.temp_shape_p2).normalized()
+            if self.temp_shape_type == "rect":
+                painter.drawRect(rect)
+            elif self.temp_shape_type == "oval":
+                painter.drawEllipse(rect)
 
         for overlay in getattr(self, "signature_overlays", []):
             rect = overlay["rect"]
