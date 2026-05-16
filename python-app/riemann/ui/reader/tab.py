@@ -1021,6 +1021,35 @@ class ReaderTab(
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Could not save file:\n{e}")
 
+    def toggle_annotation_mode(self, checked: bool = False) -> None:
+        """Overrides mixin to manage viewport kinetic scrolling lock."""
+        super().toggle_annotation_mode(checked)
+        self._update_scroller_state()
+
+    def set_tool(self, tool_id: str) -> None:
+        """Overrides mixin to manage viewport kinetic scrolling lock."""
+        super().set_tool(tool_id)
+        self._update_scroller_state()
+
+    def _update_scroller_state(self) -> None:
+        """Dynamically locks and unlocks the scroll area for annotations."""
+        if not hasattr(self, "scroll") or not self.scroll:
+            return
+
+        is_annotating = (
+            hasattr(self, "anno_toolbar")
+            and self.anno_toolbar.isVisible()
+            and getattr(self, "current_tool", "nav") != "nav"
+        )
+
+        if is_annotating:
+            QScroller.ungrabGesture(self.scroll.viewport())
+        else:
+            QScroller.grabGesture(
+                self.scroll.viewport(),
+                QScroller.ScrollerGestureType.LeftMouseButtonGesture,
+            )
+
     def export_annotations(self) -> None:
         """
         Traverses deeply nested annotation JSON layouts outputting clean markdown textual variants suitable for academic review.
@@ -1389,6 +1418,14 @@ class ReaderTab(
         Returns:
             bool: Handled flag skipping native execution reliably protecting custom routines fully efficiently safely.
         """
+        if (
+            hasattr(self, "anno_toolbar")
+            and self.anno_toolbar.isVisible()
+            and getattr(self, "current_tool", "nav") != "nav"
+            and event.type() in (QEvent.Type.Wheel, QEvent.Type.NativeGesture)
+        ):
+            return True
+
         if event.type() == QEvent.Type.KeyPress:
             if source == getattr(self, "scroll", None) or isinstance(
                 source, PageWidget
@@ -1454,7 +1491,11 @@ class ReaderTab(
                         self.process_snip(source, rect)
                     return True
 
-            if self.anno_toolbar.isVisible() and self.current_tool != "nav":
+            if (
+                hasattr(self, "anno_toolbar")
+                and self.anno_toolbar.isVisible()
+                and self.current_tool != "nav"
+            ):
                 if event.type() == QEvent.Type.MouseButtonPress:
                     if self.current_tool == "note":
                         if self.handle_annotation_click(source, event):
@@ -1510,8 +1551,12 @@ class ReaderTab(
 
                 elif event.type() == QEvent.Type.MouseMove and self.active_drawing:
                     if self.current_tool.startswith("markup"):
-                        rect = QRect(self.active_drawing[0], event.pos()).normalized()
-                        source.set_markup_preview([rect], QColor(255, 255, 0, 100))
+                        rects, _ = self._get_linear_text_selection(
+                            page_idx, self.active_drawing[0], event.pos()
+                        )
+                        preview_color = QColor(self.pen_color)
+                        preview_color.setAlpha(100)
+                        source.set_markup_preview(rects, preview_color)
 
                     elif self.current_tool in ("rect", "oval"):
                         self.active_drawing.append(
@@ -1582,23 +1627,32 @@ class ReaderTab(
                         return True
 
                     elif self.current_tool.startswith("markup") and self.active_drawing:
-                        w, h = source.width(), source.height()
-                        rect = QRect(self.active_drawing[0], event.pos()).normalized()
-                        rx1, ry1 = self._map_to_unrotated(
-                            rect.left() / w, rect.top() / h
+                        rects, text = self._get_linear_text_selection(
+                            page_idx, self.active_drawing[0], event.pos()
                         )
-                        rx2, ry2 = self._map_to_unrotated(
-                            rect.right() / w, rect.bottom() / h
-                        )
-                        self._add_anno_data(
-                            page_idx,
-                            {
-                                "type": "markup",
-                                "subtype": self.current_tool.replace("markup_", ""),
-                                "rects": [[rx1, ry1, rx2, ry2]],
-                                "color": self.pen_color,
-                            },
-                        )
+
+                        if rects:
+                            w, h = source.width(), source.height()
+                            normalized_rects = []
+                            for r in rects:
+                                rx1, ry1 = self._map_to_unrotated(
+                                    r.left() / w, r.top() / h
+                                )
+                                rx2, ry2 = self._map_to_unrotated(
+                                    r.right() / w, r.bottom() / h
+                                )
+                                normalized_rects.append([rx1, ry1, rx2, ry2])
+
+                            self._add_anno_data(
+                                page_idx,
+                                {
+                                    "type": "markup",
+                                    "subtype": self.current_tool.replace("markup_", ""),
+                                    "rects": normalized_rects,
+                                    "text": text,
+                                    "color": self.pen_color,
+                                },
+                            )
                         source.set_markup_preview([], QColor(0, 0, 0, 0))
                         self.active_drawing = []
                         return True
@@ -1841,6 +1895,14 @@ class ReaderTab(
         Args:
             event (QWheelEvent): Complex parameter detailing positional offsets dynamically tracked explicitly locally reliably.
         """
+        if (
+            hasattr(self, "anno_toolbar")
+            and self.anno_toolbar.isVisible()
+            and getattr(self, "current_tool", "nav") != "nav"
+        ):
+            event.accept()
+            return
+
         mod = event.modifiers()
 
         if mod & Qt.KeyboardModifier.ControlModifier:
