@@ -10,6 +10,7 @@ import os
 import shutil
 import sys
 import urllib.parse
+from math import inf
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pikepdf
@@ -1558,8 +1559,9 @@ class ReaderTab(
                         source.setCursor(Qt.CursorShape.IBeamCursor)
 
                 if getattr(self, "is_selecting_text", False):
-                    drag_rect = QRect(self.text_select_start, event.pos()).normalized()
-                    rects, text = self._get_intersecting_text_data(page_idx, drag_rect)
+                    rects, text = self._get_linear_text_selection(
+                        page_idx, self.text_select_start, event.pos()
+                    )
                     source.set_text_selection(rects)
                     self.current_selected_text = text
                 return True
@@ -1587,8 +1589,9 @@ class ReaderTab(
 
                 if getattr(self, "is_selecting_text", False):
                     self.is_selecting_text = False
-                    drag_rect = QRect(self.text_select_start, event.pos()).normalized()
-                    rects, text = self._get_intersecting_text_data(page_idx, drag_rect)
+                    rects, text = self._get_linear_text_selection(
+                        page_idx, self.text_select_start, event.pos()
+                    )
                     source.set_text_selection(rects)
                     self.current_selected_text = text
                 return True
@@ -2240,33 +2243,25 @@ class ReaderTab(
                 self, "Export Error", f"Failed to encrypt PDF:\n{str(e)}"
             )
 
-    def _get_intersecting_text_data(
-        self, page_idx: int, drag_rect: QRect
+    def _get_linear_text_selection(
+        self, page_idx: int, start_pos: QPoint, end_pos: QPoint
     ) -> tuple[List[QRect], str]:
         """
-        Calculates character-level intersections with the drag rectangle and extracts the precise text.
-
-        Args:
-            page_idx (int): The index of the currently processed document page.
-            drag_rect (QRect): The user's selection drag bounding box.
-
-        Returns:
-            tuple[List[QRect], str]: A tuple containing the list of character bounding boxes
-                                     and the concatenated string of selected text.
+        Calculates character-level linear text selection dynamically.
+        Uses line-based median normalization to automatically adapt to any text size or font metric,
+        eliminating the need for document-specific bounding box tuning.
         """
-        if not drag_rect or drag_rect.isEmpty():
+        if not start_pos or not end_pos:
             return [], ""
 
-        scale = self.calculate_scale()
-        base_w, base_h = (
-            self._cached_base_size if self._cached_base_size else (595, 842)
-        )
-        rotation = getattr(self, "rotation", 0)
+        widget = self.page_widgets.get(page_idx)
+        if not widget:
+            return [], ""
 
-        if rotation in (90, 270):
-            logical_w, logical_h = base_h * scale, base_w * scale
-        else:
-            logical_w, logical_h = base_w * scale, base_h * scale
+        logical_w = widget.width()
+        logical_h = widget.height()
+        scale = self.calculate_scale()
+        rotation = getattr(self, "rotation", 0)
 
         if page_idx not in self.text_segments_cache:
             self.text_segments_cache[page_idx] = self.current_doc.get_text_segments(
@@ -2274,18 +2269,19 @@ class ReaderTab(
             )
 
         segments = self.text_segments_cache[page_idx]
-        intersecting_rects = []
-        selected_text_pieces = []
+        raw_chars = []
 
-        for text, (l, t, r, b) in segments:
+        for seg_idx, (text, (l, t, r, b)) in enumerate(segments):
             char_count = len(text)
             if char_count == 0:
                 continue
 
             char_w = (r - l) / char_count
-            segment_chars = []
 
             for i, char in enumerate(text):
+                if not char.strip():
+                    continue
+
                 char_l = l + i * char_w
                 char_r = char_l + char_w
 
@@ -2298,6 +2294,9 @@ class ReaderTab(
                     y += h_rect
                     h_rect = abs(h_rect)
 
+                if h_rect > logical_h * 0.5 or w_rect > logical_w * 0.5:
+                    continue
+
                 if rotation == 90:
                     x, y = int(logical_h) - y - h_rect, x
                     w_rect, h_rect = h_rect, w_rect
@@ -2308,15 +2307,106 @@ class ReaderTab(
                     w_rect, h_rect = h_rect, w_rect
 
                 char_rect = QRect(x, y, max(1, w_rect), h_rect)
+                raw_chars.append((char, char_rect, seg_idx))
 
-                if drag_rect.intersects(char_rect):
-                    intersecting_rects.append(char_rect)
-                    segment_chars.append(char)
+        if not raw_chars:
+            return [], ""
 
-            if segment_chars:
-                selected_text_pieces.append("".join(segment_chars))
+        raw_chars.sort(key=lambda c: c[1].center().y())
 
-        return intersecting_rects, " ".join(selected_text_pieces)
+        lines = []
+        current_line = []
+        all_chars = []
+
+        for char_data in raw_chars:
+            rect = char_data[1]
+            if not current_line:
+                current_line.append(char_data)
+            else:
+                avg_cy = sum(c[1].center().y() for c in current_line) / len(
+                    current_line
+                )
+
+                if abs(rect.center().y() - avg_cy) < rect.height() * 0.6:
+                    current_line.append(char_data)
+                else:
+                    lines.append(current_line)
+                    current_line = [char_data]
+
+        if current_line:
+            lines.append(current_line)
+
+        for line in lines:
+            line.sort(key=lambda c: c[1].center().x())
+
+            sorted_h = sorted([c[1].height() for c in line])
+            median_h = sorted_h[len(sorted_h) // 2] if sorted_h else 10
+
+            sorted_cy = sorted([c[1].center().y() for c in line])
+            median_cy = sorted_cy[len(sorted_cy) // 2] if sorted_cy else 10
+
+            new_h = int(median_h * 0.85)
+            new_y = int(median_cy - (new_h / 2) + (median_h * 0.05))
+
+            for char, rect, seg_idx in line:
+                new_w = int(rect.width() * 0.95)
+                new_x = int(rect.x() + (rect.width() * 0.025))
+
+                normalized_rect = QRect(new_x, new_y, max(1, new_w), new_h)
+                all_chars.append((char, normalized_rect, seg_idx))
+
+        def get_closest_idx(pos: QPoint) -> int:
+            best_idx = -1
+            min_dist = inf
+            for i, (_, rect, _) in enumerate(all_chars):
+                cx, cy = rect.center().x(), rect.center().y()
+                dx = cx - pos.x()
+                dy = cy - pos.y()
+
+                dist = (dx * dx) + (dy * dy * 12)
+
+                if dist < min_dist:
+                    min_dist = dist
+                    best_idx = i
+            return best_idx
+
+        start_idx = get_closest_idx(start_pos)
+        end_idx = get_closest_idx(end_pos)
+
+        if start_idx == -1 or end_idx == -1:
+            return [], ""
+
+        min_idx = min(start_idx, end_idx)
+        max_idx = max(start_idx, end_idx)
+
+        selected_rects = []
+        selected_chars = []
+
+        for i in range(min_idx, max_idx + 1):
+            char, rect, seg_idx = all_chars[i]
+            selected_rects.append(rect)
+
+            if i > min_idx:
+                prev_rect = all_chars[i - 1][1]
+                prev_seg = all_chars[i - 1][2]
+
+                if (
+                    abs(rect.center().y() - prev_rect.center().y())
+                    > rect.height() * 0.5
+                ):
+                    if not selected_chars or selected_chars[-1] != "\n":
+                        selected_chars.append("\n")
+                elif seg_idx != prev_seg:
+                    if not selected_chars or (
+                        not selected_chars[-1].isspace() and not char.isspace()
+                    ):
+                        gap = rect.left() - prev_rect.right()
+                        if gap > (rect.width() * 0.15):
+                            selected_chars.append(" ")
+
+            selected_chars.append(char)
+
+        return selected_rects, "".join(selected_chars)
 
     def _search_web_for_selected_text(self, text: str) -> None:
         """
