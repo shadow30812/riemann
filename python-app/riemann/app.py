@@ -612,6 +612,10 @@ class RiemannWindow(QMainWindow):
         self.floating_fs_timer.setSingleShot(True)
         self.floating_fs_timer.timeout.connect(self.floating_fs_btn.hide)
 
+        self.fs_tracker_timer = QTimer(self)
+        self.fs_tracker_timer.setInterval(100)
+        self.fs_tracker_timer.timeout.connect(self._track_mouse_for_fs)
+
         self.enforce_global_stylesheet()
 
         from PySide6.QtGui import QKeySequence, QShortcut
@@ -724,33 +728,6 @@ class RiemannWindow(QMainWindow):
                     return True
 
                 return False
-
-        if (
-            getattr(self, "_reader_fullscreen", False)
-            and event.type() == QEvent.Type.MouseMove
-        ):
-            local_pos = self.mapFromGlobal(QCursor.pos())
-            if local_pos.y() < 10:
-                self._reveal_controls(True)
-            elif local_pos.y() > 100:
-                self.hover_timer.start()
-
-            if self.settings.value("app/floating_fs_btn", True, type=bool):
-                if local_pos.x() > self.width() - 150 and local_pos.y() < 100:
-                    self._update_floating_fs_btn_icon()
-                    self.floating_fs_btn.move(
-                        self.width() - self.floating_fs_btn.width() - 20, 20
-                    )
-                    if not self.floating_fs_btn.isVisible():
-                        self.floating_fs_btn.show()
-                        self.floating_fs_btn.raise_()
-                    self.floating_fs_timer.stop()
-                else:
-                    if (
-                        self.floating_fs_btn.isVisible()
-                        and not self.floating_fs_timer.isActive()
-                    ):
-                        self.floating_fs_timer.start()
 
         return super().eventFilter(source, event)
 
@@ -1650,6 +1627,10 @@ class RiemannWindow(QMainWindow):
         self._fullscreen_state = 0
         self._reader_fullscreen = False
 
+        self.fs_tracker_timer.stop()
+        self.floating_fs_btn.hide()
+        self.floating_fs_timer.stop()
+
         self.menuBar().show()
         self.tabs_main.tabBar().show()
         self.tabs_side.tabBar().show()
@@ -1680,11 +1661,13 @@ class RiemannWindow(QMainWindow):
             self._reader_fullscreen = True
             self.showFullScreen()
             self._broadcast_fullscreen_icon(1)
+            self.fs_tracker_timer.start()
 
         elif state == 1:
             self._fullscreen_state = 2
             self._set_tabs_toolbar_visible(False)
             self._broadcast_fullscreen_icon(2)
+            self.fs_tracker_timer.start()
 
         else:
             self.exit_fullscreen()
@@ -2310,6 +2293,39 @@ class RiemannWindow(QMainWindow):
                 widget = target.widget(i)
                 if hasattr(widget, "update_fullscreen_icon"):
                     widget.update_fullscreen_icon(state)
+
+    def _track_mouse_for_fs(self) -> None:
+        """
+        Polls the mouse position during fullscreen to reliably show UI elements,
+        bypassing event-swallowing issues in QWebEngineView and QScrollArea.
+        """
+        if not getattr(self, "_reader_fullscreen", False):
+            return
+
+        local_pos = self.mapFromGlobal(QCursor.pos())
+
+        if local_pos.y() < 10:
+            self._reveal_controls(True)
+        elif local_pos.y() > 100:
+            if not self.hover_timer.isActive():
+                self.hover_timer.start()
+
+        if self.settings.value("app/floating_fs_btn", True, type=bool):
+            if local_pos.x() > self.width() - 150 and local_pos.y() < 100:
+                self._update_floating_fs_btn_icon()
+                self.floating_fs_btn.move(
+                    self.width() - self.floating_fs_btn.width() - 20, 20
+                )
+                if not self.floating_fs_btn.isVisible():
+                    self.floating_fs_btn.show()
+                    self.floating_fs_btn.raise_()
+                self.floating_fs_timer.stop()
+            else:
+                if (
+                    self.floating_fs_btn.isVisible()
+                    and not self.floating_fs_timer.isActive()
+                ):
+                    self.floating_fs_timer.start()
 
 
 def run() -> None:
