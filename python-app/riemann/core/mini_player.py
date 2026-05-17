@@ -1,4 +1,5 @@
 import os
+import sys
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon
@@ -8,7 +9,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSlider,
-    QStyle,
     QWidget,
 )
 
@@ -27,7 +27,6 @@ class MiniAudioPlayer(QWidget):
 
         self.setup_ui()
 
-        # Poll every 500ms to update the seek bar and detect new media
         self.poll_timer = QTimer(self)
         self.poll_timer.setInterval(500)
         self.poll_timer.timeout.connect(self.poll_media_state)
@@ -35,15 +34,38 @@ class MiniAudioPlayer(QWidget):
 
         self.hide()
 
+    def _get_icon(self, icon_name: str) -> QIcon:
+        """
+        Resolves the target SVG icon relative to the parent application's currently configured theme state.
+        Automatically appends '-white' to the filename if dark mode is active.
+        """
+        is_dark = getattr(self.main_window, "dark_mode", False)
+        suffix = "-white" if is_dark else ""
+        base_name = icon_name.replace(".svg", "")
+
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            base_path = getattr(sys, "_MEIPASS")
+            path = os.path.join(
+                base_path, "riemann", "assets", "icons", f"{base_name}{suffix}.svg"
+            )
+        else:
+            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            path = os.path.join(
+                base_path, "assets", "icons", f"{base_name}{suffix}.svg"
+            )
+
+        if not os.path.exists(path) and suffix:
+            path = path.replace(f"{suffix}.svg", ".svg")
+
+        return QIcon(path)
+
     def setup_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 0, 15, 0)
         layout.setSpacing(8)
 
         self.btn_play_pause = QPushButton(self)
-        self.btn_play_pause.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause)
-        )
+        self.btn_play_pause.setIcon(self._get_icon("pause.svg"))
         self.btn_play_pause.setFixedSize(24, 24)
         self.btn_play_pause.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_play_pause.clicked.connect(self.toggle_playback)
@@ -52,6 +74,7 @@ class MiniAudioPlayer(QWidget):
         self.position_slider.setRange(0, 100)
         self.position_slider.setFixedWidth(100)
         self.position_slider.setCursor(Qt.CursorShape.PointingHandCursor)
+
         self.position_slider.sliderPressed.connect(self.slider_pressed)
         self.position_slider.sliderReleased.connect(self.slider_released)
 
@@ -68,15 +91,33 @@ class MiniAudioPlayer(QWidget):
         self._is_seeking = True
 
     def slider_released(self):
-        self._is_seeking = False
         if self.active_browser:
             seek_val = self.position_slider.value()
-            js = f"let m = [...document.querySelectorAll('audio, video')].find(e => e.duration > 0); if(m) m.currentTime = {seek_val};"
+            js = f"""
+            try {{
+                let mediaElements = [...document.querySelectorAll('audio, video')];
+                let m = mediaElements.find(e => !e.paused && e.duration > 0) || mediaElements.find(e => e.duration > 0);
+                if(m) m.currentTime = {seek_val};
+            }} catch(e) {{}}
+            """
             self.active_browser.web.page().runJavaScript(js)
+
+        QTimer.singleShot(500, self._release_seek_lock)
+
+    def _release_seek_lock(self):
+        self._is_seeking = False
 
     def toggle_playback(self):
         if self.active_browser:
-            js = "let m = [...document.querySelectorAll('audio, video')].find(e => e.duration > 0); if(m) { if(m.paused) m.play(); else m.pause(); }"
+            js = """
+            try {
+                let mediaElements = [...document.querySelectorAll('audio, video')];
+                let m = mediaElements.find(e => !e.paused && e.duration > 0) || mediaElements.find(e => e.duration > 0);
+                if(m) {
+                    if (m.paused) m.play(); else m.pause();
+                }
+            } catch(e) {}
+            """
             self.active_browser.web.page().runJavaScript(js)
 
     def find_active_browser(self):
@@ -108,6 +149,30 @@ class MiniAudioPlayer(QWidget):
                 self.main_window.menuBar().update()
 
     def poll_media_state(self):
+        is_dark = getattr(self.main_window, "dark_mode", False)
+        border_color = "white" if is_dark else "black"
+
+        new_style = f"""
+            QSlider::groove:horizontal {{
+                height: 4px;
+                background: rgba(136, 136, 136, 0.4);
+                border-radius: 2px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: #888;
+                border-radius: 2px;
+            }}
+            QSlider::handle:horizontal {{
+                background: #888;
+                border: 2px solid {border_color};
+                width: 10px;
+                margin: -5px 0; /* Expands the handle outside the thin groove */
+                border-radius: 7px; /* Makes it a perfect circle */
+            }}
+        """
+        if self.position_slider.styleSheet() != new_style:
+            self.position_slider.setStyleSheet(new_style)
+
         browser = self.find_active_browser()
         if not browser:
             self.set_visibility(False)
@@ -116,7 +181,6 @@ class MiniAudioPlayer(QWidget):
 
         self.active_browser = browser
 
-        # JS snippet altered to return a STRING delimited by a pipe "|" to bypass Qt dict mapping bugs
         js = """
         (function() {
             try {
@@ -134,8 +198,6 @@ class MiniAudioPlayer(QWidget):
         """
 
         def callback(result):
-            print(f"[Media Poll] String Payload: {result}")
-
             if result and isinstance(result, str) and "|" in result:
                 try:
                     parts = result.split("|")
@@ -153,12 +215,8 @@ class MiniAudioPlayer(QWidget):
                         f"{self.format_time(current)} / {self.format_time(duration)}"
                     )
 
-                    icon = (
-                        QStyle.StandardPixmap.SP_MediaPlay
-                        if paused
-                        else QStyle.StandardPixmap.SP_MediaPause
-                    )
-                    self.btn_play_pause.setIcon(self.style().standardIcon(icon))
+                    icon_name = "play.svg" if paused else "pause.svg"
+                    self.btn_play_pause.setIcon(self._get_icon(icon_name))
                 except Exception:
                     self.set_visibility(False)
             else:
