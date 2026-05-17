@@ -230,9 +230,21 @@
             const targetLoudness = 140;
 
             let newGain = this.params.gain;
-            if (midAvg > 10) {
+            let isFringe = false;
+
+            if (this.mediaElement && isFinite(this.mediaElement.duration)) {
+                const time = this.mediaElement.currentTime;
+                const duration = this.mediaElement.duration;
+                if (time < 5 || (duration - time) < 5) {
+                    isFringe = true;
+                }
+            }
+
+            if (midAvg > 10 && !isFringe) {
                 const gainCorrection = (targetLoudness - midAvg) * 0.001;
-                newGain = Math.max(0.8, Math.min(2.0, this.params.gain + gainCorrection));
+                newGain = Math.max(0.8, Math.min(3.0, this.params.gain + gainCorrection));
+            } else if (isFringe) {
+                newGain += (1.0 - newGain) * 0.02;
             }
 
             const bassCorrection = (targetBass - bassAvg) * 0.05;
