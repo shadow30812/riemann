@@ -6,12 +6,16 @@ application entry point. It orchestrates the UI layout, tab management
 (split-view), global keyboard shortcuts, and session persistence.
 """
 
-import gc
 import os
 import sys
-import tracemalloc
 
 # os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "9222")
+
+# import gc
+# import tracemalloc
+
+# tracemalloc.start()
+
 
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     bundle_dir = getattr(sys, "_MEIPASS")
@@ -98,8 +102,6 @@ from .core.mini_player import MiniAudioPlayer
 from .ui.browser import BrowserTab
 from .ui.components import DraggableTabWidget
 from .ui.reader import ReaderTab
-
-tracemalloc.start()
 
 
 def get_resource_path(relative_path: str) -> str:
@@ -618,54 +620,6 @@ class RiemannWindow(QMainWindow):
         self.fs_tracker_timer.timeout.connect(self._track_mouse_for_fs)
 
         self.enforce_global_stylesheet()
-
-        from PySide6.QtGui import QKeySequence, QShortcut
-
-        self.mem_shortcut = QShortcut(QKeySequence("Ctrl+M"), self)
-        self.mem_shortcut.activated.connect(self._diagnose_memory_leak)
-
-    def _diagnose_memory_leak(self):
-        print("\n" + "=" * 40)
-        print("🔍 RUNNING MEMORY DIAGNOSTICS...")
-        print("=" * 40)
-
-        gc.collect()
-
-        print("\n[ SURVIVING C++ / QT OBJECTS ]")
-        counts = {}
-        for obj in gc.get_objects():
-            try:
-                t_name = type(obj).__name__
-                if t_name in [
-                    "PageWidget",
-                    "QPixmap",
-                    "QImage",
-                    "PdfReader",
-                    "QLabel",
-                    "QWebEnginePage",
-                    "RenderingMixin",
-                ]:
-                    counts[t_name] = counts.get(t_name, 0) + 1
-            except Exception:
-                pass
-
-        if not counts:
-            print("  No suspect Qt objects found in memory.")
-        else:
-            for obj_type, count in sorted(
-                counts.items(), key=lambda x: x[1], reverse=True
-            ):
-                print(f"  🚨 Found {count} orphaned instance(s) of {obj_type}")
-
-        print("\n[ TOP 5 RAW MEMORY HOGS (Lines of Code) ]")
-        snapshot = tracemalloc.take_snapshot()
-        top_stats = snapshot.statistics("lineno")
-
-        for index, stat in enumerate(top_stats[:5], 1):
-            size_mb = stat.size / 1024 / 1024
-            print(f"  {index}. {stat.traceback[0]} -> {size_mb:.2f} MB")
-
-        print("=" * 40 + "\n")
 
     def _init_shortcuts(self) -> None:
         """
