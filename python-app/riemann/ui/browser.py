@@ -1059,6 +1059,28 @@ class BrowserTab(QWidget):
         self.shortcut_zoom_out_alt.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_zoom_out_alt.activated.connect(lambda: self.modify_zoom(-0.1))
 
+        self.shortcut_text_zoom_in = QShortcut(QKeySequence("Ctrl+Shift+="), self)
+        self.shortcut_text_zoom_in.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.shortcut_text_zoom_in.activated.connect(lambda: self.modify_text_zoom(10))
+
+        self.shortcut_text_zoom_in_alt = QShortcut(QKeySequence("Ctrl+Shift++"), self)
+        self.shortcut_text_zoom_in_alt.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.shortcut_text_zoom_in_alt.activated.connect(
+            lambda: self.modify_text_zoom(10)
+        )
+
+        self.shortcut_text_zoom_out = QShortcut(QKeySequence("Ctrl+Shift+-"), self)
+        self.shortcut_text_zoom_out.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.shortcut_text_zoom_out.activated.connect(
+            lambda: self.modify_text_zoom(-10)
+        )
+
+        self.shortcut_text_zoom_out_alt = QShortcut(QKeySequence("Ctrl+Shift+_"), self)
+        self.shortcut_text_zoom_out_alt.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.shortcut_text_zoom_out_alt.activated.connect(
+            lambda: self.modify_text_zoom(-10)
+        )
+
         self.shortcut_zoom_reset = QShortcut(QKeySequence("Ctrl+0"), self)
         self.shortcut_zoom_reset.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_zoom_reset.activated.connect(self.reset_zoom)
@@ -1412,6 +1434,19 @@ class BrowserTab(QWidget):
             QSettings("Riemann", "BrowserSettings").setValue(
                 f"zoom/{domain}", new_factor
             )
+
+    def modify_text_zoom(self, delta: float) -> None:
+        """
+        Adjusts only the text font size on the web page, without modifying layout scale.
+        """
+        js_code = f"""
+        (function() {{
+            let currentSize = parseFloat(document.body.style.fontSize) || 100;
+            currentSize += {delta};
+            document.body.style.fontSize = currentSize + '%';
+        }})();
+        """
+        self.web.page().runJavaScript(js_code)
 
     def reset_zoom(self) -> None:
         """
