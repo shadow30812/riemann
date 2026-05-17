@@ -10,7 +10,7 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QFileSystemModel,
     QHBoxLayout,
@@ -33,9 +33,7 @@ def _get_icon_path(filename):
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         return os.path.join(sys._MEIPASS, "riemann", "assets", "icons", filename)
     else:
-        base = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        )
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         return os.path.join(base, "assets", "icons", filename)
 
 
@@ -241,7 +239,7 @@ class FolderHomeTab(QWidget):
         fav_header = QHBoxLayout()
         fav_icon = QLabel()
         fav_icon.setPixmap(QIcon(_get_icon_path("star.png")).pixmap(24, 24))
-        fav_lbl = QLabel("Pinned Workspaces")
+        fav_lbl = QLabel("Favourite Workspaces")
         fav_lbl.setObjectName("SectionTitle")
         fav_header.addWidget(fav_icon)
         fav_header.addWidget(fav_lbl)
@@ -259,7 +257,14 @@ class FolderHomeTab(QWidget):
 
         rec_header = QHBoxLayout()
         rec_icon = QLabel()
-        rec_icon.setPixmap(QIcon(_get_icon_path("history.png")).pixmap(24, 24))
+        pixmap = QIcon(_get_icon_path("history.png")).pixmap(24, 24)
+
+        if self.dark_mode:
+            img = pixmap.toImage()
+            img.invertPixels(QImage.InvertMode.InvertRgb)
+            pixmap = QPixmap.fromImage(img)
+
+        rec_icon.setPixmap(pixmap)
         rec_lbl = QLabel("Recent Directories")
         rec_lbl.setObjectName("SectionTitle")
         rec_header.addWidget(rec_icon)
