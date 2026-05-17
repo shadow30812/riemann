@@ -94,6 +94,7 @@ from .core.managers import (
     LibraryManager,
     YtDlpDownloadManager,
 )
+from .core.mini_player import MiniAudioPlayer
 from .ui.browser import BrowserTab
 from .ui.components import DraggableTabWidget
 from .ui.reader import ReaderTab
@@ -1226,8 +1227,20 @@ class RiemannWindow(QMainWindow):
         )
 
         self.metrics_label.setMinimumWidth(500)
-        self.menuBar().setCornerWidget(self.metrics_label, Qt.Corner.TopRightCorner)
 
+        self.menu_corner_widget = QWidget(self)
+        self.menu_corner_layout = QHBoxLayout(self.menu_corner_widget)
+        self.menu_corner_layout.setContentsMargins(0, 0, 0, 0)
+        self.menu_corner_layout.setSpacing(0)
+
+        self.mini_player = MiniAudioPlayer(self)
+
+        self.menu_corner_layout.addWidget(self.mini_player)
+        self.menu_corner_layout.addWidget(self.metrics_label)
+
+        self.menuBar().setCornerWidget(
+            self.menu_corner_widget, Qt.Corner.TopRightCorner
+        )
         self.metrics_timer = QTimer(self)
         self.metrics_timer.timeout.connect(self._update_global_metrics)
         self.metrics_timer.start(2000)
