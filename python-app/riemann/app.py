@@ -101,7 +101,7 @@ from .core.managers import (
 from .core.mini_player import MiniAudioPlayer
 from .ui.browser import BrowserTab, PreviewTextTab
 from .ui.components import DraggableTabWidget
-from .ui.explorer import FileExplorerPanel
+from .ui.explorer import FileExplorerPanel, FolderHomeTab
 from .ui.favourites import ManageFavoritesDialog
 from .ui.reader.tab import PreviewReaderTab, ReaderTab
 
@@ -649,6 +649,7 @@ class RiemannWindow(QMainWindow):
             (Qt.Key.Key_Escape, self._handle_escape),
             ("Ctrl+T", self.new_pdf_tab),
             ("Ctrl+B", self.new_browser_tab),
+            ("Ctrl+Shift+E", self.new_folder_home_tab),
             ("Ctrl+N", self.new_window),
             ("Ctrl+Shift+N", self.new_incognito_window),
             ("Ctrl+O", self.open_file_smart),
@@ -971,6 +972,15 @@ class RiemannWindow(QMainWindow):
                 self.new_pdf_tab()
                 self.new_browser_tab()
 
+        active_folder = self.settings.value("session/active_folder", "", type=str)
+        if active_folder and os.path.exists(active_folder):
+            self.tabs_side.hide()
+            self.is_folder_session_active = True
+            if hasattr(self, "explorer_panel"):
+                self.explorer_panel.set_path(active_folder)
+                self.explorer_panel.show()
+            self.history_manager.add(active_folder, "folder")
+
     def _restore_tabs_from_settings(self, key: str, target_widget: QTabWidget) -> None:
         """
         Parses settings data to recreate tabs.
@@ -995,6 +1005,8 @@ class RiemannWindow(QMainWindow):
                     self._add_pdf_tab(item["data"], target_widget, True)
                 elif item.get("type") == "web" and item.get("data"):
                     self._add_browser_tab(item["data"], target_widget)
+                elif item.get("type") == "folder_home":
+                    self.new_folder_home_tab(target_widget)
 
     def refresh_signature_panel(self) -> None:
         """
@@ -1160,6 +1172,7 @@ class RiemannWindow(QMainWindow):
             ("Open file (Ctrl+O)", None, self.open_file_smart),
             ("New PDF Tab (Ctrl+T)", None, lambda: self.new_pdf_tab()),
             ("New Browser Page (Ctrl+B)", None, lambda: self.new_browser_tab()),
+            ("New Folder Dashboard (Ctrl+Shift+E)", None, self.new_folder_home_tab),
             (None, None, None),
             ("Split Current PDF", None, self.split_pdf),
             ("Merge PDFs", None, self.join_pdfs),
@@ -1619,8 +1632,11 @@ class RiemannWindow(QMainWindow):
 
             for i in range(tab_widget.count()):
                 wid = tab_widget.widget(i)
-                if isinstance(wid, ReaderTab) and getattr(wid, "current_path", None):
+                if isinstance(wid, FolderHomeTab):
+                    tabs_data.append({"type": "folder_home", "data": ""})
+                elif isinstance(wid, ReaderTab) and getattr(wid, "current_path", None):
                     tabs_data.append({"type": "pdf", "data": wid.current_path})
+
                 elif isinstance(wid, BrowserTab):
                     if not getattr(wid, "incognito", False):
                         url_str = wid.web.url().toString()
@@ -1641,6 +1657,15 @@ class RiemannWindow(QMainWindow):
 
         self.settings.setValue("session/main_tabs", get_files(self.tabs_main))
         self.settings.setValue("session/side_tabs", get_files(self.tabs_side))
+
+        if getattr(self, "is_folder_session_active", False) and hasattr(
+            self, "explorer_panel"
+        ):
+            self.settings.setValue(
+                "session/active_folder", self.explorer_panel.current_path
+            )
+        else:
+            self.settings.setValue("session/active_folder", "")
 
         self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/state", self.saveState())
@@ -1810,9 +1835,11 @@ class RiemannWindow(QMainWindow):
 
         list_web = create_list(self.history_manager.get_list("web"))
         list_pdf = create_list(self.history_manager.get_list("pdf"))
+        list_folder = create_list(self.history_manager.get_list("folder"))
 
         tabs.addTab(list_web, "Web History")
         tabs.addTab(list_pdf, "PDF History")
+        tabs.addTab(list_folder, "Folder History")
         layout.addWidget(tabs)
 
         button_box = QDialogButtonBox(
@@ -1826,7 +1853,13 @@ class RiemannWindow(QMainWindow):
             """
             Handles double-click or accept events to open the selected history item in a new tab.
             """
-            current_list = list_web if tabs.currentIndex() == 0 else list_pdf
+            if tabs.currentIndex() == 0:
+                current_list = list_web
+            elif tabs.currentIndex() == 1:
+                current_list = list_pdf
+            else:
+                current_list = list_folder
+
             item = current_list.currentItem()
             if not item:
                 return
@@ -1834,7 +1867,9 @@ class RiemannWindow(QMainWindow):
             data = item.text()
             dialog.accept()
 
-            if tabs.currentIndex() == 1:
+            if tabs.currentIndex() == 2:
+                self.open_folder(data)
+            elif tabs.currentIndex() == 1:
                 if os.path.exists(data):
                     current = self.tabs_main.currentWidget()
                     if isinstance(current, ReaderTab) and not current.current_path:
@@ -2406,6 +2441,7 @@ class RiemannWindow(QMainWindow):
                 return
 
         save_last_directory(self.settings, path)
+        self.history_manager.add(path, "folder")
 
         if self.tabs_side.count() > 0:
             msg_box = QMessageBox(self)
@@ -2590,6 +2626,17 @@ class RiemannWindow(QMainWindow):
             pass
 
         return "text"
+
+    def new_folder_home_tab(self, target_widget=None):
+        """Spawns the workspace/folder dashboard."""
+        if target_widget is None:
+            target_widget = self.tabs_main
+
+        tab = FolderHomeTab(self, self.dark_mode)
+        icon_path = get_resource_path(os.path.join("assets", "icons", "folder.png"))
+
+        idx = target_widget.addTab(tab, QIcon(icon_path), "Workspaces")
+        target_widget.setCurrentIndex(idx)
 
 
 def run() -> None:

@@ -268,7 +268,7 @@ class HistoryManager:
             QStandardPaths.StandardLocation.AppDataLocation
         )
         self.path = os.path.join(base, "history.json")
-        self.history: Dict[str, List[str]] = {"pdf": [], "web": []}
+        self.history: Dict[str, List[str]] = {"pdf": [], "web": [], "folder": []}
         self.popular_sites: List[str] = [
             "music.youtube.com",
             "whatsapp.com",
@@ -298,11 +298,13 @@ class HistoryManager:
                 with open(self.path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if isinstance(data, list):
-                        self.history = {"pdf": [], "web": data}
+                        self.history = {"pdf": [], "web": data, "folder": []}
                     elif isinstance(data, dict):
                         self.history = data
+                        if "folder" not in self.history:
+                            self.history["folder"] = []
             except (json.JSONDecodeError, OSError):
-                self.history = {"pdf": [], "web": []}
+                self.history = {"pdf": [], "web": [], "folder": []}
 
     def save(self) -> None:
         """
