@@ -1,207 +1,1274 @@
-# **Riemann Complete Developer Reference Guide**
+# Riemann Complete Developer Reference Guide
 
-This guide serves as an exhaustive architectural map and modification manual for the entire Riemann codebase. Riemann is a complex, hybrid application that blends Python (PySide6) for UI orchestration, Rust for high-performance memory-safe computation, FastAPI for local AI, and modern web technologies for embedded browsing and audio DSP.
+This guide serves as a detailed architectural map and implementation reference for the Riemann codebase. Riemann is a hybrid desktop research environment combining Python (PySide6), Rust, FastAPI, Chromium, and JavaScript/WebAudio subsystems into a unified local-first research platform.
 
-This document breaks down the responsibilities of each file, explains the hidden mechanics of how they interact, and provides explicit instructions on where to look when making changes or adding features to specific subsystems.
+The purpose of this document is not merely to describe files, but to explain:
 
-## **Table of Contents**
+* subsystem responsibilities
+* architectural boundaries
+* rendering and memory strategies
+* event flow patterns
+* persistence systems
+* browser integration layers
+* performance-sensitive paths
+* extension points for future development
 
-1. [Architectural Philosophy & Data Flow](#1-architectural-philosophy--data-flow)  
-2. [Core Application Orchestration (python-app/)](#2-core-application-orchestration-python-app)  
-3. [Reader Subsystem & Mixins (python-app/riemann/ui/reader/)](#3-reader-subsystem--mixins-python-appriemannuireader)  
-4. [Browser Subsystem (python-app/riemann/ui/)](#4-browser-subsystem-python-appriemannui)  
-5. [Web Assets & Javascript (python-app/riemann/assets/)](#5-web-assets--javascript-python-appriemannassets)  
-6. [Core Managers & Data (python-app/riemann/core/)](#6-core-managers--data-python-appriemanncore)  
-7. [Rust Native Backend (rust-core/ & rust-ocr-worker/)](#7-rust-native-backend-rust-core--rust-ocr-worker)  
-8. [Local AI Sidecar (riemann-ai/)](#8-local-ai-sidecar-riemann-ai)  
-9. [Build & Packaging Scripts (/ & scripts/)](#9-build--packaging-scripts---scripts)
+When modifying Riemann, always determine whether the change belongs primarily to:
 
-## **1\. Architectural Philosophy & Data Flow**
+* UI orchestration
+* native rendering
+* browser-side execution
+* AI inference
+* persistent state management
+* asynchronous worker infrastructure
 
-Riemann is designed around a **Local-First, Hybrid Architecture**. Because Python's Global Interpreter Lock (GIL) makes it unsuitable for heavy CPU-bound tasks like rasterizing 500-page PDFs or running vector similarity searches, Riemann delegates heavily:
+Route changes to the appropriate subsystem instead of expanding unrelated modules.
 
-* **UI & Event Loop:** Handled entirely by Python/PySide6.  
-* **Heavy Compute:** Pushed across the FFI (Foreign Function Interface) boundary to Rust extensions via PyO3.  
-* **AI/ML:** Isolated into a local HTTP FastAPI sidecar to prevent dependency conflicts between PySide6 and PyTorch.
+---
 
-When modifying Riemann, always ask: *Is this a UI event, a heavy computation, or a model interaction?* Route your modifications to the appropriate language layer.
+# Table of Contents
 
-## **2\. Core Application Orchestration (python-app/)**
+1. Architectural Philosophy & Runtime Model
+2. Application Lifecycle & Main Window
+3. Core Reader Architecture
+4. Rendering & Virtualization Systems
+5. Annotation Pipeline
+6. Search & Text Extraction Systems
+7. Browser Architecture
+8. JavaScript Injection Layer
+9. Media & Audio Infrastructure
+10. Live Captioning Pipeline
+11. AI Infrastructure
+12. Persistent Managers & State Systems
+13. Document Conversion & Compression
+14. Workspace & Tab Infrastructure
+15. Explorer & Favorites Systems
+16. Session Persistence & IPC
+17. Build & Packaging Infrastructure
+18. Performance & Memory Considerations
+19. Common Modification Scenarios
+20. Repository Structure Reference
 
-### **riemann/app.py**
+---
 
-* **What it is:** The global orchestrator and the largest file in the Python layer. It manages the RiemannWindow (a QMainWindow), the QSplitter for dual-pane views, global keyboard shortcuts, native menu bars, session serialization, and Chromium engine initialization.  
-* **Deep Dive Mechanics:**  
-  * **Chromium Flags:** The run() method explicitly sets environment variables like \--autoplay-policy=no-user-gesture-required (vital for the Web Audio engine) and \--disable-features=AudioServiceOutOfProcess to ensure stability across Linux environments.  
-  * **IPC & Single-Instance:** Riemann uses a QLocalServer (RiemannSingleInstance). If a user opens a second PDF via their file manager, the secondary process detects the running server, pipes the file paths over a TCP socket as a | delimited string, and instantly terminates. The primary instance intercepts this in handle\_connection() and opens the new tabs.  
-  * **The Media Kill-Switch:** The \_kill\_all\_media\_safely() method is a critical stability workaround. Chromium media threads (like YouTube) can outlive the Python Garbage Collector during a sudden window close, causing Segmentation Faults. This method forces all media tabs to navigate to their root domain (youtube.com instead of a video URL) to cleanly sever the audio/video stream before C++ teardown.  
-  * **Serialization of tabs:** The \_restore\_session() and \_restore\_tabs\_from\_settings() methods serialize the active state of tabs_main and tabs_side on closeEvent and deserialize them on boot to recreate the exact workspace.
+# 1. Architectural Philosophy & Runtime Model
 
-* **What to modify here:**  
-  * Adding new global hotkeys (def \_init\_shortcuts).  
-  * Changing split-view routing logic (def toggle\_split\_view).  
-  * Modifying the settings/preferences dialog (class SettingsDialog).  
-  * Expanding session restoration logic (def \_restore\_session).
+Riemann intentionally separates responsibilities across multiple runtime layers.
 
-### **riemann/\_\_main\_\_.py & riemann/\_\_init\_\_.py**
+## Python Layer
 
-* **What they are:** Standard Python package entry points. \_\_main\_\_.py simply imports and triggers app.run(). They rarely, if ever, require modification unless you are fundamentally changing how the package is invoked from the command line.
+Responsible for:
 
-## **3\. Reader Subsystem & Mixins (python-app/riemann/ui/reader/)**
+* UI orchestration
+* event routing
+* threading
+* browser integration
+* layout systems
+* session persistence
+* state management
 
-The PDF Reader avoids the "God Object" anti-pattern by utilizing a **mixin architecture**. ReaderTab is a minimal shell; all actual capabilities are inherited from specialized mixin classes.
+Python should not perform large-scale rasterization or heavy synchronous compute.
 
-### **tab.py (ReaderTab)**
+---
 
-* **What it is:** The master PDF tab class. It handles core UI assembly (attaching toolbars, sidebars, and the QStackedWidget for image vs. reflow modes) and routes basic events to the appropriate mixin.  
-* **What to modify here:** High-level tab UI layout, save/export dialog logic, and basic tab-centric keyboard event filtering.
+## Rust Layer
 
-### **mixins/rendering.py**
+Responsible for:
 
-* **What it is:** The heart of the visual PDF display. It interacts directly with the riemann\_core Rust module.  
-* **Deep Dive Mechanics:**  
-  * **Virtual vs. Standard Layouts:** To prevent massive memory consumption, documents over a certain size (e.g., 50 pages) trigger \_build\_virtual\_layout. In this mode, QScrollArea is populated with empty placeholder widgets based on an average page size (\_probe\_base\_page\_size). The actual QImage is only rasterized from Rust when the placeholder enters the viewport bounds (render\_visible\_pages()).  
-  * **DPI Scaling:** Uses self.devicePixelRatio() to ensure text isn't blurry on 4K/HiDPI monitors.  
-* **What to modify here:** Zoom algorithm constraints, scroll wheel event multipliers, and virtual layout threshold values.
+* PDF rendering
+* text extraction
+* OCR delegation
+* search indexing
+* page geometry
+* annotation embedding
 
-### **mixins/annotations.py**
+The Rust backend exists primarily to bypass Python's GIL and improve long-session responsiveness.
 
-* **What it is:** Handles interactive overlays. It maps physical mouse clicks (screen coordinates) into PDF-space coordinates using the current zoom scale. Additionally, the module detects hyperlinked bounding boxes in the PDF, allowing users to interact with embedded web links directly.  
-* **What to modify here:** Adding new annotation shapes (e.g., arrows, polygons), modifying the Undo/Redo stack size, or changing the JSON serialization format for local annotation storage.
+---
 
-### **mixins/search.py**
+## Browser Runtime Layer
 
-* **What it is:** Exact-text searching. It passes a query to Rust, which returns a list of bounding boxes \[x, y, w, h\]. Python then overlays semi-transparent yellow QWidget highlights over the document.  
-* **What to modify here:** Implementing case-insensitive vs. exact-match toggles, changing the highlight color, or altering the "Scroll to next result" centering logic.
+Chromium-based functionality runs inside Qt WebEngine processes.
 
-### **mixins/ai.py**
+This layer handles:
 
-* **What it is:** Bridges the UI with the riemann-ai sidecar.  
-* **Deep Dive Mechanics:** \* For "Snip-to-AI", it captures a sub-rect of the current QImage, converts it to a Base64 PNG buffer, and POSTs it to the local AI server for vision tasks (like LaTeX extraction).  
-* **What to modify here:** API payload structuring, adding new buttons to the AI toolbar, or parsing new response types from the LLM.
+* WebAudio DSP
+* injected overlays
+* live media processing
+* browser-side enhancement scripts
+* caption overlays
+* playback augmentation
 
-### **mixins/metadata.py & mixins/signatures.py**
+This layer is isolated from the Qt widget hierarchy.
 
-* **What they are:** \* metadata.py runs Regex over the first 3 pages of text to find DOIs or ArXiv IDs, then asynchronously hits the Crossref/OpenAlex REST APIs to fetch rich metadata.  
-  * signatures.py uses pyHanko to cryptographically verify PDF signers against a local trust store.  
-* **What to modify here:** Adding new metadata fallback APIs (e.g., Semantic Scholar) or altering PKCS\#12 signing flows.
+---
 
-## **4\. Browser Subsystem (python-app/riemann/ui/)**
+## AI Sidecar
 
-### **browser.py (BrowserTab)**
+AI inference is intentionally isolated into a separate FastAPI subsystem.
 
-* **What it is:** An integrated Chromium tab using QWebEngineView.  
-* **Deep Dive Mechanics:** WebEngine operates in separate OS processes. BrowserTab bridges Python to the DOM via runJavaScript and sets up DevTools windows. It distinguishes between persistent and incognito sessions by assigning either a shared or off-the-record QWebEngineProfile. Browser scale factors are saved and persisted locally per host domain using QSettings("Riemann", "BrowserSettings").  
-* **What to modify here:** Handling custom downloads (e.g., routing YouTube URLs to yt-dlp), injecting custom context menus into the web view, or implementing print-to-PDF functions.
+Reasons:
 
-* **Video Streaming** via YtDlpStreamWorker utilizes yt-dlp in background QThread workers to extract raw stream URLs for proprietary codecs that QtWebEngine cannot natively decode.
+* dependency isolation
+* PyTorch compatibility stability
+* process separation
+* crash containment
+* simplified model lifecycle management
 
-### **browser\_handlers.py**
+---
 
-* **What it is:** Houses the RequestInterceptor which evaluates every outgoing HTTP request.  
-* **What to modify here:** The ad-block list (adding new trackers to ad\_domains), or overriding the User-Agent headers for sites that block embedded browsers (like WhatsApp Web).
+# 2. Application Lifecycle & Main Window
 
-### **components.py**
+## `riemann/app.py`
 
-* **What it is:** Reusable QWidgets. Most importantly, DraggableTabWidget which heavily overrides native Qt drag-and-drop events to allow users to open files by dropping them directly onto the tab bar.  
-* **What to modify here:** Customizing tab rendering, adding close-button icons, or modifying the central AnnotationToolbar floating widget.
+This file is the primary orchestration layer of the application.
 
-## **5\. Web Assets & Javascript (python-app/riemann/assets/)**
+Core responsibilities:
 
-Riemann utilizes standard web technologies for internal features, bypassing Qt's UI limitations.
+* constructing the main window
+* initializing Chromium
+* configuring global profiles
+* split-view coordination
+* tab routing
+* session persistence
+* global shortcuts
+* single-instance handling
+* media cleanup
+* dialog orchestration
 
-### **homepage.html, homepage.css, homepage.js**
+The application entrypoint eventually routes into `RiemannWindow`.
 
-* **What it is:** The default file:// new tab interface.  
-* **Deep Dive Mechanics:** Because local HTML files cannot natively write to Python's disk environment due to security boundaries, homepage.js communicates with Python via a URL intercept hack. When a user saves a new bookmark, JS navigates to riemann-save://\<base64\_payload\>. Python intercepts this pseudo-protocol, cancels the navigation, decodes the payload, and saves it to disk.  
-* **What to modify here:** Changing the grid layout, updating the clock widget, or modifying how favicons are fetched and cached.
+---
 
-### **audio\_engine.js**
+## Chromium Configuration
 
-* **What it is:** A pure Web Audio API implementation that acts as Riemann's "Music Mode".  
-* **Deep Dive Mechanics:** It constructs an extensive DSP (Digital Signal Processing) graph: Source \-\> PreAmp \-\> Saturation (WaveShaper) \-\> Mid/Side EQ \-\> High/Low Shelves \-\> Reverb (Convolver) \-\> Compressor \-\> Limiter \-\> Destination. The AnalyserNode drives the visual FFT equalizer in the UI.  
-* **What to modify here:** Adding new audio nodes (like a low-pass filter for a "muffled" effect), tweaking the Q-factor of the EQ bands, or altering the saturation curve math.
+The application configures Chromium flags early during startup.
 
-### **video\_engine.js**
+Important behaviors depend on these flags:
 
-* **What it is:** Hook injected via PySide allowing DOM manipulation of HTML5 \<video> tags.  
-* **Deep Dive Mechanics:** Explain that it creates a floating UI overlay with an interval-based observer to force-sync the video element's playbackRate with the user's custom speed settings.
+* autoplay handling
+* audio routing
+* WebAudio stability
+* media playback compatibility
 
-### **injections/smart\_dark\_mode.js & injections/ad\_skipper.js**
+Be extremely careful when modifying startup flags because subtle browser regressions can occur on Linux distributions.
 
-* **What they are:** Scripts injected after loadFinished. smart\_dark\_mode applies a complex CSS filter: invert(1) hue-rotate(180deg) to the \<html\> tag, while explicitly un-inverting \<img\>, \<video\>, and \<canvas\> tags to preserve media colors.  
-* **What to modify here:** Improving the dark mode heuristics (e.g., protecting background-image divs) or adding specific DOM selectors to the YouTube ad-skipper.
+---
 
-## **6\. Core Managers & Data (python-app/riemann/core/)**
+## Single-Instance IPC
 
-These modules handle all disk I/O and state persistence outside of the Qt settings file.
+Riemann uses `QLocalServer` and `QLocalSocket`.
 
-### **managers.py**
+Flow:
 
-* **What it is:** Singleton-style managers for application data.  
-  * LibraryManager: Uses sqlite3 to maintain library.db. Stores file\_hash, title, authors, and year. Includes LIKE queries for local library search.  
-  * HistoryManager: Maintains a capped list (e.g., 1000 items) of visited URLs and PDF paths in history.json.  
-  * DownloadManager: Serializes active and completed downloads to track progress across sessions.  
-* **What to modify here:** \* **Database Migrations:** If you add a new column to the Library (like tags), you must update the CREATE TABLE IF NOT EXISTS schema in LibraryManager.\_\_init\_\_.  
-  * **Pruning Logic:** Altering how old history items are discarded.
+```text
+Secondary Launch
+→ Detect Existing Server
+→ Forward File Paths
+→ Existing Instance Opens Files
+→ Secondary Process Exits
+```
 
-### **constants.py**
+This system prevents duplicate application instances during OS-level "Open With" actions.
 
-* **What it is:** Global Enums. Keeps magic strings out of the codebase.  
-* **What to modify here:** Adding new ZoomMode states or tracking new application-wide ViewMode identifiers.
+---
 
-## **7\. Rust Native Backend (rust-core/ & rust-ocr-worker/)**
+## Media Kill-Switch
 
-The Rust backend represents Riemann's commitment to performance. It is exposed to Python via PyO3.
+One of the most important stability workarounds inside the application.
 
-### **rust-core/src/lib.rs**
+QtWebEngine media threads can outlive Qt widget destruction during application shutdown.
 
-* **What it is:** The core PDF manipulation library utilizing pdfium-render (a safe wrapper around Google's C++ PDFium).  
-* **Deep Dive Mechanics:**  
-  * **Memory Management:** render\_page() asks PDFium for a bitmap, processes it into a flat Vec\<u8\> (BGRA format), and hands ownership to a Python bytes object. PySide6 then wraps this in a QImage. This prevents Python from having to do costly pixel-by-pixel manipulation.  
-  * **Inversion:** If dark mode is requested, the Rust code iterates through the raw byte array and mathematically inverts the RGB channels (leaving Alpha intact) before passing it to Python. This is orders of magnitude faster than doing it in Python.  
-* **What to modify here:** Exposing new PDFium features to Python (e.g., reading PDF Table of Contents/Outlines, extracting raw embedded JPEGs, or reading form fields).
+To prevent segmentation faults:
 
-### **rust-ocr-worker/src/lib.rs**
+* active media tabs are redirected away from live media URLs
+* browser streams are forcefully severed
+* Chromium cleanup occurs before Qt teardown
 
-* **What it is:** An asynchronous text extraction worker.  
-* **Deep Dive Mechanics:** To avoid complex C++ linking issues with Tesseract libraries across different OSs, this module takes a raw RGBA buffer from Python, writes it to a temporary png file in the OS temp directory, and executes the standard tesseract CLI binary via Rust's std::process::Command using \--psm 1 (Automatic page segmentation). It captures the stdout and returns the string to Python.  
-* **What to modify here:** Adding support for different PSM modes (e.g., single block vs sparse text), passing language flags (-l eng+fra), or swapping Tesseract for a different engine.
+Do not remove this logic unless replacing it with another shutdown-safe media strategy.
 
-## **8\. Local AI Sidecar (riemann-ai/)**
+---
 
-To ensure absolute privacy, Riemann ships with its own AI environment that runs entirely offline via FastAPI.
+## Settings Infrastructure
 
-### **main.py**
+Settings are primarily persisted through `QSettings`.
 
-* **What it is:** The REST API serving vector embeddings and semantic search.  
-* **Deep Dive Mechanics:** \* **Initialization:** On boot, it loads the sentence-transformers/all-MiniLM-L6-v2 model into memory (a highly optimized, lightweight embedding model producing 384-dimensional vectors).  
-  * **Indexing (/index):** Receives a raw text string, uses LangChain text splitters to break it into overlapping chunks (e.g., 500 characters with 50 overlap), generates vectors, and stores them in an in-memory FAISS (Facebook AI Similarity Search) index.  
-  * **Searching (/search):** Embeds the user's query and performs a rapid L2-distance/Cosine similarity search against the FAISS index, returning the top N matching text chunks.  
-* **What to modify here:** \* Upgrading the underlying embedding model (e.g., switching to bge-small).  
-  * Integrating local LLMs (like llama.cpp or Ollama endpoints) for generative Q\&A based on the retrieved context.  
-  * Modifying the chunking parameters (size and overlap) to improve retrieval accuracy.
+Persistent categories include:
 
-## **9\. Build & Packaging Scripts (/ & scripts/)**
+* browser preferences
+* zoom settings
+* homepage customization
+* default directories
+* autoscroll speed
+* theme preferences
+* session state
 
-Riemann uses a multi-stage compilation pipeline to go from dynamic Python/Rust scripts to a portable, optimized binary.
+---
 
-### **scripts/build.sh & scripts/nbuild.sh**
+# 3. Core Reader Architecture
 
-* **What they are:** \* build.sh utilizes **PyInstaller**. It bundles the Python interpreter and scripts into a single folder. It is relatively fast and ideal for developer testing.  
-  * nbuild.sh utilizes **Nuitka**. Nuitka translates Python code into C, compiles it with GCC/Clang, and links it against Python libraries. This results in significantly faster startup times, harder-to-reverse-engineer code, and better memory usage, making it the script of choice for Production Release binaries.  
-* **What to modify here:** If you add new heavy pip dependencies (like scipy or transformers), you must often explicitly declare them as "hidden imports" in these scripts to ensure the compiler includes them. You must also update the \--include-data-dir flags if you add new asset folders.
+## `ui/reader/tab.py`
 
-### **Riemann.spec & build\_entry.py**
+`ReaderTab` is the central document-viewing component.
 
-* **What they are:** Configuration files for PyInstaller. build\_entry.py is a shim that ensures environmental variables (like \_MEIPASS for temporary asset extraction) are respected when the compiled binary runs.
+It is intentionally thin in terms of direct business logic.
 
-### **scripts/install\_icon.sh & scripts/generate\_white\_icons.py**
+Most major functionality is delegated to mixins.
 
-* **What they are:** Developer utilities.  
-  * generate\_white\_icons.py parses all SVGs in the icons directory and programmatically generates \-white.svg variants for Dark Mode usage.  
-  * install\_icon.sh is a convenience script for Linux developers to manually register the .desktop file and icon in \~/.local/share/applications for system menu integration.
+Responsibilities remaining inside `ReaderTab`:
 
-### **scripts/create\_model\_pack.sh**
+* UI assembly
+* toolbar creation
+* mode switching
+* scroll setup
+* shortcut registration
+* backend initialization
+* high-level event routing
+* page widget orchestration
 
-* **What it is:** A pre-build step. Because the AI sidecar is "offline-first", it cannot download the HuggingFace MiniLM model at runtime. This script downloads the model architecture and weights to the developer's machine and compresses them into a tarball. The build scripts then embed this tarball into the final executable so it is available locally immediately upon installation.
+---
+
+## Mixin Composition Strategy
+
+Reader functionality is divided into:
+
+* `RenderingMixin`
+* `AnnotationsMixin`
+* `SearchMixin`
+* `AiMixin`
+* `MetadataMixin`
+* `SignaturesMixin`
+
+This architecture prevents the reader from becoming a monolithic God object.
+
+When adding features:
+
+* rendering-related logic belongs in RenderingMixin
+* persistent annotation logic belongs in AnnotationMixin
+* AI flows belong in AiMixin
+* search logic belongs in SearchMixin
+
+Do not continuously expand `ReaderTab` itself.
+
+---
+
+## PageWidget Architecture
+
+Each rendered page is wrapped inside a custom `PageWidget`.
+
+Responsibilities:
+
+* displaying rasterized page pixmaps
+* temporary drawing overlays
+* selection rectangles
+* hyperlink overlays
+* signature overlays
+* shape previews
+* transient interaction rendering
+
+The widget intentionally separates temporary state from committed document state.
+
+---
+
+# 4. Rendering & Virtualization Systems
+
+## `mixins/rendering.py`
+
+This file contains the most performance-sensitive UI code in the application.
+
+Core responsibilities:
+
+* viewport construction
+* page widget generation
+* virtualized rendering
+* facing-page layouts
+* scroll restoration
+* zoom handling
+* rebuild scheduling
+
+---
+
+## Rendering Flow
+
+```text
+Rust Render
+→ BGRA Buffer
+→ QImage
+→ QPixmap
+→ PageWidget
+→ Scroll Viewport
+```
+
+---
+
+## Virtualized Rendering
+
+Large PDFs automatically transition into virtualization mode.
+
+Instead of creating every page widget simultaneously:
+
+* spacer widgets simulate offscreen page space
+* only nearby pages exist as active widgets
+* rendering occurs lazily
+
+Benefits:
+
+* lower RAM usage
+* fewer QWidget allocations
+* smoother continuous scrolling
+* reduced Qt layout overhead
+
+---
+
+## Facing-Page Logic
+
+Facing-page mode dynamically pairs widgets into row containers.
+
+Important detail:
+
+* odd/even alignment adjustments are required to avoid broken page pairing
+
+Most virtualization bugs historically originated from page pairing edge cases.
+
+---
+
+## Rebuild Debouncing
+
+Full layout rebuilds are expensive.
+
+The rendering system therefore:
+
+* debounces rebuild execution
+* delays viewport refreshes
+* batches scroll-triggered updates
+
+Do not directly trigger aggressive rebuild loops from wheel events.
+
+---
+
+## Scroll Preservation
+
+Layout rebuilds attempt to preserve:
+
+* logical page position
+* relative scrollbar ratio
+* viewport continuity
+
+This is especially important when switching:
+
+* zoom modes
+* facing mode
+* continuous mode
+* virtualization state
+
+---
+
+## Device Pixel Ratio Handling
+
+Rendering uses Qt device-pixel-ratio-aware scaling.
+
+Without this:
+
+* HiDPI rendering becomes blurry
+* selection rectangles desynchronize
+* annotation overlays drift
+
+---
+
+# 5. Annotation Pipeline
+
+## `mixins/annotations.py`
+
+Handles all interactive annotation behavior.
+
+Core responsibilities:
+
+* annotation persistence
+* undo/redo stacks
+* drawing tool selection
+* coordinate-space conversion
+* annotation serialization
+* visual refresh invalidation
+
+---
+
+## Annotation Storage
+
+Annotations are stored separately from PDFs using JSON.
+
+Storage path:
+
+```text
+~/.local/share/riemann/annotations/
+```
+
+The filename is generated using a SHA-256 hash of the PDF path.
+
+This allows:
+
+* persistent local overlays
+* non-destructive workflows
+* lightweight state recovery
+
+---
+
+## Overlay Rendering
+
+Temporary overlays are drawn separately from committed state.
+
+This enables:
+
+* live previews
+* drag feedback
+* translucent markup previews
+* smoother freehand rendering
+
+---
+
+## Undo/Redo Model
+
+Undo stacks store:
+
+* page index
+* annotation references
+* operation type
+
+Redraws are localized to the affected page whenever possible.
+
+---
+
+## Text Selection Evolution
+
+The project historically transitioned from rectangular selection behavior toward more linear text-selection logic.
+
+Many rendering edge cases originate from:
+
+* multi-line selections
+* transformed coordinate systems
+* zoom scaling
+* page rotation
+
+Be extremely cautious when modifying selection geometry.
+
+---
+
+# 6. Search & Text Extraction Systems
+
+## Rust Search Delegation
+
+Search operations are delegated into the Rust backend.
+
+Rust returns:
+
+```text
+[x, y, width, height]
+```
+
+bounding rectangles.
+
+Qt then converts these into viewport-space overlays.
+
+---
+
+## Text Segment Cache
+
+ReaderTab maintains a text segment cache.
+
+This cache powers:
+
+* text selection
+* search highlights
+* link interaction
+* AI extraction
+
+Avoid invalidating the cache unnecessarily.
+
+---
+
+## Hyperlink Interaction
+
+Rendered pages maintain hyperlink rectangles.
+
+Clicks are transformed from:
+
+```text
+Screen Space
+→ Page Space
+→ PDF Geometry
+```
+
+Incorrect coordinate transforms will break:
+
+* links
+* selection
+* annotations
+* AI snipping
+
+simultaneously.
+
+---
+
+# 7. Browser Architecture
+
+## `ui/browser.py`
+
+This file contains the primary Chromium integration layer.
+
+Responsibilities:
+
+* QWebEngineView management
+* profile handling
+* download orchestration
+* media integration
+* JavaScript injection
+* yt-dlp workflows
+* caption integration
+* WebAudio integration
+* browser homepage logic
+
+---
+
+## Persistent vs Incognito Profiles
+
+Persistent browsing uses shared `QWebEngineProfile` instances.
+
+Incognito sessions use off-the-record profiles.
+
+Changing profile behavior can affect:
+
+* cookies
+* cache
+* downloads
+* login persistence
+* injected scripts
+
+---
+
+## Browser Zoom Persistence
+
+Zoom levels are persisted per domain/subdomain.
+
+This logic intentionally avoids global zoom state.
+
+The zoom system was redesigned to reduce aggressive setting writes and zoom jitter.
+
+---
+
+## Download Infrastructure
+
+Qt-native downloads and yt-dlp downloads coexist.
+
+Qt downloads:
+
+* standard browser downloads
+* PDFs
+* browser assets
+
+yt-dlp downloads:
+
+* streaming platforms
+* playlists
+* subtitle embedding
+* media extraction
+
+Do not mix both systems carelessly.
+
+---
+
+# 8. JavaScript Injection Layer
+
+## Browser-Side Injection Strategy
+
+Riemann injects several enhancement scripts directly into webpages.
+
+Injection targets include:
+
+* dark mode adaptation
+* media overlays
+* caption rendering
+* playback augmentation
+* ad skipping
+* keyboard behavior fixes
+
+These scripts execute inside Chromium renderer processes.
+
+---
+
+## `caption_engine.js`
+
+Implements the browser-side live caption overlay.
+
+Core responsibilities:
+
+* capturing media streams
+* opening WebSocket connections
+* streaming audio chunks
+* draggable overlay rendering
+* dynamic font scaling
+* overlay positioning
+
+The overlay intentionally operates independently from webpage DOM structure.
+
+---
+
+## Audio Streaming
+
+Audio is captured through:
+
+```javascript
+video.captureStream()
+```
+
+The stream is piped into:
+
+* AudioContext
+* ScriptProcessor
+* Float32 buffers
+* WebSocket transport
+
+---
+
+## `audio_engine.js`
+
+Implements browser-side WebAudio DSP.
+
+This system dynamically inserts:
+
+* EQ nodes
+* saturation
+* compressors
+* analyzers
+* stereo widening
+* reverb
+
+Modifying the audio graph incorrectly can easily introduce:
+
+* clipping
+* latency
+* desynchronization
+* CPU spikes
+
+---
+
+# 9. Media & Audio Infrastructure
+
+## MiniAudioPlayer
+
+Located in:
+
+```text
+core/mini_player.py
+```
+
+The mini player polls active browser tabs looking for HTML5 media elements.
+
+It bridges native Qt controls into webpage JavaScript.
+
+Features:
+
+* play/pause
+* seeking
+* timeline polling
+* adaptive visibility
+* theme-aware icons
+
+---
+
+## Polling Strategy
+
+The player intentionally uses periodic polling instead of complex event synchronization.
+
+Reasons:
+
+* browser isolation boundaries
+* renderer unpredictability
+* simpler failure recovery
+
+---
+
+## Native Stream Extraction
+
+yt-dlp stream extraction allows playback through:
+
+* MPV
+* VLC
+* QtMultimedia
+
+This bypasses unsupported Chromium codecs.
+
+---
+
+# 10. Live Captioning Pipeline
+
+## `core/captions.py`
+
+Contains the Faster-Whisper integration.
+
+Features:
+
+* rolling transcription memory
+* translation mode
+* VAD filtering
+* asynchronous chunk processing
+
+The rolling context buffer improves transcription continuity.
+
+---
+
+## `core/captions_server.py`
+
+Implements the Qt-native WebSocket caption server.
+
+Responsibilities:
+
+* WebSocket hosting
+* client management
+* worker thread routing
+* chunk dispatching
+* response delivery
+
+---
+
+## Worker Thread Model
+
+Audio transcription executes in background worker threads.
+
+Never run transcription synchronously inside the Qt UI thread.
+
+Doing so will immediately freeze:
+
+* scrolling
+* browser rendering
+* animations
+* repaint events
+
+---
+
+# 11. AI Infrastructure
+
+## AI Sidecar Philosophy
+
+The AI stack is intentionally isolated.
+
+Reasons:
+
+* Torch dependency containment
+* simplified crashes
+* smaller UI runtime
+* optional dependency loading
+
+---
+
+## Snip-to-AI
+
+Flow:
+
+```text
+Selection Rectangle
+→ Page Capture
+→ PNG Encoding
+→ Local API Request
+→ Response Rendering
+```
+
+Coordinate transforms are shared with:
+
+* annotation geometry
+* search highlighting
+* text selection
+
+Modifying one system may affect all three.
+
+---
+
+## Optional Dependency Strategy
+
+Heavy AI dependencies are dynamically managed.
+
+This prevents the default build from becoming excessively large.
+
+Managed packages include:
+
+* torch
+* torchvision
+* transformers
+* pix2tex
+* faster-whisper
+* scipy
+* pandas
+
+---
+
+# 12. Persistent Managers & State Systems
+
+## `core/managers.py`
+
+Contains several major persistence managers.
+
+---
+
+## LibraryManager
+
+Backed by SQLite.
+
+Stores:
+
+* file metadata
+* DOI data
+* arXiv IDs
+* author information
+
+Search supports:
+
+* keyword matching
+* `author:` filters
+* `year:` filters
+
+---
+
+## HistoryManager
+
+Stores:
+
+* PDF history
+* web history
+* folder history
+
+Also powers autocomplete suggestions.
+
+The manager includes migration handling for older persistence formats.
+
+---
+
+## DownloadManager
+
+Qt-native download management dialog.
+
+Features:
+
+* progress visualization
+* pause/resume
+* persistent download history
+* cleanup workflows
+* open-file integration
+
+---
+
+## BookmarkManager
+
+JSON-backed lightweight bookmark persistence.
+
+Intentionally simple by design.
+
+---
+
+# 13. Document Conversion & Compression
+
+## `core/features.py`
+
+Contains:
+
+* conversion utilities
+* compression utilities
+* export dialogs
+* media helpers
+
+---
+
+## Conversion Infrastructure
+
+Supported conversions:
+
+* PDF → Images
+* PDF → Markdown
+* PDF → HTML
+* Images → PDF
+* CSV → HTML
+* EPUB → HTML
+
+---
+
+## Compression Strategy
+
+PDF compression works by:
+
+* traversing embedded images
+* recompressing images
+* replacing streams
+* deflating internal objects
+
+Lossless and lossy paths are both supported.
+
+---
+
+## PyMuPDF Usage
+
+Several conversion features depend on PyMuPDF.
+
+The application intentionally treats this dependency as optional.
+
+Always preserve ImportError handling.
+
+---
+
+# 14. Workspace & Tab Infrastructure
+
+## `ui/components.py`
+
+Contains:
+
+* draggable tab systems
+* annotation toolbars
+* reusable widgets
+
+---
+
+## Draggable Tabs
+
+Tabs support:
+
+* internal movement
+* split-view transfer
+* window detachment
+* external file drops
+
+The implementation uses custom MIME payloads:
+
+```text
+application/x-riemann-tab
+```
+
+---
+
+## Detached Windows
+
+Dragging tabs outside the window creates new top-level windows.
+
+This logic is heavily geometry-dependent.
+
+Be cautious when modifying:
+
+* drag thresholds
+* cursor handling
+* tab removal timing
+
+---
+
+# 15. Explorer & Favorites Systems
+
+## `ui/explorer.py`
+
+Implements the file explorer panel.
+
+Features:
+
+* themed icons
+* file previews
+* proxy filtering
+* custom context menus
+* adaptive icon handling
+
+---
+
+## Icon Proxy Model
+
+Custom proxy models dynamically swap icons depending on:
+
+* file type
+* theme mode
+* dark/light state
+
+---
+
+## Favorites
+
+Implemented in:
+
+```text
+ui/favourites.py
+```
+
+Uses QSettings persistence.
+
+Supports:
+
+* favorite folders
+* persistent quick access
+* startup restoration
+
+---
+
+# 16. Session Persistence & IPC
+
+## Session Restoration
+
+The application persists:
+
+* open tabs
+* split layouts
+* browser state
+* zoom levels
+* active documents
+
+Session restoration intentionally attempts to recreate the previous workspace state.
+
+---
+
+## Directory Persistence
+
+File dialogs preserve:
+
+* last-opened directory
+* default directory overrides
+
+This behavior is implemented repeatedly across multiple subsystems.
+
+Keep helper behavior consistent.
+
+---
+
+# 17. Build & Packaging Infrastructure
+
+## Packaging
+
+The project supports:
+
+* Nuitka
+* PyInstaller
+* Rust extension packaging
+
+---
+
+## Optional Dependencies
+
+Heavy dependencies are intentionally separable.
+
+This significantly reduces:
+
+* binary size
+* startup cost
+* packaging complexity
+
+---
+
+## Frozen Runtime Handling
+
+Many modules check:
+
+```python
+sys.frozen
+```
+
+and:
+
+```python
+sys._MEIPASS
+```
+
+This logic is required for packaged builds.
+
+Never assume development-path resource loading.
+
+---
+
+# 18. Performance & Memory Considerations
+
+## Most Sensitive Systems
+
+The most performance-sensitive areas are:
+
+* rendering rebuilds
+* virtualization
+* browser media
+* OCR
+* caption inference
+* PDF rasterization
+* WebAudio DSP
+
+---
+
+## Historical Stability Problems
+
+Historically difficult areas include:
+
+* fullscreen transitions
+* reading-mode toggles
+* virtualization rendering gaps
+* text selection geometry
+* PDF memory leaks
+* Chromium media teardown
+
+When modifying these systems:
+
+* test long sessions
+* test large PDFs
+* test media-heavy tabs
+* test split-view interactions
+
+---
+
+## Avoiding UI Freezes
+
+Never run synchronously in the Qt UI thread:
+
+* OCR
+* AI inference
+* yt-dlp extraction
+* Faster-Whisper inference
+* PDF-heavy transforms
+
+Always use:
+
+* QThread
+* worker objects
+* background subprocesses
+
+---
+
+# 19. Common Modification Scenarios
+
+## Adding a New Annotation Tool
+
+Primary files:
+
+* `annotations.py`
+* `widgets.py`
+* `components.py`
+
+Likely required:
+
+* new drawing logic
+* preview rendering
+* serialization support
+* undo integration
+
+---
+
+## Adding a New Browser Injection
+
+Primary files:
+
+* `browser.py`
+* `browser_handlers.py`
+* `assets/injections/`
+
+Keep browser-side logic isolated from Qt logic whenever possible.
+
+---
+
+## Adding a New AI Workflow
+
+Primary files:
+
+* `mixins/ai.py`
+* AI sidecar routes
+* inference workers
+
+Avoid embedding large inference logic directly into Qt widgets.
+
+---
+
+## Adding New Persistent Settings
+
+Primary storage:
+
+```python
+QSettings
+```
+
+Keep naming conventions consistent.
+
+Use namespaced keys:
+
+```text
+browser/...
+app/...
+homepage/...
+```
+
+---
+
+## Adding New Conversion Features
+
+Primary file:
+
+```text
+core/features.py
+```
+
+Ensure:
+
+* optional dependency handling
+* progress reporting
+* background execution
+* proper cleanup
+
+---
+
+# 20. Repository Structure Reference
+
+```text
+riemann/
+├── docs/
+├── libs/
+├── logs/
+├── python-app/
+│   ├── riemann/
+│   │   ├── assets/
+│   │   │   ├── injections/
+│   │   │   ├── icons/
+│   │   │   ├── theme/
+│   │   │   └── __tests__/
+│   │   ├── core/
+│   │   ├── ui/
+│   │   │   └── reader/
+│   │   │       └── mixins/
+│   └── tests/
+├── rust-core/
+├── rust-ocr-worker/
+├── riemann-ai/
+└── scripts/
+```
+
+Subsystem overview:
+
+* `core/` — persistence, downloads, captions, utilities
+* `ui/` — browser and reader UI systems
+* `mixins/` — modular reader logic
+* `assets/` — browser-side enhancements and themes
+* `rust-core/` — native rendering backend
+* `riemann-ai/` — local inference sidecar
+* `tests/` — unit and subsystem testing
+
+---
+
+# Final Notes
+
+Riemann is not a conventional Qt application.
+
+Several systems intentionally cross runtime boundaries:
+
+* Python ↔ Rust
+* Qt ↔ Chromium
+* Browser JS ↔ Qt
+* Qt ↔ AI sidecar
+
+Most complex bugs originate at those boundaries.
+
+When debugging:
+
+1. Determine which runtime owns the failing behavior.
+2. Identify whether the issue is synchronous or asynchronous.
+3. Verify coordinate-space assumptions.
+4. Verify lifecycle ordering.
+5. Test under large-document and long-session conditions.
+
+In general:
+
+* UI belongs in PySide6.
+* Heavy compute belongs in Rust.
+* Browser augmentation belongs in JavaScript.
+* AI belongs in the sidecar.
+* Persistence belongs in managers.
+
+Maintaining those boundaries is critical to preserving long-term maintainability.
