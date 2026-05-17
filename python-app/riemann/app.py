@@ -99,9 +99,11 @@ from .core.managers import (
     YtDlpDownloadManager,
 )
 from .core.mini_player import MiniAudioPlayer
-from .ui.browser import BrowserTab
+from .ui.browser import BrowserTab, PreviewTextTab
 from .ui.components import DraggableTabWidget
-from .ui.reader import ReaderTab
+from .ui.explorer import FileExplorerPanel
+from .ui.favourites import ManageFavoritesDialog
+from .ui.reader.tab import PreviewReaderTab, ReaderTab
 
 
 def get_resource_path(relative_path: str) -> str:
@@ -544,10 +546,22 @@ class RiemannWindow(QMainWindow):
         self.bookmarks_manager = BookmarksManager()
 
         self.closed_tabs_stack: List[dict] = []
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.setHandleWidth(8)
+        self.setCentralWidget(self.main_splitter)
+
+        self.explorer_panel = FileExplorerPanel(self, self.dark_mode)
+        self.explorer_panel.hide()
+        self.explorer_panel.file_single_clicked.connect(self._on_file_single_clicked)
+        self.explorer_panel.file_double_clicked.connect(self._on_file_double_clicked)
+        self.main_splitter.addWidget(self.explorer_panel)
+
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setChildrenCollapsible(False)
         self.splitter.setHandleWidth(8)
-        self.setCentralWidget(self.splitter)
+        self.main_splitter.addWidget(self.splitter)
+        self.main_splitter.setSizes([250, 950])
 
         self.tabs_main = DraggableTabWidget()
         self.tabs_main.setTabsClosable(True)
@@ -1116,6 +1130,27 @@ class RiemannWindow(QMainWindow):
         self.recent_menu.aboutToShow.connect(self._populate_recent_menu)
 
         file_menu.addSeparator()
+        self.fav_menu = file_menu.addMenu("Favorites")
+        self.fav_file_menu = self.fav_menu.addMenu("Open File from Favorite...")
+        self.fav_folder_menu = self.fav_menu.addMenu("Open Favorite Folder...")
+
+        self.fav_file_menu.aboutToShow.connect(self._populate_fav_file_menu)
+        self.fav_folder_menu.aboutToShow.connect(self._populate_fav_folder_menu)
+
+        self.fav_menu.addSeparator()
+        action_manage_fav = self.fav_menu.addAction("Manage Favorites (Ctrl+Shift+F)")
+        action_manage_fav.triggered.connect(self.manage_favorites)
+        QShortcut(QKeySequence("Ctrl+Shift+F"), self).activated.connect(
+            self.manage_favorites
+        )
+
+        action_open_folder = file_menu.addAction("Open Folder...")
+        action_open_folder.triggered.connect(lambda: self.open_folder())
+
+        action_close_folder = file_menu.addAction("Close Folder Session")
+        action_close_folder.triggered.connect(self.close_folder)
+
+        file_menu.addSeparator()
         file_actions = [
             ("Open file (Ctrl+O)", None, self.open_file_smart),
             ("New PDF Tab (Ctrl+T)", None, lambda: self.new_pdf_tab()),
@@ -1373,11 +1408,34 @@ class RiemannWindow(QMainWindow):
                 else:
                     self.new_pdf_tab(path)
 
+    def show_toast(self, msg: str) -> None:
+        """
+        Displays a temporary UI toast notification to the user.
+
+        Args:
+            msg (str): The notification text to display.
+        """
+        self.lbl_toast = QLabel(self)
+        self.lbl_toast.setStyleSheet(
+            "background: #333; color: white; padding: 10px; border-radius: 5px;"
+        )
+        self.lbl_toast.setText(msg)
+        self.lbl_toast.adjustSize()
+        self.lbl_toast.move(
+            (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
+        )
+        self.lbl_toast.show()
+        QTimer.singleShot(4000, self.lbl_toast.hide)
+
     def toggle_split_view(self) -> None:
         """
         Toggles the horizontal split-screen view.
         Moves the current tab to the side view if opening, or hides it if empty.
         """
+        if getattr(self, "is_folder_session_active", False):
+            self.show_toast("Split view is disabled during an active folder session.")
+            return
+
         current = self.tabs_main.currentWidget()
         if not current:
             return
@@ -1662,6 +1720,9 @@ class RiemannWindow(QMainWindow):
         self.settings.setValue("darkMode", self.dark_mode)
         self.enforce_global_stylesheet()
         self._update_floating_btn_style()
+
+        if hasattr(self, "explorer_panel"):
+            self.explorer_panel.update_theme(self.dark_mode)
 
         if hasattr(self, "_update_global_metrics"):
             self._update_global_metrics()
@@ -2293,6 +2354,219 @@ class RiemannWindow(QMainWindow):
                     and not self.floating_fs_timer.isActive()
                 ):
                     self.floating_fs_timer.start()
+
+    def _populate_fav_file_menu(self):
+        self.fav_file_menu.clear()
+        favs = QSettings("Riemann", "Favorites").value("folders", [], type=list)
+        if not favs:
+            self.fav_file_menu.addAction("No favorites yet").setEnabled(False)
+            return
+        for f in favs:
+            action = self.fav_file_menu.addAction(os.path.basename(f))
+            action.triggered.connect(
+                lambda checked=False, path=f: self._open_file_dialog_in_fav(path)
+            )
+
+    def _populate_fav_folder_menu(self):
+        self.fav_folder_menu.clear()
+        favs = QSettings("Riemann", "Favorites").value("folders", [], type=list)
+        if not favs:
+            self.fav_folder_menu.addAction("No favorites yet").setEnabled(False)
+            return
+        for f in favs:
+            action = self.fav_folder_menu.addAction(os.path.basename(f))
+            action.triggered.connect(
+                lambda checked=False, path=f: self.open_folder(path)
+            )
+
+    def manage_favorites(self):
+        ManageFavoritesDialog(self).exec()
+
+    def _open_file_dialog_in_fav(self, path):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Open Document",
+            path,
+            "Supported Files (*.pdf *.PDF *.md *.html *.css *.js);;All Files (*)",
+        )
+        if paths:
+            for p in paths:
+                self._open_single_file(p)
+
+    def open_folder(self, path=None):
+        if not path:
+            start_dir = get_dialog_directory(self.settings)
+            path = QFileDialog.getExistingDirectory(self, "Open Folder", start_dir)
+            if not path:
+                return
+
+        save_last_directory(self.settings, path)
+
+        if self.tabs_side.count() > 0:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Active Side Tabs")
+            msg_box.setText(
+                "Opening a folder session disables split view. How do you want to handle existing side tabs?"
+            )
+            btn_move = msg_box.addButton(
+                "Move to Main", QMessageBox.ButtonRole.AcceptRole
+            )
+            btn_new_win = msg_box.addButton(
+                "New Window", QMessageBox.ButtonRole.AcceptRole
+            )
+            btn_close = msg_box.addButton(
+                "Close Side Tabs", QMessageBox.ButtonRole.DestructiveRole
+            )
+            msg_box.exec()
+
+            if msg_box.clickedButton() == btn_move:
+                while self.tabs_side.count() > 0:
+                    widget = self.tabs_side.widget(0)
+                    text = self.tabs_side.tabText(0)
+                    icon = self.tabs_side.tabIcon(0)
+                    self.tabs_side.removeTab(0)
+                    self.tabs_main.addTab(widget, icon, text)
+            elif msg_box.clickedButton() == btn_new_win:
+                self.new_window()
+                urls = []
+                for i in range(self.tabs_side.count()):
+                    w = self.tabs_side.widget(i)
+                    if hasattr(w, "current_path") and w.current_path:
+                        urls.append(w.current_path)
+                    elif hasattr(w, "web"):
+                        urls.append(w.web.url().toString())
+                for i in range(self.tabs_side.count() - 1, -1, -1):
+                    self.close_side_tab(i)
+                for u in urls:
+                    if u.endswith(".pdf") or u.endswith(".md"):
+                        self._new_window_ref.new_pdf_tab(u)
+                    else:
+                        self._new_window_ref.new_browser_tab(u)
+            elif msg_box.clickedButton() == btn_close:
+                for i in range(self.tabs_side.count() - 1, -1, -1):
+                    self.close_side_tab(i)
+
+        self.tabs_side.hide()
+        self.is_folder_session_active = True
+        self.explorer_panel.set_path(path)
+        self.explorer_panel.show()
+        if hasattr(self, "show_toast"):
+            self.show_toast(f"Folder session connected: {os.path.basename(path)}")
+
+    def close_folder(self):
+        """Exits the folder session and restores normal app behavior."""
+        if not getattr(self, "is_folder_session_active", False):
+            return
+
+        self.explorer_panel.hide()
+        self.is_folder_session_active = False
+
+        if getattr(self, "preview_tab_widget", None):
+            idx = self.tabs_main.indexOf(self.preview_tab_widget)
+            if idx != -1:
+                self.tabs_main.removeTab(idx)
+            if hasattr(self.preview_tab_widget, "cleanup"):
+                self.preview_tab_widget.cleanup()
+            self.preview_tab_widget.deleteLater()
+            self.preview_tab_widget = None
+
+        if hasattr(self, "show_toast"):
+            self.show_toast("Folder session closed.")
+
+    def _open_single_file(self, path: str, insert_idx: int = -1):
+        is_web_file = path.lower().endswith((".html", ".css", ".js"))
+        self.add_to_history(path, "web" if is_web_file else "pdf")
+
+        target = self.tabs_main
+
+        if is_web_file:
+            tab = self.new_browser_tab(
+                f"file:///{path.replace(chr(92), '/')}", background=True
+            )
+            if insert_idx != -1:
+                target.removeTab(target.count() - 1)
+                target.insertTab(insert_idx, tab, os.path.basename(path))
+                target.setCurrentIndex(insert_idx)
+        else:
+            reader = ReaderTab()
+            reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
+            reader.load_document(path)
+            icon_path = get_resource_path(os.path.join("assets", "icons", "pdf.png"))
+            idx = insert_idx if insert_idx != -1 else target.count()
+            target.insertTab(idx, reader, QIcon(icon_path), os.path.basename(path))
+            target.setCurrentIndex(idx)
+
+    def _on_file_single_clicked(self, path: str):
+        if not os.path.isfile(path):
+            return
+
+        ext = path.split(".")[-1].lower()
+        if ext not in ["pdf", "md", "html", "css", "js"]:
+            return
+
+        idx = -1
+        if getattr(self, "preview_tab_widget", None):
+            idx = self.tabs_main.indexOf(self.preview_tab_widget)
+
+        if ext in ["html", "css", "js", "md"]:
+            new_preview = PreviewTextTab(path, getattr(self, "dark_mode", True))
+        else:
+            new_preview = PreviewReaderTab()
+            new_preview.load_document(path)
+
+        suffix = "-white.svg" if getattr(self, "dark_mode", False) else ".svg"
+        icon_path = get_resource_path(
+            os.path.join("assets", "icons", f"scan-eye{suffix}")
+        )
+        if not os.path.exists(icon_path):
+            icon_path = get_resource_path(
+                os.path.join("assets", "icons", "scan-eye.svg")
+            )
+
+        title = f"Preview: {os.path.basename(path)}"
+
+        if idx != -1:
+            self.tabs_main.removeTab(idx)
+            if hasattr(self.preview_tab_widget, "cleanup"):
+                self.preview_tab_widget.cleanup()
+            self.preview_tab_widget.deleteLater()
+            self.tabs_main.insertTab(idx, new_preview, QIcon(icon_path), title)
+            self.tabs_main.setCurrentIndex(idx)
+        else:
+            new_idx = self.tabs_main.addTab(new_preview, QIcon(icon_path), title)
+            self.tabs_main.setCurrentIndex(new_idx)
+
+        self.preview_tab_widget = new_preview
+        self._update_window_title()
+
+    def _on_file_double_clicked(self, path: str):
+        if not os.path.isfile(path):
+            return
+
+        if (
+            getattr(self, "preview_tab_widget", None)
+            and getattr(self.preview_tab_widget, "current_path", "") == path
+        ):
+            self.promote_preview_tab()
+            return
+
+        self._open_single_file(path)
+
+    def promote_preview_tab(self):
+        if not getattr(self, "preview_tab_widget", None):
+            return
+        idx = self.tabs_main.indexOf(self.preview_tab_widget)
+        if idx == -1:
+            return
+
+        path = self.preview_tab_widget.current_path
+        self.tabs_main.removeTab(idx)
+        if hasattr(self.preview_tab_widget, "cleanup"):
+            self.preview_tab_widget.cleanup()
+        self.preview_tab_widget.deleteLater()
+        self.preview_tab_widget = None
+
+        self._open_single_file(path, insert_idx=idx)
 
 
 def run() -> None:

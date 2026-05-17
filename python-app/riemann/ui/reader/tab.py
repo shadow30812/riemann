@@ -2945,3 +2945,46 @@ class ReaderTab(
         QPixmapCache.clear()
         QApplication.processEvents()
         gc.collect()
+
+
+class PreviewReaderTab(ReaderTab):
+    """
+    A lightweight, read-only PDF viewer for the Explorer preview.
+    Inherits core rendering from ReaderTab but disables all heavy UI/formatting.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.is_preview = True
+        self.current_path = ""
+
+        if hasattr(self, "toolbar") and self.toolbar:
+            self.toolbar.setVisible(False)
+        if hasattr(self, "anno_toolbar") and self.anno_toolbar:
+            self.anno_toolbar.setVisible(False)
+        if hasattr(self, "search_bar") and self.search_bar:
+            self.search_bar.setVisible(False)
+        if hasattr(self, "ai_search_bar") and self.ai_search_bar:
+            self.ai_search_bar.setVisible(False)
+        if hasattr(self, "signature_banner") and self.signature_banner:
+            self.signature_banner.setVisible(False)
+
+        self._ignore_scroll = True
+        self.scroll.verticalScrollBar().setStyleSheet(
+            "QScrollBar:vertical { width: 8px; background: transparent; }"
+        )
+
+    def load_document(
+        self,
+        path: str,
+        restore_state: bool = False,
+        password: Optional[str] = None,
+        is_retry: bool = False,
+    ) -> None:
+        self.current_path = path
+        super().load_document(path, restore_state, password, is_retry)
+
+    def cleanup(self):
+        """Ensures PDFium background threads are killed when the preview is replaced."""
+        if hasattr(self, "close_document"):
+            self.close_document()

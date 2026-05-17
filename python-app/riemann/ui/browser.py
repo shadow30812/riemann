@@ -70,6 +70,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QSlider,
@@ -2400,3 +2401,40 @@ class BrowserTab(QWidget):
         """Updates the fullscreen toggle icon dynamically based on the global state."""
         icons = {0: "panel-top.svg", 1: "maximize.svg", 2: "minimize.svg"}
         self.btn_fullscreen.setIcon(self._get_icon(icons.get(state, "maximize.svg")))
+
+
+class PreviewTextTab(QWidget):
+    """A lightweight read-only text viewer for instant web/markdown previewing."""
+
+    def __init__(self, path: str, dark_mode: bool = False, parent=None):
+        super().__init__(parent)
+        self.current_path = path
+        self.is_preview = True
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.editor = QPlainTextEdit()
+        self.editor.setReadOnly(True)
+
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                self.editor.setPlainText(f.read())
+        except Exception as e:
+            self.editor.setPlainText(f"Error loading preview: {e}")
+
+        layout.addWidget(self.editor)
+        self.apply_theme(dark_mode)
+
+    def apply_theme(self, dark_mode: bool):
+        bg = "#1e1e1e" if dark_mode else "#ffffff"
+        fg = "#d4d4d4" if dark_mode else "#111111"
+        self.editor.setStyleSheet(
+            f"QPlainTextEdit {{ background-color: {bg}; color: {fg}; font-family: monospace; font-size: 13px; border: none; padding: 10px; }}"
+        )
+
+    def cleanup(self):
+        self.editor.clear()
+
+    def update_fullscreen_icon(self, state):
+        pass
