@@ -652,7 +652,7 @@ class RiemannWindow(QMainWindow):
             ("Ctrl+N", self.new_window),
             ("Ctrl+Shift+N", self.new_incognito_window),
             ("Ctrl+O", self.open_file_smart),
-            ("Ctrl+K", self.show_bookmarks),
+            ("Ctrl+K, K", self.show_bookmarks),
             ("Ctrl+J", self.show_downloads),
             ("Ctrl+Shift+J", self.show_ytdlp_downloads),
             ("Ctrl+L", self.show_library_search),
@@ -1144,11 +1144,16 @@ class RiemannWindow(QMainWindow):
             self.manage_favorites
         )
 
-        action_open_folder = file_menu.addAction("Open Folder...")
+        action_open_folder = file_menu.addAction("Open Folder (Ctrl+K, Ctrl+O)")
         action_open_folder.triggered.connect(lambda: self.open_folder())
 
-        action_close_folder = file_menu.addAction("Close Folder Session")
+        action_close_folder = file_menu.addAction("Close Folder Session (Ctrl+K, F)")
         action_close_folder.triggered.connect(self.close_folder)
+
+        QShortcut(QKeySequence("Ctrl+K, Ctrl+O"), self).activated.connect(
+            self.open_folder
+        )
+        QShortcut(QKeySequence("Ctrl+K, F"), self).activated.connect(self.close_folder)
 
         file_menu.addSeparator()
         file_actions = [
@@ -1185,7 +1190,7 @@ class RiemannWindow(QMainWindow):
 
         view_menu = menubar.addMenu("View")
         view_actions = [
-            ("Bookmarks (Ctrl+K)", None, self.show_bookmarks),
+            ("Bookmarks (Ctrl+K, K)", None, self.show_bookmarks),
             ("Downloads (Ctrl+J)", None, self.show_downloads),
             ("yt-dlp Downloads (Ctrl+Shift+J)", None, self.show_ytdlp_downloads),
             ("Search Library (Ctrl+L)", None, self.show_library_search),
@@ -2426,15 +2431,18 @@ class RiemannWindow(QMainWindow):
                     icon = self.tabs_side.tabIcon(0)
                     self.tabs_side.removeTab(0)
                     self.tabs_main.addTab(widget, icon, text)
+
             elif msg_box.clickedButton() == btn_new_win:
                 self.new_window()
                 urls = []
+
                 for i in range(self.tabs_side.count()):
                     w = self.tabs_side.widget(i)
                     if hasattr(w, "current_path") and w.current_path:
                         urls.append(w.current_path)
                     elif hasattr(w, "web"):
                         urls.append(w.web.url().toString())
+
                 for i in range(self.tabs_side.count() - 1, -1, -1):
                     self.close_side_tab(i)
                 for u in urls:
@@ -2442,6 +2450,7 @@ class RiemannWindow(QMainWindow):
                         self._new_window_ref.new_pdf_tab(u)
                     else:
                         self._new_window_ref.new_browser_tab(u)
+
             elif msg_box.clickedButton() == btn_close:
                 for i in range(self.tabs_side.count() - 1, -1, -1):
                     self.close_side_tab(i)
@@ -2474,12 +2483,12 @@ class RiemannWindow(QMainWindow):
             self.show_toast("Folder session closed.")
 
     def _open_single_file(self, path: str, insert_idx: int = -1):
-        is_web_file = path.lower().endswith((".html", ".css", ".js"))
-        self.add_to_history(path, "web" if is_web_file else "pdf")
+        file_type = self._detect_file_type(path)
+        self.add_to_history(path, "web" if file_type == "text" else "pdf")
 
         target = self.tabs_main
 
-        if is_web_file:
+        if file_type == "text":
             tab = self.new_browser_tab(
                 f"file:///{path.replace(chr(92), '/')}", background=True
             )
@@ -2500,15 +2509,13 @@ class RiemannWindow(QMainWindow):
         if not os.path.isfile(path):
             return
 
-        ext = path.split(".")[-1].lower()
-        if ext not in ["pdf", "md", "html", "css", "js"]:
-            return
+        file_type = self._detect_file_type(path)
 
         idx = -1
         if getattr(self, "preview_tab_widget", None):
             idx = self.tabs_main.indexOf(self.preview_tab_widget)
 
-        if ext in ["html", "css", "js", "md"]:
+        if file_type == "text":
             new_preview = PreviewTextTab(path, getattr(self, "dark_mode", True))
         else:
             new_preview = PreviewReaderTab()
@@ -2529,6 +2536,7 @@ class RiemannWindow(QMainWindow):
             self.tabs_main.removeTab(idx)
             if hasattr(self.preview_tab_widget, "cleanup"):
                 self.preview_tab_widget.cleanup()
+
             self.preview_tab_widget.deleteLater()
             self.tabs_main.insertTab(idx, new_preview, QIcon(icon_path), title)
             self.tabs_main.setCurrentIndex(idx)
@@ -2555,6 +2563,7 @@ class RiemannWindow(QMainWindow):
     def promote_preview_tab(self):
         if not getattr(self, "preview_tab_widget", None):
             return
+
         idx = self.tabs_main.indexOf(self.preview_tab_widget)
         if idx == -1:
             return
@@ -2567,6 +2576,20 @@ class RiemannWindow(QMainWindow):
         self.preview_tab_widget = None
 
         self._open_single_file(path, insert_idx=idx)
+
+    def _detect_file_type(self, path: str) -> str:
+        """Determines if a file is a PDF (by extension or magic bytes) or generic text/web."""
+        if path.lower().endswith(".pdf"):
+            return "pdf"
+
+        try:
+            with open(path, "rb") as f:
+                if f.read(5) == b"%PDF-":
+                    return "pdf"
+        except Exception:
+            pass
+
+        return "text"
 
 
 def run() -> None:

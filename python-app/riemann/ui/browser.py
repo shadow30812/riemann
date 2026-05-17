@@ -2419,10 +2419,12 @@ class PreviewTextTab(QWidget):
 
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as f:
-                self.editor.setPlainText(f.read())
+                content = f.read(1024 * 1024)
+                if len(content) == 1024 * 1024:
+                    content += "\n\n[... File truncated for preview ...]"
+                self.editor.setPlainText(content)
         except Exception as e:
             self.editor.setPlainText(f"Error loading preview: {e}")
-
         layout.addWidget(self.editor)
         self.apply_theme(dark_mode)
 
