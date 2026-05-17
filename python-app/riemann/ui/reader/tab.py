@@ -1324,6 +1324,14 @@ class ReaderTab(
         if self.window() and isinstance(self.window(), RiemannWindow):
             self.window().toggle_reader_fullscreen()
 
+    def update_fullscreen_icon(self, state: int) -> None:
+        """
+        Updates the fullscreen toggle icon dynamically based on the active viewing state.
+        """
+        icons = {0: "panel-top.svg", 1: "maximize.svg", 2: "minimize.svg"}
+        icon_name = icons.get(state, "maximize.svg")
+        self.btn_fullscreen.setIcon(self._get_icon(icon_name))
+
     def open_pdf_dialog(self) -> None:
         """
         Surfaces interactive system menus prompting selection processes loading file responses effectively mapping input data correctly.

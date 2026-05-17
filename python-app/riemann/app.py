@@ -173,6 +173,11 @@ class SettingsDialog(QDialog):
             parent.settings.value("browser/auto_open_pdf", False, type=bool)
         )
 
+        self.cb_floating_fs = QCheckBox()
+        self.cb_floating_fs.setChecked(
+            parent.settings.value("app/floating_fs_btn", True, type=bool)
+        )
+
         self.cb_dark = QCheckBox()
         self.cb_dark.setChecked(parent.dark_mode)
 
@@ -207,6 +212,7 @@ class SettingsDialog(QDialog):
         form_layout.addRow("Default Dialog Directory:", dir_layout)
         form_layout.addRow("Enable Dark Mode:", self.cb_dark)
         form_layout.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
+        form_layout.addRow("Show Floating Fullscreen Button:", self.cb_floating_fs)
         form_layout.addRow("Homepage Greeting Name:", self.txt_custom_name)
         form_layout.addRow("Auto-Scroll Speed:", self.spin_autoscroll)
         layout.addLayout(form_layout)
@@ -594,6 +600,18 @@ class RiemannWindow(QMainWindow):
         self.hover_timer.setSingleShot(True)
         self.hover_timer.timeout.connect(self._check_auto_hide)
 
+        self.floating_fs_btn = QPushButton(self)
+        self.floating_fs_btn.setFixedSize(40, 40)
+        self.floating_fs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.floating_fs_btn.clicked.connect(self.toggle_reader_fullscreen)
+        self.floating_fs_btn.hide()
+        self._update_floating_btn_style()
+
+        self.floating_fs_timer = QTimer(self)
+        self.floating_fs_timer.setInterval(2000)
+        self.floating_fs_timer.setSingleShot(True)
+        self.floating_fs_timer.timeout.connect(self.floating_fs_btn.hide)
+
         self.enforce_global_stylesheet()
 
         from PySide6.QtGui import QKeySequence, QShortcut
@@ -716,6 +734,23 @@ class RiemannWindow(QMainWindow):
                 self._reveal_controls(True)
             elif local_pos.y() > 100:
                 self.hover_timer.start()
+
+            if self.settings.value("app/floating_fs_btn", True, type=bool):
+                if local_pos.x() > self.width() - 150 and local_pos.y() < 100:
+                    self._update_floating_fs_btn_icon()
+                    self.floating_fs_btn.move(
+                        self.width() - self.floating_fs_btn.width() - 20, 20
+                    )
+                    if not self.floating_fs_btn.isVisible():
+                        self.floating_fs_btn.show()
+                        self.floating_fs_btn.raise_()
+                    self.floating_fs_timer.stop()
+                else:
+                    if (
+                        self.floating_fs_btn.isVisible()
+                        and not self.floating_fs_timer.isActive()
+                    ):
+                        self.floating_fs_timer.start()
 
         return super().eventFilter(source, event)
 
@@ -1252,6 +1287,9 @@ class RiemannWindow(QMainWindow):
                 "app/default_dir", dlg.txt_default_dir.text().strip()
             )
             self.settings.setValue("app/autoscroll_speed", dlg.spin_autoscroll.value())
+            self.settings.setValue(
+                "app/floating_fs_btn", dlg.cb_floating_fs.isChecked()
+            )
 
     def new_pdf_tab(
         self, path: Optional[str] = None, restore_state: bool = False
@@ -1611,8 +1649,8 @@ class RiemannWindow(QMainWindow):
         """Helper to fully exit any fullscreen reading states."""
         self._fullscreen_state = 0
         self._reader_fullscreen = False
-        self.menuBar().show()
 
+        self.menuBar().show()
         self.tabs_main.tabBar().show()
         self.tabs_side.tabBar().show()
         self._set_tabs_toolbar_visible(True)
@@ -1622,9 +1660,8 @@ class RiemannWindow(QMainWindow):
         else:
             self.showNormal()
 
-        active_tab = self.tabs_main.currentWidget()
-        if hasattr(active_tab, "update_fullscreen_icon"):
-            active_tab.update_fullscreen_icon(0)
+        self._broadcast_fullscreen_icon(0)
+        self._update_floating_fs_btn_icon()
 
     def toggle_reader_fullscreen(self) -> None:
         """
@@ -1632,9 +1669,6 @@ class RiemannWindow(QMainWindow):
         Normal -> Reading Mode (toolbar visible) -> Pure Fullscreen.
         """
         state = getattr(self, "_fullscreen_state", 0)
-        active_tab = self.tabs_main.currentWidget()
-        if not active_tab and self.tabs_side.isVisible():
-            active_tab = self.tabs_side.currentWidget()
 
         if state == 0:
             self._fullscreen_state = 1
@@ -1645,15 +1679,16 @@ class RiemannWindow(QMainWindow):
             self._set_tabs_toolbar_visible(True)
             self._reader_fullscreen = True
             self.showFullScreen()
-            if hasattr(active_tab, "update_fullscreen_icon"):
-                active_tab.update_fullscreen_icon(1)
+            self._broadcast_fullscreen_icon(1)
+
         elif state == 1:
             self._fullscreen_state = 2
             self._set_tabs_toolbar_visible(False)
-            if hasattr(active_tab, "update_fullscreen_icon"):
-                active_tab.update_fullscreen_icon(2)
+            self._broadcast_fullscreen_icon(2)
+
         else:
             self.exit_fullscreen()
+        self._update_floating_fs_btn_icon()
 
     def _set_tabs_toolbar_visible(self, visible: bool) -> None:
         """
@@ -1676,6 +1711,7 @@ class RiemannWindow(QMainWindow):
         self.dark_mode = not self.dark_mode
         self.settings.setValue("darkMode", self.dark_mode)
         self.enforce_global_stylesheet()
+        self._update_floating_btn_style()
 
         if hasattr(self, "_update_global_metrics"):
             self._update_global_metrics()
@@ -2234,6 +2270,46 @@ class RiemannWindow(QMainWindow):
         """
         self.ytdlp_manager_dialog.show()
         self.ytdlp_manager_dialog.raise_()
+
+    def _update_floating_btn_style(self) -> None:
+        """Applies dynamic theme styling to the floating fullscreen button."""
+        bg = (
+            "rgba(40, 40, 40, 0.85)"
+            if getattr(self, "dark_mode", False)
+            else "rgba(220, 220, 220, 0.85)"
+        )
+        fg = "#fff" if getattr(self, "dark_mode", False) else "#000"
+        border = "rgba(100, 100, 100, 0.5)"
+        self.floating_fs_btn.setStyleSheet(
+            f"background: {bg}; color: {fg}; border: 1px solid {border}; border-radius: 8px;"
+        )
+        self._update_floating_fs_btn_icon()
+
+    def _update_floating_fs_btn_icon(self) -> None:
+        """Retrieves and applies the correct icon state to the floating button."""
+        state = getattr(self, "_fullscreen_state", 0)
+        icons = {0: "panel-top.svg", 1: "maximize.svg", 2: "minimize.svg"}
+        icon_name = icons.get(state, "maximize.svg")
+
+        suffix = "-white" if getattr(self, "dark_mode", False) else ""
+        if suffix and not icon_name.endswith(f"{suffix}.svg"):
+            icon_name = icon_name.replace(".svg", f"{suffix}.svg")
+
+        path = get_resource_path(os.path.join("assets", "icons", icon_name))
+        if not os.path.exists(path) and suffix:
+            path = get_resource_path(
+                os.path.join("assets", "icons", icon_name.replace(suffix, ""))
+            )
+
+        self.floating_fs_btn.setIcon(QIcon(path))
+
+    def _broadcast_fullscreen_icon(self, state: int) -> None:
+        """Helper to safely sync the fullscreen icon across all open tabs simultaneously."""
+        for target in (self.tabs_main, self.tabs_side):
+            for i in range(target.count()):
+                widget = target.widget(i)
+                if hasattr(widget, "update_fullscreen_icon"):
+                    widget.update_fullscreen_icon(state)
 
 
 def run() -> None:

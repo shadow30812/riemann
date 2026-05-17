@@ -896,6 +896,13 @@ class BrowserTab(QWidget):
         self.btn_print_pdf.setToolTip("Save Webpage to PDF")
         self.btn_print_pdf.clicked.connect(self.print_to_pdf)
 
+        self.btn_fullscreen = QPushButton()
+        self.btn_fullscreen.setIcon(self._get_icon("maximize.svg"))
+        self.btn_fullscreen.setIconSize(icon_size)
+        self.btn_fullscreen.setFixedWidth(30)
+        self.btn_fullscreen.setToolTip("Toggle Fullscreen/Reading Mode")
+        self.btn_fullscreen.clicked.connect(self.toggle_fullscreen_mode)
+
         self.btn_zoom = QPushButton("100%")
         self.btn_zoom.setFixedWidth(65)
         self.btn_zoom.setToolTip("Zoom Controls")
@@ -932,6 +939,7 @@ class BrowserTab(QWidget):
         tb_layout.addWidget(self.btn_stream)
         tb_layout.addWidget(self.btn_download)
         tb_layout.addWidget(self.btn_print_pdf)
+        tb_layout.addWidget(self.btn_fullscreen)
         tb_layout.addWidget(self.btn_zoom)
 
         layout.addWidget(self.toolbar)
@@ -2118,8 +2126,19 @@ class BrowserTab(QWidget):
             else "download.svg"
         )
         self.btn_download.setIcon(self._get_icon(dl_icon))
-
         self.btn_print_pdf.setIcon(self._get_icon("printer.svg"))
+
+        icons = {0: "panel-top.svg", 1: "maximize.svg", 2: "minimize.svg"}
+        self.btn_fullscreen.setIcon(
+            self._get_icon(
+                icons.get(
+                    getattr(self.window(), "_fullscreen_state", 0)
+                    if self.window()
+                    else 0,
+                    "maximize.svg",
+                )
+            )
+        )
 
         if hasattr(self, "btn_find_prev"):
             self.btn_find_prev.setIcon(self._get_icon("chevron-up.svg"))
@@ -2371,3 +2390,13 @@ class BrowserTab(QWidget):
         painter.end()
 
         return QIcon(shifted)
+
+    def toggle_fullscreen_mode(self) -> None:
+        """Triggers the global window fullscreen state."""
+        if self.window() and hasattr(self.window(), "toggle_reader_fullscreen"):
+            self.window().toggle_reader_fullscreen()
+
+    def update_fullscreen_icon(self, state: int) -> None:
+        """Updates the fullscreen toggle icon dynamically based on the global state."""
+        icons = {0: "panel-top.svg", 1: "maximize.svg", 2: "minimize.svg"}
+        self.btn_fullscreen.setIcon(self._get_icon(icons.get(state, "maximize.svg")))
