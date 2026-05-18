@@ -1019,7 +1019,7 @@ The application also supports exclusion of heavyweight optional dependencies.
 Typical setup:
 
 ```bash
-git clone <repo>
+git clone https://github.com/shadow30812/riemann.git
 cd riemann
 pip install -e .
 ```
@@ -1153,11 +1153,15 @@ External APIs are optional and primarily used for metadata enrichment.
 pip install .
 ```
 
+Latest pre-compiled build is available at <https://github.com/shadow30812/riemann/releases/latest>
+
 ### Windows
 
-Builds are distributed as packaged desktop binaries.
+Builds are sometimes distributed as packaged desktop binaries along with the Linux releases.
 
 Native dependencies such as PDFium are bundled during release packaging.
+
+Launch Riemann.exe after decompressing the zip file to open the application.
 
 ---
 
