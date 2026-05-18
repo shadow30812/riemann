@@ -184,7 +184,7 @@ jobs:
           $EXCLUDES="$EXCLUDES --nofollow-import-to=yt_dlp.extractor.lazy_extractors --nofollow-import-to=pygments"
           $EXCLUDES="$EXCLUDES --nofollow-import-to=faster_whisper --nofollow-import-to=ctranslate2 --nofollow-import-to=huggingface_hub --nofollow-import-to=tokenizers"
           
-          $EXCLUDE_ARGS = $ EXCLUDES.Split(" ")
+          $EXCLUDE_ARGS = $EXCLUDES.Split(" ")
 
           python -m nuitka `
               --standalone `
