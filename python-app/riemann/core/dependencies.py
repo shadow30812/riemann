@@ -1,10 +1,10 @@
 """Dependency hell"""
 
 import os
+import site
 import subprocess
-import sys
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QStandardPaths, Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QHeaderView,
@@ -15,6 +15,47 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
 )
+
+
+def setup_and_get_venv() -> str:
+    """
+    Ensures a local virtual environment exists, mounts its site-packages
+    to the compiled app's sys.path, and returns the venv python executable.
+    """
+    data_dir = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.AppLocalDataLocation
+    )
+    venv_dir = os.path.join(data_dir, "venv")
+
+    win = os.name == "nt"
+    python_exe = (
+        os.path.join(venv_dir, "Scripts", "python.exe")
+        if win
+        else os.path.join(venv_dir, "bin", "python")
+    )
+
+    if not os.path.exists(python_exe):
+        os.makedirs(data_dir, exist_ok=True)
+        sys_py = "python" if win else "python3"
+        print("[Riemann] Initializing local virtual environment...")
+        subprocess.check_call(
+            [sys_py, "-m", "venv", "--system-site-packages", venv_dir]
+        )
+
+    if win:
+        site_packages = os.path.join(venv_dir, "Lib", "site-packages")
+        if os.path.exists(site_packages):
+            site.addsitedir(site_packages)
+    else:
+        lib_dir = os.path.join(venv_dir, "lib")
+        if os.path.exists(lib_dir):
+            py_dirs = [d for d in os.listdir(lib_dir) if d.startswith("python")]
+            if py_dirs:
+                site_packages = os.path.join(lib_dir, py_dirs[0], "site-packages")
+                if os.path.exists(site_packages):
+                    site.addsitedir(site_packages)
+
+    return python_exe
 
 
 class DependencyWorker(QThread):
@@ -31,16 +72,24 @@ class DependencyWorker(QThread):
 
     def run(self):
         try:
-            interpreter = (
-                ("python" if os.name == "nt" else "python3")
-                if getattr(sys, "frozen", False) or "__compiled__" in globals()
-                else sys.executable
+            cmd = (
+                [
+                    setup_and_get_venv(),
+                    "-m",
+                    "pip",
+                    "install",
+                    self.pip_name,
+                ]
+                if self.action == "install"
+                else [
+                    setup_and_get_venv(),
+                    "-m",
+                    "pip",
+                    "uninstall",
+                    "-y",
+                    self.pip_name,
+                ]
             )
-
-            if self.action == "install":
-                cmd = [interpreter, "-m", "pip", "install", self.pip_name]
-            else:
-                cmd = [interpreter, "-m", "pip", "uninstall", "-y", self.pip_name]
 
             process = subprocess.Popen(
                 cmd,
@@ -133,14 +182,10 @@ class DependenciesDialog(QDialog):
     def _check_pip_installed(self, pip_name: str) -> bool:
         """Safely checks if a pip package is installed via subprocess."""
         base_pkg = pip_name.split("[")[0]
-        interpreter = (
-            ("python" if os.name == "nt" else "python3")
-            if getattr(sys, "frozen", False) or "__compiled__" in globals()
-            else sys.executable
-        )
         try:
             subprocess.check_output(
-                [interpreter, "-m", "pip", "show", base_pkg], stderr=subprocess.DEVNULL
+                [setup_and_get_venv(), "-m", "pip", "show", base_pkg],
+                stderr=subprocess.DEVNULL,
             )
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):

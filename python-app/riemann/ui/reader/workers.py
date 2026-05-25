@@ -6,7 +6,6 @@ import hashlib
 import os
 import re
 import subprocess
-import sys
 import urllib.request
 import zipfile
 from typing import Any
@@ -18,6 +17,8 @@ from pyhanko.sign.validation import validate_pdf_signature
 from pyhanko_certvalidator import ValidationContext
 from pyhanko_certvalidator.policy_decl import DisallowWeakAlgorithmsPolicy
 from PySide6.QtCore import QThread, Signal
+
+from ...core.dependencies import setup_and_get_venv
 
 
 class ModelDownloader(QThread):
@@ -88,9 +89,7 @@ class InstallerThread(QThread):
         """
         try:
             cmd = [
-                ("python" if os.name == "nt" else "python3")
-                if getattr(sys, "frozen", False) or "__compiled__" in globals()
-                else sys.executable,
+                setup_and_get_venv(),
                 "-m",
                 "pip",
                 "install",

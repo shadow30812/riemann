@@ -9,13 +9,17 @@ application entry point. It orchestrates the UI layout, tab management
 import os
 import sys
 
-# os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "9222")
+from .core.dependencies import setup_and_get_venv
 
+# os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "9222")
 # import gc
 # import tracemalloc
-
 # tracemalloc.start()
 
+try:
+    setup_and_get_venv()
+except Exception as e:
+    print(f"[Riemann Warning] Failed to mount local virtual environment: {e}")
 
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     bundle_dir = getattr(sys, "_MEIPASS")
