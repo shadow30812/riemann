@@ -1,8 +1,11 @@
 """Dependency hell"""
 
+import importlib
+import json
 import os
 import site
 import subprocess
+import sys
 
 from PySide6.QtCore import QStandardPaths, Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -19,8 +22,8 @@ from PySide6.QtWidgets import (
 
 def setup_and_get_venv() -> str:
     """
-    Ensures a local virtual environment exists, mounts its site-packages
-    to the compiled app's sys.path, and returns the venv python executable.
+    Ensures a local virtual environment exists, dynamically interrogates it
+    for its exact path structure, and mounts them cleanly.
     """
     data_dir = QStandardPaths.writableLocation(
         QStandardPaths.StandardLocation.AppLocalDataLocation
@@ -42,18 +45,22 @@ def setup_and_get_venv() -> str:
             [sys_py, "-m", "venv", "--system-site-packages", venv_dir]
         )
 
-    if win:
-        site_packages = os.path.join(venv_dir, "Lib", "site-packages")
-        if os.path.exists(site_packages):
-            site.addsitedir(site_packages)
-    else:
-        lib_dir = os.path.join(venv_dir, "lib")
-        if os.path.exists(lib_dir):
-            py_dirs = [d for d in os.listdir(lib_dir) if d.startswith("python")]
-            if py_dirs:
-                site_packages = os.path.join(lib_dir, py_dirs[0], "site-packages")
-                if os.path.exists(site_packages):
-                    site.addsitedir(site_packages)
+    try:
+        out = subprocess.check_output(
+            [python_exe, "-c", "import sys, json; print(json.dumps(sys.path))"],
+            text=True,
+        )
+        venv_paths = json.loads(out.strip())
+
+        for vp in reversed(venv_paths):
+            if os.path.exists(vp) and vp not in sys.path:
+                sys.path.insert(0, vp)
+                site.addsitedir(vp)
+
+        importlib.invalidate_caches()
+
+    except Exception as e:
+        print(f"[Riemann Warning] Failed to mount local virtual environment: {e}")
 
     return python_exe
 
