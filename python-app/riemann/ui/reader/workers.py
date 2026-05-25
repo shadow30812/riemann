@@ -88,7 +88,9 @@ class InstallerThread(QThread):
         """
         try:
             cmd = [
-                sys.executable,
+                ("python" if os.name == "nt" else "python3")
+                if getattr(sys, "frozen", False) or "__compiled__" in globals()
+                else sys.executable,
                 "-m",
                 "pip",
                 "install",

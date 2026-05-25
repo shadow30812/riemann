@@ -611,7 +611,6 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
             "adservice.google.com",
             "pagead2.googlesyndication.com",
             "tpc.googlesyndication.com",
-            "youtube.com/api/stats/ads",
             "youtube.com/ptracking",
             "youtube.com/pagead",
             "google-analytics.com",

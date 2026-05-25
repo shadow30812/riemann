@@ -1,5 +1,6 @@
 """Dependency hell"""
 
+import os
 import subprocess
 import sys
 
@@ -30,7 +31,11 @@ class DependencyWorker(QThread):
 
     def run(self):
         try:
-            interpreter = "python3" if hasattr(sys, "compiled") else sys.executable
+            interpreter = (
+                ("python" if os.name == "nt" else "python3")
+                if getattr(sys, "frozen", False) or "__compiled__" in globals()
+                else sys.executable
+            )
 
             if self.action == "install":
                 cmd = [interpreter, "-m", "pip", "install", self.pip_name]
@@ -128,7 +133,11 @@ class DependenciesDialog(QDialog):
     def _check_pip_installed(self, pip_name: str) -> bool:
         """Safely checks if a pip package is installed via subprocess."""
         base_pkg = pip_name.split("[")[0]
-        interpreter = "python3" if hasattr(sys, "compiled") else sys.executable
+        interpreter = (
+            ("python" if os.name == "nt" else "python3")
+            if getattr(sys, "frozen", False) or "__compiled__" in globals()
+            else sys.executable
+        )
         try:
             subprocess.check_output(
                 [interpreter, "-m", "pip", "show", base_pkg], stderr=subprocess.DEVNULL
