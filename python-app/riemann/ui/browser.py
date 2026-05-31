@@ -141,7 +141,7 @@ class YtDlpStreamWorker(QThread):
     finished = Signal(str)
     error = Signal(str)
 
-    def __init__(self, url):
+    def __init__(self, url, cookies_browser=None):
         """
         Initializes the stream extraction worker.
 
@@ -150,6 +150,7 @@ class YtDlpStreamWorker(QThread):
         """
         super().__init__()
         self.url = url
+        self.cookies_browser = cookies_browser
 
     def run(self):
         """
@@ -164,6 +165,9 @@ class YtDlpStreamWorker(QThread):
             "quiet": True,
             "noplaylist": True,
         }
+        if self.cookies_browser:
+            ydl_opts["cookiesfrombrowser"] = (self.cookies_browser,)
+
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(self.url, download=False)
@@ -2190,7 +2194,8 @@ class BrowserTab(QWidget):
 
     def stream_video(self) -> None:
         """
-        Presents a dropdown of available media players (VLC, MPV, Native).
+        Presents a dropdown of available media players (VLC, MPV, Native)
+        and securely pipes cookies to bypass authentication blocks.
         """
         raw_url = self.web.url().toString().strip()
 
@@ -2223,19 +2228,92 @@ class BrowserTab(QWidget):
 
         self.selected_player = choice
 
+        auth_methods = [
+            "No Cookies (Public Video)",
+            "Use Netscape cookies.txt file (Recommended Backup)",
+            "Auto-extract: Chrome",
+            "Auto-extract: Firefox",
+            "Auto-extract: Brave",
+            "Auto-extract: Edge",
+        ]
+
+        auth_choice, auth_ok = QInputDialog.getItem(
+            self, "Authentication", "Select cookie source:", auth_methods, 0, False
+        )
+        if not auth_ok:
+            return
+
+        cookies_browser = None
+        cookie_file = None
+
+        if "Netscape" in auth_choice:
+            app_settings = QSettings("Riemann", "PDFReader")
+            start_dir = get_dialog_directory(app_settings)
+
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Select Netscape Cookies File", start_dir, "Text Files (*.txt)"
+            )
+            if path:
+                save_last_directory(app_settings, path)
+                cookie_file = path
+            else:
+                self.show_toast("Streaming cancelled: No cookie file provided.")
+                return
+        elif "Auto-extract" in auth_choice:
+            cookies_browser = auth_choice.split(": ")[1].lower()
+
         if choice == "MPV":
             self.show_toast("Opening in MPV...")
+            mpv_args = [str(shutil.which("mpv")), "--keep-open=yes"]
+
+            if cookie_file:
+                mpv_args.append(f"--cookies-file={cookie_file}")
+            elif cookies_browser:
+                mpv_args.append(
+                    f"--ytdl-raw-options=cookies-from-browser={cookies_browser}"
+                )
+
+            mpv_args.append(raw_url)
+
             try:
                 subprocess.Popen(
-                    [str(shutil.which("mpv")), "--keep-open=yes", raw_url],
+                    mpv_args,
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stderr=subprocess.STDOUT,
                 )
             except Exception:
                 self.show_toast("Failed to start MPV.")
         else:
             self.show_toast(f"Extracting stream for {choice}...")
             self.stream_worker = YtDlpStreamWorker(raw_url)
+
+            if cookie_file:
+
+                def custom_run():
+                    ydl_opts = {
+                        "format": "best[ext=mp4]",
+                        "quiet": True,
+                        "noplaylist": True,
+                        "cookiefile": cookie_file,
+                    }
+                    try:
+                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                            info = ydl.extract_info(
+                                self.stream_worker.url, download=False
+                            )
+                            if info and "url" in info:
+                                self.stream_worker.finished.emit(info["url"])
+                            else:
+                                self.stream_worker.error.emit(
+                                    "No URL found in response"
+                                )
+                    except Exception as e:
+                        self.stream_worker.error.emit(str(e))
+
+                self.stream_worker.run = custom_run
+            elif cookies_browser:
+                self.stream_worker.cookies_browser = cookies_browser
+
             self.stream_worker.finished.connect(self._on_stream_extracted)
             self.stream_worker.error.connect(
                 lambda e: self.show_toast(f"Stream error: {e}")
