@@ -7,7 +7,13 @@
 # **Prerequisite: Builds the Rust extension first.**
 
 run: build
- PYTHONPATH=python-app python3 -m riemann
+	@if [ -x "./riemann/bin/python" ]; then \
+		env -u LD_LIBRARY_PATH PYTHONPATH=python-app ./riemann/bin/python -m riemann; \
+	elif [ -x "./.venv/bin/python" ]; then \
+		env -u LD_LIBRARY_PATH PYTHONPATH=python-app ./.venv/bin/python -m riemann; \
+	else \
+		env -u LD_LIBRARY_PATH PYTHONPATH=python-app python3 -m riemann; \
+	fi
 
 # **Build and install the Rust extension into the current virtual environment.**
 

@@ -4,185 +4,376 @@
 #
 #    pip-compile --output-file=xreqs.txt requirements.in
 #
-annotated-doc==0.0.4
-    # via typer
-anyio==4.13.0
-    # via httpx
+aiohappyeyeballs==2.7.1
+    # via aiohttp
+aiohttp==3.14.3
+    # via
+    #   pyhanko
+    #   pyhanko-certvalidator
+aiosignal==1.4.0
+    # via aiohttp
+albucore==0.0.23
+    # via albumentations
+albumentations==1.4.24
+    # via pix2tex
+annotated-doc==0.0.5
+    # via
+    #   fastapi
+    #   typer
+annotated-types==0.8.0
+    # via pydantic
+anyio==4.15.0
+    # via
+    #   httpx
+    #   starlette
 asn1crypto==1.5.1
     # via
+    #   -r requirements.in
     #   oscrypto
     #   pyhanko
     #   pyhanko-certvalidator
-asttokens==3.0.1
-    # via stack-data
-av==17.0.1
+attrs==26.1.0
+    # via aiohttp
+av==18.1.0
     # via faster-whisper
-certifi==2026.2.25
+certifi==2026.7.22
     # via
+    #   -r requirements.in
     #   httpcore
     #   httpx
+    #   pyhanko-certvalidator
     #   requests
-cffi==2.0.0
+cffi==2.1.1
     # via cryptography
-charset-normalizer==3.4.6
+charset-normalizer==3.5.1
     # via requests
 click==8.3.3
-    # via typer
-cryptography==46.0.6
+    # via uvicorn
+cloudpickle==3.1.2
+    # via joblib
+cryptography==50.0.1
     # via
     #   pyhanko
     #   pyhanko-certvalidator
-ctranslate2==4.7.1
+ctranslate2==4.8.2
     # via faster-whisper
-executing==2.2.1
-    # via stack-data
+cuda-bindings==13.3.1
+    # via torch
+cuda-pathfinder==1.8.1
+    # via cuda-bindings
+cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3.0
+    # via torch
+einops==0.8.2
+    # via
+    #   pix2tex
+    #   x-transformers
+entmax==1.3
+    # via x-transformers
+faiss-cpu==1.15.0
+    # via -r requirements.in
+fastapi==0.141.1
+    # via -r requirements.in
 faster-whisper==1.2.1
     # via -r requirements.in
-filelock==3.29.0
-    # via huggingface-hub
+filelock==3.32.5
+    # via
+    #   huggingface-hub
+    #   torch
 flatbuffers==25.12.19
     # via onnxruntime
-fsspec==2026.4.0
-    # via huggingface-hub
+frozenlist==1.8.0
+    # via
+    #   aiohttp
+    #   aiosignal
+fsspec==2026.7.0
+    # via
+    #   huggingface-hub
+    #   torch
 h11==0.16.0
-    # via httpcore
-hf-xet==1.5.0
+    # via
+    #   httpcore
+    #   uvicorn
+hf-xet==1.6.0
     # via huggingface-hub
 httpcore==1.0.9
     # via httpx
 httpx==0.28.1
     # via huggingface-hub
-huggingface-hub==1.14.0
+huggingface-hub==1.16.1
     # via
     #   faster-whisper
+    #   sentence-transformers
     #   tokenizers
-idna==3.11
+    #   transformers
+idna==3.19
     # via
     #   anyio
     #   httpx
     #   requests
-ipython-pygments-lexers==1.1.1
-    # via -r requirements.in
-jupyter-client==8.8.0
-    # via -r requirements.in
-jupyter-core==5.9.1
+    #   yarl
+jinja2==3.1.6
+    # via torch
+joblib==1.6.0
+    # via scikit-learn
+lxml==6.1.3
     # via
     #   -r requirements.in
-    #   jupyter-client
-jupyterlab-pygments==0.3.0
-    # via -r requirements.in
-lxml==6.0.2
-    # via pyhanko
-markdown==3.10.1
+    #   pikepdf
+    #   pyhanko
+markdown==3.10.3
     # via -r requirements.in
 markdown-it-py==4.2.0
     # via rich
+markupsafe==3.0.3
+    # via jinja2
 mdurl==0.1.2
     # via markdown-it-py
-nest-asyncio==1.6.0
-    # via -r requirements.in
-nuitka==4.0
-    # via -r requirements.in
-numpy==2.4.4
+mpmath==1.3.0
+    # via sympy
+multidict==6.7.1
     # via
+    #   aiohttp
+    #   yarl
+munch==4.0.0
+    # via pix2tex
+narwhals==2.25.0
+    # via scikit-learn
+networkx==3.6.1
+    # via torch
+numpy==2.4.6
+    # via
+    #   -r requirements.in
+    #   albucore
+    #   albumentations
     #   ctranslate2
+    #   faiss-cpu
     #   onnxruntime
-    #   opencv-python
-onnxruntime==1.26.0
+    #   opencv-python-headless
+    #   pandas
+    #   pix2tex
+    #   scikit-learn
+    #   scipy
+    #   sentence-transformers
+    #   torchvision
+    #   transformers
+nvidia-cublas==13.1.1.3
+    # via
+    #   cuda-toolkit
+    #   nvidia-cudnn-cu13
+    #   nvidia-cusolver
+nvidia-cuda-cupti==13.0.85
+    # via cuda-toolkit
+nvidia-cuda-nvrtc==13.0.88
+    # via
+    #   cuda-toolkit
+    #   nvidia-cublas
+nvidia-cuda-runtime==13.0.96
+    # via cuda-toolkit
+nvidia-cudnn-cu13==9.24.0.43
+    # via torch
+nvidia-cufft==12.0.0.61
+    # via cuda-toolkit
+nvidia-cufile==1.15.1.6
+    # via cuda-toolkit
+nvidia-curand==10.4.0.35
+    # via cuda-toolkit
+nvidia-cusolver==12.0.4.66
+    # via cuda-toolkit
+nvidia-cusparse==12.6.3.3
+    # via
+    #   cuda-toolkit
+    #   nvidia-cusolver
+nvidia-cusparselt-cu13==0.8.1
+    # via torch
+nvidia-nccl-cu13==2.30.7
+    # via torch
+nvidia-nvjitlink==13.3.33
+    # via
+    #   cuda-toolkit
+    #   nvidia-cufft
+    #   nvidia-cusolver
+    #   nvidia-cusparse
+nvidia-nvshmem-cu13==3.4.5
+    # via torch
+nvidia-nvtx==13.0.85
+    # via cuda-toolkit
+onnxruntime==1.29.0
     # via faster-whisper
-opencv-python==4.13.0.92
-    # via -r requirements.in
+opencv-python-headless==5.0.0.93
+    # via
+    #   albucore
+    #   albumentations
+    #   pix2tex
 oscrypto==1.3.0
     # via pyhanko-certvalidator
 packaging==26.2
     # via
+    #   faiss-cpu
     #   huggingface-hub
     #   onnxruntime
-platformdirs==4.9.4
-    # via jupyter-core
-prompt-toolkit==3.0.52
+    #   pikepdf
+    #   transformers
+pandas==3.0.5
+    # via pix2tex
+pikepdf==10.12.0
     # via -r requirements.in
-protobuf==7.34.1
+pillow==12.3.0
+    # via
+    #   -r requirements.in
+    #   pikepdf
+    #   pix2tex
+    #   torchvision
+pix2tex==0.1.4
+    # via -r requirements.in
+propcache==0.5.2
+    # via
+    #   aiohttp
+    #   yarl
+protobuf==7.36.1
     # via onnxruntime
-pure-eval==0.2.3
-    # via stack-data
+psutil==7.2.2
+    # via -r requirements.in
 pycparser==3.0
     # via cffi
-pydantic-core==2.41.5
-    # via -r requirements.in
-pygments==2.19.2
+pydantic==2.13.5
     # via
-    #   ipython-pygments-lexers
-    #   rich
-pyhanko==0.33.0
+    #   -r requirements.in
+    #   albumentations
+    #   fastapi
+pydantic-core==2.46.5
+    # via pydantic
+pygments==2.21.0
+    # via rich
+pyhanko==0.37.0
     # via -r requirements.in
-pyhanko-certvalidator==0.29.1
-    # via pyhanko
-pymupdf==1.27.2.3
+pyhanko-certvalidator==0.32.0
+    # via
+    #   -r requirements.in
+    #   pyhanko
+pymupdf==1.28.2
     # via -r requirements.in
-pymupdfb==1.23.22
+pypdf==6.16.2
     # via -r requirements.in
-pyside6==6.10.1
+pyside6==6.11.2
     # via -r requirements.in
-pyside6-addons==6.10.1
+pyside6-addons==6.11.2
     # via pyside6
-pyside6-essentials==6.10.1
+pyside6-essentials==6.11.2
     # via
     #   pyside6
     #   pyside6-addons
 python-dateutil==2.9.0.post0
-    # via jupyter-client
+    # via pandas
 pyyaml==6.0.3
     # via
+    #   albumentations
     #   ctranslate2
     #   huggingface-hub
-    #   pyhanko
-pyzmq==27.1.0
-    # via jupyter-client
-requests==2.33.0
+    #   pix2tex
+    #   transformers
+regex==2026.9.3
+    # via transformers
+requests==2.34.2
     # via
-    #   pyhanko
-    #   pyhanko-certvalidator
+    #   -r requirements.in
+    #   pix2tex
 rich==15.0.0
     # via typer
+safetensors==0.8.0
+    # via transformers
+scikit-learn==1.9.0
+    # via sentence-transformers
+scipy==1.17.1
+    # via
+    #   albumentations
+    #   scikit-learn
+    #   sentence-transformers
+sentence-transformers==6.0.1
+    # via -r requirements.in
 shellingham==1.5.4
     # via typer
-shiboken6==6.10.1
+shiboken6==6.11.2
     # via
+    #   -r requirements.in
     #   pyside6
     #   pyside6-addons
     #   pyside6-essentials
+simsimd==6.5.16
+    # via albucore
 six==1.17.0
     # via python-dateutil
-stack-data==0.6.3
-    # via -r requirements.in
-tokenizers==0.23.1
-    # via faster-whisper
-tornado==6.5.5
-    # via jupyter-client
-tqdm==4.67.3
+starlette==1.6.0
+    # via fastapi
+stringzilla==5.1.2
+    # via albucore
+sympy==1.14.0
+    # via torch
+threadpoolctl==3.6.0
+    # via scikit-learn
+timm==0.5.4
+    # via pix2tex
+tokenizers==0.23.2
+    # via
+    #   faster-whisper
+    #   pix2tex
+    #   sentence-transformers
+    #   transformers
+torch==2.14.0
+    # via
+    #   entmax
+    #   pix2tex
+    #   sentence-transformers
+    #   timm
+    #   torchvision
+    #   x-transformers
+torchvision==0.29.0
+    # via timm
+tqdm==4.70.0
     # via
     #   faster-whisper
     #   huggingface-hub
-traitlets==5.14.3
+    #   pix2tex
+    #   sentence-transformers
+    #   transformers
+transformers==5.16.1
     # via
-    #   jupyter-client
-    #   jupyter-core
-typer==0.25.1
-    # via huggingface-hub
-typing-extensions==4.15.0
+    #   pix2tex
+    #   sentence-transformers
+triton==3.8.0
+    # via torch
+typer==0.27.2
     # via
-    #   anyio
     #   huggingface-hub
+    #   transformers
+typing-extensions==4.16.0
+    # via
+    #   aiohttp
+    #   aiosignal
+    #   anyio
+    #   fastapi
+    #   huggingface-hub
+    #   pydantic
     #   pydantic-core
-tzlocal==5.3.1
+    #   sentence-transformers
+    #   starlette
+    #   torch
+    #   typing-inspection
+typing-inspection==0.4.4
+    # via
+    #   fastapi
+    #   pydantic
+tzlocal==5.4.4
     # via pyhanko
-uritools==6.0.1
+uritools==6.1.3
     # via pyhanko-certvalidator
-urllib3==2.6.3
+urllib3==2.7.0
     # via requests
-wcwidth==0.6.0
-    # via prompt-toolkit
+uvicorn==0.52.4
+    # via -r requirements.in
+x-transformers==0.15.0
+    # via pix2tex
+yarl==1.24.5
+    # via aiohttp
 yt-dlp @ git+https://github.com/yt-dlp/yt-dlp.git
     # via -r requirements.in
 
