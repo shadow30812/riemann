@@ -171,6 +171,38 @@ Secondary Launch
 
 This system prevents duplicate application instances during OS-level "Open With" actions.
 
+If an independent window instance is explicitly required, passing `--new-window` bypasses single-instance IPC forwarding and initiates a new process instance.
+
+---
+
+## Linux Desktop & Window Manager Integration
+
+To ensure seamless desktop integration on Linux distributions (GNOME, KDE, Ubuntu Dock, Cinnamon):
+
+* `RiemannWindow` registers `StartupWMClass=Riemann` on the top-level window.
+* On startup, `install_desktop_file()` automatically generates and writes `~/.local/share/applications/Riemann.desktop` if absent.
+* This ensures running instances are properly associated with the application launcher and dock icons rather than appearing as a generic executable or duplicate launcher icon.
+
+---
+
+## Fullscreen Architecture & Hover Controls
+
+Fullscreen mode in `RiemannWindow` integrates auto-hiding controls to maximize reading canvas while keeping navigation accessible:
+
+* **Trigger Threshold**: Moving the mouse within the top 4 pixels of the display reveals both the main menu bar and the primary navigation bar using smooth property animations.
+* **Auto-Hide Delay**: When the mouse leaves the top control zone, a 1.5-second single-shot timer triggers an auto-hide transition unless a menu or combo-box dropdown is currently open.
+* **System Clock Widget**: A live `SystemClockWidget` (`QLabel` updated via `QTimer`) is integrated directly into the navbar to maintain time awareness during distraction-free fullscreen research sessions.
+
+---
+
+## External Application Dispatcher
+
+Riemann allows delegating document rendering to external viewers and browsers via `_populate_external_app_menu()`:
+
+* **Dynamic Discovery**: Scans `$PATH` using `shutil.which()` for installed browsers (Google Chrome, Chromium, Mozilla Firefox, Brave Browser, Microsoft Edge) and the system default viewer (`xdg-open` on Linux, `start` on Windows).
+* **Launch Architecture**: Dispatches external viewers asynchronously via `subprocess.Popen([binary, pdf_path])` or `QDesktopServices.openUrl(QUrl.fromLocalFile(pdf_path))`.
+* **Custom Binary Selection**: A file chooser dialog (`QFileDialog`) allows launching any arbitrary executable binary against the active PDF path.
+
 ---
 
 ## Media Kill-Switch
@@ -189,7 +221,7 @@ Do not remove this logic unless replacing it with another shutdown-safe media st
 
 ---
 
-## Settings Infrastructure
+## Settings Infrastructure & UI Scaling
 
 Settings are primarily persisted through `QSettings`.
 
@@ -200,8 +232,15 @@ Persistent categories include:
 * homepage customization
 * default directories
 * autoscroll speed
-* theme preferences
+* theme preferences (defaulting to Light Mode for initial installs)
 * session state
+* `app/ui_scale`: UI Display Scaling percentage (50% to 250%)
+
+### UI Display Scaling Integration
+Located in `SettingsDialog`:
+* Configures `QT_SCALE_FACTOR` dynamically.
+* Integrates a wide `QSlider` (220px, 1% single step) and an interactive numeric `QSpinBox` synchronized bidirectionally.
+* Applies on restart, scaling all Qt widgets, fonts, and icons cleanly for high-DPI displays.
 
 ---
 
@@ -225,6 +264,34 @@ Responsibilities remaining inside `ReaderTab`:
 * backend initialization
 * high-level event routing
 * page widget orchestration
+* middle-click autoscroll navigation
+* document reloading and external launcher integration
+
+---
+
+## Middle-Click Autoscroll Architecture
+
+`ReaderTab` implements a smooth autoscrolling engine:
+
+* **Activation**: Middle-clicking inside the viewport calls `start_middle_click_scroll()`, recording the global mouse anchor position and starting `self.autoscroll_timer` (30ms interval).
+* **Deadzone & Velocity Scaling**: An 8px deadzone prevents accidental drift. Outside the deadzone, velocity is calculated via non-linear acceleration:
+  ```python
+  dy_eff = dy - 8 if dy > 8 else (dy + 8 if dy < -8 else 0)
+  speed_y = (dy_eff * 0.12) * (1.0 + abs(dy_eff) * 0.003)
+  ```
+* **Global Override Cursors**: Uses `QApplication.setOverrideCursor()` and `changeOverrideCursor()` to dynamically display:
+  * `Qt.CursorShape.SizeAllCursor` inside deadzone or multi-directional drift.
+  * `Qt.CursorShape.SizeVerCursor` when vertical movement dominates.
+  * `Qt.CursorShape.SizeHorCursor` when horizontal movement dominates.
+* **Caret Suppression**: The event filter intercepts `MouseMove` and prevents child `PageWidget` instances from resetting the cursor to an `IBeamCursor`.
+* **Exit Conditions**: Autoscroll terminates cleanly on a second middle-click, left-click, or Escape key press, restoring all override cursors in a loop.
+
+---
+
+## Keyboard Navigation & Document Reload
+
+* **Page Scrolling**: `Page Up` and `Page Down` trigger `scroll_page_length(-1)` and `scroll_page_length(1)` to jump viewport by one full visible page height.
+* **F5 Document Refresh**: Calls `reload_document()`. Compares file modification times and content hashes. If modified or deleted on disk, prompts the user with an option dialog to reload the new document or keep the active cached view.
 
 ---
 
@@ -285,6 +352,7 @@ Core responsibilities:
 * scroll restoration
 * zoom handling
 * rebuild scheduling
+* high-zoom memory clamping and priority rendering
 
 ---
 
@@ -298,6 +366,34 @@ Rust Render
 → PageWidget
 → Scroll Viewport
 ```
+
+---
+
+## Zoom Page Number Stability & Fractional Anchoring
+
+During visual zoom operations, relative page offsets can drift if viewport positions are mapped only to raw scroll values.
+
+To ensure the page number indicator in the toolbar never jumps erratically during zoom:
+* Riemann computes the fractional page offset `(scrollbar_value - current_page_top) / current_page_height` prior to scaling.
+* Post-scaling, the viewport scroll position is recalculated using the scaled dimensions and restored to the exact fractional page position.
+
+---
+
+## High-Zoom Performance Optimizations
+
+At higher zoom levels (200%–400%), single page bitmaps expand to 50MB–70MB each. Synchronously pre-rendering offscreen buffers can overwhelm `QPixmapCache` (150MB ceiling) and block the Qt event loop for seconds.
+
+Riemann applies three coordinated optimizations:
+1. **Scale-Aware Pre-Render Margins**: In `render_visible_pages`:
+   * Zoom $\ge 200\%$: `margin = 1` (limits pre-rendering to only the immediately adjacent page).
+   * Zoom $\ge 120\%$: `margin = 2`.
+   * Standard zoom: default margin.
+2. **Visible-First Priority Queue**: Pages scheduled for rendering are sorted by distance to `current_page_index`:
+   ```python
+   sorted_indices = sorted(target_indices, key=lambda i: abs(i - self.current_page_index))
+   ```
+   The active visible page renders first within 50ms–100ms, immediately providing visual clarity without waiting for buffer pages.
+3. **Re-entrancy Elimination**: Removed synchronous `QApplication.processEvents()` calls within zoom completion callbacks, avoiding recursive paint events and layout freezes.
 
 ---
 
@@ -437,18 +533,22 @@ Redraws are localized to the affected page whenever possible.
 
 ---
 
-## Text Selection Evolution
+## Precision Text Selection Engine
 
-The project historically transitioned from rectangular selection behavior toward more linear text-selection logic.
+The text selection system (`tab.py`) was overhauled to handle LaTeX, math notations, scanned papers, and OCR output with high visual and clipboard accuracy:
 
-Many rendering edge cases originate from:
-
-* multi-line selections
-* transformed coordinate systems
-* zoom scaling
-* page rotation
-
-Be extremely cautious when modifying selection geometry.
+* **Font-Weighted Character Metrics**: Character bounding boxes are mapped via `get_char_weight()` rather than uniform division, accounting for narrow (e.g. 'i', 'l') and wide (e.g. 'w', 'm') glyphs and preventing rightward highlight drift.
+* **Vertical Baseline Alignment**: Selection rectangles are shifted down by +10% of font height to align strictly with rendered glyph baselines rather than ascender ceilings.
+* **Reading-Order Overlap Clustering ($\ge 40\%$)**: Text segments extracted from PDFium or OCR are clustered into reading lines using a 40% vertical overlap threshold and sorted left-to-right. This prevents multi-column text, marginalia, and inline formulas from interleaving when selected.
+* **Double-Click Word Selection (`_get_word_at_pos`)**: Double-clicking expands backward and forward across characters on the same line until whitespace or punctuation boundaries, unifying the word into a single highlight rectangle.
+* **Triple-Click Paragraph/Sentence Selection (`_get_paragraph_at_pos`)**: Triple-clicking expands to select the current line, sentence, or paragraph:
+  * Backward and forward expansion stops at line breaks (`vert_gap > 0.5 × height`) or significant horizontal whitespace gaps (`horiz_gap > max(20px, 1.5 × height)`).
+  * Constructs the selection rectangles directly from character indices without redundant distance searches.
+* **Multi-Click Release Shield (`_just_selected_multi_click`)**:
+  * On mouse press/double-click, `_just_selected_multi_click` is set to `True`.
+  * When `MouseButtonRelease` fires after clicking without dragging, this shield prevents the single-click dismissal branch from wiping out the newly selected word or paragraph.
+  * Subsequent single clicks after 0.55s dismiss the selection as expected.
+* **Bounded Geometry Cache**: `_char_geometry_cache` is capped at 8 entries via FIFO eviction to eliminate unbounded memory growth during continuous reading.
 
 ---
 
@@ -470,6 +570,17 @@ Qt then converts these into viewport-space overlays.
 
 ---
 
+## PDFium Link Extraction & Caching (`core/links.py`)
+
+Hyperlink detection and destination routing are handled by `PdfLinkExtractor`:
+
+* **C API ctypes Integration**: Directly interfaces with PDFium C libraries (`FPDFLink_Enumerate`, `FPDFLink_GetDest`, `FPDFLink_GetAction`, `FPDFAction_GetURIPath`) to extract internal document targets (`#page=N`) and external web URIs.
+* **Performance Cache (`_page_links_cache`)**: Link extraction across dense technical documents involves expensive C-level traversal. Riemann caches extracted link rectangles per page path, reducing repeated lookup latency from ~19ms down to **0.0057ms**.
+* **Cache Invalidation**: `PdfLinkExtractor.close_document(doc_path)` safely purges cached link geometry when a document tab is closed.
+* **Viewport Navigation**: In `ReaderTab.eventFilter`, hovering over an internal link displays `Jump to Page X ↗` and sets `Qt.CursorShape.PointingHandCursor`. Clicking jumps directly to `target_page = int(url.split("page=")[-1]) - 1`. External URLs open in browser tabs.
+
+---
+
 ## Text Segment Cache
 
 ReaderTab maintains a text segment cache.
@@ -482,29 +593,6 @@ This cache powers:
 * AI extraction
 
 Avoid invalidating the cache unnecessarily.
-
----
-
-## Hyperlink Interaction
-
-Rendered pages maintain hyperlink rectangles.
-
-Clicks are transformed from:
-
-```text
-Screen Space
-→ Page Space
-→ PDF Geometry
-```
-
-Incorrect coordinate transforms will break:
-
-* links
-* selection
-* annotations
-* AI snipping
-
-simultaneously.
 
 ---
 
@@ -634,12 +722,21 @@ Implements browser-side WebAudio DSP.
 
 This system dynamically inserts:
 
-* EQ nodes
+* EQ nodes (Low Shelf, High Shelf)
 * saturation
 * compressors
+* downward peak limiter
 * analyzers
 * stereo widening
 * reverb
+
+### Settle Window & Gain Stability Algorithm
+Dynamic gain normalization across diverse tracks previously suffered from volume pumping during quiet intros, acoustic breakdowns, or speech pauses.
+
+To achieve studio-quality stability without manual volume tweaking:
+* **Settling Duration**: A configurable settle window (3s–30s, default 12s, exposed via the audio overlay slider) allows the automatic gain normalization loop to converge on the track's average loudness early in playback.
+* **Baseline Gain Lock**: After the settle window elapses, the engine locks onto the calculated baseline gain for the duration of the track, ignoring quiet passages and resisting artificial volume inflation.
+* **Downward Limiter**: A brickwall lookahead limiter catches sudden transients, loud climaxes, or dynamic shifts without distorting the audio or causing crackling.
 
 Modifying the audio graph incorrectly can easily introduce:
 
@@ -834,9 +931,12 @@ Stores:
 * web history
 * folder history
 
-Also powers autocomplete suggestions.
+Features:
 
-The manager includes migration handling for older persistence formats.
+* **Immediate Persistence**: History entries are written immediately upon opening a document or web page, rather than deferring writes until application exit. This guarantees that recently opened documents are preserved even if the application is killed abruptly.
+* **Crash Recovery State**: Tracks session exit state using a `_session_cleanly_closed` flag. If an unclean shutdown is detected on startup (e.g. system power outage or crash), the application prompts the user with a recovery dialog to restore all previously open tabs.
+* **Autocomplete Engine**: Powers address bar and file path suggestions across all viewports.
+* **Format Migration**: Automatically upgrades legacy JSON history formats.
 
 ---
 
@@ -940,6 +1040,25 @@ application/x-riemann-tab
 
 ---
 
+## Tab Hover Tooltips
+
+`DraggableTabBar` overrides `eventFilter` to intercept mouse hover events (`QEvent.Type.ToolTip`):
+
+* **Styling**: Renders a floating tinted tooltip with subtle drop shadows and translucent background (`rgba(26, 26, 46, 0.95)`).
+* **PDF Tabs**: Resolves the tab's underlying `current_path`, formatting the full filename and absolute filesystem directory path.
+* **Browser Tabs**: Resolves the page title and parses the URL via `urllib.parse` to extract the root domain or top-level subdomain (e.g. `docs.python.org`, `github.com`), avoiding raw unreadable URL clutter.
+
+---
+
+## Empty State Drop Zone Overlay
+
+When all document tabs are closed, `RiemannWindow` displays a centered drag-and-drop placeholder:
+
+* Visual target: prominent "Drop PDF here" banner styled to match the active theme.
+* Event Routing: intercepts `QDragEnterEvent`, `QDragMoveEvent`, and `QDropEvent` globally, opening dropped PDF files immediately into new reader tabs and persisting them to history.
+
+---
+
 ## Detached Windows
 
 Dragging tabs outside the window creates new top-level windows.
@@ -1000,7 +1119,7 @@ Supports:
 
 # 16. Session Persistence & IPC
 
-## Session Restoration
+## Session Restoration & Crash Recovery
 
 The application persists:
 
@@ -1009,8 +1128,12 @@ The application persists:
 * browser state
 * zoom levels
 * active documents
+* clean shutdown flag (`_session_cleanly_closed`)
 
-Session restoration intentionally attempts to recreate the previous workspace state.
+### Immediate History & Crash Recovery Flow
+* **Immediate Persistence**: Opened documents and web pages are recorded into `HistoryManager` as soon as they are launched rather than waiting for `closeEvent()`.
+* **Clean vs Unclean Exit**: On graceful exit, `RiemannWindow.closeEvent()` records a clean shutdown state. If the process is terminated abruptly (SIGKILL, power failure, system reboot), the subsequent startup detects the unclean exit and presents a modal prompt offering to **"Restore last opened tabs"**.
+* **Default Theme**: Initial theme state defaults to Light Mode for new installations.
 
 ---
 
@@ -1220,6 +1343,13 @@ riemann/
 │   │   │   ├── theme/
 │   │   │   └── __tests__/
 │   │   ├── core/
+│   │   │   ├── links.py
+│   │   │   ├── managers.py
+│   │   │   ├── features.py
+│   │   │   ├── constants.py
+│   │   │   ├── dependencies.py
+│   │   │   ├── captions.py
+│   │   │   └── mini_player.py
 │   │   ├── ui/
 │   │   │   └── reader/
 │   │   │       └── mixins/
@@ -1232,7 +1362,7 @@ riemann/
 
 Subsystem overview:
 
-* `core/` — persistence, downloads, captions, utilities
+* `core/` — persistence, downloads, captions, link extraction, utilities
 * `ui/` — browser and reader UI systems
 * `mixins/` — modular reader logic
 * `assets/` — browser-side enhancements and themes

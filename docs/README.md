@@ -27,6 +27,9 @@ All AI inference, document analysis, indexing, OCR pipelines, and media tooling 
 * [Reader System](#reader-system)
 * [Reader Mixins](#reader-mixins)
 * [Rendering Pipeline](#rendering-pipeline)
+* [Text Selection & Copying System](#text-selection--copying-system)
+* [Hyperlinks & Document Navigation](#hyperlinks--document-navigation)
+* [External Application Integration](#external-application-integration)
 * [Annotation System](#annotation-system)
 * [Search System](#search-system)
 * [AI Subsystem](#ai-subsystem)
@@ -39,10 +42,12 @@ All AI inference, document analysis, indexing, OCR pipelines, and media tooling 
 * [Library & Knowledge Management](#library--knowledge-management)
 * [Document Conversion & Compression](#document-conversion--compression)
 * [Workspace & Tab Management](#workspace--tab-management)
+* [Linux Desktop & Dock Integration](#linux-desktop--dock-integration)
+* [UI Display Scaling](#ui-display-scaling)
 * [Homepage System](#homepage-system)
 * [Viewing Modes](#viewing-modes)
 * [Virtualized Rendering](#virtualized-rendering)
-* [Session Persistence](#session-persistence)
+* [Session Persistence & Crash Recovery](#session-persistence--crash-recovery)
 * [Keyboard Shortcuts](#keyboard-shortcuts)
 * [Repository Structure](#repository-structure)
 * [Build System](#build-system)
@@ -278,14 +283,19 @@ The reader also supports:
 
 * dual-page/facing layouts
 * continuous scrolling
-* smooth zoom interpolation
+* smooth zoom interpolation with fractional scroll offset anchoring (preventing page jumping)
+* high-speed middle-click autoscroll navigation with directional cursor indicators (SizeAll, SizeVer, SizeHor)
+* Ctrl + mouse wheel smooth zooming
+* keyboard navigation (Page Up / Page Down page scrolling)
+* document refresh (F5) with disk modification detection and change prompts
+* launch in external viewers (System Default, Chrome, Firefox, Brave, Edge, custom applications)
 * reflow reading modes
 * markdown rendering
 * KaTeX rendering
 * auto-scroll reading
 * snip-to-AI workflows
 * integrated print/export pipelines
-* clickable embedded hyperlinks
+* clickable embedded hyperlinks (internal TOC, footnotes, and external URLs)
 
 ---
 
@@ -439,8 +449,60 @@ Features:
 * dynamic page widget generation
 * selective page invalidation
 * dark-mode rendering support
+* scale-aware pre-render margins (clamped to 1 page buffer at ≥200% zoom and 2 pages at ≥120% zoom to prevent memory cache blowouts)
+* visible-first priority rendering queue (active visible page is rendered immediately within 50–100ms before surrounding pages)
+* non-blocking event-loop processing (removal of synchronous event flushes prevents UI freezes on high-zoom completion)
+* bounded character geometry cache (capped LRU prevents memory leaks on long reading sessions)
 
 Large documents automatically transition into virtualized rendering mode.
+
+---
+
+## Text Selection & Copying System
+
+Riemann features a precision text extraction and selection engine optimized for technical PDFs, LaTeX documents, scanned papers, and OCR output.
+
+Features:
+
+* **Proportional Font Metrics**: Character highlighting boxes use width weighting (`get_char_weight`) rather than uniform character distribution, preventing highlight bounding boxes from drifting across long lines.
+* **Vertical Baseline Alignment**: Character selection geometry is shifted vertically by +10% of font height to align exactly with visual glyph baselines instead of font ascenders.
+* **Reading-Order Clustering ($\ge 40\%$)**: Text segments are clustered into lines by vertical overlap and sorted left-to-right, ensuring clean copying order across multi-column layouts, math formulas, and OCR artifacts.
+* **Click-to-Dismiss**: Single clicks without dragging dismiss active selections immediately.
+* **Double-Click Word Selection**: Double-clicking selects the word under the cursor across segment boundaries.
+* **Triple-Click Paragraph/Sentence Selection**: Triple-clicking selects the whole sentence or paragraph bounded by line breaks (`vert_gap > 0.5 × height`) or horizontal whitespace gaps (`horiz_gap > max(20px, 1.5 × height)`).
+* **Multi-Click Release Shield**: Selection state is preserved when lifting the mouse button after double- or triple-clicking, preventing premature deselection.
+* **Clipboard Fidelity**: Selection copy (via Ctrl+C or right-click context menu) preserves spaces, punctuation, and structural line breaks accurately.
+
+---
+
+## Hyperlinks & Document Navigation
+
+Riemann provides full support for internal document destinations and external hyperlinks.
+
+Features:
+
+* **Internal Destinations**: Extracts Table of Contents links, footnote references, and named destinations (`#page=N`) directly via native PDFium C API bindings (`core/links.py`).
+* **High-Performance Caching**: Document links are extracted once and cached per page (`_page_links_cache`), reducing lookup times to under 0.01ms per page. Caches are cleanly evicted on document close.
+* **Interactive Tooltips & Cursors**: Hovering over internal references displays a `Jump to Page X ↗` tooltip and activates a pointing hand cursor. Clicking jumps directly to the target page.
+* **External URLs**: External links display the destination URL tooltip and open in integrated browser tabs or the system default browser when clicked (or Ctrl+clicked).
+
+---
+
+## External Application Integration
+
+Users can open the currently active PDF document in external desktop applications with a single click.
+
+Access points:
+
+* **Top Menu Bar**: `File → Open in External Application...` dynamically discovers installed viewers and browsers on the system.
+* **Tab Context Menu**: Right-clicking any PDF tab provides the `Open in External Application ↗` option.
+* **Reader Toolbar**: Dedicated launcher button on the PDF toolbar with descriptive tooltip.
+
+Supported targets:
+
+* System Default PDF Viewer (`xdg-open` on Linux, OS default on Windows)
+* Web Browsers: Google Chrome, Chromium, Mozilla Firefox, Brave Browser, Microsoft Edge
+* Custom Application: File picker dialog allowing selection of any executable binary.
 
 ---
 
@@ -700,6 +762,13 @@ Adjustable controls include:
 * Bass
 * Treble
 * Air
+* Settle Window (3s–30s slider, default 12s)
+
+**Gain Stability & Settle Window**:
+The audio normalization engine incorporates a dynamic settle window to ensure volume consistency throughout a song without distracting volume fluctuations:
+* **Settling Period**: During the configurable settle window at the beginning of playback (default 12s), the gain smoothly converges toward an optimal target to normalize the overall track volume.
+* **Baseline Gain Lock**: Once settled, the gain locks onto the track's baseline level and resists changing during quiet interludes, pauses, or spoken segments—preventing unnatural volume swelling.
+* **Downward Peak Limiter**: A fast-acting peak limiter runs continuously to prevent digital clipping, crackling, or harsh transients during sudden crescendos or bass drops.
 
 The engine operates directly within Chromium's audio graph.
 
@@ -855,12 +924,14 @@ Riemann includes a highly customized tab and workspace system.
 Capabilities:
 
 * split-view workspaces
-* draggable tabs
-* detachable windows
-* file drag-and-drop
+* draggable tabs with cross-pane transfer and window detachment
+* semi-transparent tinted tab hover tooltips (showing full file name and absolute file path for PDFs; page title and top-level domain/subdomain for web pages)
+* drag-and-drop drop zone overlay (prominent "Drop PDF here" prompt when all tabs are closed)
 * dual-pane reading
 * session restoration
 * tab-aware keyboard cycling
+* fullscreen auto-reveal controls (moving cursor to top 4px reveals navbar and menu bar; auto-hides after 1.5s delay)
+* live system clock widget in fullscreen navbar
 
 Tabs can be:
 
@@ -868,6 +939,25 @@ Tabs can be:
 * moved between panes
 * detached into standalone windows
 * restored across sessions
+
+---
+
+## Linux Desktop & Dock Integration
+
+Riemann provides first-class Linux desktop and window manager integration:
+
+* **Dock / Taskbar Pinning**: Installs `Riemann.desktop` into `~/.local/share/applications/` with `StartupWMClass=Riemann` and desktop icon bindings, ensuring window managers (GNOME, KDE, Cinnamon, Ubuntu Dock) group and pin running instances cleanly without duplicate generic icons.
+* **Command-Line Multi-Window Flag (`--new-window`)**: By default, Riemann uses single-instance IPC (`QLocalServer`) to route files into the existing window. Passing `--new-window` forces the launch of a new, fully independent application window with its own process state.
+
+---
+
+## UI Display Scaling
+
+Users on high-DPI displays or custom desktop environments can adjust interface scale directly inside the application:
+
+* **Continuous Display Scale Slider**: Settings dialog provides a wide, continuous slider spanning 50% to 250% scale in 1% single steps.
+* **Direct Numeric Input (`QSpinBox`)**: An interactive text input box directly beside the slider allows users to type an exact percentage (e.g. `125%`). Slider and text box are bidirectionally synchronized.
+* **Persistent Factor**: Configures `QT_SCALE_FACTOR` and persists the preference under `app/ui_scale` across application restarts.
 
 ---
 
@@ -880,7 +970,7 @@ Supported viewing modes include:
 * reflow text mode
 * continuous scroll mode
 * facing-page mode
-* fullscreen mode
+* fullscreen mode (with top hover reveal and system clock)
 * reading mode
 
 The reflow and markdown modes include KaTeX rendering support for mathematical expressions.
@@ -915,23 +1005,15 @@ The virtualization layer also supports:
 
 ---
 
-## Session Persistence
+## Session Persistence & Crash Recovery
 
-Riemann persists:
+Riemann provides resilient state management and crash recovery:
 
-* active tabs
-* split-view state
-* browser zoom settings
-* history
-* downloads
-* bookmarks
-* custom homepage shortcuts
-* dialog directories
-* annotation state
-
-The application also implements a single-instance IPC system using QLocalServer.
-
-Secondary launches forward files into the active instance instead of spawning duplicate application windows.
+* **Immediate History Saving**: Open PDFs, web tabs, and external file drops are committed to history immediately upon opening rather than deferring to application shutdown.
+* **Crash Recovery & Unclean Exit Detection**: Tracks exit state via persistent clean-shutdown flags. If an abnormal termination occurs (crash, system reboot, power cut), Riemann detects it on subsequent launch and prompts the user with a **"Restore last opened tabs"** recovery dialog.
+* **Default Theme**: Defaults to Light Mode on fresh installations.
+* **Comprehensive Persistence**: Persists active tabs, split-view orientations, per-domain browser zoom, history, bookmarks, downloads, homepage shortcuts, and annotation databases.
+* **Single-Instance IPC**: Single-instance routing via `QLocalServer` forwards external documents to the active window unless `--new-window` is passed.
 
 ---
 
@@ -939,20 +1021,27 @@ Secondary launches forward files into the active instance instead of spawning du
 
 Examples include:
 
-| Shortcut       | Action                   |
-| -------------- | ------------------------ |
-| Ctrl+F         | Toggle search            |
-| Ctrl+I         | Toggle AI search         |
-| Ctrl+P         | Print document           |
-| Ctrl+A         | Select all text          |
-| Ctrl+Shift+A   | Toggle annotations       |
-| Ctrl+Z         | Undo annotation          |
-| Ctrl+Shift+Z   | Redo annotation          |
-| Ctrl+R         | Rotate clockwise         |
-| Ctrl+Shift+R   | Rotate counter-clockwise |
-| Ctrl+Shift+S   | Export secure PDF        |
-| Ctrl+Tab       | Cycle tabs               |
-| Ctrl+Shift+Tab | Reverse tab cycle        |
+| Shortcut       | Action                                                          |
+| -------------- | --------------------------------------------------------------- |
+| Ctrl+F         | Toggle search                                                   |
+| Ctrl+I         | Toggle AI search                                                |
+| Ctrl+P         | Print document                                                  |
+| Ctrl+A         | Select all text                                                 |
+| Ctrl+Shift+A   | Toggle annotations                                              |
+| Ctrl+Z         | Undo annotation                                                 |
+| Ctrl+Shift+Z   | Redo annotation                                                 |
+| Ctrl+R         | Rotate clockwise                                                |
+| Ctrl+Shift+R   | Rotate counter-clockwise                                        |
+| Ctrl+Shift+S   | Export secure PDF                                               |
+| F5             | Refresh active PDF (checks disk modifications & prompts reload) |
+| Page Down      | Scroll down by one page height                                  |
+| Page Up        | Scroll up by one page height                                    |
+| Ctrl + Wheel   | Smooth document zoom                                            |
+| Middle-Click   | Toggle smooth autoscroll navigation (SizeAll/Ver/Hor cursors)   |
+| Ctrl+Tab       | Cycle tabs                                                      |
+| Ctrl+Shift+Tab | Reverse tab cycle                                               |
+| F11            | Toggle reader fullscreen mode                                   |
+| Escape         | Exit fullscreen / cancel autoscroll                             |
 
 Additional browser-specific and media-specific shortcuts are also implemented.
 
