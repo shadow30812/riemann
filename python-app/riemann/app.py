@@ -9,6 +9,24 @@ application entry point. It orchestrates the UI layout, tab management
 import os
 import sys
 
+# Self-sanitization: Protect against toxic library paths in LD_LIBRARY_PATH (e.g. /opt/plecs)
+_ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+if "plecs" in _ld_path and "_RIEMANN_SANITIZED" not in os.environ:
+    _clean_parts = [p for p in _ld_path.split(":") if "plecs" not in p and p]
+    if _clean_parts:
+        os.environ["LD_LIBRARY_PATH"] = ":".join(_clean_parts)
+    else:
+        os.environ.pop("LD_LIBRARY_PATH", None)
+    os.environ["_RIEMANN_SANITIZED"] = "1"
+    try:
+        _exe = os.environ.get("NUITKA_ONEFILE_BINARY") or sys.executable
+        if not os.path.exists(_exe) and os.path.exists("/proc/self/exe"):
+            _exe = "/proc/self/exe"
+        if os.path.exists(_exe):
+            os.execv(_exe, sys.argv if sys.argv else [_exe])
+    except Exception:
+        pass
+
 from .core.dependencies import setup_and_get_venv
 
 # os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "9222")
@@ -56,6 +74,10 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
+try:
+    import PySide6.QtDBus
+except Exception:
+    pass
 from PySide6.QtWebEngineCore import (
     QWebEnginePage,
     QWebEngineProfile,

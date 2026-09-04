@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "riemann"
-version = "5.0.0"
+version = "5.1.0"
 description = "PDF reader and Web browser with integrated music mode"
 requires-python = ">=3.11"
 
@@ -21,7 +21,7 @@ dependencies = [
     "pikepdf==10.5.0",
     "prompt_toolkit==3.0.52",
     "pyHanko==0.33.0",
-    "pydantic_core==2.41.5",
+    "pydantic_core>=2.41.5",
     "pypdf==6.7.5",
     "stack_data==0.6.3",
 ]

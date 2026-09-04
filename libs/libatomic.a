@@ -1,0 +1,2 @@
+/* GNU ld script to resolve -l:libatomic.a */
+INPUT ( -latomic )
