@@ -11,6 +11,15 @@ QWidget {
     color: #111111;            /* Near black text */
 }
 
+QToolTip {
+    background-color: rgba(245, 245, 250, 0.96);
+    color: #222222;
+    border: 1px solid rgba(180, 180, 195, 0.85);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
 /* =======================================================
    2. INPUTS & DROPDOWNS (Address bar, Search, Zoom)
    ======================================================= */

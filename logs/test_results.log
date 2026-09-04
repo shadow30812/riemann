@@ -1,105 +1,105 @@
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
-     Running unittests src/lib.rs (/media/shadow30812/Windows-SSD/Well/Projects/riemann/target/debug/deps/riemann_ocr_worker-959a84f969afc208)
+   Compiling syn v2.0.114
+   Compiling either v1.15.0
+   Compiling bindgen v0.64.0
+   Compiling rayon v1.11.0
+   Compiling jpeg-decoder v0.3.2
+   Compiling zerocopy-derive v0.8.37
+   Compiling thiserror-impl v1.0.69
+   Compiling tiff v0.9.1
+   Compiling thiserror v1.0.69
+   Compiling zerocopy v0.8.37
+   Compiling leptonica-sys v0.4.9
+   Compiling tesseract-sys v0.5.15
+error: failed to run custom build command for `leptonica-sys v0.4.9`
 
-running 0 tests
+Caused by:
+  process didn't exit successfully: `/home/shadow30812/LWL/Projects/riemann/target/debug/build/leptonica-sys-7ecb366af3dbeb54/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-env-changed=LEPT_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=LEPT_STATIC
+  cargo:rerun-if-env-changed=LEPT_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=SYSROOT
+  cargo:rerun-if-env-changed=LEPT_STATIC
+  cargo:rerun-if-env-changed=LEPT_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rustc-link-search=native=/usr/lib
+  cargo:rustc-link-lib=leptonica
+  cargo:rerun-if-env-changed=PKG_CONFIG_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=LEPT_STATIC
+  cargo:rerun-if-env-changed=LEPT_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_STATIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_ALL_DYNAMIC
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+  cargo:rustc-link-search=native="/usr/lib"
+  cargo:rustc-link-lib=leptonica
 
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+  --- stderr
+  error: '/opt/rh/gcc-toolset-15/root//usr/lib/gcc/x86_64-redhat-linux/15' does not contain a GCC installation
+  /usr/include/stdio.h:34:10: fatal error: 'stddef.h' file not found
 
-     Running tests/test_ocr.rs (/media/shadow30812/Windows-SSD/Well/Projects/riemann/target/debug/deps/test_ocr-faac18860419e398)
+  thread 'main' (275) panicked at /home/shadow30812/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptonica-sys-0.4.9/build.rs:92:10:
+  Unable to generate bindings: ClangDiagnostic("error: '/opt/rh/gcc-toolset-15/root//usr/lib/gcc/x86_64-redhat-linux/15' does not contain a GCC installation\n/usr/include/stdio.h:34:10: fatal error: 'stddef.h' file not found\n")
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...
+   Compiling pyo3-build-config v0.21.2
+   Compiling pyo3-macros-backend v0.21.2
+   Compiling pyo3-ffi v0.21.2
+   Compiling pyo3 v0.21.2
+   Compiling pyo3-macros v0.21.2
+   Compiling riemann_core v0.1.0 (/home/shadow30812/LWL/Projects/riemann/rust-core)
+error: linking with `cc` failed: exit status: 1
+  |
+  = note:  "cc" "-m64" "/home/shadow30812/LWL/Projects/riemann/target/debug/deps/rustct7Vc8Z/symbols.o" "<13 object files omitted>" "-Wl,--as-needed" "-Wl,-Bstatic" "<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/lib/{libtest-*,libgetopts-*,librustc_std_workspace_std-*}.rlib" "/home/shadow30812/LWL/Projects/riemann/target/debug/deps/{libpyo3-a927a0600e7bdbcd,libmemoffset-31ddb251dce8e9b5,libportable_atomic-e0a9697e0fd8d6a4,libparking_lot-9bb091c801df1698,libparking_lot_core-37e9954507ef3009,libcfg_if-72a7719c5a503f05,libsmallvec-1f93465941e5cd86,liblock_api-8c2d92eaab852e67,libscopeguard-9c2379402a25548e,libpyo3_ffi-a18fd58cd1851184,liblibc-3b2ff6a897deda52,libunindent-c6a12d277ac1253a}.rlib" "<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/lib/{libstd-*,libpanic_unwind-*,libobject-*,libmemchr-*,libaddr2line-*,libgimli-*,libcfg_if-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libminiz_oxide-*,libadler2-*,libunwind-*,liblibc-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "-Wl,-Bdynamic" "-lpython3.12" "-lgcc_s" "-lutil" "-lrt" "-lpthread" "-lm" "-ldl" "-lc" "-L" "/home/shadow30812/LWL/Projects/riemann/target/debug/deps/rustct7Vc8Z/raw-dylibs" "-B<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld" "-fuse-ld=lld" "-Wl,--eh-frame-hdr" "-Wl,-z,noexecstack" "-L" "/usr/lib64" "-L" "/usr/lib" "-L" "\"/usr/lib\"" "-L" "\"/usr/lib64\"" "-L" "<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/lib" "-o" "/home/shadow30812/LWL/Projects/riemann/target/debug/deps/test_core-fd60aaeebb811d04" "-Wl,--gc-sections" "-pie" "-Wl,-z,relro,-z,now" "-nodefaultlibs"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: rust-lld: error: unable to find library -lpython3.12
+          collect2: error: ld returned 1 exit status
+          
 
-running 4 tests
-test test_recognize_text_empty ... ok
-test test_engine_new ... ok
-test test_engine_default ... ok
-test test_recognize_text_invalid_dimensions ... ok
+error: could not compile `riemann_core` (test "test_core") due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: linking with `cc` failed: exit status: 1
+  |
+  = note:  "cc" "-m64" "/home/shadow30812/LWL/Projects/riemann/target/debug/deps/rustcDgBsJ7/symbols.o" "<196 object files omitted>" "-Wl,--as-needed" "-Wl,-Bstatic" "<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/lib/{libtest-*,libgetopts-*,librustc_std_workspace_std-*}.rlib" "/home/shadow30812/LWL/Projects/riemann/target/debug/deps/{libriemann_ocr_worker-617b45219e065d4f,libimage-ac0c7c52095b1691,libqoi-b51304c368809429,libpng-53dc432a434594fa,libbitflags-c9d1f73edd93c8ea,libfdeflate-86ca2ba290440075,libexr-428957391b76b7dc,libzune_inflate-e68df4479ac5bd4b,libbit_field-4669b3071d3fa452,liblebe-2f59cde2ead3cc52,libhalf-f0d3b1eee50ad1e5,libzerocopy-cc0872065e29b10a,libgif-d9147059c044357a,libcolor_quant-d78950344c4e5108,libtiff-c80d0fe7a2a3acf3,libflate2-ad71710d9a3f1720,libminiz_oxide-9c943f275f5dfcc7,libsimd_adler32-211e03cb2aa87d4b,libcrc32fast-acb2aa9803982d6b,libweezl-dc4524e7310871d8,libjpeg_decoder-d48627ce17889dbd,librayon-103ba4c828711f91,librayon_core-321d2a58d681f7e7,libcrossbeam_deque-a76e4b56fbfd5add,libcrossbeam_epoch-d35239159d17f7c9,libcrossbeam_utils-6eac5cd8d42ad5f2,libanyhow-f67468405887572c,libpyo3-a927a0600e7bdbcd,libmemoffset-31ddb251dce8e9b5,libportable_atomic-e0a9697e0fd8d6a4,libparking_lot-9bb091c801df1698,libparking_lot_core-37e9954507ef3009,libsmallvec-1f93465941e5cd86,liblock_api-8c2d92eaab852e67,libscopeguard-9c2379402a25548e,libpyo3_ffi-a18fd58cd1851184,liblibc-3b2ff6a897deda52,libunindent-c6a12d277ac1253a,libpdfium_render-879398e37cb4ae60,liblog-17f15a9e282ff35c,libutf16string-f3cd98d3b0961ad2,libbyteorder-c16a13154be8bb2f,libitertools-7ff76fd6febe20b8,libeither-7903d8d472ede7b1,libvecmath-5a55b1510a26ec5f,libfloat-bd19cf6032f20aa1,libchrono-48090f3fa8bc1e36,libiana_time_zone-a0af26953165116d,libbitflags-40e2559e3664ef54,libimage-600f8fdaf53ad2df,libbytemuck-3a314be6d470c53e,libbyteorder_lite-ccf39e239709efad,libmoxcms-bea6c98e75188f42,libpxfm-cc194e927f4819e3,libzune_jpeg-d61fbf7ea62bb861,libzune_core-570eeef71f7b60b4,libnum_traits-2f97f59302c19c65,liblibloading-c8f0319f128c97ec,libcfg_if-72a7719c5a503f05,libonce_cell-2d2f6867f0bdfc02}.rlib" "<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/lib/{libstd-*,libpanic_unwind-*,libobject-*,libmemchr-*,libaddr2line-*,libgimli-*,libcfg_if-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libminiz_oxide-*,libadler2-*,libunwind-*,liblibc-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "-Wl,-Bdynamic" "-lpython3.12" "-ldl" "-lgcc_s" "-lutil" "-lrt" "-lpthread" "-lm" "-ldl" "-lc" "-L" "/home/shadow30812/LWL/Projects/riemann/target/debug/deps/rustcDgBsJ7/raw-dylibs" "-B<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld" "-fuse-ld=lld" "-Wl,--eh-frame-hdr" "-Wl,-z,noexecstack" "-L" "/usr/lib64" "-L" "/usr/lib" "-L" "\"/usr/lib\"" "-L" "\"/usr/lib64\"" "-L" "<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/lib" "-o" "/home/shadow30812/LWL/Projects/riemann/target/debug/deps/riemann_core-ee0992db392f55af" "-Wl,--gc-sections" "-pie" "-Wl,-z,relro,-z,now" "-nodefaultlibs"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: rust-lld: error: unable to find library -lpython3.12
+          collect2: error: ld returned 1 exit status
+          
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-
-   Doc-tests riemann_ocr_worker
-
-running 0 tests
-
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
-     Running unittests src/lib.rs (/media/shadow30812/Windows-SSD/Well/Projects/riemann/target/debug/deps/riemann_core-0f3c4bf603d3694a)
-
-running 0 tests
-
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-
-     Running tests/test_core.rs (/media/shadow30812/Windows-SSD/Well/Projects/riemann/target/debug/deps/test_core-3480f3afe2ff655d)
-
-running 1 test
-test test_python_gil_acquisition ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
-
-
-> test
-> jest
-
-PASS python-app/riemann/assets/__tests__/homepage.test.js
-PASS python-app/riemann/assets/__tests__/audio_engine.test.js
-
-Test Suites: 2 passed, 2 total
-Tests:       11 passed, 11 total
-Snapshots:   0 total
-Time:        1.305 s
-Ran all test suites.
-============================= test session starts ==============================
-platform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0
-rootdir: /media/shadow30812/Windows-SSD/Well/Projects/riemann
-configfile: pyproject.toml
-plugins: forked-1.6.0, anyio-4.12.1
-collected 9 items
-
-tests/test_main.py .........                                             [100%]
-
-============================== 9 passed in 5.71s ===============================
-[431195:431195:0401/101608.479639:ERROR:CONSOLE(1)] "Request Autofill.enable failed. {"code":-32601,"message":"'Autofill.enable' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
-[431195:431195:0401/101608.479728:ERROR:CONSOLE(1)] "Request Autofill.setAddresses failed. {"code":-32601,"message":"'Autofill.setAddresses' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
-Failed to make OpenGL context current for clean-up, OpenGL resources will not be destroyed.
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-Release of profile requested but WebEnginePage still not deleted. Expect troubles !
-============================= test session starts ==============================
-platform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0
-PySide6 6.10.1 -- Qt runtime 6.10.1 -- Qt compiled 6.10.1
-rootdir: /media/shadow30812/Windows-SSD/Well/Projects/riemann
-configfile: pyproject.toml
-plugins: qt-4.5.0, forked-1.6.0, anyio-4.12.1, mock-3.15.1
-collected 131 items
-
-tests/test_ai.py ......                                                  [  4%]
-tests/test_annotations.py .......                                        [  9%]
-tests/test_app.py ............                                           [ 19%]
-tests/test_browser.py ............................                       [ 40%]
-tests/test_browser_handlers.py ....                                      [ 43%]
-tests/test_components.py ..........                                      [ 51%]
-tests/test_constants.py ..                                               [ 52%]
-tests/test_managers.py .......                                           [ 58%]
-tests/test_metadata.py ....                                              [ 61%]
-tests/test_rendering.py ......                                           [ 65%]
-tests/test_search.py .....                                               [ 69%]
-tests/test_signatures.py .......                                         [ 74%]
-tests/test_tab.py ...............                                        [ 86%]
-tests/test_utils.py ....                                                 [ 89%]
-tests/test_widgets.py ....                                               [ 92%]
-tests/test_workers.py ..........                                         [100%]
-
-============================= 131 passed in 4.07s ==============================
+error: could not compile `riemann_core` (lib test) due to 1 previous error
+bash: line 1: npm: command not found
+bash: line 1: conda: command not found
+bash: line 1: conda: command not found

@@ -233,19 +233,22 @@ class RenderingMixin:
         if not self.current_doc or not self.page_widgets:
             return
 
+        scale = self.calculate_scale()
         target_indices = set()
 
         if self._virtual_enabled:
-            start = max(0, self.current_page_index - 7)
-            end = min(self.current_doc.page_count, self.current_page_index + 8)
+            margin = 1 if scale >= 2.0 else (2 if scale >= 1.2 else 4)
+            start = max(0, self.current_page_index - margin)
+            end = min(self.current_doc.page_count, self.current_page_index + margin + 1)
             for i in range(start, end):
                 target_indices.add(i)
         else:
             viewport_y = self.scroll.verticalScrollBar().value()
             viewport_h = self.scroll.viewport().height()
 
-            view_start = viewport_y - (viewport_h * 4)
-            view_end = viewport_y + (viewport_h * 5)
+            buf_mult = 0.5 if scale >= 2.0 else (1.0 if scale >= 1.2 else 2.5)
+            view_start = viewport_y - (viewport_h * buf_mult)
+            view_end = viewport_y + (viewport_h * (buf_mult + 1.0))
 
             for idx, widget in self.page_widgets.items():
                 try:
@@ -261,8 +264,9 @@ class RenderingMixin:
                     continue
 
             if not target_indices:
-                start = max(0, self.current_page_index - 7)
-                end = min(self.current_doc.page_count, self.current_page_index + 8)
+                margin = 1 if scale >= 2.0 else 2
+                start = max(0, self.current_page_index - margin)
+                end = min(self.current_doc.page_count, self.current_page_index + margin + 1)
                 for i in range(start, end):
                     target_indices.add(i)
 
@@ -273,8 +277,11 @@ class RenderingMixin:
                     self.page_widgets[idx].setText(f"Page {idx + 1}")
                 self.rendered_pages.remove(idx)
 
-        scale = self.calculate_scale()
-        for idx in target_indices:
+        # Prioritize rendering the visible page first for instant visual feedback
+        sorted_indices = sorted(
+            target_indices, key=lambda i: abs(i - self.current_page_index)
+        )
+        for idx in sorted_indices:
             if idx not in self.rendered_pages and idx in self.page_widgets:
                 self._render_single_page(idx, scale)
                 self.rendered_pages.add(idx)
@@ -392,29 +399,44 @@ class RenderingMixin:
         """Extracts and scales link bounding boxes from the PDF to the UI widget."""
         scaled_links = []
         try:
-            if hasattr(self.current_doc, "get_links"):
+            links = []
+            if hasattr(self, "pdf_path") and self.pdf_path:
+                try:
+                    from riemann.core.links import PdfLinkExtractor
+
+                    links = PdfLinkExtractor.get_instance().get_links_for_page(
+                        self.pdf_path, idx
+                    )
+                except Exception:
+                    links = []
+
+            if not links and hasattr(self.current_doc, "get_links"):
                 links = self.current_doc.get_links(idx)
-                for url, (l, t, r, b) in links:
-                    x = int(l * scale)
-                    w_rect = int((r - l) * scale)
-                    h_rect = int((t - b) * scale)
-                    y = int(logical_h - (t * scale))
-                    if h_rect < 0:
-                        y += h_rect
-                        h_rect = abs(h_rect)
 
-                    rotation = getattr(self, "rotation", 0)
-                    if rotation == 90:
-                        x, y = int(logical_h) - y - h_rect, x
-                        w_rect, h_rect = h_rect, w_rect
-                    elif rotation == 180:
-                        x, y = int(logical_w) - x - w_rect, int(logical_h) - y - h_rect
-                    elif rotation == 270:
-                        x, y = y, int(logical_w) - x - w_rect
-                        w_rect, h_rect = h_rect, w_rect
+            for url, (l, t, r, b) in links:
+                x = int(l * scale)
+                w_rect = int((r - l) * scale)
+                h_rect = int((t - b) * scale)
+                y = int(logical_h - (t * scale))
+                if h_rect < 0:
+                    y += h_rect
+                    h_rect = abs(h_rect)
 
-                    rect = QRect(x, y, max(1, w_rect), h_rect)
-                    scaled_links.append((rect, url))
+                rotation = getattr(self, "rotation", 0)
+                if rotation == 90:
+                    x, y = int(logical_h) - y - h_rect, x
+                    w_rect, h_rect = h_rect, w_rect
+                elif rotation == 180:
+                    x, y = (
+                        int(logical_w) - x - w_rect,
+                        int(logical_h) - y - h_rect,
+                    )
+                elif rotation == 270:
+                    x, y = y, int(logical_w) - x - w_rect
+                    w_rect, h_rect = h_rect, w_rect
+
+                rect = QRect(x, y, max(1, w_rect), h_rect)
+                scaled_links.append((rect, url))
         except Exception as e:
             sys.stderr.write(f"Link extraction error page {idx}: {e}\n")
 
@@ -736,7 +758,7 @@ class RenderingMixin:
         """
         Updates the physical dimensions of the layout and active widgets immediately
         while mathematically anchoring the document to prevent bouncing/vibration
-        without waiting for the backend to re-render or rebuilding the DOM.
+        and maintaining the exact current page and scroll position.
         """
         if not hasattr(self, "scroll") or not self.scroll:
             return
@@ -745,36 +767,45 @@ class RenderingMixin:
         vbar = self.scroll.verticalScrollBar()
         hbar = self.scroll.horizontalScrollBar()
 
-        mouse_pos = viewport.mapFromGlobal(QCursor.pos())
-        if viewport.rect().contains(mouse_pos):
-            mx, my = mouse_pos.x(), mouse_pos.y()
-        else:
-            mx, my = viewport.width() / 2, viewport.height() / 2
+        target_page = getattr(self, "current_page_index", 0)
+        old_scale = getattr(self, "_last_applied_scale", None) or self.calculate_scale()
 
-        old_total_h = vbar.maximum() + viewport.height()
-        old_total_w = hbar.maximum() + viewport.width()
+        base_h = (
+            self._cached_base_size[1]
+            if getattr(self, "_cached_base_size", None)
+            else 842
+        )
+        spacing = (
+            self.scroll_layout.spacing()
+            if hasattr(self, "scroll_layout")
+            else 10
+        )
+        old_ph = int(base_h * old_scale) + spacing
 
-        ratio_y = (vbar.value() + my) / old_total_h if old_total_h > 0 else 0
-        ratio_x = (hbar.value() + mx) / old_total_w if old_total_w > 0 else 0
+        is_facing = getattr(self, "facing_mode", False)
+        old_page_top = (
+            (target_page // 2 * old_ph) if is_facing else (target_page * old_ph)
+        )
+        offset_in_page = vbar.value() - old_page_top
+        page_frac = offset_in_page / old_ph if old_ph > 0 else 0.0
+        page_frac = max(0.0, min(1.0, page_frac))
 
         self._update_all_widget_sizes()
 
-        if self._virtual_enabled and self._cached_base_size:
-            _, base_h = self._cached_base_size
-            scale = self.calculate_scale()
-            page_height = int(base_h * scale) + self.scroll_layout.spacing()
-            start, end = self._virtual_range
+        new_scale = self.calculate_scale()
+        self._last_applied_scale = new_scale
+        new_ph = int(base_h * new_scale) + spacing
 
+        if self._virtual_enabled and self._cached_base_size:
+            start, end = self._virtual_range
             doc_count = self.current_doc.page_count if self.current_doc else end
             top_spacer_height = (
-                (start // 2) * page_height
-                if getattr(self, "facing_mode", False)
-                else start * page_height
+                (start // 2) * new_ph if is_facing else start * new_ph
             )
             bottom_spacer_height = (
-                max(0, (((doc_count + 1) // 2) - ((end + 1) // 2)) * page_height)
-                if getattr(self, "facing_mode", False)
-                else max(0, (doc_count - end) * page_height)
+                max(0, (((doc_count + 1) // 2) - ((end + 1) // 2)) * new_ph)
+                if is_facing
+                else max(0, (doc_count - end) * new_ph)
             )
 
             if getattr(self, "_top_spacer", None):
@@ -782,22 +813,12 @@ class RenderingMixin:
             if getattr(self, "_bottom_spacer", None) and self.current_doc:
                 self._bottom_spacer.setFixedHeight(max(0, bottom_spacer_height))
 
-        QApplication.processEvents()
-
-        new_total_h = vbar.maximum() + viewport.height()
-        new_total_w = hbar.maximum() + viewport.width()
-
-        target_y = (ratio_y * new_total_h) - my
-        target_x = (ratio_x * new_total_w) - mx
+        new_page_top = (
+            (target_page // 2 * new_ph) if is_facing else (target_page * new_ph)
+        )
+        target_y = new_page_top + int(page_frac * new_ph)
 
         was_v_blocked = vbar.signalsBlocked()
-        was_h_blocked = hbar.signalsBlocked()
-
         vbar.blockSignals(True)
-        hbar.blockSignals(True)
-
         vbar.setValue(int(target_y))
-        hbar.setValue(int(target_x))
-
         vbar.blockSignals(was_v_blocked)
-        hbar.blockSignals(was_h_blocked)

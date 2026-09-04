@@ -3,6 +3,7 @@
 import importlib
 import json
 import os
+import shutil
 import site
 import subprocess
 import sys
@@ -37,25 +38,45 @@ def setup_and_get_venv() -> str:
         else os.path.join(venv_dir, "bin", "python")
     )
 
+    # If the venv exists, ensure its Python major/minor matches the current interpreter
+    if os.path.exists(python_exe):
+        try:
+            ver = subprocess.check_output(
+                [python_exe, "-c", "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')"],
+                text=True,
+            ).strip()
+            curr_ver = f"{sys.version_info[0]}.{sys.version_info[1]}"
+            if ver != curr_ver:
+                print(f"[Riemann] Python version mismatch in venv ({ver} vs current {curr_ver}). Recreating...")
+                shutil.rmtree(venv_dir, ignore_errors=True)
+        except Exception:
+            shutil.rmtree(venv_dir, ignore_errors=True)
+
     if not os.path.exists(python_exe):
         os.makedirs(data_dir, exist_ok=True)
-        sys_py = "python" if win else "python3"
+        sys_py = sys.executable or ("python" if win else "python3")
         print("[Riemann] Initializing local virtual environment...")
         subprocess.check_call(
             [sys_py, "-m", "venv", "--system-site-packages", venv_dir]
         )
 
     try:
+        # Interrogate site-packages only; NEVER inject standard library directories into sys.path
         out = subprocess.check_output(
-            [python_exe, "-c", "import sys, json; print(json.dumps(sys.path))"],
+            [
+                python_exe,
+                "-c",
+                "import site, sysconfig, json; "
+                "paths = list(dict.fromkeys(site.getsitepackages() + [sysconfig.get_path('purelib'), sysconfig.get_path('platlib')])); "
+                "print(json.dumps(paths))",
+            ],
             text=True,
         )
-        venv_paths = json.loads(out.strip())
+        site_paths = json.loads(out.strip())
 
-        for vp in reversed(venv_paths):
-            if os.path.exists(vp) and vp not in sys.path:
-                sys.path.insert(0, vp)
-                site.addsitedir(vp)
+        for sp in site_paths:
+            if os.path.exists(sp) and sp not in sys.path:
+                site.addsitedir(sp)
 
         importlib.invalidate_caches()
 

@@ -117,6 +117,7 @@ class DraggableTabBar(QTabBar):
     _dragged_title = ""
     _dragged_icon = QIcon()
     _dragged_data = None
+    _dragged_tooltip = ""
 
     def __init__(self, parent=None):
         """
@@ -173,11 +174,13 @@ class DraggableTabBar(QTabBar):
                 tab_text = self.tabText(tab_index)
                 tab_icon = self.tabIcon(tab_index)
                 tab_data = self.tabData(tab_index)
+                tab_tooltip = self.tabToolTip(tab_index)
 
                 DraggableTabBar._dragged_widget = widget
                 DraggableTabBar._dragged_title = tab_text
                 DraggableTabBar._dragged_icon = tab_icon
                 DraggableTabBar._dragged_data = tab_data
+                DraggableTabBar._dragged_tooltip = tab_tooltip
 
                 mime = QMimeData()
                 mime.setData("application/x-riemann-tab", b"tab")
@@ -214,17 +217,21 @@ class DraggableTabBar(QTabBar):
                                 widget, tab_icon, tab_text
                             )
                             target_tab_widget.tabBar().setTabData(new_idx, tab_data)
+                            target_tab_widget.setTabToolTip(new_idx, tab_tooltip)
                             target_tab_widget.setCurrentIndex(new_idx)
                         else:
                             tab_widget.insertTab(tab_index, widget, tab_icon, tab_text)
+                            tab_widget.setTabToolTip(tab_index, tab_tooltip)
                             tab_widget.setCurrentIndex(tab_index)
 
                     else:
                         tab_widget.insertTab(tab_index, widget, tab_icon, tab_text)
                         self.setTabData(tab_index, tab_data)
+                        tab_widget.setTabToolTip(tab_index, tab_tooltip)
                         tab_widget.setCurrentIndex(tab_index)
 
                 DraggableTabBar._dragged_widget = None
+                DraggableTabBar._dragged_tooltip = ""
 
     def dragEnterEvent(self, event) -> None:
         """Accept the drag if it is an internal Riemann tab."""
@@ -246,6 +253,8 @@ class DraggableTabBar(QTabBar):
                         DraggableTabBar._dragged_title,
                     )
                     self.setTabData(idx, DraggableTabBar._dragged_data)
+                    if DraggableTabBar._dragged_tooltip:
+                        tab_widget.setTabToolTip(idx, DraggableTabBar._dragged_tooltip)
                     tab_widget.setCurrentIndex(idx)
                     event.acceptProposedAction()
         else:

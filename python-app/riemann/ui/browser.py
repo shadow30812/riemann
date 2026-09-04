@@ -666,7 +666,7 @@ class BrowserTab(QWidget):
         start_url: str = "https://www.google.com",
         parent: Optional[QWidget] = None,
         profile: Optional[QWebEngineProfile] = None,
-        dark_mode: bool = True,
+        dark_mode: bool = False,
         incognito: bool = False,
     ) -> None:
         """

@@ -55,6 +55,12 @@ fn get_pdfium() -> &'static Pdfium {
                 .or_else(|_| {
                     Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
                 })
+                .or_else(|_| {
+                    Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("libs/"))
+                })
+                .or_else(|_| {
+                    Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("../libs/"))
+                })
                 .expect("CRITICAL: Could not load Pdfium library.");
             PdfiumWrapper(Pdfium::new(bindings))
         })

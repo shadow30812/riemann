@@ -50,6 +50,14 @@
             this.currentPreset = 'flat';
             this.params = { ...this.presets['flat'] };
 
+            this.settlingWindow = 12; // Configurable settling window in seconds
+            this.songStartTime = 0;
+            this.lastMediaSrc = '';
+            this.lastCurrentTime = 0;
+            this.songGainLocked = false;
+            this.songBaselineGain = 1.0;
+            this.emaMidLoudness = 0;
+
             this.initUI();
             this.startObserver();
             this.setupFallbackUnlocker();
@@ -229,28 +237,67 @@
             const targetHigh = midAvg * 0.9;
             const targetLoudness = 140;
 
-            let newGain = this.params.gain;
             let isFringe = false;
 
             if (this.mediaElement && isFinite(this.mediaElement.duration)) {
-                const time = this.mediaElement.currentTime;
+                const currentSrc = this.mediaElement.currentSrc || this.mediaElement.src || '';
+                const time = this.mediaElement.currentTime || 0;
                 const duration = this.mediaElement.duration;
-                if (time < 5 || (duration - time) < 5) {
+
+                // Detect new song or song switch
+                if (
+                    currentSrc !== this.lastMediaSrc ||
+                    time < 1.0 ||
+                    (this.lastCurrentTime && (time < this.lastCurrentTime - 2.0))
+                ) {
+                    this.lastMediaSrc = currentSrc;
+                    this.songStartTime = Date.now();
+                    this.songGainLocked = false;
+                    this.songBaselineGain = this.params.gain;
+                    this.emaMidLoudness = 0;
+                }
+                this.lastCurrentTime = time;
+
+                if (time < 3 || (duration - time) < 3) {
                     isFringe = true;
                 }
             }
 
+            const elapsedSec = (Date.now() - (this.songStartTime || Date.now())) / 1000;
+            const isSettling = elapsedSec < (this.settlingWindow || 12);
+
+            let newGain = this.params.gain;
+
             if (midAvg > 10 && !isFringe) {
-                const gainCorrection = (targetLoudness - midAvg) * 0.001;
-                newGain = Math.max(0.8, Math.min(3.0, this.params.gain + gainCorrection));
+                if (this.emaMidLoudness === 0) {
+                    this.emaMidLoudness = midAvg;
+                } else {
+                    this.emaMidLoudness = this.emaMidLoudness * 0.98 + midAvg * 0.02;
+                }
+
+                if (isSettling) {
+                    // Initial settling window for a new song: smoothly converge towards target loudness
+                    const gainCorrection = (targetLoudness - this.emaMidLoudness) * 0.0003;
+                    newGain = Math.max(0.8, Math.min(2.2, this.params.gain + gainCorrection));
+                    this.songBaselineGain = newGain;
+                } else {
+                    // Stable within a single song: resist gain changes and lock to baseline
+                    // Apply gentle peak limiting only if midAvg is excessively loud to avoid sound cracking
+                    if (midAvg > 165) {
+                        newGain = Math.max(0.8, this.params.gain - 0.008);
+                    } else {
+                        // Slowly return to songBaselineGain, never pumping gain up during quiet sections
+                        newGain += (this.songBaselineGain - newGain) * 0.002;
+                    }
+                }
             } else if (isFringe) {
                 newGain += (1.0 - newGain) * 0.02;
             }
 
-            const bassCorrection = (targetBass - bassAvg) * 0.05;
+            const bassCorrection = (targetBass - bassAvg) * 0.02;
             let newBass = Math.max(-5, Math.min(8, this.params.bass + bassCorrection));
 
-            const highCorrection = (targetHigh - highAvg) * 0.05;
+            const highCorrection = (targetHigh - highAvg) * 0.02;
             let newTreble = Math.max(-2, Math.min(6, this.params.treble + highCorrection));
 
             this.setParam('preAmp', 'gain', newGain);
@@ -352,6 +399,7 @@
             set('bass', this.params.bass);
             set('treble', this.params.treble);
             set('air', this.params.air);
+            set('settle', this.settlingWindow || 12);
         }
 
         /**
@@ -510,6 +558,7 @@
             createSlider('BASS', 'bass', -20, 20, p.bass, v => this.setParam('lowShelf', 'gain', v));
             createSlider('TREBLE', 'treble', -20, 20, p.treble, v => this.setParam('highShelf', 'gain', v));
             createSlider('AIR', 'air', 0, 1, p.air, v => this.setParam('reverbGain', 'gain', v));
+            createSlider('SETTLE', 'settle', 3, 30, this.settlingWindow || 12, v => { this.settlingWindow = v; });
 
             const canvas = document.createElement('canvas');
             canvas.width = 250; canvas.height = 60;

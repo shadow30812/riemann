@@ -48,7 +48,13 @@ Icon=$ICON_PATH
 Terminal=false
 Categories=Office;Viewer;Utility;
 Keywords=pdf;reader;document;
-StartupWMClass=$APP_NAME"
+StartupWMClass=$APP_NAME
+MimeType=application/pdf;
+Actions=NewWindow;
+
+[Desktop Action NewWindow]
+Name=New Window
+Exec=$EXEC_PATH --new-window"
 
 # 4. Write the file to the applications directory
 OUTPUT_FILE="$INSTALL_DIR/$DESKTOP_FILE_NAME"

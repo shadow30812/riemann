@@ -29,3 +29,4 @@ commands.txt
 !test_results.log
 target.*
 models/
+logs/

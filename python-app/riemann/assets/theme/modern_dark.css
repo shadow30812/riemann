@@ -11,6 +11,15 @@ QWidget {
     color: #CCCCCC;            /* Soft white text */
 }
 
+QToolTip {
+    background-color: rgba(30, 30, 36, 0.95);
+    color: #F0F0F0;
+    border: 1px solid rgba(80, 80, 100, 0.6);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
 /* =======================================================
    2. INPUTS & DROPDOWNS (Address bar, Search, Zoom)
    ======================================================= */

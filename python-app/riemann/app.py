@@ -26,6 +26,7 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = bundle_dir
 
 import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -45,6 +46,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QCloseEvent,
     QCursor,
+    QDesktopServices,
     QDragEnterEvent,
     QDragMoveEvent,
     QDropEvent,
@@ -78,6 +80,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QSlider,
     QSpinBox,
     QSplitter,
     QTableWidget,
@@ -218,6 +221,34 @@ class SettingsDialog(QDialog):
         )
         self.spin_autoscroll.setSuffix(" px/tick")
 
+        self.slider_scale = QSlider(Qt.Orientation.Horizontal)
+        self.slider_scale.setRange(50, 250)
+        self.slider_scale.setSingleStep(1)
+        self.slider_scale.setPageStep(5)
+        self.slider_scale.setMinimumWidth(220)
+        current_scale = parent.settings.value("app/ui_scale", 100, type=int)
+        self.slider_scale.setValue(current_scale)
+
+        self.spin_scale = QSpinBox()
+        self.spin_scale.setRange(50, 250)
+        self.spin_scale.setSingleStep(1)
+        self.spin_scale.setValue(current_scale)
+        self.spin_scale.setSuffix("%")
+        self.spin_scale.setFixedWidth(75)
+        self.spin_scale.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.slider_scale.valueChanged.connect(self.spin_scale.setValue)
+        self.spin_scale.valueChanged.connect(self.slider_scale.setValue)
+
+        scale_layout = QHBoxLayout()
+        scale_layout.addWidget(self.slider_scale)
+        scale_layout.addWidget(self.spin_scale)
+        btn_reset_scale = QPushButton("Reset")
+        btn_reset_scale.setFixedWidth(60)
+        btn_reset_scale.clicked.connect(lambda: self.slider_scale.setValue(100))
+        scale_layout.addWidget(btn_reset_scale)
+
+        form_layout.addRow("Display Size (UI Scale):", scale_layout)
         form_layout.addRow("Default Dialog Directory:", dir_layout)
         form_layout.addRow("Enable Dark Mode:", self.cb_dark)
         form_layout.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
@@ -541,7 +572,12 @@ class RiemannWindow(QMainWindow):
 
         self.resize(1200, 900)
         self.settings = QSettings("Riemann", "PDFReader")
-        self.dark_mode: bool = self.settings.value("darkMode", True, type=bool)
+        self.dark_mode: bool = self.settings.value("darkMode", False, type=bool)
+        self._was_unclean_exit: bool = not self.settings.value(
+            "session/clean_exit", True, type=bool
+        )
+        self.settings.setValue("session/clean_exit", False)
+        self.settings.sync()
 
         self.download_manager_dialog = DownloadManager(self)
         self.ytdlp_manager_dialog = YtDlpDownloadManager(self)
@@ -620,6 +656,11 @@ class RiemannWindow(QMainWindow):
         self.hover_timer.setInterval(500)
         self.hover_timer.setSingleShot(True)
         self.hover_timer.timeout.connect(self._check_auto_hide)
+
+        self._session_autosave_timer = QTimer(self)
+        self._session_autosave_timer.setInterval(15000)
+        self._session_autosave_timer.timeout.connect(self._auto_save_session)
+        self._session_autosave_timer.start()
 
         self.floating_fs_btn = QPushButton(self)
         self.floating_fs_btn.setFixedSize(40, 40)
@@ -727,21 +768,27 @@ class RiemannWindow(QMainWindow):
 
     def _reveal_controls(self, show: bool):
         """
-        Controls the visibility of the application menu bar and tab bars.
+        Controls the visibility of the application menu bar, tab bars, and toolbars/navigation bars.
 
         Args:
             show (bool): True to make UI controls visible, False to hide them.
         """
+        state = getattr(self, "_fullscreen_state", 0)
         if show:
             self.menuBar().show()
             self.tabs_main.tabBar().show()
             if self.tabs_side.isVisible():
                 self.tabs_side.tabBar().show()
+            self._set_tabs_toolbar_visible(True)
         else:
             self.menuBar().hide()
             self.tabs_main.tabBar().hide()
             if self.tabs_side.isVisible():
                 self.tabs_side.tabBar().hide()
+            if state == 2:
+                self._set_tabs_toolbar_visible(False)
+            elif state == 1:
+                self._set_tabs_toolbar_visible(True)
 
     def _check_auto_hide(self):
         """
@@ -920,19 +967,23 @@ class RiemannWindow(QMainWindow):
             item (str): The URL or file path to add.
             item_type (str): The type of item ("web" or "pdf").
         """
-        if self.incognito:
+        if self.incognito or not item:
             return
 
-        if item.lower().endswith(".pdf") or item.lower().endswith(".md"):
-            item_type = "pdf"
-        elif (
-            item.lower().endswith(".html")
-            or item.lower().endswith(".css")
-            or item.lower().endswith(".js")
-        ):
-            item_type = "web"
+        clean_item = item
+        if clean_item.startswith("file://"):
+            clean_item = QUrl(clean_item).toLocalFile()
 
-        self.history_manager.add(item, item_type)
+        if clean_item.lower().endswith((".pdf", ".md")):
+            item_type = "pdf"
+            if os.path.exists(clean_item):
+                clean_item = os.path.abspath(clean_item)
+        elif clean_item.lower().endswith((".html", ".css", ".js")):
+            item_type = "web"
+            if os.path.exists(clean_item):
+                clean_item = os.path.abspath(clean_item)
+
+        self.history_manager.add(clean_item, item_type)
         self.history_model.setStringList(self.history_manager.get_model_data())
 
     def _restore_session(self) -> None:
@@ -941,6 +992,29 @@ class RiemannWindow(QMainWindow):
         Defaults to opening both PDF and browser homepages if no session exists or incognito is active
         UNLESS app is opened externally.
         """
+        if getattr(self, "_was_unclean_exit", False) and not self.external_files:
+            main_saved = self.settings.value("session/main_tabs", [])
+            side_saved = self.settings.value("session/side_tabs", [])
+            if main_saved or side_saved:
+                ret = QMessageBox.question(
+                    self,
+                    "Restore Last Opened Tabs",
+                    "Riemann detected that the application did not close properly.\n\n"
+                    "Would you like to restore your last opened tabs?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if ret == QMessageBox.StandardButton.Yes:
+                    if self.settings.value("window/geometry"):
+                        self.restoreGeometry(self.settings.value("window/geometry"))  # type: ignore
+                    self._restore_tabs_from_settings("session/main_tabs", self.tabs_main)
+                    self._restore_tabs_from_settings("session/side_tabs", self.tabs_side)
+                    if self.tabs_side.count() > 0:
+                        self.tabs_side.show()
+                        if self.settings.value("splitter/state"):
+                            self.splitter.restoreState(self.settings.value("splitter/state"))  # type: ignore
+                    return
+
         if self.incognito or not self.restore_session:
             if not self.external_files:
                 self.new_pdf_tab()
@@ -1103,6 +1177,7 @@ class RiemannWindow(QMainWindow):
         insert_idx = current_idx + 1 if current_idx != -1 else target_widget.count()
 
         target_widget.insertTab(insert_idx, reader, pdf_icon, os.path.basename(path))
+        self._update_tab_tooltip(target_widget, insert_idx)
         target_widget.setCurrentIndex(insert_idx)
 
     def _add_browser_tab(self, url: str, target_widget: QTabWidget) -> None:
@@ -1129,6 +1204,7 @@ class RiemannWindow(QMainWindow):
         insert_idx = current_idx + 1 if current_idx != -1 else target_widget.count()
 
         target_widget.insertTab(insert_idx, browser, default_icon, "Loading...")
+        self._update_tab_tooltip(target_widget, insert_idx)
         target_widget.setCurrentIndex(insert_idx)
 
         browser.web.urlChanged.connect(lambda qurl: self._update_tab_title(browser))
@@ -1144,6 +1220,12 @@ class RiemannWindow(QMainWindow):
 
         self.recent_menu = file_menu.addMenu("Open Recent")
         self.recent_menu.aboutToShow.connect(self._populate_recent_menu)
+
+        action_restore_session = file_menu.addAction("Restore Last Opened Tabs")
+        action_restore_session.triggered.connect(self.restore_previous_session)
+
+        self.external_app_menu = file_menu.addMenu("Open in External Application...")
+        self.external_app_menu.aboutToShow.connect(self._populate_external_app_menu)
 
         file_menu.addSeparator()
         self.fav_menu = file_menu.addMenu("Favorites")
@@ -1237,7 +1319,7 @@ class RiemannWindow(QMainWindow):
             "color: #888; font-size: 11px; padding-right: 15px; font-weight: bold;"
         )
 
-        self.metrics_label.setMinimumWidth(500)
+        self.metrics_label.setMinimumWidth(580)
 
         self.menu_corner_widget = QWidget(self)
         self.menu_corner_layout = QHBoxLayout(self.menu_corner_widget)
@@ -1272,6 +1354,70 @@ class RiemannWindow(QMainWindow):
                     lambda checked=False, p=pdf_path: self.new_pdf_tab(p)
                 )
 
+    def _populate_external_app_menu(self) -> None:
+        """Dynamically populates the File -> Open in External Application menu for the active tab."""
+        self.external_app_menu.clear()
+        widget = self.tabs_main.currentWidget()
+        path = getattr(widget, "current_path", None) if widget else None
+        if not path or not os.path.exists(path):
+            action = self.external_app_menu.addAction("No active PDF open")
+            action.setEnabled(False)
+            return
+
+        def _open_app(cmd):
+            try:
+                if cmd == "default":
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+                else:
+                    subprocess.Popen([cmd, path])
+            except Exception as e:
+                QMessageBox.warning(
+                    self, "Launch Error", f"Could not launch {cmd}:\n{e}"
+                )
+
+        def _choose_app():
+            app_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Choose Application to Open PDF",
+                "/usr/bin",
+                "Executables (*)",
+            )
+            if app_path:
+                try:
+                    subprocess.Popen([app_path, path])
+                except Exception as e:
+                    QMessageBox.warning(
+                        self, "Launch Error", f"Could not launch {app_path}:\n{e}"
+                    )
+
+        act_default = self.external_app_menu.addAction("System Default Viewer")
+        act_default.triggered.connect(lambda: _open_app("default"))
+        self.external_app_menu.addSeparator()
+
+        browsers = [
+            ("Google Chrome", ["google-chrome-stable", "google-chrome"]),
+            ("Mozilla Firefox", ["firefox"]),
+            ("Chromium", ["chromium-browser", "chromium"]),
+            ("Brave Browser", ["brave-browser", "brave"]),
+            ("Microsoft Edge", ["microsoft-edge-stable", "microsoft-edge"]),
+        ]
+        import shutil
+
+        for label, binaries in browsers:
+            for b in binaries:
+                if shutil.which(b):
+                    act = self.external_app_menu.addAction(label)
+                    act.triggered.connect(
+                        lambda checked=False, cmd=b: _open_app(cmd)
+                    )
+                    break
+
+        self.external_app_menu.addSeparator()
+        act_choose = self.external_app_menu.addAction(
+            "Choose Other Application..."
+        )
+        act_choose.triggered.connect(_choose_app)
+
     def show_settings(self) -> None:
         """
         Displays the configuration dialog and applies changes on acceptance.
@@ -1291,6 +1437,15 @@ class RiemannWindow(QMainWindow):
             self.settings.setValue(
                 "app/floating_fs_btn", dlg.cb_floating_fs.isChecked()
             )
+            old_scale = self.settings.value("app/ui_scale", 100, type=int)
+            new_scale = dlg.slider_scale.value()
+            if old_scale != new_scale:
+                self.settings.setValue("app/ui_scale", new_scale)
+                QMessageBox.information(
+                    self,
+                    "Restart Required",
+                    f"Display size changed to {new_scale}%.\n\nPlease restart Riemann for the new display scaling to take effect across the entire interface.",
+                )
 
     def new_pdf_tab(
         self, path: Optional[str] = None, restore_state: bool = False
@@ -1317,6 +1472,7 @@ class RiemannWindow(QMainWindow):
             )
 
             self.tabs_main.insertTab(insert_idx, reader, pdf_icon, "New Tab")
+            self._update_tab_tooltip(self.tabs_main, insert_idx)
             self.tabs_main.setCurrentWidget(reader)
 
     def new_browser_tab(
@@ -1356,6 +1512,7 @@ class RiemannWindow(QMainWindow):
         insert_idx = current_idx + 1 if current_idx != -1 else target.count()
 
         target.insertTab(insert_idx, browser, label)
+        self._update_tab_tooltip(target, insert_idx)
         new_tab = target.widget(insert_idx)
 
         browser.web.urlChanged.connect(lambda qurl: self._update_tab_title(browser))
@@ -1599,6 +1756,102 @@ class RiemannWindow(QMainWindow):
         if getattr(self, "_reader_fullscreen", False):
             self.exit_fullscreen()
 
+    def _serialize_tab_state(self, tab_widget: QTabWidget) -> List[dict]:
+        """
+        Extracts serializable session data from the provided tab widget.
+        Omits empty PDF tabs and browser homepages to ensure clean session restoration.
+
+        Args:
+            tab_widget (QTabWidget): The tab widget containing open browser or PDF tabs.
+
+        Returns:
+            List[dict]: A list of dictionaries representing the state of each tab.
+        """
+        tabs_data = []
+        media_domains = [
+            "youtube.com",
+            "dailymotion.com",
+            "reddit.com",
+            "vimeo.com",
+            "twitch.tv",
+            "spotify.com",
+            "netflix.com",
+        ]
+
+        for i in range(tab_widget.count()):
+            wid = tab_widget.widget(i)
+            if isinstance(wid, FolderHomeTab):
+                tabs_data.append({"type": "folder_home", "data": ""})
+            elif isinstance(wid, ReaderTab) and getattr(wid, "current_path", None):
+                tabs_data.append(
+                    {"type": "pdf", "data": os.path.abspath(wid.current_path)}
+                )
+
+            elif isinstance(wid, BrowserTab):
+                if not getattr(wid, "incognito", False):
+                    url_str = wid.web.url().toString()
+
+                    for domain in media_domains:
+                        if domain in url_str.lower():
+                            url_obj = wid.web.url()
+                            url_str = f"{url_obj.scheme()}://{url_obj.host()}"
+                            break
+
+                    if (
+                        "homepage.html" not in url_str
+                        and url_str != "about:blank"
+                        and url_str
+                    ):
+                        tabs_data.append({"type": "web", "data": url_str})
+        return tabs_data
+
+    def _auto_save_session(self) -> None:
+        """
+        Periodically writes the active session state to settings so an abrupt
+        PC shutdown or application termination does not lose the session.
+        """
+        if self.incognito or not getattr(self, "restore_session", True):
+            return
+
+        main_tabs = self._serialize_tab_state(self.tabs_main)
+        side_tabs = self._serialize_tab_state(self.tabs_side)
+
+        if main_tabs or side_tabs:
+            self.settings.setValue("session/main_tabs", main_tabs)
+            self.settings.setValue("session/side_tabs", side_tabs)
+            self.settings.setValue(
+                "session/main_active_idx", self.tabs_main.currentIndex()
+            )
+            self.settings.setValue(
+                "session/side_active_idx", self.tabs_side.currentIndex()
+            )
+            self.settings.sync()
+
+    def restore_previous_session(self) -> None:
+        """
+        Explicitly restores the last opened tabs from history/settings.
+        """
+        main_saved = self.settings.value("session/main_tabs", [])
+        side_saved = self.settings.value("session/side_tabs", [])
+
+        if not main_saved and not side_saved:
+            QMessageBox.information(
+                self,
+                "Restore Session",
+                "No previous session tab data was found in history.",
+            )
+            return
+
+        self._restore_tabs_from_settings("session/main_tabs", self.tabs_main)
+        self._restore_tabs_from_settings("session/side_tabs", self.tabs_side)
+
+        if self.tabs_side.count() > 0:
+            self.tabs_side.show()
+            if self.settings.value("splitter/state"):
+                self.splitter.restoreState(self.settings.value("splitter/state"))  # type: ignore
+
+        self.show_toast("Restored last session tabs 📂")
+
     def closeEvent(self, event: QCloseEvent) -> None:
         """
         Handles the window close event.
@@ -1612,55 +1865,8 @@ class RiemannWindow(QMainWindow):
             super().closeEvent(event)
             return
 
-        def get_files(tab_widget: QTabWidget) -> List[dict]:
-            """
-            Extracts serializable session data from the provided tab widget.
-            Omits empty PDF tabs and browser homepages to ensure clean session restoration.
-
-            Args:
-                tab_widget (QTabWidget): The tab widget containing open browser or PDF tabs.
-
-            Returns:
-                List[dict]: A list of dictionaries representing the state of each tab.
-            """
-            tabs_data = []
-            media_domains = [
-                "youtube.com",
-                "dailymotion.com",
-                "reddit.com",
-                "vimeo.com",
-                "twitch.tv",
-                "spotify.com",
-                "netflix.com",
-            ]
-
-            for i in range(tab_widget.count()):
-                wid = tab_widget.widget(i)
-                if isinstance(wid, FolderHomeTab):
-                    tabs_data.append({"type": "folder_home", "data": ""})
-                elif isinstance(wid, ReaderTab) and getattr(wid, "current_path", None):
-                    tabs_data.append({"type": "pdf", "data": wid.current_path})
-
-                elif isinstance(wid, BrowserTab):
-                    if not getattr(wid, "incognito", False):
-                        url_str = wid.web.url().toString()
-
-                        for domain in media_domains:
-                            if domain in url_str.lower():
-                                url_obj = wid.web.url()
-                                url_str = f"{url_obj.scheme()}://{url_obj.host()}"
-                                break
-
-                        if (
-                            "homepage.html" not in url_str
-                            and url_str != "about:blank"
-                            and url_str
-                        ):
-                            tabs_data.append({"type": "web", "data": url_str})
-            return tabs_data
-
-        self.settings.setValue("session/main_tabs", get_files(self.tabs_main))
-        self.settings.setValue("session/side_tabs", get_files(self.tabs_side))
+        self.settings.setValue("session/main_tabs", self._serialize_tab_state(self.tabs_main))
+        self.settings.setValue("session/side_tabs", self._serialize_tab_state(self.tabs_side))
 
         if getattr(self, "is_folder_session_active", False) and hasattr(
             self, "explorer_panel"
@@ -1676,6 +1882,7 @@ class RiemannWindow(QMainWindow):
 
         self.settings.setValue("session/main_active_idx", self.tabs_main.currentIndex())
         self.settings.setValue("session/side_active_idx", self.tabs_side.currentIndex())
+        self.settings.setValue("session/clean_exit", True)
 
         self.settings.sync()
         self._kill_all_media_safely()
@@ -1992,6 +2199,7 @@ class RiemannWindow(QMainWindow):
         idx = self.tabs_main.indexOf(browser)
         if idx != -1:
             self.tabs_main.setTabText(idx, display_title)
+            self._update_tab_tooltip(self.tabs_main, idx)
             self._update_window_title()
             return
 
@@ -1999,7 +2207,66 @@ class RiemannWindow(QMainWindow):
             idx = self.tabs_side.indexOf(browser)
             if idx != -1:
                 self.tabs_side.setTabText(idx, display_title)
+                self._update_tab_tooltip(self.tabs_side, idx)
                 self._update_window_title()
+
+    def _update_tab_tooltip(self, tab_widget: QTabWidget, idx: int) -> None:
+        """
+        Updates the tab tooltip with full name and full file location for PDFs,
+        or full title and top level subdomain for browser pages.
+        """
+        if idx < 0 or idx >= tab_widget.count():
+            return
+        widget = tab_widget.widget(idx)
+        if not widget:
+            return
+
+        if isinstance(widget, ReaderTab) or hasattr(widget, "current_path"):
+            path = getattr(widget, "current_path", None)
+            if path:
+                filename = os.path.basename(path)
+                abs_path = os.path.abspath(path)
+                doc_title = None
+                if hasattr(widget, "document_metadata") and isinstance(
+                    widget.document_metadata, dict
+                ):
+                    doc_title = widget.document_metadata.get("title")
+
+                if doc_title and doc_title.strip() and doc_title.strip() != filename:
+                    tooltip = f"{doc_title.strip()}\nFile: {filename}\nLocation: {abs_path}"
+                else:
+                    tooltip = f"{filename}\nLocation: {abs_path}"
+            else:
+                tooltip = "New PDF Document"
+
+        elif isinstance(widget, BrowserTab) or hasattr(widget, "web"):
+            title = widget.web.title() if hasattr(widget, "web") else ""
+            url = widget.web.url() if hasattr(widget, "web") else QUrl()
+            url_str = url.toString() if hasattr(url, "toString") else ""
+
+            if "homepage.html" in url_str:
+                subdomain = "Start Page"
+                display_name = title or "Riemann Home"
+            elif url.isLocalFile():
+                subdomain = "Local File"
+                display_name = title or os.path.basename(url.toLocalFile())
+            else:
+                host = url.host() if hasattr(url, "host") else ""
+                subdomain = host or "Web"
+                display_name = title or host or "Web Page"
+
+            if display_name and subdomain and display_name != subdomain:
+                tooltip = f"{display_name}\nDomain: {subdomain}"
+            else:
+                tooltip = display_name or subdomain
+
+        elif isinstance(widget, FolderHomeTab) or hasattr(widget, "current_path"):
+            path = getattr(widget, "current_path", "Workspace")
+            tooltip = f"Workspace\nLocation: {path}"
+        else:
+            tooltip = tab_widget.tabText(idx)
+
+        tab_widget.setTabToolTip(idx, tooltip)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         """
@@ -2063,6 +2330,12 @@ class RiemannWindow(QMainWindow):
 
         menu.addSeparator()
         action_duplicate = menu.addAction("Duplicate Tab")
+
+        if hasattr(widget, "get_open_with_menu") and getattr(widget, "current_path", None):
+            open_with_sub = widget.get_open_with_menu(menu)
+            open_with_sub.setTitle("Open in External Application ↗")
+            menu.addMenu(open_with_sub)
+
         menu.addSeparator()
         action_close = menu.addAction("Close Tab")
         action_close_other = menu.addAction("Close Other Tabs")
@@ -2315,8 +2588,9 @@ class RiemannWindow(QMainWindow):
             except Exception:
                 pass
 
+        clock_str = time.strftime("%I:%M:%S %p")
         self.metrics_label.setText(
-            f" Uptime: {uptime_str} &nbsp;|&nbsp; Mem: {mem_str} &nbsp;|&nbsp; {net_str} &nbsp;|&nbsp; {bat_str} "
+            f" <b>{clock_str}</b> &nbsp;|&nbsp; Mem: {mem_str} &nbsp;|&nbsp; Uptime: {uptime_str} &nbsp;|&nbsp; {net_str} &nbsp;|&nbsp; {bat_str} "
         )
 
     def show_ytdlp_downloads(self) -> None:
@@ -2376,7 +2650,9 @@ class RiemannWindow(QMainWindow):
 
         local_pos = self.mapFromGlobal(QCursor.pos())
 
-        if local_pos.y() < 10:
+        if local_pos.y() < 40:
+            if self.hover_timer.isActive():
+                self.hover_timer.stop()
             self._reveal_controls(True)
         elif local_pos.y() > 100:
             if not self.hover_timer.isActive():
@@ -2666,28 +2942,39 @@ def run() -> None:
     sys.argv.append("--autoplay-policy=no-user-gesture-required")
 
     install_linux_integration()
+
+    init_settings = QSettings("Riemann", "PDFReader")
+    ui_scale = init_settings.value("app/ui_scale", 100, type=int)
+    if ui_scale and ui_scale != 100:
+        os.environ["QT_SCALE_FACTOR"] = f"{ui_scale / 100.0:.2f}"
+
     app = QApplication(sys.argv)
     app.setApplicationName("Riemann")
-    app.setDesktopFileName("Riemann.desktop")
+    app.setDesktopFileName("Riemann")
 
     QPixmapCache.setCacheLimit(153600)
 
-    window = RiemannWindow()
     args = app.arguments()
-    files_to_open = [
-        arg for arg in args[1:] if not arg.startswith("-") and os.path.isfile(arg)
-    ]
+    is_new_window = "--new-window" in args
+    files_to_open = []
+    for arg in args[1:]:
+        if not arg.startswith("-"):
+            clean_arg = QUrl(arg).toLocalFile() if arg.startswith("file://") else arg
+            if os.path.isfile(clean_arg):
+                files_to_open.append(os.path.abspath(clean_arg))
 
     server_name = "RiemannSingleInstance"
-    socket = QLocalSocket()
-    socket.connectToServer(server_name)
 
-    if socket.waitForConnected(500):
-        if files_to_open:
-            msg = "|".join(files_to_open)
-            socket.write(msg.encode("utf-8"))
-            socket.waitForBytesWritten(500)
-        sys.exit(0)
+    if not is_new_window:
+        socket = QLocalSocket()
+        socket.connectToServer(server_name)
+
+        if socket.waitForConnected(500):
+            if files_to_open:
+                msg = "|".join(files_to_open)
+                socket.write(msg.encode("utf-8"))
+                socket.waitForBytesWritten(500)
+            sys.exit(0)
 
     server = QLocalServer()
     server.removeServer(server_name)
@@ -2714,8 +3001,13 @@ def run() -> None:
             msg = client.readAll().data().decode("utf-8")
             if msg:
                 for path in msg.split("|"):
-                    if os.path.isfile(path):
-                        window.new_pdf_tab(path)
+                    clean_p = (
+                        QUrl(path).toLocalFile()
+                        if path.startswith("file://")
+                        else path
+                    )
+                    if os.path.isfile(clean_p):
+                        window.new_pdf_tab(os.path.abspath(clean_p))
 
             window.activateWindow()
             window.raise_()
@@ -2774,6 +3066,10 @@ def install_linux_integration():
             "Categories=Office;Viewer;Utility;\n"
             f"StartupWMClass={app_name}\n"
             "MimeType=application/pdf;\n"
+            "Actions=NewWindow;\n\n"
+            "[Desktop Action NewWindow]\n"
+            "Name=New Window\n"
+            f'Exec="{exe_path}" --new-window\n'
         )
 
         with open(desktop_file_path, "w") as f:

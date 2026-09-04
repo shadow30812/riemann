@@ -4,9 +4,55 @@ Custom UI Widgets for the Reader Module.
 
 from typing import List, Optional
 
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
 from PySide6.QtWidgets import QLabel
+
+
+class DropZoneLabel(QLabel):
+    """
+    Interactive drop zone widget accepting dragged PDF/document files.
+    """
+
+    file_dropped = Signal(str)
+
+    def __init__(self, text: str = "Drop PDF Here", parent=None) -> None:
+        super().__init__(text, parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self.setStyleSheet(
+                "font-size: 24px; color: #ff4500; font-weight: bold; letter-spacing: 2px; "
+                "border: 3px dashed #ff4500; border-radius: 15px; background: rgba(255, 69, 0, 0.1);"
+            )
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self.setStyleSheet(
+            "font-size: 24px; color: #888; font-weight: bold; letter-spacing: 2px;"
+        )
+        event.accept()
+
+    def dropEvent(self, event) -> None:
+        for url in event.mimeData().urls():
+            if url.isLocalFile():
+                path = url.toLocalFile()
+                self.file_dropped.emit(path)
+                event.acceptProposedAction()
+                self.setStyleSheet(
+                    "font-size: 24px; color: #888; font-weight: bold; letter-spacing: 2px;"
+                )
+                return
+        event.ignore()
 
 
 class PageWidget(QLabel):

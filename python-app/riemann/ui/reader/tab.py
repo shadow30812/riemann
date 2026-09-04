@@ -8,7 +8,9 @@ the full PDF reading experience.
 import gc
 import os
 import shutil
+import subprocess
 import sys
+import time
 import urllib.parse
 from math import inf
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -84,7 +86,7 @@ from .mixins.rendering import RenderingMixin
 from .mixins.search import SearchMixin
 from .mixins.signatures import SignaturesMixin
 from .utils import generate_markdown_html
-from .widgets import PageWidget
+from .widgets import DropZoneLabel, PageWidget
 
 try:
     import riemann_core
@@ -165,13 +167,14 @@ class ReaderTab(
 
         self.settings: QSettings = QSettings("Riemann", "PDFReader")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAcceptDrops(True)
 
         self.engine: Optional[riemann_core.PdfEngine] = None
         self.current_doc: Optional[riemann_core.RiemannDocument] = None
         self.current_path: Optional[str] = None
         self.current_page_index: int = 0
 
-        self.theme_mode: int = self.settings.value("themeMode", 0, type=int)
+        self.theme_mode: int = 0  # Always default to Light Mode (0) on document open
         self.zoom_mode: ZoomMode = ZoomMode.FIT_WIDTH
         self.manual_scale: float = 1.0
         self.facing_mode: bool = False
@@ -207,6 +210,16 @@ class ReaderTab(
         self._virtual_range: Tuple[int, int] = (0, 0)
         self._cached_base_size: Optional[Tuple[int, int]] = None
 
+        self._autoscroll_active: bool = False
+        self._autoscroll_origin_global: Optional[QPoint] = None
+        self._autoscroll_speed_y: float = 0.0
+        self._autoscroll_speed_x: float = 0.0
+
+        self._click_count: int = 0
+        self._last_click_time: float = 0.0
+        self._last_click_pos: QPoint = QPoint()
+        self._just_selected_multi_click: bool = False
+
         self._init_backend()
         self.setup_ui()
         self.apply_theme()
@@ -238,6 +251,9 @@ class ReaderTab(
             ("Ctrl+R", self.rotate_document),
             ("Ctrl+Shift+R", self.rotate_document_ccw),
             ("Ctrl+Shift+S", self.export_secure_pdf),
+            ("Page Down", lambda: self.scroll_page_length(1)),
+            ("Page Up", lambda: self.scroll_page_length(-1)),
+            ("F5", self.reload_document),
         ]
         for seq, slot in shortcuts:
             QShortcut(QKeySequence(seq), self).activated.connect(slot)
@@ -290,6 +306,8 @@ class ReaderTab(
             if idx != -1:
                 display_title = (title[:25] + "..") if len(title) > 25 else title
                 tw.setTabText(idx, display_title)
+                if hasattr(self.window(), "_update_tab_tooltip"):
+                    self.window()._update_tab_tooltip(tw, idx)
                 if hasattr(self.window(), "_update_window_title"):
                     self.window()._update_window_title()
 
@@ -425,6 +443,14 @@ class ReaderTab(
         self.btn_export.setIconSize(icon_size)
         self.btn_export.setToolTip("Export Annotations to Markdown")
         self.btn_export.clicked.connect(self.export_annotations)
+
+        self.btn_open_external = QPushButton()
+        self.btn_open_external.setIcon(self._get_icon("airplay.svg"))
+        self.btn_open_external.setIconSize(icon_size)
+        self.btn_open_external.setToolTip(
+            "Open in External Application (System Viewer, Chrome, Firefox...)"
+        )
+        self.btn_open_external.clicked.connect(self.show_open_with_menu)
 
         self.btn_print = QPushButton()
         self.btn_print.setIcon(self._get_icon("printer.svg"))
@@ -621,6 +647,7 @@ class ReaderTab(
             self.btn_print,
             self.btn_rename,
             self.btn_export,
+            self.btn_open_external,
             self.btn_sign,
             self.btn_rotate,
             self.btn_rotate_ccw,
@@ -776,6 +803,8 @@ class ReaderTab(
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.scroll.setWidgetResizable(True)
         self.scroll.installEventFilter(self)
+        self.scroll.viewport().installEventFilter(self)
+        self.scroll.viewport().setMouseTracking(True)
         self.scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self.scroll_content = QWidget()
@@ -874,6 +903,10 @@ class ReaderTab(
 
         self._probe_base_page_size()
         self.current_path = path
+        try:
+            self._loaded_mtime = os.path.getmtime(path) if os.path.exists(path) else None
+        except Exception:
+            self._loaded_mtime = None
         self._update_tab_title(os.path.basename(path))
 
         if is_retry and hasattr(self, "show_toast"):
@@ -932,6 +965,82 @@ class ReaderTab(
         )
         sys.stderr.write(f"Load error: {err_str}\n")
 
+    def reload_document(self) -> None:
+        """
+        Refreshes the currently open PDF or Markdown tab.
+        Checks if the file has changed on disk or is no longer present,
+        prompting the user whether to reload or keep the existing state.
+        """
+        if not self.current_path:
+            return
+
+        if not os.path.exists(self.current_path):
+            ret = QMessageBox.question(
+                self,
+                "File No Longer Present",
+                f"The file is no longer present at:\n{self.current_path}\n\nDo you want to close this tab?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if ret == QMessageBox.StandardButton.Yes:
+                tw = self._get_tab_widget()
+                if tw:
+                    idx = tw.indexOf(self)
+                    if idx != -1:
+                        main_win = self.window()
+                        if hasattr(main_win, "close_tab") and tw == getattr(
+                            main_win, "tabs_main", None
+                        ):
+                            main_win.close_tab(idx)
+                        elif hasattr(main_win, "close_side_tab") and tw == getattr(
+                            main_win, "tabs_side", None
+                        ):
+                            main_win.close_side_tab(idx)
+                        else:
+                            tw.removeTab(idx)
+                            self.deleteLater()
+            return
+
+        current_mtime = None
+        try:
+            current_mtime = os.path.getmtime(self.current_path)
+        except Exception:
+            pass
+
+        has_changed = (
+            getattr(self, "_loaded_mtime", None) is not None
+            and current_mtime is not None
+            and current_mtime != self._loaded_mtime
+        )
+
+        if has_changed:
+            ret = QMessageBox.question(
+                self,
+                "File Changed On Disk",
+                f"The file '{os.path.basename(self.current_path)}' has been modified on disk.\n\n"
+                f"Do you want to open the new file, or keep the currently open version?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if ret != QMessageBox.StandardButton.Yes:
+                return
+
+        saved_page = self.current_page_index
+        saved_scroll = self.scroll.verticalScrollBar().value()
+        self._loaded_mtime = current_mtime
+        self.load_document(self.current_path, restore_state=False)
+
+        def _restore_pos():
+            if self.current_doc:
+                self.current_page_index = min(
+                    saved_page, self.current_doc.page_count - 1
+                )
+                self.ensure_visible(self.current_page_index)
+            self.scroll.verticalScrollBar().setValue(saved_scroll)
+
+        QTimer.singleShot(350, _restore_pos)
+        self.show_toast("Refreshed document 🔄")
+
     def _load_markdown(self, path: str) -> None:
         """
         Compiles raw markdown syntax representations generating reflow HTML internally displayed within WebEngine contexts.
@@ -940,6 +1049,10 @@ class ReaderTab(
             path (str): Reference string accessing unformatted document text structurally.
         """
         self.current_path = path
+        try:
+            self._loaded_mtime = os.path.getmtime(path) if os.path.exists(path) else None
+        except Exception:
+            self._loaded_mtime = None
         self.settings.setValue("lastFile", path)
         self._update_tab_title(os.path.basename(path))
 
@@ -1105,6 +1218,80 @@ class ReaderTab(
             QApplication.restoreOverrideCursor()
             QMessageBox.critical(self, "Export Failed", str(e))
 
+    def get_open_with_menu(self, parent_widget=None) -> QMenu:
+        """
+        Constructs a QMenu offering options to open the current PDF
+        in external applications (standard web browsers and system default viewer).
+        """
+        menu = QMenu("Open With...", parent_widget or self)
+        if not getattr(self, "current_path", None) or not os.path.exists(self.current_path):
+            act = menu.addAction("No document open")
+            act.setEnabled(False)
+            return menu
+
+        path = os.path.abspath(self.current_path)
+
+        def _open_in_browser(cmd):
+            try:
+                subprocess.Popen([cmd, path])
+            except Exception as e:
+                QMessageBox.warning(self, "Launch Error", f"Could not launch {cmd}: {e}")
+
+        def _open_system_default():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+        def _choose_other_app():
+            app_path, _ = QFileDialog.getOpenFileName(
+                self, "Choose Application", "/usr/bin", "Executables (*)"
+            )
+            if app_path:
+                try:
+                    subprocess.Popen([app_path, path])
+                except Exception as e:
+                    QMessageBox.warning(self, "Launch Error", f"Could not launch {app_path}: {e}")
+
+        act_default = menu.addAction("System Default Viewer")
+        act_default.triggered.connect(_open_system_default)
+        menu.addSeparator()
+
+        browsers = [
+            ("Google Chrome", ["google-chrome-stable", "google-chrome"]),
+            ("Mozilla Firefox", ["firefox"]),
+            ("Chromium", ["chromium-browser", "chromium"]),
+            ("Brave Browser", ["brave-browser", "brave"]),
+            ("Microsoft Edge", ["microsoft-edge-stable", "microsoft-edge"]),
+        ]
+
+        found_any_browser = False
+        for label, binaries in browsers:
+            for b in binaries:
+                if shutil.which(b):
+                    act = menu.addAction(label)
+                    act.triggered.connect(
+                        lambda checked=False, cmd=b: _open_in_browser(cmd)
+                    )
+                    found_any_browser = True
+                    break
+
+        if not found_any_browser:
+            act_none = menu.addAction("No standard web browsers detected")
+            act_none.setEnabled(False)
+
+        menu.addSeparator()
+        act_other = menu.addAction("Choose Other Application...")
+        act_other.triggered.connect(_choose_other_app)
+
+        return menu
+
+    def show_open_with_menu(self) -> None:
+        """Displays the 'Open With' external application menu below the toolbar button."""
+        menu = self.get_open_with_menu()
+        menu.exec(
+            self.btn_open_external.mapToGlobal(
+                QPoint(0, self.btn_open_external.height())
+            )
+        )
+
     def _setup_scroller(self) -> None:
         """
         Assigns physics-based smooth tracking variables mimicking native touch interactions predictably gracefully.
@@ -1264,6 +1451,47 @@ class ReaderTab(
             self.update_view()
             self.ensure_visible(new_idx)
 
+    def start_middle_click_scroll(self, global_pos: QPoint) -> None:
+        """Starts middle-click autoscroll navigation with explicit autoscroll cursor."""
+        if not hasattr(self, "scroll") or not self.scroll:
+            return
+        self._autoscroll_active = True
+        self._autoscroll_origin_global = global_pos
+        self._autoscroll_speed_y = 0.0
+        self._autoscroll_speed_x = 0.0
+        QApplication.setOverrideCursor(Qt.CursorShape.SizeAllCursor)
+        if not hasattr(self, "_autoscroll_nav_timer"):
+            self._autoscroll_nav_timer = QTimer(self)
+            self._autoscroll_nav_timer.setInterval(20)
+            self._autoscroll_nav_timer.timeout.connect(self._on_autoscroll_nav_tick)
+        self._autoscroll_nav_timer.start()
+
+    def stop_middle_click_scroll(self) -> None:
+        """Stops middle-click autoscroll navigation and restores cursor."""
+        self._autoscroll_active = False
+        if (
+            hasattr(self, "_autoscroll_nav_timer")
+            and self._autoscroll_nav_timer.isActive()
+        ):
+            self._autoscroll_nav_timer.stop()
+        self._autoscroll_speed_y = 0.0
+        self._autoscroll_speed_x = 0.0
+        while QApplication.overrideCursor() is not None:
+            QApplication.restoreOverrideCursor()
+        if hasattr(self, "scroll") and self.scroll:
+            self.scroll.viewport().unsetCursor()
+
+    def _on_autoscroll_nav_tick(self) -> None:
+        """Ticks middle-click autoscroll navigation."""
+        if not getattr(self, "_autoscroll_active", False) or not self.scroll:
+            return
+        if self._autoscroll_speed_y != 0:
+            vbar = self.scroll.verticalScrollBar()
+            vbar.setValue(int(vbar.value() + self._autoscroll_speed_y))
+        if self._autoscroll_speed_x != 0:
+            hbar = self.scroll.horizontalScrollBar()
+            hbar.setValue(int(hbar.value() + self._autoscroll_speed_x))
+
     def toggle_view_mode(self) -> None:
         """
         Transitions viewing context switching image pipelines converting explicitly formatted HTML representations dynamically.
@@ -1368,6 +1596,55 @@ class ReaderTab(
         step = self.scroll.viewport().height() * 0.9
         bar.setValue(bar.value() + (direction * step))
 
+    def scroll_page_length(self, direction: int) -> None:
+        """
+        Scrolls vertically by exactly one page length (or advances/recedes view in non-continuous mode).
+
+        Args:
+            direction (int): 1 to scroll down/next, -1 to scroll up/previous.
+        """
+        if not self.continuous_scroll and self.view_mode == ViewMode.IMAGE:
+            if direction > 0:
+                self.next_view()
+            else:
+                self.prev_view()
+            return
+
+        scale = self.calculate_scale()
+        base_h = self._cached_base_size[1] if self._cached_base_size else 842
+        spacing = (
+            self.scroll_layout.spacing()
+            if hasattr(self, "scroll_layout") and self.scroll_layout
+            else 0
+        )
+        ph = int(base_h * scale) + spacing
+        if ph <= 0:
+            ph = self.scroll.viewport().height()
+
+        bar = self.scroll.verticalScrollBar()
+        bar.setValue(int(bar.value() + (direction * ph)))
+
+    def jump_to_page(self, idx: int) -> None:
+        """Jumps directly to the given 0-based page index, updating view and scroll position."""
+        if not self.current_doc:
+            return
+        idx = max(0, min(self.current_doc.page_count - 1, idx))
+        self.current_page_index = idx
+        if hasattr(self, "txt_page"):
+            self.txt_page.setText(str(idx + 1))
+        if not self.continuous_scroll or (
+            self._virtual_enabled
+            and (
+                idx < self._virtual_range[0]
+                or idx >= self._virtual_range[1]
+            )
+        ):
+            self.rebuild_layout()
+        self.update_view()
+        self.ensure_visible(idx)
+        if hasattr(self, "scroll") and self.scroll:
+            self.scroll.setFocus()
+
     def on_page_input_return(self) -> None:
         """
         Parses manually edited textbox values verifying mathematical limits mapping results cleanly rebuilding bounds dynamically.
@@ -1377,24 +1654,14 @@ class ReaderTab(
         try:
             num = int(self.txt_page.text().strip())
             if 1 <= num <= self.current_doc.page_count:
-                idx = num - 1
-                if idx != self.current_page_index:
-                    self.current_page_index = idx
-                    if not self.continuous_scroll or (
-                        self._virtual_enabled
-                        and (
-                            idx < self._virtual_range[0]
-                            or idx >= self._virtual_range[1]
-                        )
-                    ):
-                        self.rebuild_layout()
-                    self.update_view()
-                    self.ensure_visible(idx)
-                    self.scroll.setFocus()
+                self.jump_to_page(num - 1)
             else:
                 raise ValueError
         except ValueError:
             self.txt_page.setText(str(self.current_page_index + 1))
+
+    # Alias for backwards compatibility
+    on_page_text_submitted = on_page_input_return
 
     def show_toast(self, msg: str) -> None:
         """
@@ -1426,6 +1693,68 @@ class ReaderTab(
         Returns:
             bool: Handled flag skipping native execution reliably protecting custom routines fully efficiently safely.
         """
+        if getattr(self, "_autoscroll_active", False):
+            if event.type() in (
+                QEvent.Type.MouseButtonPress,
+                QEvent.Type.MouseButtonRelease,
+            ):
+                if event.type() == QEvent.Type.MouseButtonPress:
+                    self.stop_middle_click_scroll()
+                return True
+            elif event.type() == QEvent.Type.MouseMove:
+                cur = event.globalPosition().toPoint()
+                dy = cur.y() - self._autoscroll_origin_global.y()
+                dx = cur.x() - self._autoscroll_origin_global.x()
+                dy_eff = dy - 8 if dy > 8 else (dy + 8 if dy < -8 else 0)
+                dx_eff = dx - 8 if dx > 8 else (dx + 8 if dx < -8 else 0)
+                self._autoscroll_speed_y = (dy_eff * 0.12) * (
+                    1.0 + abs(dy_eff) * 0.003
+                )
+                self._autoscroll_speed_x = (dx_eff * 0.12) * (
+                    1.0 + abs(dx_eff) * 0.003
+                )
+                if abs(dy) > 8 and abs(dy) >= abs(dx):
+                    QApplication.changeOverrideCursor(Qt.CursorShape.SizeVerCursor)
+                elif abs(dx) > 8 and abs(dx) > abs(dy):
+                    QApplication.changeOverrideCursor(Qt.CursorShape.SizeHorCursor)
+                else:
+                    QApplication.changeOverrideCursor(Qt.CursorShape.SizeAllCursor)
+                return True
+            elif (
+                event.type() == QEvent.Type.KeyPress
+                and event.key() == Qt.Key.Key_Escape
+            ):
+                self.stop_middle_click_scroll()
+                return True
+
+        if event.type() == QEvent.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.MiddleButton:
+                if getattr(self, "_autoscroll_active", False):
+                    self.stop_middle_click_scroll()
+                else:
+                    self.start_middle_click_scroll(
+                        event.globalPosition().toPoint()
+                    )
+                return True
+
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+            and hasattr(self, "scroll")
+            and source == self.scroll.viewport()
+        ):
+            self.clear_all_text_selections()
+
+        if event.type() == QEvent.Type.Wheel:
+            mod = event.modifiers()
+            if mod & Qt.KeyboardModifier.ControlModifier:
+                delta = event.angleDelta().y()
+                if delta > 0:
+                    self.zoom_step(1.1)
+                elif delta < 0:
+                    self.zoom_step(0.9)
+                return True
+
         if (
             hasattr(self, "anno_toolbar")
             and self.anno_toolbar.isVisible()
@@ -1668,13 +1997,56 @@ class ReaderTab(
                 and event.button() == Qt.MouseButton.LeftButton
             ):
                 source.setFocus()
-                self.is_selecting_text = True
+                self._mouse_press_pos = event.pos()
+                self.is_selecting_text = False
                 self.text_select_start = event.pos()
-                source.set_text_selection([])
-                self.current_selected_text = ""
+
+                now = time.time()
+                last_time = getattr(self, "_last_click_time", 0.0)
+                last_pos = getattr(self, "_last_click_pos", QPoint())
+                dt = now - last_time
+                dist = (event.pos() - last_pos).manhattanLength()
+
+                if dt < 0.55 and dist < 18:
+                    self._click_count = getattr(self, "_click_count", 1) + 1
+                else:
+                    self._click_count = 1
+
+                self._last_click_time = now
+                self._last_click_pos = event.pos()
+
+                if self._click_count >= 3:
+                    self._click_count = 3
+                    self._just_selected_multi_click = True
+                    rects, text = self._get_paragraph_at_pos(
+                        page_idx, event.pos()
+                    )
+                    if rects and text:
+                        self.clear_all_text_selections()
+                        source.set_text_selection(rects)
+                        self.current_selected_text = text
+                    return True
+
+                return True
+
+            elif (
+                event.type() == QEvent.Type.MouseButtonDblClick
+                and event.button() == Qt.MouseButton.LeftButton
+            ):
+                self._click_count = 2
+                self._last_click_time = time.time()
+                self._last_click_pos = event.pos()
+                self._just_selected_multi_click = True
+                rects, text = self._get_word_at_pos(page_idx, event.pos())
+                if rects and text:
+                    self.clear_all_text_selections()
+                    source.set_text_selection(rects)
+                    self.current_selected_text = text
                 return True
 
             elif event.type() == QEvent.Type.MouseMove:
+                if getattr(self, "_autoscroll_active", False):
+                    return True
                 if (
                     hasattr(source, "link_rects")
                     and not getattr(self, "is_selecting_text", False)
@@ -1688,7 +2060,13 @@ class ReaderTab(
                             break
 
                     if hovered_url:
-                        self.link_tooltip.setText(hovered_url)
+                        if hovered_url.startswith("#page="):
+                            target_page_str = hovered_url.split("page=")[-1]
+                            self.link_tooltip.setText(
+                                f"Jump to Page {target_page_str} ↗"
+                            )
+                        else:
+                            self.link_tooltip.setText(hovered_url)
                         self.link_tooltip.adjustSize()
                         self.link_tooltip.move(
                             10, self.height() - self.link_tooltip.height() - 10
@@ -1696,7 +2074,10 @@ class ReaderTab(
                         self.link_tooltip.show()
                         self.link_tooltip.raise_()
 
-                        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                        if hovered_url.startswith("#page=") or (
+                            event.modifiers()
+                            == Qt.KeyboardModifier.ControlModifier
+                        ):
                             source.setCursor(Qt.CursorShape.PointingHandCursor)
                         else:
                             source.setCursor(Qt.CursorShape.IBeamCursor)
@@ -1704,42 +2085,72 @@ class ReaderTab(
                         self.link_tooltip.hide()
                         source.setCursor(Qt.CursorShape.IBeamCursor)
 
-                if getattr(self, "is_selecting_text", False):
-                    rects, text = self._get_linear_text_selection(
-                        page_idx, self.text_select_start, event.pos()
-                    )
-                    source.set_text_selection(rects)
-                    self.current_selected_text = text
+                if (
+                    (event.buttons() & Qt.MouseButton.LeftButton)
+                    and hasattr(self, "_mouse_press_pos")
+                    and not self.active_drawing
+                    and not self.is_snipping
+                ):
+                    if not getattr(self, "is_selecting_text", False):
+                        if (
+                            event.pos() - self._mouse_press_pos
+                        ).manhattanLength() >= 5:
+                            self.is_selecting_text = True
+                            self._just_selected_multi_click = False
+                    if getattr(self, "is_selecting_text", False):
+                        rects, text = self._get_linear_text_selection(
+                            page_idx, self.text_select_start, event.pos()
+                        )
+                        source.set_text_selection(rects)
+                        self.current_selected_text = text
                 return True
 
             elif event.type() == QEvent.Type.MouseButtonRelease:
                 if (
                     event.button() == Qt.MouseButton.LeftButton
-                    and event.modifiers() == Qt.KeyboardModifier.ControlModifier
                     and not self.active_drawing
                     and not self.is_snipping
+                    and not getattr(self, "is_selecting_text", False)
                 ):
                     if hasattr(source, "link_rects"):
                         pos = event.pos()
                         for rect, url in source.link_rects:
                             if rect.contains(pos):
-                                self.is_selecting_text = False
-                                source.set_text_selection([])
-                                main_win = self.window()
+                                self.clear_all_text_selections()
+                                if url.startswith("#page="):
+                                    try:
+                                        target_page = (
+                                            int(url.split("page=")[-1]) - 1
+                                        )
+                                        self.jump_to_page(target_page)
+                                        return True
+                                    except ValueError:
+                                        pass
+                                elif (
+                                    event.modifiers()
+                                    == Qt.KeyboardModifier.ControlModifier
+                                ):
+                                    main_win = self.window()
+                                    if hasattr(main_win, "new_browser_tab"):
+                                        main_win.new_browser_tab(url)
+                                    else:
+                                        QDesktopServices.openUrl(QUrl(url))
+                                    return True
 
-                                if hasattr(main_win, "new_browser_tab"):
-                                    main_win.new_browser_tab(url)
-                                else:
-                                    QDesktopServices.openUrl(QUrl(url))
-                                return True
-
-                if getattr(self, "is_selecting_text", False):
-                    self.is_selecting_text = False
-                    rects, text = self._get_linear_text_selection(
-                        page_idx, self.text_select_start, event.pos()
-                    )
-                    source.set_text_selection(rects)
-                    self.current_selected_text = text
+                if event.button() == Qt.MouseButton.LeftButton:
+                    if getattr(self, "is_selecting_text", False):
+                        self.is_selecting_text = False
+                        rects, text = self._get_linear_text_selection(
+                            page_idx, self.text_select_start, event.pos()
+                        )
+                        source.set_text_selection(rects)
+                        self.current_selected_text = text
+                    elif getattr(self, "_just_selected_multi_click", False):
+                        # Multi-click selection (double or triple click): preserve highlight!
+                        self._just_selected_multi_click = False
+                    else:
+                        # Single click without dragging: clear selection immediately
+                        self.clear_all_text_selections()
                 return True
 
             elif (
@@ -1790,6 +2201,11 @@ class ReaderTab(
             self.toggle_reader_fullscreen()
             return
 
+        if key == Qt.Key.Key_F5:
+            self.reload_document()
+            event.accept()
+            return
+
         if mod == Qt.KeyboardModifier.NoModifier:
             if key == Qt.Key.Key_R:
                 self.toggle_view_mode()
@@ -1833,6 +2249,14 @@ class ReaderTab(
                 self.next_view()
             elif key == Qt.Key.Key_Left:
                 self.prev_view()
+            elif key == Qt.Key.Key_PageDown:
+                self.scroll_page_length(1)
+                event.accept()
+                return
+            elif key == Qt.Key.Key_PageUp:
+                self.scroll_page_length(-1)
+                event.accept()
+                return
             elif key == Qt.Key.Key_Space:
                 self.scroll_page(-1 if mod & Qt.KeyboardModifier.ShiftModifier else 1)
 
@@ -2021,11 +2445,11 @@ class ReaderTab(
         ):
             self.web.setZoomFactor(self.calculate_scale())
 
+        target_page = getattr(self, "current_page_index", 0)
         if hasattr(self, "apply_visual_zoom"):
             self.apply_visual_zoom()
-            self.current_page_index = self._get_closest_page(
-                self.scroll.verticalScrollBar().value()
-            )
+            self.current_page_index = target_page
+            self.txt_page.setText(str(target_page + 1))
         else:
             self._update_all_widget_sizes()
         self._update_zoom_combo_text()
@@ -2221,7 +2645,7 @@ class ReaderTab(
         )
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.drop_zone = QLabel("Drop PDF Here")
+        self.drop_zone = DropZoneLabel("Drop PDF Here")
         self.drop_zone.setObjectName("dropZone")
         self.drop_zone.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.drop_zone.setStyleSheet(
@@ -2231,6 +2655,7 @@ class ReaderTab(
         self.drop_zone.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
+        self.drop_zone.file_dropped.connect(self._on_file_dropped)
 
         self.txt_open_path = QLineEdit()
         self.txt_open_path.setPlaceholderText(
@@ -2300,6 +2725,45 @@ class ReaderTab(
             self.load_document(path)
         else:
             self.show_toast("File no longer exists at this location.")
+
+    def _on_file_dropped(self, path: str) -> None:
+        """Handles dropped file pathways."""
+        if not path:
+            return
+        clean = QUrl(path).toLocalFile() if path.startswith("file://") else path
+        abs_p = os.path.abspath(clean)
+        if abs_p.lower().endswith(".pdf") or abs_p.lower().endswith(".md"):
+            if not self.current_path:
+                self.load_document(abs_p)
+            else:
+                main_win = self.window()
+                if hasattr(main_win, "new_pdf_tab"):
+                    main_win.new_pdf_tab(abs_p)
+                else:
+                    self.load_document(abs_p)
+
+    def dragEnterEvent(self, event) -> None:
+        """Accept drag if it contains local files."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        """Accept move if it contains local files."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        """Handle dropping files anywhere on the ReaderTab."""
+        for url in event.mimeData().urls():
+            if url.isLocalFile():
+                self._on_file_dropped(url.toLocalFile())
+                event.acceptProposedAction()
+                return
+        super().dropEvent(event)
 
     def _map_to_unrotated(self, rx: float, ry: float) -> Tuple[float, float]:
         """Maps x and y coordinates of rotated PDF to unrotated pixmaps
@@ -2397,13 +2861,23 @@ class ReaderTab(
                 self, "Export Error", f"Failed to encrypt PDF:\n{str(e)}"
             )
 
+    def clear_all_text_selections(self) -> None:
+        """Clears text selections and copied text across all page widgets."""
+        self.current_selected_text = ""
+        self.is_selecting_text = False
+        if hasattr(self, "page_widgets"):
+            for w in self.page_widgets.values():
+                if hasattr(w, "set_text_selection") and getattr(
+                    w, "selected_text_rects", None
+                ):
+                    w.set_text_selection([])
+
     def _get_linear_text_selection(
         self, page_idx: int, start_pos: QPoint, end_pos: QPoint
     ) -> tuple[List[QRect], str]:
         """
-        Calculates character-level linear text selection dynamically.
-        Uses line-based median normalization to automatically adapt to any text size or font metric,
-        eliminating the need for document-specific bounding box tuning.
+        Calculates character-level linear text selection with precise font metrics,
+        robust reading order line-clustering, and clean multi-line box merging.
         """
         if not start_pos or not end_pos:
             return [], ""
@@ -2423,138 +2897,367 @@ class ReaderTab(
 
         if cache_key not in self._char_geometry_cache:
             if page_idx not in self.text_segments_cache:
-                self.text_segments_cache[page_idx] = self.current_doc.get_text_segments(
-                    page_idx
+                self.text_segments_cache[page_idx] = (
+                    self.current_doc.get_text_segments(page_idx)
                 )
 
             segments = self.text_segments_cache[page_idx]
-            raw_chars = []
+            raw_segments = []
+
+            def get_char_weight(ch: str) -> float:
+                if ch in "ijl|!':;., -`'\"1":
+                    return 0.45
+                elif ch in "mwMW@#%&":
+                    return 1.35
+                elif ch.isupper():
+                    return 1.15
+                elif ch in "frt":
+                    return 0.65
+                return 0.85
 
             for seg_idx, (text, (l, t, r, b)) in enumerate(segments):
-                char_count = len(text)
-                if char_count == 0:
+                if not text:
                     continue
 
-                char_w = (r - l) / char_count
+                seg_x = int(l * scale)
+                seg_w = max(1, int((r - l) * scale))
+                seg_h = max(1, int((t - b) * scale))
+                seg_y = int(logical_h - (t * scale))
 
-                for i, char in enumerate(text):
-                    if not char.strip():
-                        continue
+                # Align visual highlight box vertically with glyphs rather than font ascender ceiling
+                y_adj = max(0, int(seg_h * 0.10))
+                seg_y += y_adj
+                seg_h = max(1, int(seg_h * 0.90))
 
-                    char_l = l + i * char_w
-                    char_r = char_l + char_w
-
-                    x = int(char_l * scale)
-                    w_rect = int((char_r - char_l) * scale)
-                    h_rect = int((t - b) * scale)
-                    y = int(logical_h - (t * scale))
-
-                    if h_rect < 0:
-                        y += h_rect
-                        h_rect = abs(h_rect)
-
-                    if h_rect > logical_h * 0.5 or w_rect > logical_w * 0.5:
-                        continue
-
-                    if rotation == 90:
-                        x, y = int(logical_h) - y - h_rect, x
-                        w_rect, h_rect = h_rect, w_rect
-                    elif rotation == 180:
-                        x, y = int(logical_w) - x - w_rect, int(logical_h) - y - h_rect
-                    elif rotation == 270:
-                        x, y = y, int(logical_w) - x - w_rect
-                        w_rect, h_rect = h_rect, w_rect
-
-                    char_rect = QRect(x, y, max(1, w_rect), h_rect)
-                    raw_chars.append((char, char_rect, seg_idx))
-
-            raw_chars.sort(key=lambda c: c[1].center().y())
-
-            lines = []
-            current_line = []
-            all_chars = []
-
-            for char_data in raw_chars:
-                rect = char_data[1]
-                if not current_line:
-                    current_line.append(char_data)
-                else:
-                    avg_cy = sum(c[1].center().y() for c in current_line) / len(
-                        current_line
+                if rotation == 90:
+                    seg_x, seg_y = int(logical_h) - seg_y - seg_h, seg_x
+                    seg_w, seg_h = seg_h, seg_w
+                elif rotation == 180:
+                    seg_x, seg_y = (
+                        int(logical_w) - seg_x - seg_w,
+                        int(logical_h) - seg_y - seg_h,
                     )
+                elif rotation == 270:
+                    seg_x, seg_y = seg_y, int(logical_w) - seg_x - seg_w
+                    seg_w, seg_h = seg_h, seg_w
 
-                    if abs(rect.center().y() - avg_cy) < rect.height() * 0.6:
-                        current_line.append(char_data)
-                    else:
-                        lines.append(current_line)
-                        current_line = [char_data]
+                if seg_h > logical_h * 0.5 or seg_w > logical_w * 0.8:
+                    continue
 
-            if current_line:
-                lines.append(current_line)
+                total_weight = sum(get_char_weight(c) for c in text) or 1.0
+                char_boxes = []
+                cur_x = seg_x
+                for ch in text:
+                    w_ch = max(
+                        1, int((get_char_weight(ch) / total_weight) * seg_w)
+                    )
+                    char_boxes.append((ch, QRect(cur_x, seg_y, w_ch, seg_h)))
+                    cur_x += w_ch
 
+                if char_boxes:
+                    last_c, last_r = char_boxes[-1]
+                    rem = (seg_x + seg_w) - (last_r.x() + last_r.width())
+                    if rem != 0:
+                        char_boxes[-1] = (
+                            last_c,
+                            QRect(
+                                last_r.x(),
+                                last_r.y(),
+                                max(1, last_r.width() + rem),
+                                last_r.height(),
+                            ),
+                        )
+
+                raw_segments.append(
+                    {
+                        "seg_idx": seg_idx,
+                        "text": text,
+                        "x": seg_x,
+                        "y": seg_y,
+                        "w": seg_w,
+                        "h": seg_h,
+                        "char_boxes": char_boxes,
+                    }
+                )
+
+            # Cluster segments into lines using vertical overlap
+            lines: List[List[dict]] = []
+            for seg_item in raw_segments:
+                placed = False
+                for line in lines:
+                    ref = line[0]
+                    overlap = min(
+                        seg_item["y"] + seg_item["h"], ref["y"] + ref["h"]
+                    ) - max(seg_item["y"], ref["y"])
+                    min_h = min(seg_item["h"], ref["h"])
+                    if min_h > 0 and (overlap / min_h) >= 0.40:
+                        line.append(seg_item)
+                        placed = True
+                        break
+                if not placed:
+                    lines.append([seg_item])
+
+            # Sort lines top-to-bottom by average vertical position
+            lines.sort(key=lambda ln: sum(s["y"] for s in ln) / len(ln))
+
+            # Sort segments left-to-right within each line and produce reading-order characters
+            all_chars: List[tuple[str, QRect, int]] = []
             for line in lines:
-                line.sort(key=lambda c: c[1].center().x())
+                line.sort(key=lambda s: s["x"])
+                for s_idx, s in enumerate(line):
+                    if s_idx > 0:
+                        prev_s = line[s_idx - 1]
+                        gap = s["x"] - (prev_s["x"] + prev_s["w"])
+                        if (
+                            gap > 2
+                            and not prev_s["text"].endswith(" ")
+                            and not s["text"].startswith(" ")
+                        ):
+                            space_rect = QRect(
+                                prev_s["x"] + prev_s["w"], s["y"], gap, s["h"]
+                            )
+                            all_chars.append((" ", space_rect, -1))
+                    for ch, ch_r in s["char_boxes"]:
+                        all_chars.append((ch, ch_r, s["seg_idx"]))
 
-                for char, rect, seg_idx in line:
-                    all_chars.append((char, rect, seg_idx))
-
+            if len(self._char_geometry_cache) > 8:
+                self._char_geometry_cache.pop(
+                    next(iter(self._char_geometry_cache)), None
+                )
             self._char_geometry_cache[cache_key] = all_chars
 
         all_chars = self._char_geometry_cache[cache_key]
         if not all_chars:
             return [], ""
 
-        def get_closest_idx(pos: QPoint) -> int:
-            best_idx = -1
-            min_dist = inf
-            for i, (_, rect, _) in enumerate(all_chars):
-                cx, cy = rect.center().x(), rect.center().y()
-                dx = cx - pos.x()
-                dy = cy - pos.y()
+        def get_closest_char_idx(pos: QPoint) -> Optional[int]:
+            if not all_chars:
+                return None
+            for idx, (_, r, _) in enumerate(all_chars):
+                if r.contains(pos):
+                    return idx
 
-                dist = (dx * dx) + (dy * dy * 12)
+            px, py = pos.x(), pos.y()
+            best_idx = None
+            min_dist = float("inf")
 
-                if dist < min_dist:
-                    min_dist = dist
-                    best_idx = i
+            for idx, (_, r, _) in enumerate(all_chars):
+                ry = r.center().y()
+                rx = r.center().x()
+                dy = abs(py - ry)
+                dx = abs(px - rx)
+
+                if dy <= r.height() * 0.8:
+                    dist = dx + dy * 2.0
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_idx = idx
+                elif dy < 35:
+                    dist = dx * 1.5 + dy * 6.0
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_idx = idx
+
+            if min_dist > 150:
+                return None
             return best_idx
 
-        start_idx = get_closest_idx(start_pos)
-        end_idx = get_closest_idx(end_pos)
+        start_idx = get_closest_char_idx(start_pos)
+        end_idx = get_closest_char_idx(end_pos)
 
-        if start_idx == -1 or end_idx == -1:
+        if start_idx is None or end_idx is None:
             return [], ""
 
         min_idx = min(start_idx, end_idx)
         max_idx = max(start_idx, end_idx)
 
-        selected_rects = []
-        selected_chars = []
+        selected_rects: List[QRect] = []
+        selected_chars: List[str] = []
+
+        current_box: Optional[QRect] = None
+        prev_cy: Optional[float] = None
 
         for i in range(min_idx, max_idx + 1):
-            char, rect, seg_idx = all_chars[i]
-            selected_rects.append(rect)
+            ch, rect, _ = all_chars[i]
+            selected_chars.append(ch)
 
-            if i > min_idx:
-                prev_rect = all_chars[i - 1][1]
-                prev_seg = all_chars[i - 1][2]
-
+            if current_box is None:
+                current_box = QRect(rect)
+                prev_cy = rect.center().y()
+            else:
                 if (
-                    abs(rect.center().y() - prev_rect.center().y())
-                    > rect.height() * 0.5
+                    abs(rect.center().y() - prev_cy) < rect.height() * 0.5
+                    and rect.left() <= current_box.right() + 8
                 ):
-                    if not selected_chars or selected_chars[-1] != "\n":
-                        selected_chars.append("\n")
+                    current_box = current_box.united(rect)
+                else:
+                    selected_rects.append(current_box)
+                    current_box = QRect(rect)
+                    prev_cy = rect.center().y()
 
-                elif seg_idx != prev_seg:
-                    if not selected_chars or (
-                        not selected_chars[-1].isspace() and not char.isspace()
-                    ):
-                        gap = rect.left() - prev_rect.right()
-                        if gap > (rect.width() * 0.15):
-                            selected_chars.append(" ")
+        if current_box is not None:
+            selected_rects.append(current_box)
 
-            selected_chars.append(char)
+        return selected_rects, "".join(selected_chars)
+
+    def _get_word_at_pos(
+        self, page_idx: int, pos: QPoint
+    ) -> tuple[List[QRect], str]:
+        """Returns the bounding rectangle and text for the single word under pos."""
+        widget = self.page_widgets.get(page_idx)
+        if not widget:
+            return [], ""
+
+        scale = self.calculate_scale()
+        logical_w = widget.width()
+        logical_h = widget.height()
+        rotation = getattr(self, "rotation", 0)
+        cache_key = (page_idx, scale, logical_w, logical_h, rotation)
+
+        self._get_linear_text_selection(page_idx, pos, pos)
+        all_chars = self._char_geometry_cache.get(cache_key, [])
+        if not all_chars:
+            return [], ""
+
+        hit_idx = None
+        for idx, (_, r, _) in enumerate(all_chars):
+            if r.contains(pos):
+                hit_idx = idx
+                break
+
+        if hit_idx is None:
+            px, py = pos.x(), pos.y()
+            min_d = float("inf")
+            for idx, (_, r, _) in enumerate(all_chars):
+                d = abs(px - r.center().x()) + abs(py - r.center().y()) * 2.0
+                if d < min_d:
+                    min_d = d
+                    hit_idx = idx
+            if hit_idx is None or min_d > 80:
+                return [], ""
+
+        if all_chars[hit_idx][0].isspace():
+            return [], ""
+
+        start_i = hit_idx
+        while start_i > 0 and not all_chars[start_i - 1][0].isspace():
+            curr_r = all_chars[start_i][1]
+            prev_r = all_chars[start_i - 1][1]
+            vert_gap = abs(curr_r.center().y() - prev_r.center().y())
+            if vert_gap > curr_r.height() * 0.5:
+                break
+            horiz_gap = curr_r.left() - prev_r.right()
+            if horiz_gap > max(8.0, curr_r.height() * 0.6):
+                break
+            start_i -= 1
+
+        end_i = hit_idx
+        while end_i < len(all_chars) - 1 and not all_chars[end_i + 1][0].isspace():
+            curr_r = all_chars[end_i][1]
+            next_r = all_chars[end_i + 1][1]
+            vert_gap = abs(next_r.center().y() - curr_r.center().y())
+            if vert_gap > curr_r.height() * 0.5:
+                break
+            horiz_gap = next_r.left() - curr_r.right()
+            if horiz_gap > max(8.0, curr_r.height() * 0.6):
+                break
+            end_i += 1
+
+        word_rect = all_chars[start_i][1]
+        word_chars = []
+        for i in range(start_i, end_i + 1):
+            ch, r, _ = all_chars[i]
+            word_chars.append(ch)
+            word_rect = word_rect.united(r)
+
+        return [word_rect], "".join(word_chars)
+
+    def _get_paragraph_at_pos(
+        self, page_idx: int, pos: QPoint
+    ) -> tuple[List[QRect], str]:
+        """
+        Returns the bounding rectangles and text for the entire sentence/paragraph under pos.
+        Selection extends until a line break or horizontal whitespace is encountered.
+        """
+        widget = self.page_widgets.get(page_idx)
+        if not widget:
+            return [], ""
+
+        scale = self.calculate_scale()
+        logical_w = widget.width()
+        logical_h = widget.height()
+        rotation = getattr(self, "rotation", 0)
+        cache_key = (page_idx, scale, logical_w, logical_h, rotation)
+
+        self._get_linear_text_selection(page_idx, pos, pos)
+        all_chars = self._char_geometry_cache.get(cache_key, [])
+        if not all_chars:
+            return [], ""
+
+        hit_idx = None
+        for idx, (_, r, _) in enumerate(all_chars):
+            if r.contains(pos):
+                hit_idx = idx
+                break
+
+        if hit_idx is None:
+            px, py = pos.x(), pos.y()
+            min_d = float("inf")
+            for idx, (_, r, _) in enumerate(all_chars):
+                d = abs(px - r.center().x()) + abs(py - r.center().y()) * 2.0
+                if d < min_d:
+                    min_d = d
+                    hit_idx = idx
+            if hit_idx is None or min_d > 80:
+                return [], ""
+
+        start_i = hit_idx
+        while start_i > 0:
+            curr_r = all_chars[start_i][1]
+            prev_r = all_chars[start_i - 1][1]
+            vert_gap = abs(curr_r.center().y() - prev_r.center().y())
+            if vert_gap > curr_r.height() * 0.5:
+                # Line break encountered
+                break
+            horiz_gap = curr_r.left() - prev_r.right()
+            if horiz_gap > max(20.0, curr_r.height() * 1.5):
+                # Significant horizontal whitespace encountered
+                break
+            start_i -= 1
+
+        end_i = hit_idx
+        while end_i < len(all_chars) - 1:
+            curr_r = all_chars[end_i][1]
+            next_r = all_chars[end_i + 1][1]
+            vert_gap = abs(next_r.center().y() - curr_r.center().y())
+            if vert_gap > curr_r.height() * 0.5:
+                # Line break encountered
+                break
+            horiz_gap = next_r.left() - curr_r.right()
+            if horiz_gap > max(20.0, curr_r.height() * 1.5):
+                # Significant horizontal whitespace encountered
+                break
+            end_i += 1
+
+        while start_i < end_i and all_chars[start_i][0].isspace():
+            start_i += 1
+        while end_i > start_i and all_chars[end_i][0].isspace():
+            end_i -= 1
+
+        selected_rects: List[QRect] = []
+        selected_chars: List[str] = []
+        current_box: Optional[QRect] = None
+
+        for i in range(start_i, end_i + 1):
+            ch, rect, _ = all_chars[i]
+            selected_chars.append(ch)
+            if current_box is None:
+                current_box = QRect(rect)
+            else:
+                current_box = current_box.united(rect)
+
+        if current_box is not None:
+            selected_rects.append(current_box)
 
         return selected_rects, "".join(selected_chars)
 
@@ -2800,6 +3503,7 @@ class ReaderTab(
         self.btn_save.setIcon(self._get_icon("save.svg"))
         self.btn_rename.setIcon(self._get_icon("rename.svg"))
         self.btn_export.setIcon(self._get_icon("file-output.svg"))
+        self.btn_open_external.setIcon(self._get_icon("airplay.svg"))
         self.btn_print.setIcon(self._get_icon("printer.svg"))
 
         self.btn_cite.setIcon(self._get_icon("text-quote.svg"))
