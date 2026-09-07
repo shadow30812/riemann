@@ -1,7 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtCore import QUrl, Signal
+from PySide6.QtCore import QSettings, QUrl, Signal
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QMessageBox, QWidget
 from riemann.app import (
     LibrarySearchDialog,
@@ -9,6 +10,7 @@ from riemann.app import (
     SettingsDialog,
     get_resource_path,
 )
+from riemann.ui.browser import BrowserTab
 
 
 class DummySettings:
@@ -483,5 +485,128 @@ def test_exit_application(qtbot):
         window.exit_application()
         mock_save.assert_called_once()
         mock_app.quit.assert_called_once()
+
+
+def test_clean_exit_flag_written_to_pdfreader_settings(qtbot):
+    """Clean exit must write session/clean_exit = True to QSettings('Riemann', 'PDFReader')."""
+    win = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(win)
+    assert win.settings.value("session/clean_exit", False, type=bool) is False
+
+    RiemannWindow._save_all_windows_session(clean_exit=True)
+    assert win.settings.value("session/clean_exit", False, type=bool) is True
+
+    win2 = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(win2)
+    assert win2._was_unclean_exit is False
+
+
+def test_unclean_exit_prompt_no_discards_session_and_opens_fresh_homepage(qtbot):
+    """When unclean exit prompt is shown and user clicks 'No', session is cleared and fresh homepages open."""
+    win = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(win)
+
+    dummy_tab = [{"type": "web", "data": "https://example.com"}]
+    win.settings.setValue("session/main_tabs", dummy_tab)
+    win.settings.setValue("session/windows", [{"main_tabs": dummy_tab, "side_tabs": []}])
+    win.settings.setValue("session/clean_exit", False)
+    win._was_unclean_exit = True
+    win.restore_session = True
+
+    while win.tabs_main.count() > 0:
+        win.tabs_main.removeTab(0)
+
+    with patch("PySide6.QtWidgets.QMessageBox.question", return_value=QMessageBox.StandardButton.No) as mock_q:
+        win._restore_session()
+        mock_q.assert_called_once()
+
+    assert win.settings.value("session/main_tabs", []) == []
+    assert win.settings.value("session/windows", []) == []
+
+    # Clean default tabs: 1 PDF tab and 1 Browser tab
+    assert win.tabs_main.count() == 2
+
+
+def test_unclean_exit_prompt_yes_restores_tabs(qtbot):
+    """When unclean exit prompt is shown and user clicks 'Yes', session tabs are restored."""
+    win = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(win)
+
+    dummy_tab = [{"type": "web", "data": "https://example.com"}]
+    win.settings.setValue("session/main_tabs", dummy_tab)
+    win.settings.setValue("session/windows", [{"main_tabs": dummy_tab, "side_tabs": []}])
+    win.settings.setValue("session/clean_exit", False)
+    win._was_unclean_exit = True
+    win.restore_session = True
+
+    while win.tabs_main.count() > 0:
+        win.tabs_main.removeTab(0)
+
+    with patch("PySide6.QtWidgets.QMessageBox.question", return_value=QMessageBox.StandardButton.Yes) as mock_q:
+        win._restore_session()
+        mock_q.assert_called_once()
+
+    assert win.tabs_main.count() >= 1
+    assert any(hasattr(win.tabs_main.widget(i), "web") for i in range(win.tabs_main.count()))
+
+
+def test_closing_tabs_with_ctrl_w_does_not_restore_closed_tabs(qtbot):
+    """Closing tabs via close_tab updates session immediately and does not restore closed tabs."""
+    win = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(win)
+
+    win.new_browser_tab("https://example.com")
+    assert win.tabs_main.count() == 3
+
+    while win.tabs_main.count() > 0:
+        win.close_tab(0)
+
+    assert win.settings.value("session/main_tabs", []) == []
+
+    RiemannWindow._save_all_windows_session(clean_exit=True)
+
+    win2 = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(win2)
+    win2.restore_session = True
+    win2._restore_session()
+
+    found_closed = any(
+        isinstance(win2.tabs_main.widget(i), BrowserTab)
+        and "example.com" in getattr(win2.tabs_main.widget(i).web.url(), "toString", lambda: "")()
+        for i in range(win2.tabs_main.count())
+    )
+    assert found_closed is False
+
+
+def test_multi_window_sequential_close_preserves_windows(qtbot):
+    """Closing windows sequentially within grace period preserves multi-window session."""
+    RiemannWindow._all_open_windows = []
+    RiemannWindow._recently_closed_windows = []
+
+    win1 = RiemannWindow(incognito=False, restore_session=False)
+    win1.new_browser_tab("https://window1.org")
+    qtbot.addWidget(win1)
+
+    win2 = RiemannWindow(incognito=False, restore_session=False)
+    win2.new_browser_tab("https://window2.org")
+    qtbot.addWidget(win2)
+
+    assert len(RiemannWindow._all_open_windows) == 2
+
+    close_event = QCloseEvent()
+    win1.closeEvent(close_event)
+    assert win1 not in RiemannWindow._all_open_windows
+    assert len(RiemannWindow._recently_closed_windows) == 1
+
+    win2.closeEvent(close_event)
+    assert win2 not in RiemannWindow._all_open_windows
+
+    saved = win2.settings.value("session/windows", [])
+    assert len(saved) >= 2
+    assert win2.settings.value("session/clean_exit", False, type=bool) is True
+
+    RiemannWindow._all_open_windows = []
+    RiemannWindow._recently_closed_windows = []
+
 
 

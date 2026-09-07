@@ -47,7 +47,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import psutil
 from pypdf import PdfReader, PdfWriter
@@ -562,6 +562,7 @@ class RiemannWindow(QMainWindow):
     """
 
     _all_open_windows: List["RiemannWindow"] = []
+    _recently_closed_windows: List[Tuple[float, dict]] = []
 
     def __init__(
         self,
@@ -1032,10 +1033,28 @@ class RiemannWindow(QMainWindow):
         if getattr(self, "is_secondary_restoration", False):
             return
 
-        if getattr(self, "_was_unclean_exit", False) and not self.external_files:
+        if (
+            getattr(self, "_was_unclean_exit", False)
+            and not self.external_files
+            and not self.incognito
+            and getattr(self, "restore_session", True)
+        ):
+            saved_windows = self.settings.value("session/windows", None)
             main_saved = self.settings.value("session/main_tabs", [])
             side_saved = self.settings.value("session/side_tabs", [])
-            if main_saved or side_saved:
+
+            has_tabs = bool(main_saved or side_saved)
+            if not has_tabs and isinstance(saved_windows, list):
+                for w_data in saved_windows:
+                    if isinstance(w_data, dict) and (
+                        w_data.get("main_tabs")
+                        or w_data.get("side_tabs")
+                        or w_data.get("active_folder")
+                    ):
+                        has_tabs = True
+                        break
+
+            if has_tabs:
                 ret = QMessageBox.question(
                     self,
                     "Restore Last Opened Tabs",
@@ -1044,15 +1063,20 @@ class RiemannWindow(QMainWindow):
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.Yes,
                 )
-                if ret == QMessageBox.StandardButton.Yes:
-                    if self.settings.value("window/geometry"):
-                        self.restoreGeometry(self.settings.value("window/geometry"))  # type: ignore
-                    self._restore_tabs_from_settings("session/main_tabs", self.tabs_main)
-                    self._restore_tabs_from_settings("session/side_tabs", self.tabs_side)
-                    if self.tabs_side.count() > 0:
-                        self.tabs_side.show()
-                        if self.settings.value("splitter/state"):
-                            self.splitter.restoreState(self.settings.value("splitter/state"))  # type: ignore
+                if ret != QMessageBox.StandardButton.Yes:
+                    self.settings.setValue("session/windows", [])
+                    self.settings.setValue("session/main_tabs", [])
+                    self.settings.setValue("session/side_tabs", [])
+                    self.settings.setValue("session/main_active_idx", -1)
+                    self.settings.setValue("session/side_active_idx", -1)
+                    self.settings.setValue("session/active_folder", "")
+                    self.settings.setValue("session/clean_exit", False)
+                    self.settings.sync()
+
+                    if not self.external_files:
+                        self.new_pdf_tab()
+                        self.new_browser_tab()
+                    self.resize(1200, 900)
                     return
 
         if self.incognito or not self.restore_session:
@@ -1111,6 +1135,13 @@ class RiemannWindow(QMainWindow):
             self._extra_windows = []
             for win_data in saved_windows[1:]:
                 if not isinstance(win_data, dict):
+                    continue
+                has_content = bool(
+                    win_data.get("main_tabs")
+                    or win_data.get("side_tabs")
+                    or win_data.get("active_folder")
+                )
+                if not has_content:
                     continue
                 sec_win = RiemannWindow(
                     incognito=False,
@@ -1963,6 +1994,7 @@ class RiemannWindow(QMainWindow):
         except RuntimeError:
             pass
         self._check_all_tabs_closed()
+        self._auto_save_session()
 
     def close_side_tab(self, index: int) -> None:
         """
@@ -2000,6 +2032,7 @@ class RiemannWindow(QMainWindow):
         if self.tabs_side.count() == 0:
             self.tabs_side.hide()
         self._check_all_tabs_closed()
+        self._auto_save_session()
 
     def _check_all_tabs_closed(self) -> None:
         """
@@ -2080,16 +2113,15 @@ class RiemannWindow(QMainWindow):
         main_tabs = self._serialize_tab_state(self.tabs_main)
         side_tabs = self._serialize_tab_state(self.tabs_side)
 
-        if main_tabs or side_tabs:
-            self.settings.setValue("session/main_tabs", main_tabs)
-            self.settings.setValue("session/side_tabs", side_tabs)
-            self.settings.setValue(
-                "session/main_active_idx", self.tabs_main.currentIndex()
-            )
-            self.settings.setValue(
-                "session/side_active_idx", self.tabs_side.currentIndex()
-            )
-            self.settings.sync()
+        self.settings.setValue("session/main_tabs", main_tabs)
+        self.settings.setValue("session/side_tabs", side_tabs)
+        self.settings.setValue(
+            "session/main_active_idx", self.tabs_main.currentIndex()
+        )
+        self.settings.setValue(
+            "session/side_active_idx", self.tabs_side.currentIndex()
+        )
+        self.settings.sync()
 
     def restore_previous_session(self) -> None:
         """
@@ -2116,54 +2148,77 @@ class RiemannWindow(QMainWindow):
 
         self.show_toast("Restored last session tabs 📂")
 
+    def _serialize_window_state(self) -> dict:
+        """Serializes the current window's geometry, state, tabs, and folder session."""
+        main_tabs = self._serialize_tab_state(self.tabs_main)
+        side_tabs = self._serialize_tab_state(self.tabs_side)
+        active_folder = ""
+        if getattr(self, "is_folder_session_active", False) and hasattr(self, "explorer_panel"):
+            active_folder = self.explorer_panel.current_path
+
+        return {
+            "geometry": self.saveGeometry(),
+            "state": self.saveState(),
+            "main_tabs": main_tabs,
+            "side_tabs": side_tabs,
+            "main_active_idx": self.tabs_main.currentIndex(),
+            "side_active_idx": self.tabs_side.currentIndex(),
+            "active_folder": active_folder,
+        }
+
     @classmethod
-    def _save_all_windows_session(cls) -> None:
+    def _save_all_windows_session(
+        cls,
+        clean_exit: bool = True,
+        closing_window: Optional["RiemannWindow"] = None,
+    ) -> None:
         """Saves session state for all currently open non-incognito windows."""
-        settings = QSettings("Riemann", "Riemann")
+        settings = QSettings("Riemann", "PDFReader")
+        now = time.time()
+
+        # Prune expired recently closed windows (older than 15s)
+        cls._recently_closed_windows = [
+            (t, data) for (t, data) in cls._recently_closed_windows
+            if now - t < 15.0
+        ]
+
         current_open = [
             w for w in cls._all_open_windows
-            if not getattr(w, "incognito", False) and not w.isHidden()
+            if not getattr(w, "incognito", False)
         ]
-        if not current_open:
+
+        windows_to_save = list(current_open)
+        if (
+            closing_window
+            and closing_window not in windows_to_save
+            and not getattr(closing_window, "incognito", False)
+        ):
+            windows_to_save.append(closing_window)
+
+        if not windows_to_save and not cls._recently_closed_windows:
+            if clean_exit:
+                settings.setValue("session/clean_exit", True)
+                settings.sync()
             return
 
-        now = time.time()
-        prev_close_time = settings.value("session/multi_window_close_time", 0.0, type=float)
-        existing_windows = settings.value("session/windows", None)
-
-        is_closing_sequence = (
-            (now - prev_close_time < 20.0)
-            and isinstance(existing_windows, list)
-            and len(existing_windows) > 1
-        )
-
         windows_data = []
-        for win in current_open:
-            main_tabs = win._serialize_tab_state(win.tabs_main)
-            side_tabs = win._serialize_tab_state(win.tabs_side)
-            active_folder = ""
-            if getattr(win, "is_folder_session_active", False) and hasattr(win, "explorer_panel"):
-                active_folder = win.explorer_panel.current_path
+        for win in windows_to_save:
+            windows_data.append(win._serialize_window_state())
 
-            win_dict = {
-                "geometry": win.saveGeometry(),
-                "state": win.saveState(),
-                "main_tabs": main_tabs,
-                "side_tabs": side_tabs,
-                "main_active_idx": win.tabs_main.currentIndex(),
-                "side_active_idx": win.tabs_side.currentIndex(),
-                "active_folder": active_folder,
-            }
-            windows_data.append(win_dict)
-
-        if is_closing_sequence and isinstance(existing_windows, list):
-            if len(windows_data) < len(existing_windows):
-                for extra in existing_windows[len(windows_data):]:
-                    windows_data.append(extra)
+        # If this save is closing the last open window, merge any valid recently closed windows
+        remaining_open = [w for w in current_open if w != closing_window]
+        if not remaining_open and cls._recently_closed_windows:
+            for _, recent_data in cls._recently_closed_windows:
+                if (
+                    recent_data.get("main_tabs")
+                    or recent_data.get("side_tabs")
+                    or recent_data.get("active_folder")
+                ):
+                    windows_data.append(recent_data)
+            cls._recently_closed_windows.clear()
 
         if windows_data:
             settings.setValue("session/windows", windows_data)
-            settings.setValue("session/multi_window_close_time", now)
             first_win = windows_data[0]
             settings.setValue("session/main_tabs", first_win["main_tabs"])
             settings.setValue("session/side_tabs", first_win["side_tabs"])
@@ -2172,7 +2227,8 @@ class RiemannWindow(QMainWindow):
             settings.setValue("session/active_folder", first_win["active_folder"])
             settings.setValue("window/geometry", first_win["geometry"])
             settings.setValue("window/state", first_win["state"])
-            settings.setValue("session/clean_exit", True)
+            if clean_exit:
+                settings.setValue("session/clean_exit", True)
             settings.sync()
 
     def exit_application(self) -> None:
@@ -2195,10 +2251,22 @@ class RiemannWindow(QMainWindow):
             super().closeEvent(event)
             return
 
-        RiemannWindow._save_all_windows_session()
+        other_open = [
+            w for w in RiemannWindow._all_open_windows
+            if w != self and not getattr(w, "incognito", False)
+        ]
+        win_state = self._serialize_window_state()
+        if other_open:
+            if win_state.get("main_tabs") or win_state.get("side_tabs") or win_state.get("active_folder"):
+                RiemannWindow._recently_closed_windows.append((time.time(), win_state))
 
         if self in RiemannWindow._all_open_windows:
             RiemannWindow._all_open_windows.remove(self)
+
+        RiemannWindow._save_all_windows_session(
+            clean_exit=True,
+            closing_window=self if not other_open else None,
+        )
 
         self._kill_all_media_safely()
         super().closeEvent(event)

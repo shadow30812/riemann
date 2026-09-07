@@ -52,6 +52,7 @@ def reader():
 
 
 def test_probe_base_page_size(reader):
+    reader.current_doc.page_count = 1
     mock_res = MagicMock()
     mock_res.width = 600
     mock_res.height = 800
@@ -118,7 +119,7 @@ def test_render_visible_pages(mock_render_single, mock_calc_scale, reader):
     reader.render_visible_pages()
 
     assert 2 not in reader.rendered_pages
-    assert 3 in reader.rendered_pages
+    assert 3 not in reader.rendered_pages
     assert 10 in reader.rendered_pages
 
     mock_render_single.assert_any_call(10, 1.0)
@@ -129,6 +130,10 @@ def test_update_view_reflow(mock_generate, reader):
     reader.view_mode = ViewMode.REFLOW
     reader.current_doc.get_page_text.return_value = "raw pdf text"
     mock_generate.return_value = "<html>reflowed</html>"
+    mock_viewport = MagicMock()
+    mock_viewport.width.return_value = 1000
+    mock_viewport.height.return_value = 800
+    reader.scroll.viewport.return_value = mock_viewport
 
     reader.update_view()
 

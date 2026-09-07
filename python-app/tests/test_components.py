@@ -34,6 +34,7 @@ def test_draggable_tab_widget_drag_enter_ignore(qtbot):
     qtbot.addWidget(widget)
     mock_event = MagicMock(spec=QDragEnterEvent)
     mock_event.mimeData().hasText.return_value = False
+    mock_event.mimeData().hasFormat.return_value = False
     widget.dragEnterEvent(mock_event)
     mock_event.ignore.assert_called_once()
 
@@ -49,6 +50,7 @@ def test_draggable_tab_widget_drop(mock_reader_tab, mock_exists, qtbot):
     mock_reader_tab.return_value = dummy_tab
 
     mock_event = MagicMock(spec=QDropEvent)
+    mock_event.mimeData().hasFormat.return_value = False
     mock_event.mimeData().text.return_value = "/fake/path.pdf"
     widget.dropEvent(mock_event)
     mock_event.acceptProposedAction.assert_called_once()
