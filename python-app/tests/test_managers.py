@@ -10,6 +10,7 @@ from riemann.core.managers import (
     DownloadManager,
     HistoryManager,
     LibraryManager,
+    YtDlpDownloadManager,
 )
 
 if not QApplication.instance():
@@ -138,3 +139,87 @@ def test_download_manager_persistence(mock_app_data):
         assert data[0]["file_name"] == "test.pdf"
         assert data[0]["status"] == "Completed"
         assert data[0]["full_path"] == "/down/test.pdf"
+
+
+def test_ytdlp_download_manager_cumulative_playlist_progress(mock_app_data):
+    """Item 8: Cumulative playlist progress across multiple videos."""
+    from PySide6.QtWidgets import QProgressBar, QTreeWidget, QTreeWidgetItem
+
+    mgr = YtDlpDownloadManager.__new__(YtDlpDownloadManager)
+    mgr.tree = QTreeWidget()
+
+    root_item = QTreeWidgetItem()
+    root_prog = QProgressBar()
+    task = {
+        "worker": "mock_worker",
+        "root_item": root_item,
+        "root_prog": root_prog,
+        "dest_dir": "/tmp",
+        "videos": {},
+        "is_finished": False,
+    }
+    mgr.tasks = [task]
+    mgr.format_size = MagicMock(return_value="1 MB")
+    mgr.format_time = MagicMock(return_value="10s")
+    mgr._create_progress_bar = MagicMock(return_value=QProgressBar())
+
+    # Video 3 of 10 at 50% download progress:
+    # Completed fraction = (3 - 1) + 0.5 = 2.5 / 10 = 25%
+    mgr.update_progress("mock_worker", {
+        "status": "downloading",
+        "playlist_index": 3,
+        "playlist_count": 10,
+        "percentage": 50,
+        "video_id": "vid_3",
+        "filename": "vid_3.mp4",
+    })
+
+    assert root_prog.value() == 25
+    assert root_item.text(4) == "Video 3 of 10"
+
+    # Video 3 finished:
+    # Completed fraction = (3 - 1) + 1.0 = 3.0 / 10 = 30%
+    mgr.update_progress("mock_worker", {
+        "status": "finished",
+        "playlist_index": 3,
+        "playlist_count": 10,
+        "percentage": 100,
+        "video_id": "vid_3",
+        "filename": "vid_3.mp4",
+    })
+
+    assert root_prog.value() == 30
+
+
+def test_ytdlp_download_manager_single_video_progress(mock_app_data):
+    """Item 8: Single video progress updates."""
+    from PySide6.QtWidgets import QProgressBar, QTreeWidget, QTreeWidgetItem
+
+    mgr = YtDlpDownloadManager.__new__(YtDlpDownloadManager)
+    mgr.tree = QTreeWidget()
+
+    root_item = QTreeWidgetItem()
+    root_prog = QProgressBar()
+    task = {
+        "worker": "single_worker",
+        "root_item": root_item,
+        "root_prog": root_prog,
+        "dest_dir": "/tmp",
+        "videos": {},
+        "is_finished": False,
+    }
+    mgr.tasks = [task]
+    mgr.format_size = MagicMock(return_value="5 MB")
+    mgr.format_time = MagicMock(return_value="5s")
+    mgr._create_progress_bar = MagicMock(return_value=QProgressBar())
+
+    mgr.update_progress("single_worker", {
+        "status": "downloading",
+        "percentage": 68,
+        "speed": 1024 * 1024,
+        "eta": 5,
+        "total_bytes": 10 * 1024 * 1024,
+    })
+
+    assert root_prog.value() == 68
+

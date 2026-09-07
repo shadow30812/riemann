@@ -23,6 +23,10 @@ try:
 except ImportError:
     pass
 
+_deno_dir = os.path.expanduser("~/.deno/bin")
+if os.path.isdir(_deno_dir) and _deno_dir not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = f"{_deno_dir}:{os.environ.get('PATH', '')}"
+
 from PySide6.QtCore import (
     QBuffer,
     QByteArray,
@@ -164,6 +168,7 @@ class YtDlpStreamWorker(QThread):
             "format": "best[ext=mp4]",
             "quiet": True,
             "noplaylist": True,
+            "remote_components": ["ejs:github"],
         }
         if self.cookies_browser:
             ydl_opts["cookiesfrombrowser"] = (self.cookies_browser,)
@@ -189,7 +194,7 @@ class YtDlpWorker(QThread):
     progress_details = Signal(dict)
     finished = Signal(bool, str)
 
-    def __init__(self, url: str, download_dir: str, dl_opts: dict) -> None:
+    def __init__(self, url: str, download_dir: str, dl_opts: Optional[dict] = None) -> None:
         """
         Initializes the yt-dlp download worker.
 
@@ -201,7 +206,7 @@ class YtDlpWorker(QThread):
         super().__init__()
         self.url = url
         self.download_dir = download_dir
-        self.dl_opts = dl_opts
+        self.dl_opts = dl_opts if dl_opts is not None else {}
         self.is_cancelled = False
         self._last_emit_time = 0.0
 
@@ -210,16 +215,20 @@ class YtDlpWorker(QThread):
         Executes the yt-dlp Python API, mapping user options to internal flags,
         and manages the download lifecycle safely within the process.
         """
+        is_playlist = bool(self.dl_opts.get("playlist", False))
         ydl_opts = {
-            "outtmpl": os.path.join(self.download_dir, "%(title)s.%(ext)s"),
             "quiet": True,
             "no_warnings": True,
             "progress_hooks": [self.progress_hook],
             "ignoreerrors": True,
+            "remote_components": ["ejs:github"],
         }
 
-        if self.dl_opts.get("playlist"):
+        if is_playlist:
             ydl_opts["noplaylist"] = False
+            ydl_opts["outtmpl"] = os.path.join(
+                self.download_dir, "%(playlist_index&{:02d} - |)s%(title)s.%(ext)s"
+            )
             pl_start = self.dl_opts.get("playlist_start")
             pl_end = self.dl_opts.get("playlist_end")
 
@@ -229,6 +238,7 @@ class YtDlpWorker(QThread):
                 ydl_opts["playlistend"] = int(pl_end)
         else:
             ydl_opts["noplaylist"] = True
+            ydl_opts["outtmpl"] = os.path.join(self.download_dir, "%(title)s.%(ext)s")
 
         cookies_browser = self.dl_opts.get("cookies", "none")
         if cookies_browser != "none":
@@ -367,7 +377,7 @@ class YtDlpWorker(QThread):
 
 
 class YtDlpSettingsDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, is_playlist: bool = False):
         super().__init__(parent)
         self.setWindowTitle("Download Settings")
         self.setFixedSize(360, 360)
@@ -405,7 +415,7 @@ class YtDlpSettingsDialog(QDialog):
         layout.addWidget(self.chk_subs)
 
         self.chk_playlist = QCheckBox("Download playlist (if applicable)")
-        self.chk_playlist.setChecked(False)
+        self.chk_playlist.setChecked(is_playlist)
         layout.addWidget(self.chk_playlist)
 
         pl_layout = QHBoxLayout()
@@ -1917,7 +1927,8 @@ class BrowserTab(QWidget):
             self.show_toast("Invalid URL for download.")
             return
 
-        dialog = YtDlpSettingsDialog(self)
+        is_pl = "list=" in url.lower() or "/playlist" in url.lower()
+        dialog = YtDlpSettingsDialog(self, is_playlist=is_pl)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             dl_opts = dialog.get_options()
 

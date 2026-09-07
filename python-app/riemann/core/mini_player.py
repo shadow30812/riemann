@@ -119,17 +119,86 @@ class MiniAudioPlayer(QWidget):
             """
             self.active_browser.web.page().runJavaScript(js)
 
-    def find_active_browser(self):
-        """Finds the first browser tab using safe duck typing."""
-        for tabs in [self.main_window.tabs_main, self.main_window.tabs_side]:
-            if tabs.isVisible() and tabs.hasFocus():
-                curr = tabs.currentWidget()
-                if hasattr(curr, "web"):
-                    return curr
+    def _is_browser_valid(self, browser):
+        """Checks if a browser tab instance is still valid and alive."""
+        if not browser:
+            return False
+        try:
+            from shiboken6 import isValid
+            if not isValid(browser):
+                return False
+        except Exception:
+            pass
+        if not hasattr(browser, "web") or not browser.web:
+            return False
+        try:
+            page = browser.web.page()
+            if not page:
+                return False
+        except (RuntimeError, AttributeError):
+            return False
+        return True
 
+    def _get_all_app_browsers(self):
+        """Collects all BrowserTab instances across all windows and tab widgets."""
+        from PySide6.QtWidgets import QApplication
+        browsers = []
+        windows = [self.main_window]
+        try:
+            for top in QApplication.topLevelWidgets():
+                if hasattr(top, "tabs_main") and top not in windows:
+                    windows.append(top)
+        except Exception:
+            pass
+
+        for win in windows:
+            for tab_widget in [getattr(win, "tabs_main", None), getattr(win, "tabs_side", None)]:
+                if not tab_widget:
+                    continue
+                for i in range(tab_widget.count()):
+                    w = tab_widget.widget(i)
+                    if hasattr(w, "web") and w not in browsers and self._is_browser_valid(w):
+                        browsers.append(w)
+        return browsers
+
+    def find_active_browser(self):
+        """
+        Finds the browser tab to control.
+        App-wide: checks active tab, audible tabs, or retains the currently controlled browser.
+        """
+        all_browsers = self._get_all_app_browsers()
+
+        # 1. If currently focused tab is a browser with media/audio, prioritize it
+        for tabs in [self.main_window.tabs_main, self.main_window.tabs_side]:
+            if tabs and tabs.isVisible() and tabs.hasFocus():
+                curr = tabs.currentWidget()
+                if self._is_browser_valid(curr):
+                    try:
+                        if curr.web.page().recentlyAudible() or not self._is_browser_valid(self.active_browser):
+                            return curr
+                    except Exception:
+                        pass
+
+        # 2. Check if any browser tab in the app is actively audible (playing audio)
+        for b in all_browsers:
+            try:
+                if b.web.page().recentlyAudible():
+                    return b
+            except Exception:
+                pass
+
+        # 3. If currently tracking a valid browser, keep tracking it even if user switched tabs
+        if self._is_browser_valid(self.active_browser) and self.active_browser in all_browsers:
+            return self.active_browser
+
+        # 4. Fallback: check current tab of main tabs
         curr_main = self.main_window.tabs_main.currentWidget()
-        if hasattr(curr_main, "web"):
+        if self._is_browser_valid(curr_main):
             return curr_main
+
+        # 5. Fallback: any browser tab in the app
+        if all_browsers:
+            return all_browsers[0]
 
         return None
 
@@ -220,6 +289,9 @@ class MiniAudioPlayer(QWidget):
                     self.set_visibility(False)
             else:
                 self.set_visibility(False)
+                # If current browser has no media, allow switching to another browser on next poll
+                if result == "none":
+                    self.active_browser = None
 
         if hasattr(self.active_browser.web.page(), "runJavaScript"):
             self.active_browser.web.page().runJavaScript(js, callback)
@@ -233,3 +305,4 @@ class MiniAudioPlayer(QWidget):
         if h > 0:
             return f"{h}:{m:02d}:{s:02d}"
         return f"{m:02d}:{s:02d}"
+

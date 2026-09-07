@@ -215,6 +215,11 @@ class SettingsDialog(QDialog):
         self.cb_dark = QCheckBox()
         self.cb_dark.setChecked(parent.dark_mode)
 
+        self.cb_pdf_preview_mode = QCheckBox()
+        self.cb_pdf_preview_mode.setChecked(
+            parent.settings.value("reader/open_in_preview_mode", False, type=bool)
+        )
+
         self.txt_custom_name = QLineEdit()
         self.txt_custom_name.setPlaceholderText("Leave empty for OS default")
         self.txt_custom_name.setText(
@@ -274,6 +279,9 @@ class SettingsDialog(QDialog):
         form_layout.addRow("Default Dialog Directory:", dir_layout)
         form_layout.addRow("Enable Dark Mode:", self.cb_dark)
         form_layout.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
+        form_layout.addRow(
+            "Open Documents in Preview Mode:", self.cb_pdf_preview_mode
+        )
         form_layout.addRow("Show Floating Fullscreen Button:", self.cb_floating_fs)
         form_layout.addRow("Homepage Greeting Name:", self.txt_custom_name)
         form_layout.addRow("Auto-Scroll Speed:", self.spin_autoscroll)
@@ -553,11 +561,14 @@ class RiemannWindow(QMainWindow):
     shortcuts, and session persistence.
     """
 
+    _all_open_windows: List["RiemannWindow"] = []
+
     def __init__(
         self,
         incognito: bool = False,
         restore_session: bool = True,
         external_files: Optional[List[str]] = None,
+        is_secondary_restoration: bool = False,
     ) -> None:
         """
         Initializes the main application window.
@@ -571,6 +582,10 @@ class RiemannWindow(QMainWindow):
         self.incognito = incognito
         self.restore_session = restore_session
         self.external_files = external_files or []
+        self.is_secondary_restoration = is_secondary_restoration
+
+        if not self.incognito:
+            RiemannWindow._all_open_windows.append(self)
 
         if self.incognito:
             self.setWindowTitle("Riemann (Incognito)")
@@ -707,7 +722,7 @@ class RiemannWindow(QMainWindow):
         Initializes and binds global application keyboard shortcuts.
         """
         shortcuts = [
-            ("Ctrl+Q", self.close),
+            ("Ctrl+Q", self.exit_application),
             ("Ctrl+W", self.close_active_tab),
             ("Ctrl+Shift+T", self.restore_last_closed_tab),
             ("Ctrl+\\", self.toggle_split_view),
@@ -1014,6 +1029,9 @@ class RiemannWindow(QMainWindow):
         Defaults to opening both PDF and browser homepages if no session exists or incognito is active
         UNLESS app is opened externally.
         """
+        if getattr(self, "is_secondary_restoration", False):
+            return
+
         if getattr(self, "_was_unclean_exit", False) and not self.external_files:
             main_saved = self.settings.value("session/main_tabs", [])
             side_saved = self.settings.value("session/side_tabs", [])
@@ -1042,6 +1060,102 @@ class RiemannWindow(QMainWindow):
                 self.new_pdf_tab()
                 self.new_browser_tab()
             self.resize(1200, 900)
+            return
+
+        saved_windows = self.settings.value("session/windows", None)
+        if saved_windows and isinstance(saved_windows, list) and len(saved_windows) > 0:
+            first_win_data = saved_windows[0]
+            if first_win_data.get("geometry"):
+                self.restoreGeometry(first_win_data["geometry"])  # type: ignore
+
+            self._restore_tabs_from_items(
+                first_win_data.get("main_tabs", []), self.tabs_main
+            )
+            self._restore_tabs_from_items(
+                first_win_data.get("side_tabs", []), self.tabs_side
+            )
+
+            main_idx = first_win_data.get("main_active_idx", -1)
+            if isinstance(main_idx, int) and 0 <= main_idx < self.tabs_main.count():
+                self.tabs_main.setCurrentIndex(main_idx)
+
+            side_idx = first_win_data.get("side_active_idx", -1)
+            if isinstance(side_idx, int) and 0 <= side_idx < self.tabs_side.count():
+                self.tabs_side.setCurrentIndex(side_idx)
+
+            if self.tabs_side.count() > 0:
+                self.tabs_side.show()
+                if first_win_data.get("state"):
+                    try:
+                        self.restoreState(first_win_data["state"])  # type: ignore
+                    except Exception:
+                        pass
+            else:
+                self.tabs_side.hide()
+
+            active_folder = first_win_data.get("active_folder", "")
+            if active_folder and os.path.exists(active_folder):
+                self.tabs_side.hide()
+                self.is_folder_session_active = True
+                if hasattr(self, "explorer_panel"):
+                    self.explorer_panel.set_path(active_folder)
+                    self.explorer_panel.show()
+                self.history_manager.add(active_folder, "folder")
+
+            if self.tabs_main.count() == 0 and self.tabs_side.count() == 0:
+                if not self.external_files:
+                    self.new_pdf_tab()
+                    self.new_browser_tab()
+
+            # Restore secondary windows concurrently
+            self._extra_windows = []
+            for win_data in saved_windows[1:]:
+                if not isinstance(win_data, dict):
+                    continue
+                sec_win = RiemannWindow(
+                    incognito=False,
+                    restore_session=False,
+                    is_secondary_restoration=True,
+                )
+                if win_data.get("geometry"):
+                    sec_win.restoreGeometry(win_data["geometry"])  # type: ignore
+
+                sec_win._restore_tabs_from_items(
+                    win_data.get("main_tabs", []), sec_win.tabs_main
+                )
+                sec_win._restore_tabs_from_items(
+                    win_data.get("side_tabs", []), sec_win.tabs_side
+                )
+
+                m_idx = win_data.get("main_active_idx", -1)
+                if isinstance(m_idx, int) and 0 <= m_idx < sec_win.tabs_main.count():
+                    sec_win.tabs_main.setCurrentIndex(m_idx)
+
+                s_idx = win_data.get("side_active_idx", -1)
+                if isinstance(s_idx, int) and 0 <= s_idx < sec_win.tabs_side.count():
+                    sec_win.tabs_side.setCurrentIndex(s_idx)
+
+                if sec_win.tabs_side.count() > 0:
+                    sec_win.tabs_side.show()
+                    if win_data.get("state"):
+                        try:
+                            sec_win.restoreState(win_data["state"])  # type: ignore
+                        except Exception:
+                            pass
+                else:
+                    sec_win.tabs_side.hide()
+
+                af = win_data.get("active_folder", "")
+                if af and os.path.exists(af):
+                    sec_win.tabs_side.hide()
+                    sec_win.is_folder_session_active = True
+                    if hasattr(sec_win, "explorer_panel"):
+                        sec_win.explorer_panel.set_path(af)
+                        sec_win.explorer_panel.show()
+                    sec_win.history_manager.add(af, "folder")
+
+                sec_win.show()
+                self._extra_windows.append(sec_win)
             return
 
         if self.settings.value("window/geometry"):
@@ -1081,15 +1195,8 @@ class RiemannWindow(QMainWindow):
                 self.explorer_panel.show()
             self.history_manager.add(active_folder, "folder")
 
-    def _restore_tabs_from_settings(self, key: str, target_widget: QTabWidget) -> None:
-        """
-        Parses settings data to recreate tabs.
-
-        Args:
-            key (str): The QSettings key to read from.
-            target_widget (QTabWidget): The QTabWidget to populate.
-        """
-        items = self.settings.value(key, [], type=list)
+    def _restore_tabs_from_items(self, items: list, target_widget: QTabWidget) -> None:
+        """Helper to restore a collection of serialized tab records into a target tab widget."""
         if isinstance(items, str):
             items = [items]
 
@@ -1102,11 +1209,27 @@ class RiemannWindow(QMainWindow):
                     and item.get("data")
                     and os.path.exists(item.get("data"))
                 ):
-                    self._add_pdf_tab(item["data"], target_widget, True)
+                    self._add_pdf_tab(
+                        item["data"],
+                        target_widget,
+                        True,
+                        is_preview=item.get("preview", None),
+                    )
                 elif item.get("type") == "web" and item.get("data"):
                     self._add_browser_tab(item["data"], target_widget)
                 elif item.get("type") == "folder_home":
                     self.new_folder_home_tab(target_widget)
+
+    def _restore_tabs_from_settings(self, key: str, target_widget: QTabWidget) -> None:
+        """
+        Parses settings data to recreate tabs.
+
+        Args:
+            key (str): The QSettings key to read from.
+            target_widget (QTabWidget): The QTabWidget to populate.
+        """
+        items = self.settings.value(key, [], type=list)
+        self._restore_tabs_from_items(items, target_widget)
 
     def refresh_signature_panel(self) -> None:
         """
@@ -1177,7 +1300,11 @@ class RiemannWindow(QMainWindow):
                 self.tabs_side.hide()
 
     def _add_pdf_tab(
-        self, path: str, target_widget: QTabWidget, restore_state: bool = False
+        self,
+        path: str,
+        target_widget: QTabWidget,
+        restore_state: bool = False,
+        is_preview: Optional[bool] = None,
     ) -> None:
         """
         Internal helper to instantiate and add a ReaderTab.
@@ -1186,10 +1313,21 @@ class RiemannWindow(QMainWindow):
             path (str): Path to the PDF file.
             target_widget (QTabWidget): The tab widget to add the tab to.
             restore_state (bool): Whether to restore scroll position/zoom.
+            is_preview (Optional[bool]): If provided, forces preview or extended mode.
         """
         self.add_to_history(path, "pdf")
-        reader = ReaderTab()
-        reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
+        if is_preview is not None:
+            open_preview = is_preview
+        else:
+            open_preview = self.settings.value(
+                "reader/open_in_preview_mode", False, type=bool
+            )
+
+        if open_preview:
+            reader = PreviewReaderTab()
+        else:
+            reader = ReaderTab()
+            reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
         reader.load_document(path, restore_state=restore_state)
 
         icon_path = get_resource_path(os.path.join("assets", "icons", "pdf.png"))
@@ -1296,7 +1434,7 @@ class RiemannWindow(QMainWindow):
             ("New Window (Ctrl+N)", None, self.new_window),
             ("New Incognito Tab (Ctrl+Shift+N)", None, self.new_incognito_window),
             (None, None, None),
-            ("Exit (Ctrl+Q)", None, self.close),
+            ("Exit (Ctrl+Q)", None, self.exit_application),
         ]
 
         for name, shortcut, slot in file_actions:
@@ -1459,6 +1597,51 @@ class RiemannWindow(QMainWindow):
             self.settings.setValue(
                 "app/floating_fs_btn", dlg.cb_floating_fs.isChecked()
             )
+            old_preview_mode = self.settings.value(
+                "reader/open_in_preview_mode", False, type=bool
+            )
+            new_preview_mode = dlg.cb_pdf_preview_mode.isChecked()
+            if old_preview_mode != new_preview_mode:
+                has_open_docs = False
+                for tab_widget in [self.tabs_main, self.tabs_side]:
+                    for i in range(tab_widget.count()):
+                        w = tab_widget.widget(i)
+                        if isinstance(w, ReaderTab) and w != getattr(
+                            self, "preview_tab_widget", None
+                        ):
+                            has_open_docs = True
+                            break
+                    if has_open_docs:
+                        break
+
+                if has_open_docs:
+                    target_mode = (
+                        "Preview Mode" if new_preview_mode else "Extended PDF Mode"
+                    )
+                    msg_box = QMessageBox(self)
+                    msg_box.setWindowTitle("Switch Open Documents Mode")
+                    msg_box.setIcon(QMessageBox.Icon.Question)
+                    msg_box.setText(
+                        f"You changed the default document mode to {target_mode}.\n\n"
+                        "Would you like to switch already open documents to the new mode, "
+                        "or keep their current layout?"
+                    )
+                    btn_switch = msg_box.addButton(
+                        "Switch Open Documents", QMessageBox.ButtonRole.AcceptRole
+                    )
+                    btn_keep = msg_box.addButton(
+                        "Keep Current Layout", QMessageBox.ButtonRole.RejectRole
+                    )
+                    msg_box.setDefaultButton(btn_switch)
+                    msg_box.exec()
+
+                    if msg_box.clickedButton() == btn_switch:
+                        self._switch_open_documents_mode(new_preview_mode)
+
+                self.settings.setValue(
+                    "reader/open_in_preview_mode", new_preview_mode
+                )
+
             old_scale = self.settings.value("app/ui_scale", 100, type=int)
             new_scale = dlg.slider_scale.value()
             if old_scale != new_scale:
@@ -1468,6 +1651,56 @@ class RiemannWindow(QMainWindow):
                     "Restart Required",
                     f"Display size changed to {new_scale}%.\n\nPlease restart Riemann for the new display scaling to take effect across the entire interface.",
                 )
+
+    def _switch_open_documents_mode(self, to_preview: bool) -> None:
+        """
+        Switches existing open PDF documents between Extended PDF mode (ReaderTab)
+        and Preview mode (PreviewReaderTab).
+        """
+        for tab_widget in [self.tabs_main, self.tabs_side]:
+            tabs_to_convert = []
+            for i in range(tab_widget.count()):
+                widget = tab_widget.widget(i)
+                if isinstance(widget, ReaderTab):
+                    if getattr(self, "preview_tab_widget", None) == widget:
+                        continue
+                    is_current_preview = getattr(widget, "is_preview", False)
+                    if to_preview and not is_current_preview:
+                        tabs_to_convert.append((i, widget, True))
+                    elif not to_preview and is_current_preview:
+                        tabs_to_convert.append((i, widget, False))
+
+            for idx, old_widget, make_preview in tabs_to_convert:
+                path = getattr(old_widget, "current_path", "")
+                page_idx = getattr(old_widget, "current_page_index", 0)
+                scroll_y = 0
+                if hasattr(old_widget, "scroll") and hasattr(old_widget.scroll, "verticalScrollBar"):
+                    scroll_y = old_widget.scroll.verticalScrollBar().value()
+
+                title = tab_widget.tabText(idx)
+                icon = tab_widget.tabIcon(idx)
+
+                if make_preview:
+                    new_widget = PreviewReaderTab()
+                else:
+                    new_widget = ReaderTab()
+                    new_widget.signatures_detected.connect(
+                        lambda _: self.refresh_signature_panel()
+                    )
+
+                if path and os.path.exists(path):
+                    new_widget.load_document(path)
+                    new_widget.current_page_index = page_idx
+                    if hasattr(new_widget, "scroll") and new_widget.scroll:
+                        new_widget.scroll.verticalScrollBar().setValue(scroll_y)
+
+                tab_widget.removeTab(idx)
+                if hasattr(old_widget, "cleanup"):
+                    old_widget.cleanup()
+                old_widget.deleteLater()
+
+                tab_widget.insertTab(idx, new_widget, icon, title)
+                tab_widget.setCurrentIndex(idx)
 
     def new_pdf_tab(
         self, path: Optional[str] = None, restore_state: bool = False
@@ -1482,8 +1715,13 @@ class RiemannWindow(QMainWindow):
         if path:
             self._add_pdf_tab(path, self.tabs_main, restore_state)
         else:
-            reader = ReaderTab()
-            reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
+            if self.settings.value("reader/open_in_preview_mode", False, type=bool):
+                reader = PreviewReaderTab()
+            else:
+                reader = ReaderTab()
+                reader.signatures_detected.connect(
+                    lambda _: self.refresh_signature_panel()
+                )
 
             icon_path = get_resource_path(os.path.join("assets", "icons", "pdf.png"))
             pdf_icon = QIcon(icon_path)
@@ -1806,7 +2044,11 @@ class RiemannWindow(QMainWindow):
                 tabs_data.append({"type": "folder_home", "data": ""})
             elif isinstance(wid, ReaderTab) and getattr(wid, "current_path", None):
                 tabs_data.append(
-                    {"type": "pdf", "data": os.path.abspath(wid.current_path)}
+                    {
+                        "type": "pdf",
+                        "data": os.path.abspath(wid.current_path),
+                        "preview": getattr(wid, "is_preview", False),
+                    }
                 )
 
             elif isinstance(wid, BrowserTab):
@@ -1874,6 +2116,70 @@ class RiemannWindow(QMainWindow):
 
         self.show_toast("Restored last session tabs 📂")
 
+    @classmethod
+    def _save_all_windows_session(cls) -> None:
+        """Saves session state for all currently open non-incognito windows."""
+        settings = QSettings("Riemann", "Riemann")
+        current_open = [
+            w for w in cls._all_open_windows
+            if not getattr(w, "incognito", False) and not w.isHidden()
+        ]
+        if not current_open:
+            return
+
+        now = time.time()
+        prev_close_time = settings.value("session/multi_window_close_time", 0.0, type=float)
+        existing_windows = settings.value("session/windows", None)
+
+        is_closing_sequence = (
+            (now - prev_close_time < 20.0)
+            and isinstance(existing_windows, list)
+            and len(existing_windows) > 1
+        )
+
+        windows_data = []
+        for win in current_open:
+            main_tabs = win._serialize_tab_state(win.tabs_main)
+            side_tabs = win._serialize_tab_state(win.tabs_side)
+            active_folder = ""
+            if getattr(win, "is_folder_session_active", False) and hasattr(win, "explorer_panel"):
+                active_folder = win.explorer_panel.current_path
+
+            win_dict = {
+                "geometry": win.saveGeometry(),
+                "state": win.saveState(),
+                "main_tabs": main_tabs,
+                "side_tabs": side_tabs,
+                "main_active_idx": win.tabs_main.currentIndex(),
+                "side_active_idx": win.tabs_side.currentIndex(),
+                "active_folder": active_folder,
+            }
+            windows_data.append(win_dict)
+
+        if is_closing_sequence and isinstance(existing_windows, list):
+            if len(windows_data) < len(existing_windows):
+                for extra in existing_windows[len(windows_data):]:
+                    windows_data.append(extra)
+
+        if windows_data:
+            settings.setValue("session/windows", windows_data)
+            settings.setValue("session/multi_window_close_time", now)
+            first_win = windows_data[0]
+            settings.setValue("session/main_tabs", first_win["main_tabs"])
+            settings.setValue("session/side_tabs", first_win["side_tabs"])
+            settings.setValue("session/main_active_idx", first_win["main_active_idx"])
+            settings.setValue("session/side_active_idx", first_win["side_active_idx"])
+            settings.setValue("session/active_folder", first_win["active_folder"])
+            settings.setValue("window/geometry", first_win["geometry"])
+            settings.setValue("window/state", first_win["state"])
+            settings.setValue("session/clean_exit", True)
+            settings.sync()
+
+    def exit_application(self) -> None:
+        """Saves all open windows and terminates the application."""
+        RiemannWindow._save_all_windows_session()
+        QApplication.instance().quit()
+
     def closeEvent(self, event: QCloseEvent) -> None:
         """
         Handles the window close event.
@@ -1882,31 +2188,18 @@ class RiemannWindow(QMainWindow):
         Args:
             event (QCloseEvent): The close event triggered by the system.
         """
-        if self.incognito or not self.restore_session:
+        if self.incognito:
+            if self in RiemannWindow._all_open_windows:
+                RiemannWindow._all_open_windows.remove(self)
             self._kill_all_media_safely()
             super().closeEvent(event)
             return
 
-        self.settings.setValue("session/main_tabs", self._serialize_tab_state(self.tabs_main))
-        self.settings.setValue("session/side_tabs", self._serialize_tab_state(self.tabs_side))
+        RiemannWindow._save_all_windows_session()
 
-        if getattr(self, "is_folder_session_active", False) and hasattr(
-            self, "explorer_panel"
-        ):
-            self.settings.setValue(
-                "session/active_folder", self.explorer_panel.current_path
-            )
-        else:
-            self.settings.setValue("session/active_folder", "")
+        if self in RiemannWindow._all_open_windows:
+            RiemannWindow._all_open_windows.remove(self)
 
-        self.settings.setValue("window/geometry", self.saveGeometry())
-        self.settings.setValue("window/state", self.saveState())
-
-        self.settings.setValue("session/main_active_idx", self.tabs_main.currentIndex())
-        self.settings.setValue("session/side_active_idx", self.tabs_side.currentIndex())
-        self.settings.setValue("session/clean_exit", True)
-
-        self.settings.sync()
         self._kill_all_media_safely()
         super().closeEvent(event)
 
@@ -2690,6 +2983,13 @@ class RiemannWindow(QMainWindow):
                     self.floating_fs_btn.show()
                     self.floating_fs_btn.raise_()
                 self.floating_fs_timer.stop()
+            elif local_pos.x() < 150 and local_pos.y() < 100:
+                self._update_floating_fs_btn_icon()
+                self.floating_fs_btn.move(20, 20)
+                if not self.floating_fs_btn.isVisible():
+                    self.floating_fs_btn.show()
+                    self.floating_fs_btn.raise_()
+                self.floating_fs_timer.stop()
             else:
                 if (
                     self.floating_fs_btn.isVisible()
@@ -2835,8 +3135,11 @@ class RiemannWindow(QMainWindow):
                 target.insertTab(insert_idx, tab, os.path.basename(path))
                 target.setCurrentIndex(insert_idx)
         else:
-            reader = ReaderTab()
-            reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
+            if self.settings.value("reader/open_in_preview_mode", False, type=bool):
+                reader = PreviewReaderTab()
+            else:
+                reader = ReaderTab()
+                reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
             reader.load_document(path)
             icon_path = get_resource_path(os.path.join("assets", "icons", "pdf.png"))
             idx = insert_idx if insert_idx != -1 else target.count()
@@ -3042,6 +3345,7 @@ def run() -> None:
     for path in files_to_open:
         window.new_pdf_tab(path)
 
+    app.aboutToQuit.connect(RiemannWindow._save_all_windows_session)
     window.show()
     sys.exit(app.exec())
 

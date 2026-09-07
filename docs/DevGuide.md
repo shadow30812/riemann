@@ -185,11 +185,24 @@ To ensure seamless desktop integration on Linux distributions (GNOME, KDE, Ubunt
 
 ---
 
+## Multi-Window Lifecycle & State Tracking
+
+`RiemannWindow` tracks all open non-incognito window instances globally via `_all_open_windows`:
+
+* **Instance Tracking**: When a non-incognito `RiemannWindow` is instantiated, it registers itself into `RiemannWindow._all_open_windows`. On `closeEvent()`, it unregisters cleanly.
+* **Multi-Window Session Serialization (`_save_all_windows_session()`)**: Iterates through all open windows in `_all_open_windows`, capturing window geometry, main tab paths/types, side tab paths/types, active tab indices, and split-view orientation states into a list serialized under the `sessions/multi_window` key in `QSettings`.
+* **Sequential Close Grace Window**: When multiple windows are open, closing one window sets a 20-second timestamp threshold (`_multi_window_save_time`). Subsequent windows closed within this window avoid overwriting the multi-window session with a single-window state, protecting session restoration if the user closes windows sequentially prior to exiting.
+* **Clean Application Exit (`exit_application()`)**: Forces a clean serialization of all active windows and issues `QApplication.quit()`.
+* **Multi-Window Restoration**: On startup with `restore_session=True`, if `sessions/multi_window` exists and contains multiple window records, the primary window restores its own layout and dynamically spawns subsequent `RiemannWindow(restore_session=False)` instances, populating their tabs and geometries.
+
+---
+
 ## Fullscreen Architecture & Hover Controls
 
 Fullscreen mode in `RiemannWindow` integrates auto-hiding controls to maximize reading canvas while keeping navigation accessible:
 
 * **Trigger Threshold**: Moving the mouse within the top 4 pixels of the display reveals both the main menu bar and the primary navigation bar using smooth property animations.
+* **Dual-Corner Exit Fullscreen Toggle (`_track_mouse_for_fs`)**: Moving the mouse cursor within 150×100px of either the **top-right** (`x > width - 150, y < 100`) or **top-left** (`x < 150, y < 100`) corner triggers the floating exit fullscreen button (`btn_exit_fs`). The button dynamically repositions adjacent to the active hover corner (`(20, 20)` for top-left, `(width - 56, 20)` for top-right).
 * **Auto-Hide Delay**: When the mouse leaves the top control zone, a 1.5-second single-shot timer triggers an auto-hide transition unless a menu or combo-box dropdown is currently open.
 * **System Clock Widget**: A live `SystemClockWidget` (`QLabel` updated via `QTimer`) is integrated directly into the navbar to maintain time awareness during distraction-free fullscreen research sessions.
 
@@ -235,12 +248,24 @@ Persistent categories include:
 * theme preferences (defaulting to Light Mode for initial installs)
 * session state
 * `app/ui_scale`: UI Display Scaling percentage (50% to 250%)
+* `reader/open_in_preview_mode`: Default document opening mode (Extended vs Preview)
 
 ### UI Display Scaling Integration
 Located in `SettingsDialog`:
 * Configures `QT_SCALE_FACTOR` dynamically.
 * Integrates a wide `QSlider` (220px, 1% single step) and an interactive numeric `QSpinBox` synchronized bidirectionally.
 * Applies on restart, scaling all Qt widgets, fonts, and icons cleanly for high-DPI displays.
+
+### Document Open Mode Setting & Tab Replacement Infrastructure
+`SettingsDialog` exposes a checkbox (`chk_preview_mode`) controlling `reader/open_in_preview_mode`:
+* **Live Change Detection**: If the user toggles this setting when PDF documents are currently open in the main or side panes, `RiemannWindow` prompts the user with explicit action buttons:
+  * **"Switch Open Documents"** (`AcceptRole`): executes in-place tab hot-swapping via `_switch_open_documents_mode(new_preview_mode)`.
+  * **"Keep Current Layout"** (`RejectRole`): saves the setting for future documents while leaving active documents in their existing layout.
+* **In-Place Tab Conversion (`_switch_open_documents_mode`)**:
+  * Iterates across `tabs_main` and `tabs_side`.
+  * For each open document, instantiates the target tab type (`PreviewReaderTab` if converting to preview mode, or `ReaderTab` if converting to extended mode).
+  * Safely reads the old widget's scroll state (`hasattr(old_widget.scroll, "verticalScrollBar")`), page index, tab title, and file path.
+  * Inserts the new tab at the exact same index, transfers focus, calls `cleanup()` on the old tab, and schedules it for deferred deletion.
 
 ---
 
@@ -292,6 +317,36 @@ Responsibilities remaining inside `ReaderTab`:
 
 * **Page Scrolling**: `Page Up` and `Page Down` trigger `scroll_page_length(-1)` and `scroll_page_length(1)` to jump viewport by one full visible page height.
 * **F5 Document Refresh**: Calls `reload_document()`. Compares file modification times and content hashes. If modified or deleted on disk, prompts the user with an option dialog to reload the new document or keep the active cached view.
+
+---
+
+## Tab Focus Isolation
+
+In standard Qt focus traversal hierarchies, Tab-key navigation or switching between tab widgets can propagate focus events down to internal `QScrollArea` viewports or child widgets, inadvertently advancing the scrollbar by one line or page.
+
+To eliminate unwanted viewport jumping when cycling tabs:
+* `ReaderTab` explicitly overrides `focusNextPrevChild(next: bool) -> bool` and returns `False`.
+* This prevents background focus traversal from mutating scroll position while keeping explicit user keyboard navigation (arrow keys, Page Up/Down, Space, autoscroll) intact.
+
+---
+
+## Universal Page Indicator Popup
+
+`ReaderTab` features a transient page indicator pill (`page_indicator_popup`) positioned near the vertical scrollbar:
+
+* **Triggering Pipeline**: Invoked inside `defer_scroll_update()` whenever the scrollbar position moves or programmatic page jumps occur.
+* **Display Mode Coverage**: Operates universally across all three display modes:
+  * Normal / Windowed Mode (`_fullscreen_state == 0`)
+  * Reading Mode with visible toolbar (`_fullscreen_state == 1`)
+  * Pure Fullscreen with hidden toolbar (`_fullscreen_state == 2`)
+* **Geometry Calculation**: Positions the widget dynamically adjacent to the vertical scrollbar:
+  ```python
+  x = max(10, self.width() - sb_width - self.page_indicator_popup.width() - 15)
+  ratio = sb_val / sb_max if sb_max > 0 else 0.5
+  y = int(40 + ratio * (self.height() - self.page_indicator_popup.height() - 80))
+  ```
+  This bounds `y` within the visible viewport so it never collides with top navigation toolbars or bottom status bars.
+* **Opacity Fade Lifecycle**: Uses a `QGraphicsOpacityEffect` and `QPropertyAnimation` with cubic easing. Upon triggering, the popup instantly resets to 100% opacity and restarts a 1200ms single-shot hold timer (`_page_indicator_timer`), followed by an 800ms smooth fade to 0.0 opacity, hiding the widget on completion.
 
 ---
 
@@ -552,6 +607,36 @@ The text selection system (`tab.py`) was overhauled to handle LaTeX, math notati
 
 ---
 
+## External PDF Comments & Annotations Ingestion
+
+Beyond native Riemann annotation overlays, `AnnotationsMixin` supports discovering, parsing, and interacting with annotations embedded by third-party PDF readers (e.g. Adobe Acrobat, Apple Preview, Okular):
+
+* **Ingestion Layer (`_load_external_comments()`)**:
+  * Utilizes `pypdf.PdfReader` to traverse `/Annots` arrays on each page without altering original file binaries.
+  * Filters for interactive annotation subtypes: `/Text` (sticky notes), `/FreeText`, `/Highlight`, `/Underline`, `/StrikeOut`, `/Squiggly`, `/Square`, `/Circle`.
+  * Extracts metadata dictionaries containing:
+    * `/T`: Author / creator name.
+    * `/M`: Modification timestamp.
+    * `/Contents`: Textual comment body.
+    * `/Rect`: Bounding coordinate rectangle in PDF points.
+* **Coordinate Space Normalization**:
+  * Native PDF geometry uses points ($72 \text{ pt/inch}$) with the origin `(0, 0)` located at the **bottom-left** of the media box.
+  * Riemann converts coordinates to image pixel space (origin at **top-left**):
+    ```python
+    scale_x = img_width / page_width
+    scale_y = img_height / page_height
+    norm_x = x1 * scale_x
+    norm_y = (page_height - y2) * scale_y
+    norm_w = (x2 - x1) * scale_x
+    norm_h = (y2 - y1) * scale_y
+    ```
+* **Interaction & Hit Testing (`_get_comment_at_pos`)**:
+  * Employs an expanded 10px hit-test margin to ensure small note icons or thin highlight strokes are easy to click.
+  * In `ReaderTab.eventFilter`, mouse hover events set `Qt.CursorShape.PointingHandCursor` and show the comment preview as a tooltip.
+  * Clicking on the comment opens `CommentViewDialog`, displaying author, timestamp, and the complete scrollable comment text.
+
+---
+
 # 6. Search & Text Extraction Systems
 
 ## Rust Search Delegation
@@ -663,6 +748,26 @@ Do not mix both systems carelessly.
 
 ---
 
+## yt-dlp Video & Playlist Architecture
+
+The yt-dlp integration in `ui/browser.py` manages asynchronous video and playlist retrieval:
+
+* **Challenge Execution & Deno Environment**:
+  * Configures `"remote_components": ["ejs:github"]` within `ydl_opts` for both `YtDlpWorker` and `YtDlpStreamWorker`.
+  * Checks and appends `~/.deno/bin` to `os.environ["PATH"]` if present to resolve JavaScript extraction challenges without external intervention.
+* **Automatic Playlist Detection**:
+  * In `BrowserTab.download_video()`, checks if the target URL contains `list=` or `/playlist`.
+  * If detected, passes `is_playlist=True` to `YtDlpSettingsDialog`, auto-checking the "Download playlist" option.
+* **Output Template Formatting**:
+  * Single video: `%(title)s.%(ext)s`.
+  * Playlist: `%(playlist_index&{:02d} - |)s%(title)s.%(ext)s`, cleanly ordering downloaded items by their track index.
+* **Cumulative Progress Tracking (`core/managers.py`)**:
+  * In `YtDlpDownloadManager.update_progress()`, progress is normalized across all items in the playlist:
+    $$\text{Total \%} = \frac{(p_{\text{idx}} - 1) + \frac{\text{video \%}}{100}}{p_{\text{count}}} \times 100$$
+  * Prevents UI progress bars from resetting back to 0% as each successive video begins downloading.
+
+---
+
 # 8. JavaScript Injection Layer
 
 ## Browser-Side Injection Strategy
@@ -749,7 +854,7 @@ Modifying the audio graph incorrectly can easily introduce:
 
 # 9. Media & Audio Infrastructure
 
-## MiniAudioPlayer
+## MiniAudioPlayer Architecture & Cross-Window Polling
 
 Located in:
 
@@ -757,29 +862,40 @@ Located in:
 core/mini_player.py
 ```
 
-The mini player polls active browser tabs looking for HTML5 media elements.
+`MiniAudioPlayer` is a compact native controller hosted directly within the main window's menu bar (`QMenuBar`). It bridges native Qt controls to in-browser HTML5 media playback via asynchronous JavaScript execution.
 
-It bridges native Qt controls into webpage JavaScript.
+Features & Subsystem Design:
 
-Features:
-
-* play/pause
-* seeking
-* timeline polling
-* adaptive visibility
-* theme-aware icons
+* **App-Wide Cross-Window Discovery (`_get_all_app_browsers()`)**:
+  * Gathers all active `BrowserTab` instances across all application windows via `RiemannWindow._all_open_windows` and `QApplication.topLevelWidgets()`.
+  * Allows media playback in any window or split-view pane to be monitored and controlled from the active menu bar.
+* **C++ Pointer Validity Safety (`_is_browser_valid()`)**:
+  * Tab widgets can be closed, detached, or garbage-collected while polling timers are running.
+  * Uses `shiboken6.isValid(browser)` and verifies the existence of `browser.web` and `browser.web.page()` to prevent dangling C++ pointer access and segmentation faults.
+* **Audible Prioritization & Active Session Retention (`find_active_browser()`)**:
+  1. Checks if the currently focused tab in `tabs_main` or `tabs_side` is a valid browser tab. If it is audible (`page.recentlyAudible()`), it is selected.
+  2. Traverses all discovered browser tabs across all open windows for any tab actively playing sound (`recentlyAudible()`).
+  3. If currently controlling a valid browser tab (`self.active_browser`), retains tracking even when the user switches to a PDF reader tab, another window, or a non-browser tab.
+  4. Falls back to the current tab of `tabs_main` or any available browser tab.
+* **Native Playback Controls**:
+  * Play/Pause: Dispatches JavaScript to locate `<audio>` or `<video>` elements and invoke `.play()` or `.pause()`.
+  * Seek: Synchronizes `QSlider` releases with `media.currentTime = seek_val`.
+  * Timeline: Formats current playback time and total track duration (`MM:SS / MM:SS`).
+* **Adaptive Visibility & Layout Recomputation**:
+  * Hides cleanly when no valid media is playing (`self.active_browser is None`).
+  * Calls `adjustSize()` and `updateGeometry()` on parent widgets and the menu bar when visibility toggles to ensure seamless navbar layout recalculation.
 
 ---
 
 ## Polling Strategy
 
-The player intentionally uses periodic polling instead of complex event synchronization.
+The player intentionally uses periodic polling (500ms `QTimer` interval) instead of complex event synchronization.
 
 Reasons:
 
 * browser isolation boundaries
-* renderer unpredictability
-* simpler failure recovery
+* renderer process unpredictability
+* seamless recovery if a media page navigates or refreshes
 
 ---
 
@@ -1129,11 +1245,35 @@ The application persists:
 * zoom levels
 * active documents
 * clean shutdown flag (`_session_cleanly_closed`)
+* multi-window layout schemas (`sessions/multi_window`)
 
 ### Immediate History & Crash Recovery Flow
 * **Immediate Persistence**: Opened documents and web pages are recorded into `HistoryManager` as soon as they are launched rather than waiting for `closeEvent()`.
 * **Clean vs Unclean Exit**: On graceful exit, `RiemannWindow.closeEvent()` records a clean shutdown state. If the process is terminated abruptly (SIGKILL, power failure, system reboot), the subsequent startup detects the unclean exit and presents a modal prompt offering to **"Restore last opened tabs"**.
 * **Default Theme**: Initial theme state defaults to Light Mode for new installations.
+
+---
+
+## Multi-Window Session Persistence Architecture
+
+Riemann provides seamless restoration across multiple concurrent desktop windows:
+
+* **Session Schema (`sessions/multi_window`)**:
+  A serialized list of window dictionaries, each containing:
+  * `geometry`: Window dimensions and position on screen.
+  * `main_tabs`: List of tab serialization dicts (`{"type": "pdf"|"web", "data": path|url}`) for `tabs_main`.
+  * `side_tabs`: List of tab serialization dicts for `tabs_side`.
+  * `active_main_idx`: Active tab index in the main pane.
+  * `active_side_idx`: Active tab index in the side pane.
+  * `is_split`: Boolean indicating if split-view was visible.
+* **Sequential Close Coordination**:
+  * Users frequently close windows one by one before fully quitting the application.
+  * When any window closes with multiple windows remaining, `_save_all_windows_session()` records the current time into `_multi_window_save_time`.
+  * If the final window closes within 20 seconds, it refrains from overwriting the multi-window snapshot, allowing the full multi-window layout to be restored on the next startup.
+* **Restoration Lifecycle**:
+  * On application boot, `RiemannWindow.__init__(restore_session=True)` checks for `sessions/multi_window`.
+  * If found, the current window restores entry 0.
+  * For entries `1..N`, the application instantiates new `RiemannWindow(restore_session=False)` objects, populating their tabs and geometries, and displays them on screen.
 
 ---
 

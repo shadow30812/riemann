@@ -13,9 +13,10 @@ from riemann.app import (
 
 class DummySettings:
     """Provides safe Python types back to PySide6 methods like restoreGeometry."""
+    _shared_data = {}
 
     def __init__(self, *args, **kwargs):
-        self._data = {}
+        self._data = DummySettings._shared_data
 
     def value(self, key, default_val=None, type=None):
         return self._data.get(key, default_val)
@@ -25,6 +26,10 @@ class DummySettings:
 
     def sync(self):
         pass
+
+    def clear(self):
+        self._data.clear()
+
 
 
 class DummyHistoryManager:
@@ -85,6 +90,29 @@ class DummyReaderTab(QWidget):
     def __init__(self, *args, **kwargs):
         super().__init__()
         self.current_path = None
+        self.is_preview = False
+        self.scroll = None
+
+    def load_document(self, path, restore_state=False):
+        self.current_path = path
+
+    def toggle_theme(self):
+        pass
+
+    def cleanup(self):
+        pass
+
+
+
+class DummyPreviewReaderTab(DummyReaderTab):
+    signatures_detected = Signal(object)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.current_path = None
+        self.is_preview = True
+        self.scroll = None
+
 
     def load_document(self, path, restore_state=False):
         self.current_path = path
@@ -99,9 +127,12 @@ def isolated_app_environment(qtbot):
     Automatically patches Heavy UI & WebEngine components for every test
     so Chromium threads never spin up and safe types are passed to C++.
     """
+    DummySettings._shared_data.clear()
+    RiemannWindow._all_open_windows.clear()
     with (
         patch("riemann.app.BrowserTab", DummyBrowserTab),
         patch("riemann.app.ReaderTab", DummyReaderTab),
+        patch("riemann.app.PreviewReaderTab", DummyPreviewReaderTab),
         patch("riemann.app.HistoryManager", DummyHistoryManager),
         patch("riemann.app.BookmarksManager", DummyBookmarksManager),
         patch("riemann.app.DownloadManager", DummyDownloadManager),
@@ -111,6 +142,10 @@ def isolated_app_environment(qtbot):
         patch("riemann.app.QWebEnginePage"),
     ):
         yield
+    RiemannWindow._all_open_windows.clear()
+    DummySettings._shared_data.clear()
+
+
 
 
 def test_get_resource_path():
@@ -266,3 +301,187 @@ def test_join_pdfs(
 
     assert mock_writer.add_page.call_count == 2
     mock_writer.write.assert_called_once()
+
+
+def test_settings_dialog_preview_mode(qtbot):
+    """Item 2: Preview mode checkbox in SettingsDialog."""
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+
+    window.settings.setValue("reader/open_in_preview_mode", True)
+    dlg = SettingsDialog(window)
+    qtbot.addWidget(dlg)
+    assert dlg.cb_pdf_preview_mode.isChecked() is True
+
+    window.settings.setValue("reader/open_in_preview_mode", False)
+    dlg2 = SettingsDialog(window)
+    qtbot.addWidget(dlg2)
+    assert dlg2.cb_pdf_preview_mode.isChecked() is False
+
+
+def test_switch_open_documents_mode(qtbot):
+    """Item 2: Live switching between Preview and Extended Reader modes."""
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+
+    with patch("os.path.exists", return_value=True):
+        # Open a reader tab
+        window._add_pdf_tab("/fake/document.pdf", window.tabs_main)
+        assert window.tabs_main.count() == 3  # 2 default tabs + 1 pdf
+        pdf_tab = window.tabs_main.widget(2)
+        assert getattr(pdf_tab, "is_preview", False) is False
+
+        # Switch to preview mode
+        window._switch_open_documents_mode(to_preview=True)
+        new_tab = window.tabs_main.widget(2)
+        assert getattr(new_tab, "is_preview", False) is True
+        assert new_tab.current_path == "/fake/document.pdf"
+
+        # Switch back to full reader mode
+        window._switch_open_documents_mode(to_preview=False)
+        reverted_tab = window.tabs_main.widget(2)
+        assert getattr(reverted_tab, "is_preview", False) is False
+        assert reverted_tab.current_path == "/fake/document.pdf"
+
+
+def test_settings_dialog_mode_switch_prompt(qtbot):
+    """Item 2: Prompt with explicit buttons when mode changes with open documents."""
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+
+    with patch("os.path.exists", return_value=True):
+        window._add_pdf_tab("/fake/document.pdf", window.tabs_main)
+
+    window.settings.setValue("reader/open_in_preview_mode", False)
+
+    # 1. User accepts switch -> calls _switch_open_documents_mode
+    with (
+        patch("riemann.app.SettingsDialog") as mock_settings_dlg_cls,
+        patch("riemann.app.QMessageBox") as mock_msgbox_cls,
+        patch.object(window, "_switch_open_documents_mode") as mock_switch,
+    ):
+        mock_dlg = MagicMock()
+        mock_dlg.exec.return_value = 1  # Accepted
+        mock_dlg.spin_sidebar.value.return_value = 240
+        mock_dlg.spin_tab_limit.value.return_value = 10
+        mock_dlg.spin_history_limit.value.return_value = 100
+        mock_dlg.spin_autoscroll.value.return_value = 2
+        mock_dlg.cb_floating_fs.isChecked.return_value = True
+        mock_dlg.cb_pdf_preview_mode.isChecked.return_value = True
+        mock_dlg.slider_scale.value.return_value = 100
+        mock_settings_dlg_cls.return_value = mock_dlg
+
+        btn_switch = MagicMock()
+        btn_keep = MagicMock()
+        mock_box_inst = MagicMock()
+        mock_box_inst.addButton.side_effect = [btn_switch, btn_keep]
+        mock_box_inst.clickedButton.return_value = btn_switch
+        mock_msgbox_cls.return_value = mock_box_inst
+
+        window.show_settings()
+        mock_switch.assert_called_once_with(True)
+
+    # 2. User rejects switch (keep current) -> does NOT call _switch_open_documents_mode
+    with (
+        patch("riemann.app.SettingsDialog") as mock_settings_dlg_cls,
+        patch("riemann.app.QMessageBox") as mock_msgbox_cls,
+        patch.object(window, "_switch_open_documents_mode") as mock_switch,
+    ):
+        mock_dlg = MagicMock()
+        mock_dlg.exec.return_value = 1
+        mock_dlg.spin_sidebar.value.return_value = 240
+        mock_dlg.spin_tab_limit.value.return_value = 10
+        mock_dlg.spin_history_limit.value.return_value = 100
+        mock_dlg.spin_autoscroll.value.return_value = 2
+        mock_dlg.cb_floating_fs.isChecked.return_value = True
+        mock_dlg.cb_pdf_preview_mode.isChecked.return_value = True
+        mock_dlg.slider_scale.value.return_value = 100
+        mock_settings_dlg_cls.return_value = mock_dlg
+
+        mock_box_inst = MagicMock()
+        mock_box_inst.addButton.side_effect = [btn_switch, btn_keep]
+        mock_box_inst.clickedButton.return_value = btn_keep
+        mock_msgbox_cls.return_value = mock_box_inst
+
+        window.show_settings()
+        mock_switch.assert_not_called()
+
+
+
+def test_multi_window_session_tracking_and_save(qtbot):
+    """Item 3: Multi-window tracking in _all_open_windows and session serialization."""
+    RiemannWindow._all_open_windows = []
+
+    win1 = RiemannWindow(incognito=False, restore_session=False)
+    win1.show()
+    qtbot.addWidget(win1)
+    assert win1 in RiemannWindow._all_open_windows
+
+    win2 = RiemannWindow(incognito=False, restore_session=False)
+    win2.show()
+    qtbot.addWidget(win2)
+    assert len(RiemannWindow._all_open_windows) == 2
+
+    # Incognito window should NOT be tracked in _all_open_windows
+    win_incog = RiemannWindow(incognito=True, restore_session=False)
+    win_incog.show()
+    qtbot.addWidget(win_incog)
+    assert win_incog not in RiemannWindow._all_open_windows
+
+    # Test saving all windows session
+    RiemannWindow._save_all_windows_session()
+    saved = win1.settings.value("session/windows", None)
+    assert saved is not None
+    assert len(saved) >= 2
+
+    # Clean up
+    RiemannWindow._all_open_windows = []
+
+
+def test_dual_corner_fullscreen_button(qtbot):
+    """Item 4: Fullscreen floating button appears on hover in both top corners."""
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    window.resize(1000, 700)
+    window._reader_fullscreen = True
+    window.floating_fs_btn.hide()
+
+    from PySide6.QtCore import QPoint
+
+    # Hover near top-left (e.g. local x=50, y=30)
+    with patch.object(window, "mapFromGlobal", return_value=QPoint(50, 30)):
+        window._track_mouse_for_fs()
+    assert window.floating_fs_btn.pos() == QPoint(20, 20)
+    assert not window.floating_fs_btn.isHidden()
+
+    # Hover near top-right (e.g. local x=950, y=30)
+    with patch.object(window, "mapFromGlobal", return_value=QPoint(950, 30)):
+        window._track_mouse_for_fs()
+    expected_x = window.width() - window.floating_fs_btn.width() - 20
+    assert window.floating_fs_btn.pos() == QPoint(expected_x, 20)
+    assert not window.floating_fs_btn.isHidden()
+
+    # Hover in center (e.g. local x=500, y=300) should not move/show button
+    window.floating_fs_btn.hide()
+    with patch.object(window, "mapFromGlobal", return_value=QPoint(500, 300)):
+        window._track_mouse_for_fs()
+    assert window.floating_fs_btn.isHidden()
+
+
+
+
+def test_exit_application(qtbot):
+    """Item 3: File -> Exit / Ctrl+Q saves all windows and exits."""
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+
+    mock_app = MagicMock()
+    with (
+        patch.object(RiemannWindow, "_save_all_windows_session") as mock_save,
+        patch("PySide6.QtWidgets.QApplication.instance", return_value=mock_app),
+    ):
+        window.exit_application()
+        mock_save.assert_called_once()
+        mock_app.quit.assert_called_once()
+
+

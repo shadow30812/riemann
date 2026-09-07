@@ -1,7 +1,13 @@
+import sys
 from unittest.mock import MagicMock, patch
 
 from PySide6.QtCore import QPoint, QRect
+from PySide6.QtWidgets import QApplication
 from riemann.ui.reader.widgets import PageWidget
+
+if not QApplication.instance():
+    _qapp = QApplication(sys.argv)
+
 
 
 def test_pagewidget_init():

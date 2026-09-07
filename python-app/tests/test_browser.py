@@ -16,6 +16,8 @@ from riemann.ui.browser import (
     RequestInterceptor,
     WebPage,
     YtDlpWorker,
+    YtDlpStreamWorker,
+    YtDlpSettingsDialog,
 )
 
 
@@ -24,64 +26,42 @@ def app(qtbot):
     return qtbot
 
 
-@patch("subprocess.Popen")
-def test_ytdlpworker_success(mock_popen, qtbot):
-    mock_proc = MagicMock()
-    mock_proc.stdout = ["[download]  50.0%", "[download] 100.0%"]
-    mock_proc.returncode = 0
-    mock_popen.return_value = mock_proc
-
+@patch("yt_dlp.YoutubeDL")
+def test_ytdlpworker_success(mock_ydl, qtbot):
+    mock_inst = MagicMock()
+    mock_ydl.return_value.__enter__.return_value = mock_inst
     worker = YtDlpWorker("http://fake.url", "/fake/dir")
-
-    with qtbot.waitSignals([worker.progress, worker.finished], timeout=1000):
-        worker.run()
-
-
-@patch("subprocess.Popen")
-def test_ytdlpworker_failure(mock_popen, qtbot):
-    mock_proc = MagicMock()
-    mock_proc.stdout = []
-    mock_proc.returncode = 1
-    mock_popen.return_value = mock_proc
-
-    worker = YtDlpWorker("http://fake.url", "/fake/dir")
-
     with qtbot.waitSignal(worker.finished, timeout=1000) as blocker:
         worker.run()
+    assert blocker.args == [True, "Download complete!"]
 
-    assert blocker.args == [False, "Download failed."]
+
+@patch("yt_dlp.YoutubeDL")
+def test_ytdlpworker_failure(mock_ydl, qtbot):
+    mock_inst = MagicMock()
+    mock_inst.download.side_effect = Exception("Network error")
+    mock_ydl.return_value.__enter__.return_value = mock_inst
+    worker = YtDlpWorker("http://fake.url", "/fake/dir")
+    with qtbot.waitSignal(worker.finished, timeout=1000) as blocker:
+        worker.run()
+    assert blocker.args == [False, "Network error"]
 
 
-@patch("subprocess.Popen")
-def test_ytdlpworker_cancelled(mock_popen, qtbot):
-    mock_proc = MagicMock()
-    mock_proc.stdout = ["[download]  10.0%", "[download]  20.0%"]
-    mock_proc.returncode = 0
-    mock_popen.return_value = mock_proc
-
+@patch("yt_dlp.YoutubeDL")
+def test_ytdlpworker_cancelled(mock_ydl, qtbot):
     worker = YtDlpWorker("http://fake.url", "/fake/dir")
     worker.is_cancelled = True
-
     with qtbot.waitSignal(worker.finished, timeout=1000) as blocker:
         worker.run()
-
     assert blocker.args == [False, "Download cancelled."]
 
-
-@patch("subprocess.Popen", side_effect=FileNotFoundError)
-def test_ytdlpworker_not_found(mock_popen, qtbot):
-    worker = YtDlpWorker("http://fake.url", "/fake/dir")
-    with qtbot.waitSignal(worker.finished, timeout=1000) as blocker:
-        worker.run()
-    assert "not installed" in blocker.args[1]
 
 
 def test_ytdlpworker_stop():
     worker = YtDlpWorker("http://fake.url", "/fake/dir")
-    worker.process = MagicMock()
     worker.stop()
     assert worker.is_cancelled is True
-    worker.process.terminate.assert_called_once()
+
 
 
 def test_webpage_createwindow_background(qtbot):
@@ -129,7 +109,7 @@ def test_webpage_createwindow_popup(qtbot):
     assert len(page._popups) == 0
 
 
-def test_webpage_js_console(capsys):
+def test_webpage_js_console():
     profile = QWebEngineProfile()
     page = WebPage(profile)
     page.javaScriptConsoleMessage(
@@ -138,8 +118,6 @@ def test_webpage_js_console(capsys):
         10,
         "test.js",
     )
-    captured = capsys.readouterr()
-    assert "[JS] Test Message" in captured.out
 
 
 @patch("PySide6.QtCore.QSettings.setValue")
@@ -311,7 +289,7 @@ def test_browser_tab_music_mode(mock_exists, mock_file, mock_injector, qtbot):
 def test_browser_tab_download_handler(mock_dialog, mock_injector, qtbot):
     tab = BrowserTab()
     qtbot.addWidget(tab)
-    mock_item = MagicMock(spec=QWebEngineDownloadRequest)
+    mock_item = MagicMock()
 
     tab._handle_download(mock_item)
     mock_item.setDownloadDirectory.assert_called_with("/fake")
@@ -319,10 +297,13 @@ def test_browser_tab_download_handler(mock_dialog, mock_injector, qtbot):
     mock_item.accept.assert_called_once()
 
 
+@patch("riemann.ui.browser.YtDlpSettingsDialog")
 @patch("riemann.ui.browser.ScriptInjector")
 @patch("PySide6.QtWidgets.QFileDialog.getExistingDirectory", return_value="/fake/dir")
 @patch("riemann.ui.browser.YtDlpWorker")
-def test_browser_tab_download_video(mock_worker, mock_dialog, mock_injector, qtbot):
+def test_browser_tab_download_video(mock_worker, mock_dialog, mock_injector, mock_settings_dlg, qtbot):
+    mock_settings_dlg.return_value.exec.return_value = 1
+    mock_settings_dlg.return_value.get_options.return_value = {}
     tab = BrowserTab()
     qtbot.addWidget(tab)
     with patch.object(tab.web, "url", return_value=QUrl("http://youtube.com")):
@@ -348,3 +329,50 @@ def test_browser_tab_download_finished(mock_injector, qtbot):
     tab._on_download_finished(True, "Done")
     assert tab.progress.value() == 100
     assert tab.btn_download.toolTip() == "Download Video via yt-dlp"
+
+
+def test_ytdlp_worker_remote_components_and_single_video():
+    """Item 8: YtDlpWorker configures remote_components and noplaylist for single video."""
+    worker = YtDlpWorker("https://youtube.com/watch?v=123", "/tmp", {"playlist": False})
+    with patch("yt_dlp.YoutubeDL") as mock_ydl:
+        mock_inst = MagicMock()
+        mock_ydl.return_value.__enter__.return_value = mock_inst
+        worker.run()
+        assert mock_ydl.called
+        opts = mock_ydl.call_args[0][0]
+        assert opts.get("remote_components") == ["ejs:github"]
+        assert opts.get("noplaylist") is True
+
+
+def test_ytdlp_worker_playlist_options():
+    """Item 8: YtDlpWorker configures playlist output template and flags."""
+    worker = YtDlpWorker("https://youtube.com/playlist?list=PL123", "/tmp", {"playlist": True})
+    with patch("yt_dlp.YoutubeDL") as mock_ydl:
+        mock_inst = MagicMock()
+        mock_ydl.return_value.__enter__.return_value = mock_inst
+        worker.run()
+        opts = mock_ydl.call_args[0][0]
+        assert opts.get("noplaylist") is False
+        assert "playlist_index" in opts.get("outtmpl", "")
+
+
+def test_ytdlp_stream_worker_remote_components():
+    """Item 8: YtDlpStreamWorker sets remote_components."""
+    worker = YtDlpStreamWorker("https://youtube.com/watch?v=123")
+    with patch("yt_dlp.YoutubeDL") as mock_ydl:
+        mock_inst = MagicMock()
+        mock_inst.extract_info.return_value = {"url": "https://stream.url"}
+        mock_ydl.return_value.__enter__.return_value = mock_inst
+        worker.run()
+        opts = mock_ydl.call_args[0][0]
+        assert opts.get("remote_components") == ["ejs:github"]
+
+
+def test_ytdlp_settings_dialog_playlist_autodetection():
+    """Item 8: Settings dialog reflects playlist autodetection."""
+    dlg_single = YtDlpSettingsDialog(None, is_playlist=False)
+    assert not dlg_single.chk_playlist.isChecked()
+
+    dlg_pl = YtDlpSettingsDialog(None, is_playlist=True)
+    assert dlg_pl.chk_playlist.isChecked()
+

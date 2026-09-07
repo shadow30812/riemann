@@ -8,13 +8,83 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QInputDialog
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+)
 
 from ..widgets import PageWidget
+
+
+class CommentViewDialog(QDialog):
+    """Clean popup dialog displaying external PDF comments from Acrobat, Preview, etc."""
+
+    def __init__(self, comment: Dict[str, Any], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("PDF Comment")
+        self.setMinimumSize(380, 240)
+        self.resize(440, 280)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        author = comment.get("author") or "Unknown Author"
+        date = comment.get("date") or ""
+        subtype = comment.get("subtype") or "Comment"
+        page_num = comment.get("page", 0) + 1
+
+        hdr_layout = QHBoxLayout()
+        icon_lbl = QLabel("💬")
+        icon_lbl.setStyleSheet("font-size: 22px;")
+        hdr_layout.addWidget(icon_lbl)
+
+        meta_layout = QVBoxLayout()
+        lbl_author = QLabel(f"<b>{author}</b> ({subtype})")
+        lbl_author.setStyleSheet("font-size: 13px;")
+        meta_layout.addWidget(lbl_author)
+
+        info_text = f"Page {page_num}"
+        if date:
+            info_text += f" • {date}"
+        lbl_date = QLabel(info_text)
+        lbl_date.setStyleSheet("color: #888; font-size: 11px;")
+        meta_layout.addWidget(lbl_date)
+
+        hdr_layout.addLayout(meta_layout)
+        hdr_layout.addStretch()
+        layout.addLayout(hdr_layout)
+
+        txt_edit = QTextEdit()
+        txt_edit.setPlainText(comment.get("contents", ""))
+        txt_edit.setReadOnly(True)
+        txt_edit.setStyleSheet(
+            "font-size: 13px; line-height: 1.4; border: 1px solid #555; border-radius: 6px; padding: 6px;"
+        )
+        layout.addWidget(txt_edit)
+
+        btn_box = QHBoxLayout()
+        btn_copy = QPushButton("Copy Text")
+        btn_copy.clicked.connect(lambda: QApplication.clipboard().setText(comment.get("contents", "")))
+        btn_close = QPushButton("Close")
+        btn_close.clicked.connect(self.accept)
+        btn_close.setDefault(True)
+
+        btn_box.addWidget(btn_copy)
+        btn_box.addStretch()
+        btn_box.addWidget(btn_close)
+        layout.addLayout(btn_box)
 
 
 class AnnotationsMixin:
@@ -306,3 +376,123 @@ class AnnotationsMixin:
         if p_idx in self.rendered_pages:
             self.rendered_pages.remove(p_idx)
         self.render_visible_pages()
+
+    def _load_external_comments(self, path: str) -> None:
+        """Extracts native PDF comments/annotations created by external applications."""
+        self.external_comments: Dict[int, List[Dict[str, Any]]] = {}
+        if not path or not os.path.isfile(path) or path.lower().endswith(".md"):
+            return
+
+        try:
+            import pypdf
+
+            reader = pypdf.PdfReader(path)
+            for page_idx, page in enumerate(reader.pages):
+                if "/Annots" not in page:
+                    continue
+                annots = page["/Annots"]
+                crop = page.cropbox
+                origin_x = float(crop.left)
+                origin_y = float(crop.bottom)
+                cw = float(crop.width) if float(crop.width) > 0 else 1.0
+                ch = float(crop.height) if float(crop.height) > 0 else 1.0
+
+                page_comments = []
+                for annot_ref in annots:
+                    try:
+                        obj = annot_ref.get_object()
+                        if not obj:
+                            continue
+                        subtype = str(obj.get("/Subtype", "")).lstrip("/")
+                        if subtype in ("Link", "Widget"):
+                            continue
+
+                        contents = ""
+                        if "/Contents" in obj and obj["/Contents"]:
+                            contents = str(obj["/Contents"]).strip()
+                        elif "/Popup" in obj:
+                            popup = obj["/Popup"].get_object()
+                            if popup and "/Contents" in popup and popup["/Contents"]:
+                                contents = str(popup["/Contents"]).strip()
+
+                        if not contents:
+                            continue
+
+                        author = str(obj.get("/T", "") or "").strip()
+                        if not author and "/Popup" in obj:
+                            popup = obj["/Popup"].get_object()
+                            if popup:
+                                author = str(popup.get("/T", "") or "").strip()
+
+                        date_str = str(
+                            obj.get("/M", "") or obj.get("/CreationDate", "") or ""
+                        ).strip()
+                        if date_str.startswith("D:"):
+                            raw = date_str[2:16]
+                            if len(raw) >= 8:
+                                date_str = f"{raw[0:4]}-{raw[4:6]}-{raw[6:8]}"
+                                if len(raw) >= 14:
+                                    date_str += (
+                                        f" {raw[8:10]}:{raw[10:12]}:{raw[12:14]}"
+                                    )
+
+                        rect = obj.get("/Rect", [])
+                        if len(rect) == 4:
+                            x1 = (float(min(rect[0], rect[2])) - origin_x) / cw
+                            x2 = (float(max(rect[0], rect[2])) - origin_x) / cw
+                            y1 = 1.0 - ((float(max(rect[1], rect[3])) - origin_y) / ch)
+                            y2 = 1.0 - ((float(min(rect[1], rect[3])) - origin_y) / ch)
+                            rel_rect = (
+                                min(x1, x2),
+                                min(y1, y2),
+                                max(x1, x2),
+                                max(y1, y2),
+                            )
+                        else:
+                            rel_rect = (0.0, 0.0, 0.0, 0.0)
+
+                        page_comments.append(
+                            {
+                                "page": page_idx,
+                                "subtype": subtype,
+                                "contents": contents,
+                                "author": author,
+                                "date": date_str,
+                                "rel_rect": rel_rect,
+                            }
+                        )
+                    except Exception:
+                        continue
+                if page_comments:
+                    self.external_comments[page_idx] = page_comments
+        except Exception as e:
+            print(f"[Warning] Failed to load external PDF comments: {e}")
+
+    def _get_comment_at_pos(
+        self, page_idx: int, pos: Any, page_w: int, page_h: int
+    ) -> Optional[Dict[str, Any]]:
+        """Finds any external comment clicked or hovered on at the given page position."""
+        if not hasattr(self, "external_comments") or not self.external_comments:
+            return None
+        comments = self.external_comments.get(page_idx, [])
+        if not comments:
+            return None
+
+        rx, ry = pos.x() / max(1, page_w), pos.y() / max(1, page_h)
+        if hasattr(self, "_map_to_unrotated"):
+            rx, ry = self._map_to_unrotated(rx, ry)
+
+        for c in comments:
+            x1, y1, x2, y2 = c["rel_rect"]
+            hit_pad_x = max(0.02, 16.0 / max(1, page_w))
+            hit_pad_y = max(0.02, 16.0 / max(1, page_h))
+            if (x1 - hit_pad_x <= rx <= x2 + hit_pad_x) and (
+                y1 - hit_pad_y <= ry <= y2 + hit_pad_y
+            ):
+                return c
+        return None
+
+    def show_external_comment_dialog(self, comment: Dict[str, Any]) -> None:
+        """Displays dialog showing external comment content, author, and date."""
+        dlg = CommentViewDialog(comment, self)
+        dlg.exec()

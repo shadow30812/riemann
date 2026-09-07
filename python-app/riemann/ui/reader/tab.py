@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QFileDialog,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -233,6 +234,40 @@ class ReaderTab(
         self.autoscroll_timer = QTimer(self)
         self.autoscroll_timer.setInterval(30)
         self.autoscroll_timer.timeout.connect(self._do_autoscroll)
+
+        self.external_comments: Dict[int, List[Dict[str, Any]]] = {}
+
+        # Floating page indicator popup for pure fullscreen mode
+        self.page_indicator_popup = QLabel(self)
+        self.page_indicator_popup.setStyleSheet(
+            "background-color: rgba(25, 25, 25, 215);"
+            "color: #ffffff;"
+            "font-size: 13px;"
+            "font-weight: bold;"
+            "border-radius: 6px;"
+            "padding: 5px 12px;"
+            "border: 1px solid rgba(255, 255, 255, 45);"
+        )
+        self.page_indicator_popup.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.page_indicator_opacity = QGraphicsOpacityEffect(self.page_indicator_popup)
+        self.page_indicator_popup.setGraphicsEffect(self.page_indicator_opacity)
+        self.page_indicator_opacity.setOpacity(0.0)
+        self.page_indicator_popup.hide()
+
+        self._page_indicator_fade_anim = QPropertyAnimation(
+            self.page_indicator_opacity, b"opacity"
+        )
+        self._page_indicator_fade_anim.setDuration(800)
+        self._page_indicator_fade_anim.setStartValue(1.0)
+        self._page_indicator_fade_anim.setEndValue(0.0)
+        self._page_indicator_fade_anim.finished.connect(
+            self._on_page_indicator_fade_finished
+        )
+
+        self._page_indicator_timer = QTimer(self)
+        self._page_indicator_timer.setSingleShot(True)
+        self._page_indicator_timer.setInterval(1200)
+        self._page_indicator_timer.timeout.connect(self._start_page_indicator_fade)
 
         self._init_shortcuts()
 
@@ -922,6 +957,7 @@ class ReaderTab(
 
         self.settings.setValue("lastFile", path)
         self.load_annotations()
+        self._load_external_comments(path)
         QTimer.singleShot(500, lambda: self._detect_signatures(path))
         QTimer.singleShot(1000, self.index_pdf_for_ai)
 
@@ -1361,6 +1397,50 @@ class ReaderTab(
                 self.txt_page.setText(str(closest + 1))
 
         self.scroll_timer.start()
+        self._trigger_fullscreen_page_indicator()
+
+    def _trigger_fullscreen_page_indicator(self) -> None:
+        """Shows the floating page indicator near the scrollbar across all display modes."""
+        if not self.current_doc or self.current_doc.page_count <= 0:
+            return
+
+        curr = self.current_page_index + 1
+        total = self.current_doc.page_count
+        self.page_indicator_popup.setText(f"{curr} / {total}")
+        self.page_indicator_popup.adjustSize()
+
+        self._page_indicator_fade_anim.stop()
+        self.page_indicator_opacity.setOpacity(1.0)
+
+        sb = self.scroll.verticalScrollBar()
+        sb_width = sb.width() if sb.isVisible() else 14
+        sb_val = sb.value()
+        sb_max = sb.maximum()
+
+        x = max(10, self.width() - sb_width - self.page_indicator_popup.width() - 15)
+        if sb_max > 0:
+            ratio = sb_val / sb_max
+            y = int(40 + ratio * (self.height() - self.page_indicator_popup.height() - 80))
+        else:
+            y = (self.height() - self.page_indicator_popup.height()) // 2
+
+        self.page_indicator_popup.move(x, y)
+        self.page_indicator_popup.show()
+        self.page_indicator_popup.raise_()
+
+        self._page_indicator_timer.start(1200)
+
+    def _start_page_indicator_fade(self) -> None:
+        """Gradually fades out the page indicator over 800ms."""
+        self._page_indicator_fade_anim.stop()
+        self._page_indicator_fade_anim.setStartValue(self.page_indicator_opacity.opacity())
+        self._page_indicator_fade_anim.setEndValue(0.0)
+        self._page_indicator_fade_anim.start()
+
+    def _on_page_indicator_fade_finished(self) -> None:
+        """Hides the page indicator once faded out."""
+        if self.page_indicator_opacity.opacity() <= 0.01:
+            self.page_indicator_popup.hide()
 
     def real_scroll_handler(self) -> None:
         """
@@ -2082,8 +2162,26 @@ class ReaderTab(
                         else:
                             source.setCursor(Qt.CursorShape.IBeamCursor)
                     else:
-                        self.link_tooltip.hide()
-                        source.setCursor(Qt.CursorShape.IBeamCursor)
+                        hovered_comment = self._get_comment_at_pos(
+                            page_idx, event.pos(), source.width(), source.height()
+                        )
+                        if hovered_comment:
+                            author = hovered_comment.get("author") or "Comment"
+                            contents = hovered_comment.get("contents", "")
+                            preview = (
+                                contents if len(contents) <= 90 else contents[:87] + "..."
+                            )
+                            self.link_tooltip.setText(f"💬 {author}: {preview}")
+                            self.link_tooltip.adjustSize()
+                            self.link_tooltip.move(
+                                10, self.height() - self.link_tooltip.height() - 10
+                            )
+                            self.link_tooltip.show()
+                            self.link_tooltip.raise_()
+                            source.setCursor(Qt.CursorShape.PointingHandCursor)
+                        else:
+                            self.link_tooltip.hide()
+                            source.setCursor(Qt.CursorShape.IBeamCursor)
 
                 if (
                     (event.buttons() & Qt.MouseButton.LeftButton)
@@ -2149,6 +2247,19 @@ class ReaderTab(
                         # Multi-click selection (double or triple click): preserve highlight!
                         self._just_selected_multi_click = False
                     else:
+                        # Single click without dragging: check if clicked on external comment or note
+                        comment = self._get_comment_at_pos(
+                            page_idx, event.pos(), source.width(), source.height()
+                        )
+                        if comment:
+                            self.clear_all_text_selections()
+                            self.show_external_comment_dialog(comment)
+                            return True
+
+                        if self.handle_annotation_click(source, event):
+                            self.clear_all_text_selections()
+                            return True
+
                         # Single click without dragging: clear selection immediately
                         self.clear_all_text_selections()
                 return True
@@ -3309,21 +3420,8 @@ class ReaderTab(
 
     def focusNextPrevChild(self, next: bool) -> bool:
         """
-        Intercepts Tab and Shift+Tab to intuitively cycle PDF pages
-        instead of relying on Qt's default focus chain which resets to page 0.
+        Preserves default Qt focus chaining without advancing PDF pages unexpectedly.
         """
-        focus_widget = QApplication.focusWidget()
-
-        if isinstance(focus_widget, (QLineEdit, QComboBox)):
-            return super().focusNextPrevChild(next)
-
-        if getattr(self, "view_mode", None) == ViewMode.IMAGE:
-            if next:
-                self.next_view()
-            else:
-                self.prev_view()
-            return True
-
         return super().focusNextPrevChild(next)
 
     def _get_or_create_web_view(self) -> QWebEngineView:

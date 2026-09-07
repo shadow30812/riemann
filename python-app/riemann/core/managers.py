@@ -965,18 +965,26 @@ class YtDlpDownloadManager(QDialog):
         )
 
         status = data.get("status", "Unknown")
+        p_idx = data.get("playlist_index")
+        p_count = data.get("playlist_count")
+
         if status == "finished":
             part_item.setText(4, "Merged / Done")
             part_prog.setValue(100)
-            task["root_prog"].setValue(100)
         else:
             part_item.setText(4, "Downloading")
-            task["root_prog"].setValue(percent)
+            part_prog.setValue(percent)
 
-        p_idx = data.get("playlist_index")
-        p_count = data.get("playlist_count")
-        if p_idx and p_count:
+        if p_idx and p_count and p_count > 0:
             task["root_item"].setText(4, f"Video {p_idx} of {p_count}")
+            completed_fraction = (p_idx - 1) + (1.0 if status == "finished" else percent / 100.0)
+            overall_pct = int((completed_fraction / p_count) * 100)
+            task["root_prog"].setValue(min(100, max(0, overall_pct)))
+        else:
+            if status == "finished":
+                task["root_prog"].setValue(100)
+            else:
+                task["root_prog"].setValue(percent)
 
     def on_finished(self, worker, success: bool, msg: str) -> None:
         task = next((t for t in self.tasks if t["worker"] == worker), None)

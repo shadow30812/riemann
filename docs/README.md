@@ -519,6 +519,11 @@ Capabilities include:
 * page-local repainting
 * highlight opacity management
 * shape previews during drag operations
+* **External Application Comments Support**: In addition to native Riemann annotations, the reader directly parses and renders annotations authored in external PDF software (such as Adobe Acrobat, Apple Preview, or Okular):
+  * **Native Annotations Ingestion**: Inspects the document via `pypdf.PdfReader` to extract native annotation dictionaries (`/Text`, `/FreeText`, `/Highlight`, `/Underline`, etc.).
+  * **Metadata Extraction**: Reads `/T` (author/creator), `/M` (modification date/time), `/Contents` (comment message body), and `/Rect` (bounding coordinate box).
+  * **Coordinate Normalization**: Converts PDF point coordinates (origin at bottom-left) to rendered page pixel coordinates.
+  * **Interactive Inspection**: Hovering over an external comment displays a formatted tooltip and activates a pointing hand cursor. Clicking on the comment opens a dedicated `CommentViewDialog` displaying the author name, date, and scrollable message content.
 
 The rendering layer maintains temporary visual overlays independently from committed annotation state.
 
@@ -717,6 +722,14 @@ Capabilities:
 * FFmpeg post-processing
 * playlist slicing
 * native download management
+* **Automated Playlist Detection & Formatting**: Automatically detects playlist URLs containing `list=` or `/playlist` parameters, pre-checking the playlist download option in the settings dialog and applying a structured output template:
+  ```text
+  %(playlist_index&{:02d} - |)s%(title)s.%(ext)s
+  ```
+* **Cumulative Playlist Progress Tracking**: In multi-video playlist downloads, progress is computed globally across the entire playlist rather than resetting to 0% per item:
+  $$\text{Total \%} = \frac{(p_{\text{idx}} - 1) + \frac{\text{video \%}}{100}}{p_{\text{count}}} \times 100$$
+  This ensures continuous, accurate progress feedback across all queued videos.
+* **Modern JavaScript Extraction & Deno Support**: Automatically integrates `"remote_components": ["ejs:github"]` and discovers local Deno installations on `PATH` to resolve modern JavaScript challenges during stream extraction.
 
 The application includes:
 
@@ -776,19 +789,18 @@ The engine operates directly within Chromium's audio graph.
 
 ## Mini Player
 
-Riemann includes a compact native media controller.
+Riemann includes a compact native media controller embedded directly in the application menu bar.
 
 The mini player continuously polls active BrowserTabs and bridges playback controls into HTML5 media elements using JavaScript execution.
 
 Features:
 
-* play/pause controls
-* seek controls
-* playback timeline display
-* media detection
-* browser tab polling
-* dynamic icon theming
-* adaptive visibility
+* **App-Wide Cross-Window Media Discovery**: Media discovery spans all application windows (`RiemannWindow._all_open_windows` and `QApplication.topLevelWidgets()`), enabling audio controls regardless of which window or workspace pane hosts the media tab.
+* **Audible Tab Prioritization**: Automatically locates and prioritizes browser tabs that are actively playing sound (`recentlyAudible()`).
+* **Active Browser Session Retention**: Retains the active media playback connection across tab switches (e.g. switching to a PDF tab or non-browser tab keeps playback controls active and accessible).
+* **Playback & Timeline Controls**: Provides native play/pause toggles, continuous seek slider, and dynamic track timestamp display (`currentTime / duration`).
+* **Theme-Aware Iconography**: Automatically updates control icon assets (`play.svg`, `pause.svg`) to match light or dark application themes.
+* **Adaptive Visibility**: Gracefully hides from the menu bar when no active media streams are present, eliminating visual clutter.
 
 The mini player operates independently from browser UI controls.
 
@@ -972,8 +984,28 @@ Supported viewing modes include:
 * facing-page mode
 * fullscreen mode (with top hover reveal and system clock)
 * reading mode
+* document preview mode (lightweight alternative to extended PDF mode)
 
 The reflow and markdown modes include KaTeX rendering support for mathematical expressions.
+
+### Universal Page Indicator Popup
+
+A floating pill widget (`Page X / Y`) displays dynamically near the vertical scrollbar whenever the viewport moves (scroll updates or page jumps):
+
+* **All Display Settings**: Active across all three display modes: Normal (windowed), Reading Mode (with toolbar), and Pure Fullscreen (toolbar hidden).
+* **Smooth 2-Second Fade**: Uses `QGraphicsOpacityEffect` and `QPropertyAnimation` with cubic easing, holding for 1.2 seconds before executing a 0.8-second smooth opacity fade-out.
+* **Constrained Geometry**: Positioned near the vertical scrollbar (`x = scroll.width() - popup.width() - 25`), bounds-checked to prevent viewport clipping.
+
+### Dual-Corner Fullscreen Toggle
+
+When operating in fullscreen mode, moving the mouse cursor within 150×100px of either the **top-right** or **top-left** corner dynamically reveals the floating exit fullscreen button, positioning the button near the triggered corner (`(20, 20)` for top-left, `(width - 56, 20)` for top-right).
+
+### Document Open Mode Setting & Live Tab Replacement
+
+Users can configure whether new documents open in full Extended PDF Mode (`ReaderTab`) or lightweight Preview Mode (`PreviewReaderTab`) via `Settings → Reader → Open documents in preview mode by default`:
+
+* **Live In-Place Hot-Swap**: When changing the mode while PDF documents are currently open, Riemann displays a prompt with explicit actions: **"Switch Open Documents"** or **"Keep Current Layout"**.
+* **State Preservation**: In-place replacement preserves file paths, tab titles, current page index, and vertical scroll offsets.
 
 ---
 
@@ -1010,6 +1042,12 @@ The virtualization layer also supports:
 Riemann provides resilient state management and crash recovery:
 
 * **Immediate History Saving**: Open PDFs, web tabs, and external file drops are committed to history immediately upon opening rather than deferring to application shutdown.
+* **Multi-Window Session Restoration**:
+  * Tracks all open non-incognito application windows in `RiemannWindow._all_open_windows`.
+  * Serializes window geometries, main tabs, side tabs, active tab indices, and split-view configurations across all open windows under `sessions/multi_window`.
+  * On launch with session restoration enabled, restores the primary window and spawns separate `RiemannWindow` instances for each additional saved window.
+  * Incorporates sequential close window protection (20-second grace threshold) so sequentially closing windows before application exit does not discard prior window sessions.
+  * Provides `File → Exit` (`exit_application()`) to persist all windows simultaneously and cleanly shut down.
 * **Crash Recovery & Unclean Exit Detection**: Tracks exit state via persistent clean-shutdown flags. If an abnormal termination occurs (crash, system reboot, power cut), Riemann detects it on subsequent launch and prompts the user with a **"Restore last opened tabs"** recovery dialog.
 * **Default Theme**: Defaults to Light Mode on fresh installations.
 * **Comprehensive Persistence**: Persists active tabs, split-view orientations, per-domain browser zoom, history, bookmarks, downloads, homepage shortcuts, and annotation databases.
