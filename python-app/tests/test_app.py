@@ -732,3 +732,27 @@ def test_collapse_tabs_hides_both_strips_and_survives_fullscreen(qtbot):
     assert not window.tabs_main.tabBar().isHidden()
     assert not window.tabs_side.tabBar().isHidden()
     assert not window.btn_collapse_tabs.isChecked()
+
+
+def test_frozen_build_never_uses_itself_as_the_venv_python():
+    """A packaged Riemann is sys.executable, and Nuitka refuses '-m venv' on itself."""
+    import sys
+
+    from riemann.core import dependencies
+
+    with (
+        patch.object(dependencies, "_is_frozen", return_value=True),
+        patch.object(dependencies.shutil, "which", return_value=None),
+    ):
+        with pytest.raises(RuntimeError):
+            dependencies._find_base_python()
+
+    with patch.object(dependencies, "_is_frozen", return_value=False):
+        assert dependencies._find_base_python() == sys.executable
+
+
+def test_greeting_name_falls_back_without_pwd():
+    from riemann.ui import browser
+
+    name = browser._os_display_name()
+    assert isinstance(name, str) and name

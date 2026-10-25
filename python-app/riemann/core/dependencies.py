@@ -22,6 +22,54 @@ from PySide6.QtWidgets import (
 )
 
 
+# Keeps subprocesses from flashing a console window in the Windows GUI build.
+_NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+
+def _is_frozen() -> bool:
+    """True in a Nuitka or PyInstaller build, where sys.executable is Riemann itself."""
+    return bool(getattr(sys, "frozen", False)) or "__compiled__" in globals()
+
+
+def _find_base_python() -> str:
+    """
+    Returns a Python interpreter that can create the venv.
+
+    From source that is the running interpreter. In a packaged build
+    sys.executable is the Riemann binary, which Nuitka refuses to run with
+    "-m venv" (it exits with "the program tried to call itself with '-m'"), so
+    the venv was never created there. So look for an installed Python with the
+    same major.minor version, since packages installed into the venv must be
+    importable by the bundled interpreter.
+    """
+    if not _is_frozen():
+        return sys.executable
+    want = f"{sys.version_info[0]}.{sys.version_info[1]}"
+    candidates = []
+    if os.name == "nt":
+        candidates += [["py", f"-{want}"], ["python"], ["python3"]]
+    else:
+        candidates += [[f"python{want}"], ["python3"], ["python"]]
+    for cmd in candidates:
+        exe = shutil.which(cmd[0])
+        if not exe:
+            continue
+        try:
+            out = subprocess.check_output(
+                [exe, *cmd[1:], "-c", "import sys; print(sys.executable); print(f'{sys.version_info[0]}.{sys.version_info[1]}')"],
+                text=True,
+                timeout=15,
+                **_NO_WINDOW,
+            ).split()
+        except Exception:
+            continue
+        if len(out) >= 2 and out[-1] == want:
+            return out[0]
+    raise RuntimeError(
+        f"Optional dependencies need Python {want} installed on this computer; none was found."
+    )
+
+
 def setup_and_get_venv() -> str:
     """
     Ensures a local virtual environment exists, dynamically interrogates it
@@ -45,6 +93,7 @@ def setup_and_get_venv() -> str:
             ver = subprocess.check_output(
                 [python_exe, "-c", "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')"],
                 text=True,
+                **_NO_WINDOW,
             ).strip()
             curr_ver = f"{sys.version_info[0]}.{sys.version_info[1]}"
             if ver != curr_ver:
@@ -55,10 +104,10 @@ def setup_and_get_venv() -> str:
 
     if not os.path.exists(python_exe):
         os.makedirs(data_dir, exist_ok=True)
-        sys_py = sys.executable or ("python" if win else "python3")
+        sys_py = _find_base_python()
         print("[Riemann] Initializing local virtual environment...")
         subprocess.check_call(
-            [sys_py, "-m", "venv", "--system-site-packages", venv_dir]
+            [sys_py, "-m", "venv", "--system-site-packages", venv_dir], **_NO_WINDOW
         )
 
     try:
@@ -72,6 +121,7 @@ def setup_and_get_venv() -> str:
                 "print(json.dumps(paths))",
             ],
             text=True,
+            **_NO_WINDOW,
         )
         site_paths = json.loads(out.strip())
 
@@ -126,6 +176,7 @@ class DependencyWorker(QThread):
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                **_NO_WINDOW,
             )
 
             for line in iter(process.stdout.readline, ""):
@@ -211,9 +262,10 @@ class DependenciesDialog(QDialog):
             subprocess.check_output(
                 [setup_and_get_venv(), "-m", "pip", "show", base_pkg],
                 stderr=subprocess.DEVNULL,
+                **_NO_WINDOW,
             )
             return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except (subprocess.CalledProcessError, FileNotFoundError, RuntimeError):
             return False
 
     def handle_action(self, pip_name: str, row: int, install: bool):

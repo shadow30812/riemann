@@ -53,6 +53,8 @@ python -m nuitka `
     --enable-plugin=pyside6 `
     --include-package=riemann `
     --include-data-dir=python-app/riemann/assets=riemann/assets `
+    --noinclude-data-files=riemann/assets/riemann_ai_engine/* `
+    --include-raw-dir=python-app/riemann/assets/riemann_ai_engine=riemann/assets/riemann_ai_engine `
     --include-data-file=libs/pdfium.dll=pdfium.dll `
     --include-windows-runtime-dlls=no `
     --windows-console-mode=disable `

@@ -327,6 +327,21 @@ class AiMixin:
 
             ai_script = os.path.join(ai_dir, "main.py")
 
+            # The Windows release compiles the sidecar with Nuitka instead of
+            # shipping a packed Python environment.
+            compiled = os.path.join(ai_dir, "main.exe" if sys.platform == "win32" else "main.bin")
+            if os.path.exists(compiled) and not os.path.exists(python_exe):
+                self.ai_process = subprocess.Popen(
+                    [compiled],
+                    cwd=ai_dir,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    close_fds=True,
+                    **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}),
+                )
+                atexit.register(self._kill_ai_engine)
+                return
+
             if not os.path.exists(python_exe) or not os.path.exists(ai_script):
                 dev_script = os.path.join(
                     base_path, "..", "..", "riemann-ai", "main.py"

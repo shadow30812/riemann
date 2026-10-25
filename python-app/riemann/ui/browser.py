@@ -9,7 +9,6 @@ audio processing injection (Riemann Audio), and download management.
 import base64
 import json
 import os
-import pwd
 import re
 import shutil
 import subprocess
@@ -661,6 +660,33 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
             info.setHttpHeader(b"User-Agent", self.spoofed_ua)
 
 
+def _os_display_name() -> str:
+    """The user's full name from the OS account, else their login name."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            size = ctypes.c_ulong(256)
+            buf = ctypes.create_unicode_buffer(size.value)
+            # EXTENDED_NAME_FORMAT 3 = NameDisplay ("Ada Lovelace")
+            if ctypes.windll.secur32.GetUserNameExW(3, buf, ctypes.byref(size)) and buf.value:
+                return buf.value
+        else:
+            import pwd  # Unix only; importing it at module level broke Windows
+
+            full = pwd.getpwuid(os.getuid()).pw_gecos.split(",")[0]
+            if full:
+                return full
+    except Exception:
+        pass
+    try:
+        return os.getlogin()
+    except OSError:
+        import getpass
+
+        return getpass.getuser()
+
+
 class BrowserTab(QWidget):
     """
     A comprehensive web browser widget.
@@ -1212,12 +1238,7 @@ class BrowserTab(QWidget):
             name = settings.value("homepage/custom_name", "", type=str)
 
             if not name:
-                try:
-                    name = pwd.getpwuid(os.getuid()).pw_gecos.split(",")[0]
-                    if not name:
-                        name = os.getlogin()
-                except Exception:
-                    name = os.getlogin()
+                name = _os_display_name()
 
             links = settings.value("homepage_links", "null")
             fav_settings = QSettings("Riemann", "FaviconCache")
@@ -1229,7 +1250,7 @@ class BrowserTab(QWidget):
             theme = "dark" if self.dark_mode else "light"
             js_code = (
                 f"window.setTheme && window.setTheme('{theme}'); "
-                f"window.cachedIcons = {icons_json}; window.initHomepage('{name}', {links});"
+                f"window.cachedIcons = {icons_json}; window.initHomepage({json.dumps(name)}, {links});"
             )
             self.web.page().runJavaScript(js_code)
 

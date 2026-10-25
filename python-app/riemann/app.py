@@ -3837,6 +3837,12 @@ def run() -> None:
     app.aboutToQuit.connect(RiemannWindow._save_all_windows_session)
     app.aboutToQuit.connect(stop_all_render_workers)
     window.show()
+    smoke_ms = os.environ.get("RIEMANN_SMOKE_TEST")
+    if smoke_ms:
+        # CI starts the packaged build with this set to check that it gets as far
+        # as an open window, then quits cleanly.
+        print("[Riemann] Smoke test: window shown", flush=True)
+        QTimer.singleShot(int(smoke_ms) if smoke_ms.isdigit() else 5000, app.quit)
     sys.exit(app.exec())
 
 

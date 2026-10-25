@@ -169,6 +169,16 @@ jobs:
           print(f"Moving {src} -> {dst}")
           shutil.copy2(src, dst)
 
+      - name: Check the app imports on Windows
+        # Fails in about a minute on Unix-only imports and similar mistakes,
+        # instead of producing an exe that exits silently on launch.
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$(Get-Location)\python-app"
+          $env:QT_QPA_PLATFORM = "offscreen"
+          python -c "import riemann.app; print('riemann.app imports OK')"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       # =========================
       # 🚀 STAGE 3: FINAL BUILD
       # =========================
@@ -187,12 +197,14 @@ jobs:
           $EXCLUDE_ARGS = $EXCLUDES.Split(" ")
 
           python -m nuitka `
-              --standalone `
+              --onefile `
               --assume-yes-for-downloads `
               --lto=no `
               --enable-plugin=pyside6 `
               --include-package=riemann `
               --include-data-dir=python-app/riemann/assets=riemann/assets `
+              --noinclude-data-files=riemann/assets/riemann_ai_engine/* `
+              --include-raw-dir=python-app/riemann/assets/riemann_ai_engine=riemann/assets/riemann_ai_engine `
               --include-data-file=libs/pdfium.dll=pdfium.dll `
               --windows-console-mode=attach `
               <# --windows-icon-from-ico=python-app/riemann/assets/icons/icon.ico #> `
@@ -206,6 +218,30 @@ jobs:
               exit $LASTEXITCODE 
           }
 
+      - name: Smoke test the built exe
+        # Starts Riemann.exe and expects it to open its window and quit on its
+        # own (RIEMANN_SMOKE_TEST). A startup crash fails the job and prints
+        # the crash log written by build_entry.py.
+        shell: pwsh
+        run: |
+          $env:RIEMANN_SMOKE_TEST = "8000"
+          $p = Start-Process -FilePath "dist\Riemann.exe" -PassThru
+          if (-not $p.WaitForExit(240000)) {
+              Stop-Process -Id $p.Id -Force
+              Write-Host "Riemann.exe did not quit within 4 minutes (hung at startup?)" -ForegroundColor Red
+              $code = 1
+          } else {
+              $code = $p.ExitCode
+          }
+          $log = Join-Path $env:LOCALAPPDATA "Riemann\crash.log"
+          if ((Test-Path $log) -and (Get-Item $log).Length -gt 0) {
+              Write-Host "---- crash.log ----"
+              Get-Content $log
+              $code = 1
+          }
+          Write-Host "Exit code: $code"
+          exit $code
+
       # =========================
       # 📦 STAGE 4: PACKAGE + RELEASE
       # =========================
@@ -213,14 +249,13 @@ jobs:
       - name: Upload Windows Executable Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Riemann-Windows-Standalone
-          path: dist/build_entry.dist/
+          name: Riemann-Windows
+          path: dist/Riemann.exe
 
       - name: Zip Artifact
         shell: bash
         run: |
-          cd dist
-          7z a ../Riemann-Windows.zip build_entry.dist/
+          7z a Riemann-Windows.zip ./dist/Riemann.exe
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
