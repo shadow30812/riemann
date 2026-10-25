@@ -1,0 +1,63 @@
+{
+  "label": "original",
+  "machine": {
+    "date": "2026-10-25 08:37 UTC",
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13500H",
+    "logical_cores": 16,
+    "ram_gb": 13.1,
+    "os": "Rocky Linux 10.2 (Red Quartz) (kernel 6.12.0-211.61.1.el10_2.0.1.x86_64)",
+    "python": "3.11.16",
+    "commit": "a2d54af",
+    "dirty": false,
+    "pyside6": "6.10.1"
+  },
+  "settings": {
+    "runs": 5,
+    "doc": "pdf17_spec.pdf",
+    "platform": "offscreen"
+  },
+  "median": {
+    "imports_ms": 1447.8,
+    "window_ms": 1890.0,
+    "first_page_ms": 3873.1,
+    "rss_mb": 386.4
+  },
+  "first_launch": {
+    "imports_ms": 7019.533395767212,
+    "window_ms": 7614.624977111816,
+    "first_page_ms": 9699.495077133179,
+    "rss_mb": 386.94140625
+  },
+  "runs": [
+    {
+      "imports_ms": 1528.515338897705,
+      "window_ms": 1974.0707874298096,
+      "first_page_ms": 3873.058319091797,
+      "rss_mb": 386.44140625
+    },
+    {
+      "imports_ms": 1428.0176162719727,
+      "window_ms": 1890.0339603424072,
+      "first_page_ms": 3890.751838684082,
+      "rss_mb": 387.95703125
+    },
+    {
+      "imports_ms": 1337.235450744629,
+      "window_ms": 1766.782283782959,
+      "first_page_ms": 3626.896858215332,
+      "rss_mb": 385.421875
+    },
+    {
+      "imports_ms": 1534.4767570495605,
+      "window_ms": 2040.4601097106934,
+      "first_page_ms": 4025.872230529785,
+      "rss_mb": 387.9609375
+    },
+    {
+      "imports_ms": 1447.754144668579,
+      "window_ms": 1883.941411972046,
+      "first_page_ms": 3859.4746589660645,
+      "rss_mb": 385.92578125
+    }
+  ]
+}

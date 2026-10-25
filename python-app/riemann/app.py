@@ -91,6 +91,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -101,11 +102,13 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QProxyStyle,
     QPushButton,
     QSizePolicy,
     QSlider,
     QSpinBox,
     QSplitter,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -206,10 +209,11 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.parent_win = parent
         self.setWindowTitle("Settings")
-        self.resize(400, 400)
+        self.setMinimumWidth(560)
 
         layout = QVBoxLayout(self)
-        form_layout = QFormLayout()
+        layout.setContentsMargins(20, 12, 20, 16)
+        layout.setSpacing(4)
 
         self.cb_auto_pdf = QCheckBox()
         self.cb_auto_pdf.setChecked(
@@ -285,7 +289,7 @@ class SettingsDialog(QDialog):
         self.spin_scale.setSingleStep(1)
         self.spin_scale.setValue(current_scale)
         self.spin_scale.setSuffix("%")
-        self.spin_scale.setFixedWidth(75)
+        self.spin_scale.setFixedWidth(96)
         self.spin_scale.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.slider_scale.valueChanged.connect(self.spin_scale.setValue)
@@ -295,26 +299,39 @@ class SettingsDialog(QDialog):
         scale_layout.addWidget(self.slider_scale)
         scale_layout.addWidget(self.spin_scale)
         btn_reset_scale = QPushButton("Reset")
-        btn_reset_scale.setFixedWidth(60)
+        btn_reset_scale.setAutoDefault(False)
         btn_reset_scale.clicked.connect(lambda: self.slider_scale.setValue(100))
         scale_layout.addWidget(btn_reset_scale)
 
-        form_layout.addRow("Display Size (UI Scale):", scale_layout)
-        form_layout.addRow("Default Dialog Directory:", dir_layout)
-        form_layout.addRow("Enable Dark Mode:", self.cb_dark)
-        form_layout.addRow("Vertical Tabs:", self.cb_vertical_tabs)
-        form_layout.addRow("Snap Window to Screen Edges:", self.cb_window_snap)
-        form_layout.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
-        form_layout.addRow(
+        def form_group(title: str) -> QFormLayout:
+            group = QGroupBox(title)
+            form = QFormLayout(group)
+            form.setHorizontalSpacing(24)
+            form.setVerticalSpacing(10)
+            form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            layout.addWidget(group)
+            return form
+
+        appearance = form_group("Appearance")
+        appearance.addRow("Display Size (UI Scale):", scale_layout)
+        appearance.addRow("Enable Dark Mode:", self.cb_dark)
+        appearance.addRow("Vertical Tabs:", self.cb_vertical_tabs)
+        appearance.addRow("Show Floating Fullscreen Button:", self.cb_floating_fs)
+        appearance.addRow("Homepage Greeting Name:", self.txt_custom_name)
+
+        behaviour = form_group("Behaviour")
+        behaviour.addRow("Default Dialog Directory:", dir_layout)
+        behaviour.addRow("Snap Window to Screen Edges:", self.cb_window_snap)
+        behaviour.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
+        behaviour.addRow(
             "Open Documents in Preview Mode:", self.cb_pdf_preview_mode
         )
-        form_layout.addRow("Show Floating Fullscreen Button:", self.cb_floating_fs)
-        form_layout.addRow("Homepage Greeting Name:", self.txt_custom_name)
-        form_layout.addRow("Auto-Scroll Speed:", self.spin_autoscroll)
-        layout.addLayout(form_layout)
+        behaviour.addRow("Auto-Scroll Speed:", self.spin_autoscroll)
 
         group = QGroupBox("Data Management")
-        group_layout = QVBoxLayout(group)
+        group_layout = QGridLayout(group)
+        group_layout.setHorizontalSpacing(10)
+        group_layout.setVerticalSpacing(10)
 
         btn_clear_history = QPushButton("Clear Browsing History")
         btn_clear_history.clicked.connect(self.clear_history)
@@ -332,24 +349,29 @@ class SettingsDialog(QDialog):
         btn_clear_cache.clicked.connect(self.clear_cache)
 
         btn_clear_all = QPushButton("Clear All Data")
-        btn_clear_all.setStyleSheet("color: #d32f2f; font-weight: bold;")
+        btn_clear_all.setProperty("role", "danger")
         btn_clear_all.clicked.connect(self.clear_all_data)
 
         btn_manage_deps = QPushButton("Manage External Dependencies")
-        btn_manage_deps.setStyleSheet(
-            "background-color: #1976D2; color: white; font-weight: bold;"
-        )
+        btn_manage_deps.setProperty("role", "primary")
         btn_manage_deps.clicked.connect(self.open_dependency_manager)
 
-        group_layout.addWidget(btn_clear_history)
-        group_layout.addWidget(btn_clear_downloads)
-        group_layout.addWidget(btn_clear_cookies)
-        group_layout.addWidget(btn_manage_cookies)
-        group_layout.addWidget(btn_clear_cache)
-        group_layout.addWidget(btn_clear_all)
-        layout.addSpacing(10)
-        group_layout.addWidget(btn_manage_deps)
+        for i, btn in enumerate(
+            (
+                btn_clear_history,
+                btn_clear_downloads,
+                btn_clear_cookies,
+                btn_manage_cookies,
+                btn_clear_cache,
+                btn_clear_all,
+            )
+        ):
+            btn.setAutoDefault(False)
+            group_layout.addWidget(btn, i // 2, i % 2)
+        btn_manage_deps.setAutoDefault(False)
+        group_layout.addWidget(btn_manage_deps, 3, 0, 1, 2)
         layout.addWidget(group)
+        layout.addSpacing(8)
 
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -716,6 +738,8 @@ class RiemannWindow(QMainWindow):
         self._apply_vertical_tabs(
             self.settings.value("app/vertical_tabs", False, type=bool)
         )
+        self._tabs_collapsed = self.settings.value("app/tabs_collapsed", False, type=bool)
+        self._restore_tab_bars()
 
         self.setup_menu()
         self._init_shortcuts()
@@ -781,6 +805,7 @@ class RiemannWindow(QMainWindow):
             ("Ctrl+W", self.close_active_tab),
             ("Ctrl+Shift+T", self.restore_last_closed_tab),
             ("Ctrl+\\", self.toggle_split_view),
+            ("Ctrl+Shift+B", self.toggle_tabs_collapsed),
             ("N", self.toggle_active_tab_theme),
             (Qt.Key.Key_F11, self.toggle_reader_fullscreen),
             (Qt.Key.Key_Escape, self._handle_escape),
@@ -868,9 +893,7 @@ class RiemannWindow(QMainWindow):
         state = getattr(self, "_fullscreen_state", 0)
         if show:
             self.menuBar().show()
-            self.tabs_main.tabBar().show()
-            if self.tabs_side.isVisible():
-                self.tabs_side.tabBar().show()
+            self._restore_tab_bars()
             self._set_tabs_toolbar_visible(True)
         else:
             self.menuBar().hide()
@@ -1714,6 +1737,10 @@ class RiemannWindow(QMainWindow):
         self.action_vertical_tabs.setCheckable(True)
         self.action_vertical_tabs.setChecked(self.tabs_main.is_vertical_tabs())
         self.action_vertical_tabs.toggled.connect(self.set_vertical_tabs)
+        self.action_collapse_tabs = view_menu.addAction("Collapse Tabs (Ctrl+Shift+B)")
+        self.action_collapse_tabs.setCheckable(True)
+        self.action_collapse_tabs.setChecked(self._tabs_collapsed)
+        self.action_collapse_tabs.toggled.connect(self.set_tabs_collapsed)
 
         if psutil:
             self._last_net_io = psutil.net_io_counters()
@@ -1754,9 +1781,20 @@ class RiemannWindow(QMainWindow):
         self.btn_vertical_tabs.setChecked(self.tabs_main.is_vertical_tabs())
         self.btn_vertical_tabs.toggled.connect(self.set_vertical_tabs)
 
+        self.btn_collapse_tabs = QToolButton(self)
+        self.btn_collapse_tabs.setCheckable(True)
+        self.btn_collapse_tabs.setAutoRaise(True)
+        self.btn_collapse_tabs.setToolTip(
+            "Collapse the tab row (or column, with vertical tabs) to give the "
+            "page more room (Ctrl+Shift+B)"
+        )
+        self.btn_collapse_tabs.setChecked(self._tabs_collapsed)
+        self.btn_collapse_tabs.toggled.connect(self.set_tabs_collapsed)
+
         self.btn_split_view.setText("Split View")
         self.btn_vertical_tabs.setText("Vertical Tabs")
-        for btn in (self.btn_split_view, self.btn_vertical_tabs):
+        self.btn_collapse_tabs.setText("Collapse Tabs")
+        for btn in (self.btn_split_view, self.btn_vertical_tabs, self.btn_collapse_tabs):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             btn.setIconSize(QSize(15, 15))
@@ -2223,6 +2261,7 @@ class RiemannWindow(QMainWindow):
         for btn, name in (
             (self.btn_split_view, "columns-2"),
             (self.btn_vertical_tabs, "panel-left"),
+            (self.btn_collapse_tabs, "list-collapse"),
         ):
             path = get_resource_path(os.path.join("assets", "icons", f"{name}{suffix}.svg"))
             btn.setIcon(QIcon(path))
@@ -2249,6 +2288,35 @@ class RiemannWindow(QMainWindow):
                 control.blockSignals(True)
                 control.setChecked(vertical)
                 control.blockSignals(False)
+
+    def _restore_tab_bars(self) -> None:
+        """Shows the tab strips again, unless the user has collapsed them."""
+        visible = not getattr(self, "_tabs_collapsed", False)
+        self.tabs_main.tabBar().setVisible(visible)
+        self.tabs_side.tabBar().setVisible(visible)
+
+    def set_tabs_collapsed(self, collapsed: bool) -> None:
+        """
+        Hides or shows the tab strip of both panes: the row on top, or the
+        column on the left with vertical tabs. Tabs still switch with
+        Ctrl+Tab and Ctrl+Shift+Tab while collapsed.
+        """
+        collapsed = bool(collapsed)
+        self._tabs_collapsed = collapsed
+        self.settings.setValue("app/tabs_collapsed", collapsed)
+        if getattr(self, "_fullscreen_state", 0) == 0:
+            self._restore_tab_bars()
+        for control in (
+            getattr(self, "action_collapse_tabs", None),
+            getattr(self, "btn_collapse_tabs", None),
+        ):
+            if control is not None and control.isChecked() != collapsed:
+                control.blockSignals(True)
+                control.setChecked(collapsed)
+                control.blockSignals(False)
+
+    def toggle_tabs_collapsed(self) -> None:
+        self.set_tabs_collapsed(not getattr(self, "_tabs_collapsed", False))
 
     def _record_closed_tab(self, widget: QWidget) -> None:
         """
@@ -2614,8 +2682,7 @@ class RiemannWindow(QMainWindow):
         self.floating_fs_timer.stop()
 
         self.menuBar().show()
-        self.tabs_main.tabBar().show()
-        self.tabs_side.tabBar().show()
+        self._restore_tab_bars()
         self._set_tabs_toolbar_visible(True)
 
         if getattr(self, "_was_maximized", False):
@@ -2693,6 +2760,8 @@ class RiemannWindow(QMainWindow):
                 w = tab_widget.widget(i)
                 if hasattr(w, "_update_icons"):
                     w._update_icons()
+                if hasattr(w, "apply_ui_theme"):
+                    w.apply_ui_theme(self.dark_mode)
 
         self.refresh_signature_panel()
 
@@ -3637,6 +3706,16 @@ class RiemannWindow(QMainWindow):
         target_widget.setCurrentIndex(idx)
 
 
+class ButtonIconFreeStyle(QProxyStyle):
+    """The platform style without the stock icons (a red X, a green tick) that some
+    desktop themes put on OK/Cancel/Yes/No buttons; they clash with the app theme."""
+
+    def styleHint(self, hint, option=None, widget=None, returnData=None):
+        if hint == QStyle.StyleHint.SH_DialogButtonBox_ButtonsHaveIcons:
+            return 0
+        return super().styleHint(hint, option, widget, returnData)
+
+
 ACTIVATE_MESSAGE = "--activate"
 
 
@@ -3673,6 +3752,7 @@ def run() -> None:
         prefer_xwayland_for_snapping()
 
     app = QApplication(sys.argv)
+    app.setStyle(ButtonIconFreeStyle())
     app.setApplicationName("Riemann")
     app.setDesktopFileName("Riemann")
 

@@ -4,6 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <title>New Page</title>
+    <script>
+        // Pick the theme before first paint so the page never flashes the wrong colours.
+        document.documentElement.dataset.theme =
+            new URLSearchParams(location.search).get('theme') === 'light' ? 'light' : 'dark';
+    </script>
     <link rel="stylesheet" href="homepage.css">
     <link rel="icon" href="browser.png" type="image/png">
 </head>

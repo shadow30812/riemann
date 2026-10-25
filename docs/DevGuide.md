@@ -81,6 +81,7 @@ Responsible for:
 * search indexing
 * page geometry
 * annotation embedding
+* reading third-party comments (`get_comments`) and counting signature fields (`signature_count`)
 
 The Rust backend exists primarily to bypass Python's GIL and improve long-session responsiveness.
 
@@ -137,6 +138,8 @@ Core responsibilities:
 * dialog orchestration
 
 The application entrypoint eventually routes into `RiemannWindow`.
+
+**Collapse Tabs.** `set_tabs_collapsed()` hides both tab bars (the main strip, or the column with vertical tabs, and the side pane's strip) and saves the state under `app/tabs_collapsed`. The View menu action, the `btn_collapse_tabs` button in the menu corner (icon `list-collapse`, `list-collapse-white` in dark mode) and Ctrl+Shift+B all route through it and are kept in sync with signals blocked. Fullscreen hides the tab bars on its own; on the way out, `_restore_tab_bars()` respects the collapsed state.
 
 ---
 
@@ -204,6 +207,7 @@ Fullscreen mode in `RiemannWindow` integrates auto-hiding controls to maximize r
 * **Trigger Threshold**: Moving the mouse within the top 4 pixels of the display reveals both the main menu bar and the primary navigation bar using smooth property animations.
 * **Dual-Corner Exit Fullscreen Toggle (`_track_mouse_for_fs`)**: Moving the mouse cursor within 150×100px of either the **top-right** (`x > width - 150, y < 100`) or **top-left** (`x < 150, y < 100`) corner triggers the floating exit fullscreen button (`btn_exit_fs`). The button dynamically repositions adjacent to the active hover corner (`(20, 20)` for top-left, `(width - 56, 20)` for top-right).
 * **Auto-Hide Delay**: When the mouse leaves the top control zone, a 1.5-second single-shot timer triggers an auto-hide transition unless a menu or combo-box dropdown is currently open.
+* **Tab Strip Restore (`_restore_tab_bars()`)**: Revealing the controls and leaving fullscreen both go through `_restore_tab_bars()`, which shows the main and side tab bars only when tabs are not collapsed.
 * **System Clock Widget**: A live `SystemClockWidget` (`QLabel` updated via `QTimer`) is integrated directly into the navbar to maintain time awareness during distraction-free fullscreen research sessions.
 
 ---
@@ -269,6 +273,25 @@ Located in `SettingsDialog`:
 
 ---
 
+## Theme Palette
+
+`ui/palette.py` holds the colour tokens for both interface themes (`DARK`, `LIGHT`, read through `tokens(dark)`): canvas, surface, raised, border, text, muted, faint, accent and danger colours. The same values are written out in three places, which must change together:
+
+* `ui/palette.py`, used by the PDF start page (`ReaderTab._style_home_page`), the Workspaces dashboard (`FolderHomeTab._apply_style`), the file tree and the browser toolbar.
+* `assets/theme/modern_dark.css` and `modern_light.css`, the window stylesheets. Both come from one template, so their selectors are identical and only colours and icon names differ.
+* `assets/homepage/homepage.css`, as CSS variables under `:root[data-theme=...]`.
+
+Other pieces of the theming:
+
+* `GridCanvas` paints the start pages' background: the canvas colour, a faint 32 px grid that echoes the app icon, and a soft accent glow at the top. The browser homepage draws the same grid in CSS.
+* `tinted_pixmap(name, colour, size)` renders a Lucide SVG from `assets/icons` in any colour, so home page icons can use the accent without separate `-white` files.
+* The browser homepage loads as `homepage.html?theme=dark|light`. An inline script sets `data-theme` before first paint, and `BrowserTab.apply_theme` calls `window.setTheme()` when the tab's theme changes. `smart_dark_mode.js` skips the homepage so it is never inverted.
+* `RiemannWindow.toggle_ui_theme()` calls `apply_ui_theme(dark)` on every tab that has it (empty reader tabs and the Workspaces dashboard).
+* Dialog buttons are outlined; the default button in a `QDialogButtonBox` uses the accent. Give other buttons a role instead of inline colours: `btn.setProperty("role", "primary" | "danger" | "success")`.
+* `ButtonIconFreeStyle` (a `QProxyStyle` set in `run()`) turns off `SH_DialogButtonBox_ButtonsHaveIcons`, which removes the stock icons some desktop themes put on OK, Cancel, Yes and No.
+
+---
+
 # 3. Core Reader Architecture
 
 ## `ui/reader/tab.py`
@@ -291,6 +314,8 @@ Responsibilities remaining inside `ReaderTab`:
 * page widget orchestration
 * middle-click autoscroll navigation
 * document reloading and external launcher integration
+
+The toolbar buttons live in a `QWidget` inside `self.toolbar_scroll`, a frameless `QScrollArea` with both scrollbars hidden. When the pane is narrower than the toolbar, the mouse wheel scrolls it sideways instead of Qt squeezing or clipping the buttons.
 
 ---
 
@@ -390,6 +415,8 @@ Responsibilities:
 
 The widget intentionally separates temporary state from committed document state.
 
+`PageWidget` paints the page pixmap itself instead of relying on `QLabel.setPixmap` with `scaledContents`. `setPixmap()` stores the pixmap in `_page_pixmap` and clears the label's own pixmap; `paintEvent()` draws it at `(0, 0)` when its size is within 2 px of the widget, and smooth-scales it to `rect()` otherwise. With `scaledContents`, a pixmap one pixel off the widget size was rescaled on its first paint, which cost a full-page resample on the UI thread. `setText()` and `clear()` drop the stored pixmap, so placeholder text and a page image never show at once.
+
 ---
 
 # 4. Rendering & Virtualization Systems
@@ -414,13 +441,19 @@ Core responsibilities:
 ## Rendering Flow
 
 ```text
-Rust Render
-→ BGRA Buffer
-→ QImage
-→ QPixmap
-→ PageWidget
+Rust render into an uninitialised PyBytes (BGRA, no copy)
+→ QImage (Format_RGB32, shares the bytes)
+→ QPixmap (shares the image data)
+→ PAGE_CACHE
+→ PageWidget.paintEvent
 → Scroll Viewport
 ```
+
+* `render_page` reads the page size with `pages().page_size()` under the PDFium lock, allocates the output with `PyBytes_FromStringAndSize(NULL, len)`, then releases the GIL and renders through `PdfBitmap::from_bytes` straight into that buffer. `render_config()` sets a fixed size, native byte order (`set_reverse_byte_order(false)`), a white clear colour and annotation rendering.
+* `convert_pixels()` applies the page theme in place: mode 0 does nothing, mode 1 inverts the colour channels, mode 2 runs `smart_dark` per pixel.
+* `PAGE_IMAGE_FORMAT` in `render_worker.py` is `Format_RGB32`. PDFium's BGRA in memory is Qt's RGB32 layout on little-endian machines, so `QPixmap.fromImage` shares the buffer. `Format_ARGB32` made Qt scan the alpha channel and convert the image on every page.
+* Overlays (annotations, search hits) are drawn on a copy of the cached pixmap. `_render_overlays` returns early when a page has neither, because opening a `QPainter` on a shared pixmap detaches it and copies the whole image.
+* While the sharp render is pending, `_display_stand_in` scales a cached low-resolution or older render once to the widget size times the device pixel ratio, so paint events don't rescale it.
 
 ---
 
@@ -511,6 +544,8 @@ This is especially important when switching:
 * facing mode
 * continuous mode
 * virtualization state
+
+`_set_scroll_value_silently()` moves the scrollbar while `_ignore_scroll` is set, so the scroll handler skips that change. Do not use `blockSignals()` on the scrollbar for this: `QScrollArea` moves its content in response to the scrollbar's `valueChanged`, so a blocked signal leaves the scrollbar and the content out of step and pages render off screen. `rebuild_layout()` unblocks signals before restoring the position for the same reason.
 
 ---
 
@@ -611,8 +646,11 @@ The text selection system (`tab.py`) was overhauled to handle LaTeX, math notati
 
 Beyond native Riemann annotation overlays, `AnnotationsMixin` supports discovering, parsing, and interacting with annotations embedded by third-party PDF readers (e.g. Adobe Acrobat, Apple Preview, Okular):
 
-* **Ingestion Layer (`_load_external_comments()`)**:
-  * Utilizes `pypdf.PdfReader` to traverse `/Annots` arrays on each page without altering original file binaries.
+* **Ingestion Layer (`_load_external_comments_async()`)**:
+  * `ReaderTab._on_document_loaded` starts it on a daemon thread. The result comes back through `_CommentsBridge.loaded`, a queued signal, and `_on_external_comments_loaded` drops it if the tab has moved on to another file.
+  * When the document has `get_comments` (the Rust core), `read_comments_from_core()` reads every page through PDFium. The core skips links, widgets, popups and annotations with empty contents, and the GIL is released while it runs.
+  * Otherwise `read_external_comments()` falls back to `pypdf.PdfReader`, traversing `/Annots` arrays on each page without altering original file binaries. The pypdf path parses the whole file in Python and took about 2 s on the 756-page PDF specification, which is why it no longer runs on the UI thread.
+  * `_load_external_comments()` is the synchronous pypdf version, kept for callers that need the result immediately.
   * Filters for interactive annotation subtypes: `/Text` (sticky notes), `/FreeText`, `/Highlight`, `/Underline`, `/StrikeOut`, `/Squiggly`, `/Square`, `/Circle`.
   * Extracts metadata dictionaries containing:
     * `/T`: Author / creator name.
@@ -1384,12 +1422,25 @@ Never run synchronously in the Qt UI thread:
 * yt-dlp extraction
 * Faster-Whisper inference
 * PDF-heavy transforms
+* whole-file parsing with pypdf or pyhanko (signature detection uses `doc.signature_count()` and falls back to pyhanko only when the core lacks it)
+
+A pure-Python parser on a worker thread still holds the GIL most of the time and starves the UI thread, so prefer a Rust core method that releases the GIL.
 
 Always use:
 
 * QThread
 * worker objects
 * background subprocesses
+
+---
+
+## Page Buffer Memory on Linux
+
+A page rendered at Fit Width is about 10 MB. glibc serves allocations that size with `mmap` until the first one is freed, then raises its dynamic threshold and serves later ones from per-thread arenas, which rarely hand memory back to the OS. `_return_page_buffers_to_os()` in `render_worker.py` runs once at import on Linux and calls `mallopt(M_MMAP_THRESHOLD, 1 MB)`, which fixes the threshold so page buffers always come from `mmap` and are released when freed. With ten PDF tabs open this halved resident memory (3.5 GB to 1.8 GB in `benchmarks/bench_memory.py`).
+
+## Benchmarks
+
+`benchmarks/` holds the scripts behind the numbers in the README: `bench_core.py` (Rust core against PyMuPDF), `bench_scroll.py`, `bench_startup.py` and `bench_memory.py`. They run against the checkout by default; `--app-path` and `--core-path` point them at another checkout or core build for before/after comparisons. Run the relevant one before and after changing the render path, the page cache or startup. See `benchmarks/README.md`.
 
 ---
 
@@ -1501,6 +1552,8 @@ riemann/
 ├── rust-core/
 ├── rust-ocr-worker/
 ├── riemann-ai/
+├── benchmarks/
+│   └── results/
 └── scripts/
 ```
 
@@ -1512,6 +1565,7 @@ Subsystem overview:
 * `assets/` — browser-side enhancements and themes
 * `rust-core/` — native rendering backend
 * `riemann-ai/` — local inference sidecar
+* `benchmarks/` — performance scripts and their JSON results
 * `tests/` — unit and subsystem testing
 
 ---

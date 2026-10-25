@@ -321,9 +321,7 @@ class ConvertDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         btn_convert = QPushButton("Convert")
-        btn_convert.setStyleSheet(
-            "background-color: #ff4500; color: white; font-weight: bold;"
-        )
+        btn_convert.setProperty("role", "primary")
         btn_convert.clicked.connect(self.execute_conversion)
         btn_cancel = QPushButton("Cancel")
         btn_cancel.clicked.connect(self.reject)
@@ -512,12 +510,9 @@ class CompressDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         btn_compress = QPushButton("Compress")
-        btn_compress.setStyleSheet(
-            "background-color: #ff4500; color: white; font-weight: bold; padding: 6px 12px;"
-        )
+        btn_compress.setProperty("role", "primary")
         btn_compress.clicked.connect(self.execute_compression)
         btn_cancel = QPushButton("Cancel")
-        btn_cancel.setStyleSheet("padding: 6px 12px;")
         btn_cancel.clicked.connect(self.reject)
 
         btn_layout.addStretch()

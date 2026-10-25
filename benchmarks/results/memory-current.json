@@ -1,0 +1,49 @@
+{
+  "label": "current",
+  "machine": {
+    "date": "2026-10-25 08:38 UTC",
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13500H",
+    "logical_cores": 16,
+    "ram_gb": 13.1,
+    "os": "Rocky Linux 10.2 (Red Quartz) (kernel 6.12.0-211.61.1.el10_2.0.1.x86_64)",
+    "python": "3.11.16",
+    "commit": "542b79c",
+    "dirty": true,
+    "pyside6": "6.10.1"
+  },
+  "settings": {
+    "tabs": 10,
+    "pages": 60,
+    "app_path": null,
+    "core_path": null,
+    "label": "current",
+    "window": "1400x1000",
+    "zoom": "Fit Width",
+    "platform": "offscreen"
+  },
+  "samples": [
+    {
+      "tabs": 0,
+      "rss_mb": 138.1,
+      "cache_mb": 0.0
+    },
+    {
+      "tabs": 1,
+      "rss_mb": 339.4,
+      "cache_mb": 135.0,
+      "cache_budget_mb": 384.0
+    },
+    {
+      "tabs": 5,
+      "rss_mb": 1059.8,
+      "cache_mb": 380.7,
+      "cache_budget_mb": 384.0
+    },
+    {
+      "tabs": 10,
+      "rss_mb": 1759.0,
+      "cache_mb": 377.9,
+      "cache_budget_mb": 384.0
+    }
+  ]
+}

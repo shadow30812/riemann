@@ -10,9 +10,10 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QIcon, QImage, QPixmap
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFileSystemModel,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QListView,
@@ -26,6 +27,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from .palette import FONT_STACK, GridCanvas, path_row, short_folder, tinted_icon, tinted_pixmap, tokens
 
 
 def _get_icon_path(filename):
@@ -126,11 +129,12 @@ class FileExplorerPanel(QWidget):
     def update_theme(self, dark_mode: bool):
         self.dark_mode = dark_mode
         self.proxy.set_dark_mode(dark_mode)
-        bg = "#1e1e1e" if dark_mode else "#ffffff"
-        fg = "#d4d4d4" if dark_mode else "#111111"
+        t = tokens(dark_mode)
         self.tree.setStyleSheet(
-            f"QTreeView {{ background-color: {bg}; color: {fg}; border: none; outline: none; }} "
-            f"QTreeView::item:hover {{ background-color: rgba(60, 140, 255, 0.2); }}"
+            f"QTreeView {{ background-color: {t['canvas']}; color: {t['text']}; border: none; outline: none; padding: 4px; }} "
+            f"QTreeView::item {{ padding: 3px 2px; border-radius: 6px; }} "
+            f"QTreeView::item:hover {{ background-color: {t['raised']}; }} "
+            f"QTreeView::item:selected {{ background-color: {t['accent_soft']}; color: {t['text']}; }}"
         )
 
     def _on_clicked(self, index: QModelIndex):
@@ -167,7 +171,7 @@ class FileExplorerPanel(QWidget):
 
 
 class FolderHomeTab(QWidget):
-    """A distinct, modern dashboard for managing Workspaces."""
+    """The Workspaces dashboard: favourite and recent folders."""
 
     def __init__(self, parent=None, dark_mode=True):
         super().__init__(parent)
@@ -175,50 +179,29 @@ class FolderHomeTab(QWidget):
         self.setup_ui()
 
     def setup_ui(self):
-        bg = "#0B0C10" if self.dark_mode else "#F3F4F6"
-        fg = "#FFFFFF" if self.dark_mode else "#111827"
-        card_bg = "#1F2937" if self.dark_mode else "#FFFFFF"
-        card_border = "#374151" if self.dark_mode else "#E5E7EB"
-        hover_bg = "#374151" if self.dark_mode else "#F9FAFB"
-        accent = "#3B82F6"
-        text_mut = "#9CA3AF" if self.dark_mode else "#6B7280"
-
-        self.setStyleSheet(f"""
-            QWidget {{ background-color: {bg}; color: {fg}; font-family: 'Segoe UI', system-ui, sans-serif; }}
-            QScrollArea {{ border: none; background: transparent; }}
-            #HeaderTitle {{ font-size: 36px; font-weight: 800; margin-bottom: 4px; }}
-            #HeaderSub {{ font-size: 15px; color: {text_mut}; margin-bottom: 24px; }}
-            #SectionTitle {{ font-size: 20px; font-weight: 600; color: {fg}; }}
-            
-            QPushButton#PrimaryAction {{
-                background-color: {accent}; color: #FFFFFF; border: none; border-radius: 8px;
-                padding: 14px 28px; font-size: 16px; font-weight: bold;
-            }}
-            QPushButton#PrimaryAction:hover {{ background-color: #2563EB; }}
-            
-            QListWidget {{ background: transparent; border: none; outline: none; }}
-            QListWidget#FavList::item {{
-                background-color: {card_bg}; border: 1px solid {card_border}; border-radius: 12px; margin: 8px;
-                padding: 20px; color: {fg};
-            }}
-            QListWidget#FavList::item:hover {{ border-color: {accent}; background-color: {hover_bg}; }}
-            
-            QListWidget#RecentList::item {{
-                background-color: {card_bg}; border: 1px solid {card_border}; border-radius: 8px; margin-bottom: 8px;
-                padding: 12px 16px; color: {fg};
-            }}
-            QListWidget#RecentList::item:hover {{ border-color: {accent}; background-color: {hover_bg}; }}
-        """)
-
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        self.canvas = GridCanvas(self.dark_mode)
+        root.addWidget(self.canvas)
+        canvas_layout = QVBoxLayout(self.canvas)
+        canvas_layout.setContentsMargins(0, 0, 0, 0)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(60, 50, 60, 50)
-        content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        content.setObjectName("dashContent")
+        row = QHBoxLayout(content)
+        row.setContentsMargins(48, 44, 48, 44)
+        column = QWidget()
+        column.setMaximumWidth(1080)
+        layout = QVBoxLayout(column)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        row.addStretch(1)
+        row.addWidget(column, 30)
+        row.addStretch(1)
 
         header = QLabel("Workspace Dashboard")
         header.setObjectName("HeaderTitle")
@@ -226,101 +209,167 @@ class FolderHomeTab(QWidget):
             "Select a directory to mount as your active coding or research environment."
         )
         sub.setObjectName("HeaderSub")
+        sub.setWordWrap(True)
 
+        self.btn_open = QPushButton("  Open Directory...")
+        self.btn_open.setObjectName("PrimaryAction")
+        self.btn_open.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_open.clicked.connect(lambda: self.window().open_folder())
         btn_layout = QHBoxLayout()
-        btn_open = QPushButton("Open Directory...")
-        btn_open.setObjectName("PrimaryAction")
-        btn_open.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_open.setFixedWidth(220)
-        btn_open.clicked.connect(lambda: self.window().open_folder())
-        btn_layout.addWidget(btn_open)
+        btn_layout.addWidget(self.btn_open)
         btn_layout.addStretch()
 
-        fav_header = QHBoxLayout()
-        fav_icon = QLabel()
-        fav_icon.setPixmap(QIcon(_get_icon_path("star.png")).pixmap(24, 24))
         fav_lbl = QLabel("Favourite Workspaces")
         fav_lbl.setObjectName("SectionTitle")
-        fav_header.addWidget(fav_icon)
-        fav_header.addWidget(fav_lbl)
-        fav_header.addStretch()
 
         self.list_favs = QListWidget()
         self.list_favs.setObjectName("FavList")
         self.list_favs.setViewMode(QListView.ViewMode.IconMode)
         self.list_favs.setResizeMode(QListView.ResizeMode.Adjust)
-        self.list_favs.setSpacing(10)
-        self.list_favs.setIconSize(QSize(48, 48))
-        self.list_favs.setMinimumHeight(180)
-        self.list_favs.setMaximumHeight(220)
+        self.list_favs.setMovement(QListView.Movement.Static)
+        self.list_favs.setGridSize(QSize(184, 130))
+        self.list_favs.setIconSize(QSize(34, 34))
+        self.list_favs.setUniformItemSizes(True)
+        self.list_favs.setWordWrap(False)
+        self.list_favs.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.list_favs.setFixedHeight(150)
+        self.list_favs.setCursor(Qt.CursorShape.PointingHandCursor)
         self.list_favs.itemClicked.connect(self._on_item_clicked)
+        self.lbl_favs_empty = QLabel(
+            "No favourites yet. Right-click a folder in the file tree and choose Add to Favorites."
+        )
+        self.lbl_favs_empty.setObjectName("EmptyNote")
+        self.lbl_favs_empty.setWordWrap(True)
 
-        rec_header = QHBoxLayout()
-        rec_icon = QLabel()
-        pixmap = QIcon(_get_icon_path("history.png")).pixmap(24, 24)
-
-        if self.dark_mode:
-            img = pixmap.toImage()
-            img.invertPixels(QImage.InvertMode.InvertRgb)
-            pixmap = QPixmap.fromImage(img)
-
-        rec_icon.setPixmap(pixmap)
         rec_lbl = QLabel("Recent Directories")
         rec_lbl.setObjectName("SectionTitle")
-        rec_header.addWidget(rec_icon)
-        rec_header.addWidget(rec_lbl)
-        rec_header.addStretch()
-
+        recent_card = QFrame()
+        recent_card.setObjectName("DashCard")
+        card_layout = QVBoxLayout(recent_card)
+        card_layout.setContentsMargins(8, 8, 8, 8)
         self.list_recents = QListWidget()
         self.list_recents.setObjectName("RecentList")
+        self.list_recents.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.list_recents.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list_recents.itemClicked.connect(self._on_item_clicked)
+        self.lbl_recents_empty = QLabel("Folders you open will show up here.")
+        self.lbl_recents_empty.setObjectName("EmptyNote")
+        self.lbl_recents_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(self.list_recents)
+        card_layout.addWidget(self.lbl_recents_empty)
 
-        content_layout.addWidget(header)
-        content_layout.addWidget(sub)
-        content_layout.addLayout(btn_layout)
-        content_layout.addSpacing(40)
-        content_layout.addLayout(fav_header)
-        content_layout.addSpacing(10)
-        content_layout.addWidget(self.list_favs)
-        content_layout.addSpacing(20)
-        content_layout.addLayout(rec_header)
-        content_layout.addSpacing(10)
-        content_layout.addWidget(self.list_recents)
+        layout.addWidget(header)
+        layout.addSpacing(6)
+        layout.addWidget(sub)
+        layout.addSpacing(24)
+        layout.addLayout(btn_layout)
+        layout.addSpacing(40)
+        layout.addWidget(fav_lbl)
+        layout.addSpacing(12)
+        layout.addWidget(self.list_favs)
+        layout.addWidget(self.lbl_favs_empty)
+        layout.addSpacing(32)
+        layout.addWidget(rec_lbl)
+        layout.addSpacing(12)
+        layout.addWidget(recent_card)
+        layout.addStretch(1)
 
         scroll.setWidget(content)
-        main_layout.addWidget(scroll)
+        canvas_layout.addWidget(scroll)
+        self._apply_style()
+
+    def _apply_style(self):
+        t = tokens(self.dark_mode)
+        self.canvas.set_dark(self.dark_mode)
+        self.setStyleSheet(f"""
+            QWidget {{ background: transparent; color: {t["text"]}; font-family: {FONT_STACK}; }}
+            QScrollArea, #dashContent {{ border: none; background: transparent; }}
+            #HeaderTitle {{ font-size: 32px; font-weight: 600; color: {t["text"]}; }}
+            #HeaderSub {{ font-size: 15px; color: {t["muted"]}; }}
+            #SectionTitle {{ font-size: 15px; font-weight: 600; color: {t["text"]}; }}
+            #EmptyNote {{ font-size: 14px; color: {t["faint"]}; padding: 18px 4px; }}
+            #DashCard {{ background: {t["surface"]}; border: 1px solid {t["border"]}; border-radius: 16px; }}
+
+            QPushButton#PrimaryAction {{
+                background-color: {t["accent"]}; color: {t["accent_text"]}; border: none; border-radius: 10px;
+                padding: 11px 22px; font-size: 14px; font-weight: 600;
+            }}
+            QPushButton#PrimaryAction:hover {{ background-color: {t["accent_hover"]}; }}
+
+            QListWidget {{ background: transparent; border: none; outline: none; padding: 0; }}
+            QListWidget#FavList::item {{
+                background-color: {t["surface"]}; border: 1px solid {t["border"]}; border-radius: 14px;
+                margin: 0 12px 12px 0; padding: 18px 10px 12px 10px; color: {t["text"]};
+            }}
+            QListWidget#FavList::item:hover {{ border-color: {t["accent"]}; background-color: {t["raised"]}; }}
+            QListWidget#FavList::item:selected {{ border-color: {t["accent"]}; background-color: {t["accent_soft"]}; color: {t["text"]}; }}
+
+            QListWidget#RecentList::item {{ border: none; border-radius: 10px; margin: 1px 0; padding: 0; }}
+            QListWidget#RecentList::item:hover {{ background-color: {t["raised"]}; }}
+            QListWidget#RecentList::item:selected {{ background-color: {t["accent_soft"]}; }}
+            #recentName {{ font-size: 14px; color: {t["text"]}; }}
+            #recentDir {{ font-size: 12px; color: {t["faint"]}; }}
+            QScrollBar:vertical {{ background: transparent; width: 10px; }}
+            QScrollBar::handle:vertical {{ background: {t["border_strong"]}; border-radius: 4px; margin: 2px; min-height: 24px; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+        """)
+        self.btn_open.setIcon(tinted_icon("folder", t["accent_text"], 18))
+
+    def apply_ui_theme(self, dark: bool):
+        """Called by the main window when the interface theme changes."""
+        if dark != self.dark_mode:
+            self.dark_mode = dark
+            self._apply_style()
+            self._populate_lists()
 
     def showEvent(self, event):
         super().showEvent(event)
+        dark = getattr(self.window(), "dark_mode", self.dark_mode)
+        if dark != self.dark_mode:
+            self.dark_mode = dark
+            self._apply_style()
         self._populate_lists()
 
     def _populate_lists(self):
         self.list_favs.clear()
         self.list_recents.clear()
-
-        folder_icon = QIcon(
-            _get_icon_path("folder-white.svg" if self.dark_mode else "folder.svg")
-        )
-
+        t = tokens(self.dark_mode)
+        fav_icon = tinted_icon("folder", t["accent"], 34)
+        row_icon = tinted_pixmap("folder", t["muted"], 18)
         favs = QSettings("Riemann", "Favorites").value("folders", [], type=list)
         for f in favs:
             if os.path.exists(f):
-                item = QListWidgetItem(folder_icon, f"\n{os.path.basename(f)}")
+                item = QListWidgetItem(fav_icon, os.path.basename(f.rstrip(os.sep)) or f)
                 item.setToolTip(f)
                 item.setData(Qt.ItemDataRole.UserRole, f)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
+                item.setSizeHint(QSize(172, 118))
                 self.list_favs.addItem(item)
 
         if hasattr(self.window(), "history_manager"):
             recents = self.window().history_manager.get_list("folder")
             for r in recents[:15]:
                 if os.path.exists(r) and r not in favs:
-                    item = QListWidgetItem(f"   {os.path.basename(r)}")
+                    item = QListWidgetItem()
                     item.setToolTip(r)
                     item.setData(Qt.ItemDataRole.UserRole, r)
+                    item.setSizeHint(QSize(0, 54))
                     self.list_recents.addItem(item)
+                    self.list_recents.setItemWidget(
+                        item,
+                        path_row(row_icon, os.path.basename(r.rstrip(os.sep)) or r, short_folder(os.path.dirname(r))),
+                    )
+
+        has_favs = self.list_favs.count() > 0
+        self.list_favs.setVisible(has_favs)
+        self.lbl_favs_empty.setVisible(not has_favs)
+        n = self.list_recents.count()
+        self.list_recents.setVisible(n > 0)
+        self.list_recents.setFixedHeight(n * 56 + 2)
+        self.lbl_recents_empty.setVisible(n == 0)
 
     def _on_item_clicked(self, item):
         path = item.data(Qt.ItemDataRole.UserRole)
         if os.path.exists(path):
             self.window().open_folder(path)
+

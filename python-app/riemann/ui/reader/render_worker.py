@@ -7,6 +7,8 @@ kept in a process-wide LRU cache so that rebuilding the virtual layout or
 scrolling back over recent pages does not render them again.
 """
 
+import ctypes
+import sys
 import threading
 import weakref
 from collections import OrderedDict
@@ -14,6 +16,38 @@ from typing import Dict, Hashable, Optional, Tuple
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
+
+
+# Rendered pages are always opaque (PDFium draws onto a white background), so
+# their BGRA bytes are exactly Qt's RGB32 layout (0xffRRGGBB). RGB32 is also the
+# format QPixmap uses on screen, so QPixmap.fromImage shares the buffer instead
+# of scanning it for transparency and converting it, which took 10-13 ms per
+# page at Fit Width when the images were tagged ARGB32.
+PAGE_IMAGE_FORMAT = QImage.Format.Format_RGB32
+
+
+def _return_page_buffers_to_os() -> None:
+    """
+    Makes glibc give freed page buffers back to the OS.
+
+    A page at Fit Width is about 10 MB. glibc serves blocks that large with
+    mmap, but after the first one is freed it raises its threshold and puts
+    later ones on the heap of whichever thread allocated them, where freed
+    memory mostly stays. Every tab has its own render thread, so with five
+    tabs open the process held about 1.9 GB instead of about 1.1 GB. Fixing the
+    threshold at 1 MB keeps page-sized blocks on mmap.
+    """
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        libc = ctypes.CDLL("libc.so.6")
+        M_MMAP_THRESHOLD = -3
+        libc.mallopt(M_MMAP_THRESHOLD, 1024 * 1024)
+    except (OSError, AttributeError):
+        pass  # not glibc (musl, for example)
+
+
+_return_page_buffers_to_os()
 
 
 class PageImageCache:
@@ -155,7 +189,7 @@ class PageRenderWorker(QThread):
             try:
                 res = doc.render_page(page_idx, render_scale, theme)
                 img = QImage(
-                    res.data, res.width, res.height, QImage.Format.Format_ARGB32
+                    res.data, res.width, res.height, PAGE_IMAGE_FORMAT
                 ).copy()
             except Exception:
                 continue

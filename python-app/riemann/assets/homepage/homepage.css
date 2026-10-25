@@ -1,23 +1,66 @@
 /*
-Component: Base Variables & Body Layout
-Purpose: Defines global color tokens, thematic backgrounds, and baseline typographic settings.
+Component: Theme tokens
+Purpose: Colours shared with the Qt home pages (riemann/ui/palette.py). The page
+starts in the theme named by ?theme= in its URL, and the host switches it later
+with window.setTheme().
 */
-:root {
-    --bg: #0f0f13;
-    --accent: #ff4500;
-    --card: rgba(30, 30, 35, 0.8);
+:root,
+:root[data-theme="dark"] {
+    --canvas: #1C1D20;
+    --surface: #232428;
+    --raised: #2A2C31;
+    --border: #303237;
+    --border-strong: #3D4047;
+    --text: #E6E7EA;
+    --muted: #9A9FA8;
+    --faint: #6E737C;
+    --accent: #6B9BFF;
+    --accent-hover: #86AEFF;
+    --accent-text: #0F1626;
+    --accent-soft: rgba(107, 155, 255, 0.14);
+    --danger: #F07070;
+    --grid: rgba(255, 255, 255, 0.028);
+    --glow: rgba(107, 155, 255, 0.07);
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    color-scheme: dark;
 }
 
+:root[data-theme="light"] {
+    --canvas: #F4F4F1;
+    --surface: #FFFFFF;
+    --raised: #ECECE8;
+    --border: #E0E0DB;
+    --border-strong: #CBCBC4;
+    --text: #1C1D20;
+    --muted: #5F646C;
+    --faint: #8C9098;
+    --accent: #2F6FEB;
+    --accent-hover: #1F5BD3;
+    --accent-text: #FFFFFF;
+    --accent-soft: rgba(47, 111, 235, 0.10);
+    --danger: #D33C3C;
+    --grid: rgba(0, 0, 0, 0.035);
+    --glow: rgba(47, 111, 235, 0.05);
+    --shadow: 0 10px 30px rgba(20, 20, 30, 0.10);
+    color-scheme: light;
+}
+
+/*
+Component: Body layout
+Purpose: Canvas colour, the graph-paper grid from the app icon, and a soft glow at the top.
+*/
 body {
     margin: 0;
-    padding: 0;
-    background-color: var(--bg);
-    background-image: radial-gradient(circle at 50% 0%, #2a1b38 0%, transparent 50%),
-        linear-gradient(rgba(255, 69, 0, 0.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 69, 0, 0.04) 1px, transparent 1px);
-    background-size: 100% 100%, 30px 30px, 30px 30px;
-    color: #eee;
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    padding: 0 16px;
+    box-sizing: border-box;
+    background-color: var(--canvas);
+    background-image: radial-gradient(ellipse at 50% 0%, var(--glow) 0%, transparent 60%),
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 100% 100%, 32px 32px, 32px 32px;
+    background-attachment: fixed;
+    color: var(--text);
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -25,64 +68,72 @@ body {
 }
 
 /*
-Component: Search Interface
-Purpose: Styles the central search input container, typography, and focus states.
+Component: Search interface
+Purpose: The greeting and the search field.
 */
 .search-container {
-    margin-top: 18vh;
+    margin-top: 20vh;
     width: 100%;
-    max-width: 650px;
+    max-width: 640px;
     text-align: center;
 }
 
 .search-container h1 {
     font-weight: 300;
-    letter-spacing: 2px;
-    margin-bottom: 30px;
+    font-size: 40px;
+    letter-spacing: 0.5px;
+    margin: 0 0 28px;
+    color: var(--text);
 }
 
 .search-box {
     width: 100%;
-    padding: 16px 25px;
-    font-size: 18px;
-    border-radius: 30px;
-    border: 1px solid #333;
-    background: #1a1a20;
-    color: #fff;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    box-sizing: border-box;
+    padding: 15px 22px;
+    font-size: 17px;
+    font-family: inherit;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow);
     outline: none;
-    transition: 0.3s;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.search-box::placeholder {
+    color: var(--faint);
 }
 
 .search-box:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 15px rgba(255, 69, 0, 0.3);
+    box-shadow: var(--shadow), 0 0 0 4px var(--accent-soft);
 }
 
 /*
-Component: Quick Links Grid
-Purpose: Defines the responsive grid layout and interactive card elements for saved links.
+Component: Quick links grid
+Purpose: Shortcut cards and the Add Link card.
 */
 .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+    gap: 16px;
     width: 100%;
-    max-width: 800px;
-    margin-top: 50px;
-    padding: 20px;
+    max-width: 720px;
+    margin-top: 48px;
+    box-sizing: border-box;
 }
 
 .card {
-    background: var(--card);
-    border: 1px solid #333;
-    border-radius: 12px;
-    padding: 20px 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 10px 16px;
     text-align: center;
     cursor: pointer;
     text-decoration: none;
-    color: #fff;
-    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    color: var(--text);
+    transition: transform 0.15s ease, border-color 0.15s, background 0.15s, box-shadow 0.15s;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -90,22 +141,23 @@ Purpose: Defines the responsive grid layout and interactive card elements for sa
 }
 
 .card:hover {
-    transform: translateY(-5px);
+    transform: translateY(-3px);
     border-color: var(--accent);
-    box-shadow: 0 8px 20px rgba(255, 69, 0, 0.2);
-    background: rgba(40, 40, 45, 0.95);
+    background: var(--raised);
+    box-shadow: var(--shadow);
 }
 
 .card .icon {
-    font-size: 26px;
-    margin-bottom: 12px;
+    font-size: 24px;
+    line-height: 32px;
+    margin-bottom: 10px;
 }
 
 .card .icon-img {
     width: 32px;
     height: 32px;
-    margin-bottom: 12px;
-    border-radius: 6px;
+    margin-bottom: 10px;
+    border-radius: 8px;
     object-fit: contain;
 }
 
@@ -120,13 +172,138 @@ Purpose: Defines the responsive grid layout and interactive card elements for sa
 
 .add-btn {
     background: transparent;
-    border: 2px dashed #555;
-    color: #888;
+    border: 1.5px dashed var(--border-strong);
+    color: var(--muted);
     box-shadow: none;
 }
 
+.add-btn .icon {
+    color: var(--muted);
+    font-weight: 300;
+}
+
 .add-btn:hover {
-    border-color: #aaa;
-    color: #fff;
-    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+    box-shadow: none;
+}
+
+.add-btn:hover .icon {
+    color: var(--accent);
+}
+
+/*
+Component: Shortcut dialog and context menu
+Purpose: The Add/Edit Website Shortcut modal and the Edit/Delete menu on a card.
+*/
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+.modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    width: 340px;
+    box-shadow: var(--shadow);
+}
+
+.modal h3 {
+    margin: 0 0 18px;
+    font-weight: 600;
+    font-size: 17px;
+    color: var(--text);
+}
+
+.modal input {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 12px;
+    background: var(--canvas);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 11px 12px;
+    border-radius: 10px;
+    outline: none;
+    font: inherit;
+    font-size: 14px;
+}
+
+.modal input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.btn {
+    font: inherit;
+    font-size: 14px;
+    padding: 8px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.btn-secondary {
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+}
+
+.btn-secondary:hover {
+    background: var(--raised);
+}
+
+.btn-primary {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: var(--accent-text);
+    font-weight: 600;
+}
+
+.btn-primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+}
+
+.ctx-menu {
+    position: absolute;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 6px;
+    z-index: 1000;
+    box-shadow: var(--shadow);
+    min-width: 130px;
+}
+
+.ctx-item {
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text);
+}
+
+.ctx-item:hover {
+    background: var(--raised);
+}
+
+.ctx-item.danger {
+    color: var(--danger);
 }

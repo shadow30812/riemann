@@ -1,6 +1,8 @@
 (function () {
     var existing = document.getElementById('riemann-dark');
     if (existing) existing.remove();
+    // Riemann's start page has its own light and dark palettes.
+    if (location.protocol === 'file:' && location.pathname.endsWith('/homepage.html')) return;
     function getBrightness(elem) {
         var style = window.getComputedStyle(elem);
         var color = style.backgroundColor;

@@ -69,86 +69,95 @@ fn value_err(e: impl ToString) -> PyErr {
     PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
 }
 
-/// Converts RGBA pixels (PDFium output with reversed byte order) into the BGRA
-/// layout Qt expects for `Format_ARGB32`, applying the requested theme.
+/// Applies the page theme in place to BGRA pixels (PDFium's native order, which
+/// is also what Qt reads for `Format_ARGB32` on little-endian machines).
+/// Mode 0 leaves the buffer untouched, 1 inverts it, 2 inverts lightness while
+/// keeping hue and saturation.
 fn convert_pixels(buffer: &mut [u8], theme_mode: u8) {
-    buffer.chunks_exact_mut(4).for_each(|pixel| {
-        let b_raw = pixel[0];
-        let g_raw = pixel[1];
-        let r_raw = pixel[2];
+    match theme_mode {
+        1 => buffer.chunks_exact_mut(4).for_each(|pixel| {
+            pixel[0] = 255 - pixel[0];
+            pixel[1] = 255 - pixel[1];
+            pixel[2] = 255 - pixel[2];
+        }),
+        2 => buffer.chunks_exact_mut(4).for_each(|pixel| {
+            let (c0, c1, c2) = smart_dark(pixel[2], pixel[1], pixel[0]);
+            pixel[0] = c0;
+            pixel[1] = c1;
+            pixel[2] = c2;
+        }),
+        _ => {}
+    }
+}
 
-        if theme_mode == 1 {
-            pixel[0] = 255 - r_raw;
-            pixel[1] = 255 - g_raw;
-            pixel[2] = 255 - b_raw;
-        } else if theme_mode == 2 {
-            let b = b_raw as f32 / 255.0;
-            let g = g_raw as f32 / 255.0;
-            let r = r_raw as f32 / 255.0;
+/// Inverts the HSL lightness of one pixel, keeping hue and saturation.
+///
+/// Takes `(red, green, blue)` but names them `b_raw`, `g_raw`, `r_raw` and
+/// returns `(blue, green, red)`, mirroring the original RGBA-based code. HSL
+/// lightness inversion commutes with swapping red and blue, so the result is
+/// the same; keeping the original arithmetic keeps the output bit-identical.
+fn smart_dark(b_raw: u8, g_raw: u8, r_raw: u8) -> (u8, u8, u8) {
+    let b = b_raw as f32 / 255.0;
+    let g = g_raw as f32 / 255.0;
+    let r = r_raw as f32 / 255.0;
 
-            let max = r.max(g).max(b);
-            let min = r.min(g).min(b);
-            let l = (max + min) / 2.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let l = (max + min) / 2.0;
 
-            if max == min {
-                let val = ((1.0 - l) * 255.0) as u8;
-                pixel[0] = val;
-                pixel[1] = val;
-                pixel[2] = val;
-            } else {
-                let d = max - min;
-                let s = if l > 0.5 {
-                    d / (2.0 - max - min)
-                } else {
-                    d / (max + min)
-                };
+    if max == min {
+        let val = ((1.0 - l) * 255.0) as u8;
+        return (val, val, val);
+    }
 
-                let mut h = if max == r {
-                    (g - b) / d + (if g < b { 6.0 } else { 0.0 })
-                } else if max == g {
-                    (b - r) / d + 2.0
-                } else {
-                    (r - g) / d + 4.0
-                };
-                h /= 6.0;
+    let d = max - min;
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
 
-                let new_l = 1.0 - l;
-                let q = if new_l < 0.5 {
-                    new_l * (1.0 + s)
-                } else {
-                    new_l + s - new_l * s
-                };
-                let p = 2.0 * new_l - q;
+    let mut h = if max == r {
+        (g - b) / d + (if g < b { 6.0 } else { 0.0 })
+    } else if max == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    h /= 6.0;
 
-                let hue_to_rgb = |mut t: f32| -> f32 {
-                    if t < 0.0 {
-                        t += 1.0;
-                    }
-                    if t > 1.0 {
-                        t -= 1.0;
-                    }
-                    if t < 1.0 / 6.0 {
-                        return p + (q - p) * 6.0 * t;
-                    }
-                    if t < 1.0 / 2.0 {
-                        return q;
-                    }
-                    if t < 2.0 / 3.0 {
-                        return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
-                    }
-                    p
-                };
+    let new_l = 1.0 - l;
+    let q = if new_l < 0.5 {
+        new_l * (1.0 + s)
+    } else {
+        new_l + s - new_l * s
+    };
+    let p = 2.0 * new_l - q;
 
-                pixel[0] = (hue_to_rgb(h + 1.0 / 3.0) * 255.0) as u8;
-                pixel[1] = (hue_to_rgb(h) * 255.0) as u8;
-                pixel[2] = (hue_to_rgb(h - 1.0 / 3.0) * 255.0) as u8;
-            }
-        } else {
-            pixel[0] = r_raw;
-            pixel[1] = g_raw;
-            pixel[2] = b_raw;
+    let hue_to_rgb = |mut t: f32| -> f32 {
+        if t < 0.0 {
+            t += 1.0;
         }
-    });
+        if t > 1.0 {
+            t -= 1.0;
+        }
+        if t < 1.0 / 6.0 {
+            return p + (q - p) * 6.0 * t;
+        }
+        if t < 1.0 / 2.0 {
+            return q;
+        }
+        if t < 2.0 / 3.0 {
+            return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+        }
+        p
+    };
+
+    (
+        (hue_to_rgb(h + 1.0 / 3.0) * 255.0) as u8,
+        (hue_to_rgb(h) * 255.0) as u8,
+        (hue_to_rgb(h - 1.0 / 3.0) * 255.0) as u8,
+    )
 }
 
 /// Encodes a link destination as `#page=N`, adding `&top=Y` (PDF user space,
@@ -243,16 +252,19 @@ fn get_pdfium() -> &'static Pdfium {
 fn generate_bitmap<'a>(page: &'a PdfPage<'a>, scale: f32) -> PyResult<PdfBitmap<'a>> {
     let width = (page.width().value * scale) as i32;
     let height = (page.height().value * scale) as i32;
+    page.render_with_config(&render_config(width, height))
+        .map_err(runtime_err)
+}
 
-    let render_config = PdfRenderConfig::new()
-        .set_target_width(width)
-        .set_target_height(height)
-        .rotate_if_landscape(PdfPageRenderRotation::None, true)
+/// Render settings shared by every page render: annotations on, white
+/// background, and PDFium's native BGRA byte order (what Qt reads for
+/// `Format_ARGB32`), so no channel swap is needed afterwards.
+fn render_config(width: i32, height: i32) -> PdfRenderConfig {
+    PdfRenderConfig::new()
+        .set_fixed_size(width, height)
         .render_annotations(true)
-        .set_clear_color(PdfColor::new(255, 255, 255, 255));
-
-    page.render_with_config(&render_config)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+        .set_reverse_byte_order(false)
+        .set_clear_color(PdfColor::new(255, 255, 255, 255))
 }
 
 /// Type definition for form widget data.
@@ -266,6 +278,20 @@ type TextSegment = (String, (f32, f32, f32, f32));
 /// Type definition for link data.
 /// Tuple structure: `(url, bounds_tuple)`.
 type Link = (String, (f32, f32, f32, f32));
+
+/// Type definition for a comment made in another application.
+/// Tuple structure: `(subtype, contents, author, date, bounds_tuple)`.
+type Comment = (String, String, String, String, (f32, f32, f32, f32));
+
+/// The PDF `/Subtype` name for an annotation type.
+fn annotation_subtype_name(kind: PdfPageAnnotationType) -> String {
+    match kind {
+        PdfPageAnnotationType::Strikeout => "StrikeOut".to_string(),
+        PdfPageAnnotationType::Redacted => "Redact".to_string(),
+        PdfPageAnnotationType::ThreeD => "3D".to_string(),
+        other => format!("{other:?}"),
+    }
+}
 
 /// Encapsulates the output of a page render operation.
 ///
@@ -322,28 +348,77 @@ impl RiemannDocument {
         theme_mode: u8,
     ) -> PyResult<RenderResult> {
         let inner = &self.inner;
-        let (buffer, width, height) = py.allow_threads(|| -> PyResult<(Vec<u8>, u32, u32)> {
-            let (mut buffer, width, height) = {
+
+        // The page size comes from the document's page tree, so the page itself
+        // is only loaded once, for the render below.
+        let (width, height) = py.allow_threads(|| -> PyResult<(i32, i32)> {
+            let _guard = pdfium_guard();
+            let doc_guard = lock_doc(inner);
+            let size = doc_guard.0.pages().page_size(page_index).map_err(value_err)?;
+            Ok((
+                (size.width().value * scale) as i32,
+                (size.height().value * scale) as i32,
+            ))
+        })?;
+        if width <= 0 || height <= 0 {
+            return Err(value_err(format!("page {page_index} renders to an empty image")));
+        }
+        let len = width as usize * height as usize * 4;
+
+        // Allocate the result uninitialised and let PDFium draw straight into it.
+        // Nothing else can see the object until it is returned, so it is safe to
+        // fill with the GIL released. This avoids copying the image out of
+        // PDFium and again into Python, which cost more than the render itself.
+        let data: Py<PyBytes> = unsafe {
+            let ptr = pyo3::ffi::PyBytes_FromStringAndSize(
+                std::ptr::null(),
+                len as pyo3::ffi::Py_ssize_t,
+            );
+            if ptr.is_null() {
+                return Err(PyErr::fetch(py));
+            }
+            Py::from_owned_ptr(py, ptr)
+        };
+        let addr = unsafe { pyo3::ffi::PyBytes_AsString(data.as_ptr()) } as usize;
+
+        py.allow_threads(move || -> PyResult<()> {
+            let buffer = unsafe { std::slice::from_raw_parts_mut(addr as *mut u8, len) };
+            {
                 let _guard = pdfium_guard();
                 let doc_guard = lock_doc(inner);
                 let page = doc_guard.0.pages().get(page_index).map_err(value_err)?;
-                let bitmap = generate_bitmap(&page, scale)?;
-                (
-                    bitmap.as_raw_bytes().to_vec(),
-                    bitmap.width() as u32,
-                    bitmap.height() as u32,
-                )
-            };
-            convert_pixels(&mut buffer, theme_mode);
-            Ok((buffer, width, height))
+                let mut bitmap = unsafe {
+                    PdfBitmap::from_bytes(
+                        width,
+                        height,
+                        PdfBitmapFormat::BGRA,
+                        &mut buffer[..],
+                        doc_guard.0.bindings(),
+                    )
+                }
+                .map_err(runtime_err)?;
+                page.render_into_bitmap_with_config(&mut bitmap, &render_config(width, height))
+                    .map_err(runtime_err)?;
+            }
+            convert_pixels(buffer, theme_mode);
+            Ok(())
         })?;
 
-        let data = PyBytes::new_bound(py, &buffer);
-
         Ok(RenderResult {
-            width,
-            height,
-            data: data.into(),
+            width: width as u32,
+            height: height as u32,
+            data,
+        })
+    }
+
+    /// Returns how many digital signatures the document contains. Reading the
+    /// count is cheap; validating them is left to the Python side.
+    fn signature_count(&self, py: Python) -> usize {
+        let inner = &self.inner;
+        py.allow_threads(|| {
+            let _guard = pdfium_guard();
+            let doc_guard = lock_doc(inner);
+            doc_guard.0.signatures().len() as usize
         })
     }
 
@@ -407,24 +482,17 @@ impl RiemannDocument {
     fn ocr_page(&self, py: Python, page_index: u16, scale: f32) -> PyResult<String> {
         let inner = &self.inner;
         py.allow_threads(|| {
-            let (mut buffer, width, height) = {
+            let (buffer, width, height) = {
                 let _guard = pdfium_guard();
                 let doc_guard = lock_doc(inner);
                 let page = doc_guard.0.pages().get(page_index).map_err(value_err)?;
                 let bitmap = generate_bitmap(&page, scale)?;
                 (
-                    bitmap.as_raw_bytes().to_vec(),
+                    bitmap.as_raw_bytes(),
                     bitmap.width() as u32,
                     bitmap.height() as u32,
                 )
             };
-
-            buffer.chunks_exact_mut(4).for_each(|pixel| {
-                let blue = pixel[0];
-                let red = pixel[2];
-                pixel[0] = red;
-                pixel[2] = blue;
-            });
 
             let engine = OcrEngine::new();
             engine
@@ -683,6 +751,72 @@ impl RiemannDocument {
                 }
             }
             Ok(widgets)
+        })
+    }
+
+    /// Lists comments left on a page by other applications (Acrobat, Preview,
+    /// Okular): every annotation with text contents except links, form
+    /// widgets and popups.
+    ///
+    /// # Returns
+    /// `(crop_box, comments)`: the crop box as `(left, bottom, right, top)` and
+    /// a list of `(subtype, contents, author, date, (left, top, right, bottom))`.
+    /// Dates are the raw PDF date strings (`D:YYYYMMDDHHmmSS...`).
+    fn get_comments(
+        &self,
+        py: Python,
+        page_index: u16,
+    ) -> PyResult<((f32, f32, f32, f32), Vec<Comment>)> {
+        let inner = &self.inner;
+        py.allow_threads(|| {
+            let _guard = pdfium_guard();
+            let doc_guard = lock_doc(inner);
+            let pages = doc_guard.0.pages();
+            if (page_index as usize) >= (pages.len() as usize) {
+                return Ok(((0.0, 0.0, 0.0, 0.0), Vec::new()));
+            }
+            let page = pages.get(page_index).map_err(value_err)?;
+
+            let crop = match page.boundaries().crop() {
+                Ok(b) => (
+                    b.bounds.left().value,
+                    b.bounds.bottom().value,
+                    b.bounds.right().value,
+                    b.bounds.top().value,
+                ),
+                Err(_) => (0.0, 0.0, page.width().value, page.height().value),
+            };
+
+            let mut comments = Vec::new();
+            for annotation in page.annotations().iter() {
+                let kind = annotation.annotation_type();
+                if matches!(
+                    kind,
+                    PdfPageAnnotationType::Link
+                        | PdfPageAnnotationType::Widget
+                        | PdfPageAnnotationType::XfaWidget
+                        | PdfPageAnnotationType::Popup
+                ) {
+                    continue;
+                }
+                let contents = annotation.contents().unwrap_or_default().trim().to_string();
+                if contents.is_empty() {
+                    continue;
+                }
+                let author = annotation.creator().unwrap_or_default().trim().to_string();
+                let date = annotation
+                    .modification_date()
+                    .or_else(|| annotation.creation_date())
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                let bounds = annotation
+                    .bounds()
+                    .map(|r| (r.left().value, r.top().value, r.right().value, r.bottom().value))
+                    .unwrap_or((0.0, 0.0, 0.0, 0.0));
+                comments.push((annotation_subtype_name(kind), contents, author, date, bounds));
+            }
+            Ok((crop, comments))
         })
     }
 

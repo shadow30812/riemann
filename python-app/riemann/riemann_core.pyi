@@ -77,6 +77,33 @@ class RiemannDocument:
         """
         ...
 
+    def signature_count(self) -> int:
+        """
+        Returns how many digital signatures the document contains, without
+        validating them.
+        """
+        ...
+
+    def get_comments(
+        self, page_index: int
+    ) -> Tuple[
+        Tuple[float, float, float, float],
+        List[Tuple[str, str, str, str, Tuple[float, float, float, float]]],
+    ]:
+        """
+        Lists comments left on a page by other applications: every annotation
+        with text contents except links, form widgets and popups.
+
+        Args:
+            page_index: Zero-based index of the page.
+
+        Returns:
+            (crop_box, comments). The crop box is (left, bottom, right, top).
+            Each comment is (subtype, contents, author, date, (left, top, right,
+            bottom)), with the date as a raw PDF date string.
+        """
+        ...
+
     def get_page_text(self, page_index: int) -> str:
         """
         Extracts all plain text from a specific page.

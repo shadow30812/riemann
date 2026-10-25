@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 from PySide6.QtCore import QStandardPaths, Qt, QThread, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDialog,
     QHeaderView,
@@ -189,16 +190,12 @@ class DependenciesDialog(QDialog):
             is_installed = self._check_pip_installed(pip_name)
             status_item = QTableWidgetItem("Installed" if is_installed else "Missing")
             status_item.setForeground(
-                Qt.GlobalColor.green if is_installed else Qt.GlobalColor.red
+                QColor("#3FB27F") if is_installed else QColor("#E06C6C")
             )
             self.table.setItem(row, 1, status_item)
 
             btn = QPushButton("Uninstall" if is_installed else "Install")
-            btn.setStyleSheet(
-                "background-color: #d32f2f; color: white;"
-                if is_installed
-                else "background-color: #2e7d32; color: white;"
-            )
+            btn.setProperty("role", "danger" if is_installed else "success")
             btn.clicked.connect(
                 lambda checked,
                 p=pip_name,

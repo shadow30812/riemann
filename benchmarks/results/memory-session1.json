@@ -1,0 +1,49 @@
+{
+  "label": "session1",
+  "machine": {
+    "date": "2026-10-25 08:39 UTC",
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13500H",
+    "logical_cores": 16,
+    "ram_gb": 13.1,
+    "os": "Rocky Linux 10.2 (Red Quartz) (kernel 6.12.0-211.61.1.el10_2.0.1.x86_64)",
+    "python": "3.11.16",
+    "commit": "4f65f07",
+    "dirty": false,
+    "pyside6": "6.10.1"
+  },
+  "settings": {
+    "tabs": 10,
+    "pages": 60,
+    "app_path": "/tmp/claude-1000/-mnt-Windows-Well-Projects-SDE-riemann/5c87edec-2fca-494a-a5d9-5e86012ca624/scratchpad/session1/python-app",
+    "core_path": "/tmp/claude-1000/-mnt-Windows-Well-Projects-SDE-riemann/5c87edec-2fca-494a-a5d9-5e86012ca624/scratchpad/core_base",
+    "label": "session1",
+    "window": "1400x1000",
+    "zoom": "Fit Width",
+    "platform": "offscreen"
+  },
+  "samples": [
+    {
+      "tabs": 0,
+      "rss_mb": 137.7,
+      "cache_mb": 0.0
+    },
+    {
+      "tabs": 1,
+      "rss_mb": 399.4,
+      "cache_mb": 135.0,
+      "cache_budget_mb": 384.0
+    },
+    {
+      "tabs": 5,
+      "rss_mb": 2192.4,
+      "cache_mb": 380.7,
+      "cache_budget_mb": 384.0
+    },
+    {
+      "tabs": 10,
+      "rss_mb": 3514.5,
+      "cache_mb": 377.9,
+      "cache_budget_mb": 384.0
+    }
+  ]
+}

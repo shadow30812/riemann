@@ -707,3 +707,28 @@ def test_dropping_a_folder_opens_folder_session(qtbot, tmp_path):
     with patch.object(window, "open_folder") as mock_open_folder:
         window.dropEvent(event)
     mock_open_folder.assert_called_once_with(str(tmp_path))
+
+
+def test_collapse_tabs_hides_both_strips_and_survives_fullscreen(qtbot):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    window.show()
+    window.toggle_split_view()
+
+    window.btn_collapse_tabs.setChecked(True)
+    assert window.tabs_main.tabBar().isHidden()
+    assert window.tabs_side.tabBar().isHidden()
+    assert window.action_collapse_tabs.isChecked()
+    assert window.settings.value("app/tabs_collapsed") is True
+
+    window.new_pdf_tab()
+    assert window.tabs_main.tabBar().isHidden()  # new tabs don't bring it back
+
+    window.toggle_reader_fullscreen()
+    window.exit_fullscreen()
+    assert window.tabs_main.tabBar().isHidden()  # leaving fullscreen keeps it collapsed
+
+    window.toggle_tabs_collapsed()
+    assert not window.tabs_main.tabBar().isHidden()
+    assert not window.tabs_side.tabBar().isHidden()
+    assert not window.btn_collapse_tabs.isChecked()

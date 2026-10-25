@@ -1,0 +1,98 @@
+{
+  "label": "current",
+  "machine": {
+    "date": "2026-10-25 08:52 UTC",
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13500H",
+    "logical_cores": 16,
+    "ram_gb": 13.1,
+    "os": "Rocky Linux 10.2 (Red Quartz) (kernel 6.12.0-211.61.1.el10_2.0.1.x86_64)",
+    "python": "3.11.16",
+    "commit": "542b79c",
+    "dirty": true,
+    "pyside6": "6.10.1"
+  },
+  "settings": {
+    "app_path": null,
+    "core_path": null,
+    "label": "current",
+    "docs": "pdf17_spec.pdf,latent_diffusion.pdf",
+    "speeds": "2000,6000,19000",
+    "seconds": 5.0,
+    "runs": 3,
+    "window": "1400x1000",
+    "zoom": "Fit Width",
+    "platform": "offscreen"
+  },
+  "documents": {
+    "pdf17_spec.pdf": {
+      "2000": {
+        "runs": 3,
+        "ticks": 300,
+        "sharp_pct": 100.0,
+        "standin_pct": 0.0,
+        "blank_pct": 0.0,
+        "ui_pass_max_ms": 18.9,
+        "ui_pass_p99_ms": 6.4,
+        "settle_ms": 2.2,
+        "first_sharp_ms": 191.2
+      },
+      "6000": {
+        "runs": 3,
+        "ticks": 300,
+        "sharp_pct": 100.0,
+        "standin_pct": 0.0,
+        "blank_pct": 0.0,
+        "ui_pass_max_ms": 40.3,
+        "ui_pass_p99_ms": 10.3,
+        "settle_ms": 2.4,
+        "first_sharp_ms": 228.7
+      },
+      "19000": {
+        "runs": 3,
+        "ticks": 300,
+        "sharp_pct": 100.0,
+        "standin_pct": 0.0,
+        "blank_pct": 0.0,
+        "ui_pass_max_ms": 37.7,
+        "ui_pass_p99_ms": 14.5,
+        "settle_ms": 2.2,
+        "first_sharp_ms": 229.9
+      }
+    },
+    "latent_diffusion.pdf": {
+      "2000": {
+        "runs": 3,
+        "ticks": 300,
+        "sharp_pct": 100.0,
+        "standin_pct": 0.0,
+        "blank_pct": 0.0,
+        "ui_pass_max_ms": 14.8,
+        "ui_pass_p99_ms": 5.7,
+        "settle_ms": 2.2,
+        "first_sharp_ms": 345.2
+      },
+      "6000": {
+        "runs": 3,
+        "ticks": 300,
+        "sharp_pct": 100.0,
+        "standin_pct": 0.0,
+        "blank_pct": 0.0,
+        "ui_pass_max_ms": 36.6,
+        "ui_pass_p99_ms": 6.5,
+        "settle_ms": 2.2,
+        "first_sharp_ms": 328.3
+      },
+      "19000": {
+        "runs": 3,
+        "ticks": 247,
+        "sharp_pct": 50.2,
+        "standin_pct": 19.0,
+        "blank_pct": 31.6,
+        "ui_pass_max_ms": 51.2,
+        "ui_pass_p99_ms": 10.8,
+        "settle_ms": 262.7,
+        "first_sharp_ms": 323.8
+      }
+    }
+  }
+}

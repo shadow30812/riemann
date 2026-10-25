@@ -88,6 +88,7 @@ from PySide6.QtWidgets import (
 
 from ..core.captions_server import CaptionsServer
 from .browser_handlers import ScriptInjector
+from .palette import tokens
 
 
 def get_resource_path(relative_path: str) -> str:
@@ -1162,7 +1163,9 @@ class BrowserTab(QWidget):
             )
 
             if os.path.exists(homepage_path):
-                self.web.load(QUrl.fromLocalFile(homepage_path))
+                home_url = QUrl.fromLocalFile(homepage_path)
+                home_url.setQuery("theme=" + ("dark" if self.dark_mode else "light"))
+                self.web.load(home_url)
             else:
                 self.web.load(QUrl("https://www.google.com"))
         else:
@@ -1223,7 +1226,11 @@ class BrowserTab(QWidget):
                 cached_icons[key] = fav_settings.value(key, "", type=str)
             icons_json = json.dumps(cached_icons)
 
-            js_code = f"window.cachedIcons = {icons_json}; window.initHomepage('{name}', {links});"
+            theme = "dark" if self.dark_mode else "light"
+            js_code = (
+                f"window.setTheme && window.setTheme('{theme}'); "
+                f"window.cachedIcons = {icons_json}; window.initHomepage('{name}', {links});"
+            )
             self.web.page().runJavaScript(js_code)
 
     def _on_feature_permission_requested(
@@ -1315,22 +1322,21 @@ class BrowserTab(QWidget):
         Applies aesthetic color changes to the UI based on the active dark/light mode setting.
         """
         settings = self.web.page().settings()
-        if self.dark_mode:
-            bg, fg, inp_bg, border = "#333", "#ddd", "#444", "#555"
-            settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, False)
-            self.web.page().setBackgroundColor(QColor("#333"))
-        else:
-            bg, fg, inp_bg, border = "#f0f0f0", "#222", "#fff", "#ccc"
-            settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, False)
-            self.web.page().setBackgroundColor(QColor("#fff"))
+        t = tokens(self.dark_mode)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, False)
+        self.web.page().setBackgroundColor(QColor(t["canvas"] if self.dark_mode else "#fff"))
 
+        if "homepage.html" in self.web.url().toString():
+            theme = "dark" if self.dark_mode else "light"
+            self.web.page().runJavaScript(f"window.setTheme && window.setTheme('{theme}');")
         self.script_injector.inject_smart_dark_mode(self.web.page(), self.dark_mode)
-        style = f"QWidget {{ background: {bg}; \
-                                            color: {fg}; }} \
-                                QLineEdit {{ background: {inp_bg}; \
-                                            border: 1px solid {border}; \
-                                            border-radius: 4px; \
-                                            padding: 4px; }}"
+        style = (
+            f"QWidget {{ background: {t['canvas']}; color: {t['text']}; }} "
+            f"QLineEdit {{ background: {t['surface']}; border: 1px solid {t['border']}; "
+            f"border-radius: 8px; padding: 5px 10px; color: {t['text']}; "
+            f"selection-background-color: {t['accent']}; selection-color: {t['accent_text']}; }} "
+            f"QLineEdit:focus {{ border-color: {t['accent']}; }}"
+        )
         self.toolbar.setStyleSheet(style)
         self.search_bar.setStyleSheet(style)
 
@@ -1343,9 +1349,7 @@ class BrowserTab(QWidget):
                             padding: 4px; }
             """)
 
-        menu_bg = "#2C2C30" if self.dark_mode else "#F0F0F0"
-        menu_fg = "#E0E0E0" if self.dark_mode else "#111111"
-        menu_border = "#3F3F46" if self.dark_mode else "#CCCCCC"
+        menu_bg, menu_fg, menu_border = t["surface"], t["text"], t["border"]
         if hasattr(self, "btn_zoom") and self.btn_zoom.menu():
             self.btn_zoom.menu().setStyleSheet(
                 f"QMenu {{ background: {menu_bg}; \

@@ -7,10 +7,11 @@ Handles annotation tools (pen, note), undo/redo stacks, and file persistence.
 import hashlib
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -24,6 +25,146 @@ from PySide6.QtWidgets import (
 )
 
 from ..widgets import PageWidget
+
+
+class _CommentsBridge(QObject):
+    """Carries comments parsed on a worker thread back to the UI thread."""
+
+    loaded = Signal(str, object)
+
+
+def _format_pdf_date(value: str) -> str:
+    """Turns a PDF date (D:YYYYMMDDHHmmSS...) into 'YYYY-MM-DD HH:MM:SS'."""
+    date_str = value.strip()
+    if date_str.startswith("D:"):
+        raw = date_str[2:16]
+        if len(raw) >= 8:
+            date_str = f"{raw[0:4]}-{raw[4:6]}-{raw[6:8]}"
+            if len(raw) >= 14:
+                date_str += f" {raw[8:10]}:{raw[10:12]}:{raw[12:14]}"
+    return date_str
+
+
+def _relative_rect(rect, origin_x: float, origin_y: float, cw: float, ch: float):
+    """Maps a PDF rectangle (any corner order) to 0..1 page coordinates, top-left origin."""
+    if not rect:
+        return (0.0, 0.0, 0.0, 0.0)
+    x1 = (min(rect[0], rect[2]) - origin_x) / cw
+    x2 = (max(rect[0], rect[2]) - origin_x) / cw
+    y1 = 1.0 - ((max(rect[1], rect[3]) - origin_y) / ch)
+    y2 = 1.0 - ((min(rect[1], rect[3]) - origin_y) / ch)
+    return (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+
+
+def read_comments_from_core(doc) -> Dict[int, List[Dict[str, Any]]]:
+    """
+    Same result as read_external_comments, read through the Rust core. Each
+    call releases the GIL and the PDFium lock between pages, so it can run on a
+    worker thread without starving the UI thread or the page renderer.
+    """
+    comments: Dict[int, List[Dict[str, Any]]] = {}
+    for page_idx in range(doc.page_count):
+        try:
+            crop, items = doc.get_comments(page_idx)
+        except Exception:
+            continue
+        if not items:
+            continue
+        left, bottom, right, top = crop
+        cw = (right - left) if right - left > 0 else 1.0
+        ch = (top - bottom) if top - bottom > 0 else 1.0
+        comments[page_idx] = [
+            {
+                "page": page_idx,
+                "subtype": subtype,
+                "contents": contents,
+                "author": author,
+                "date": _format_pdf_date(date),
+                "rel_rect": _relative_rect(rect, left, bottom, cw, ch),
+            }
+            for subtype, contents, author, date, rect in items
+        ]
+    return comments
+
+
+def read_external_comments(path: str) -> Dict[int, List[Dict[str, Any]]]:
+    """
+    Extracts native PDF comments created by other applications (Acrobat, Preview,
+    Okular), keyed by page index. Pure pypdf parsing with no Qt calls, so it is
+    safe to run off the UI thread.
+    """
+    comments: Dict[int, List[Dict[str, Any]]] = {}
+    if not path or not os.path.isfile(path) or path.lower().endswith(".md"):
+        return comments
+
+    try:
+        import pypdf
+
+        reader = pypdf.PdfReader(path)
+        for page_idx, page in enumerate(reader.pages):
+            if "/Annots" not in page:
+                continue
+            annots = page["/Annots"]
+            crop = page.cropbox
+            origin_x = float(crop.left)
+            origin_y = float(crop.bottom)
+            cw = float(crop.width) if float(crop.width) > 0 else 1.0
+            ch = float(crop.height) if float(crop.height) > 0 else 1.0
+
+            page_comments = []
+            for annot_ref in annots:
+                try:
+                    obj = annot_ref.get_object()
+                    if not obj:
+                        continue
+                    subtype = str(obj.get("/Subtype", "")).lstrip("/")
+                    if subtype in ("Link", "Widget"):
+                        continue
+
+                    contents = ""
+                    if "/Contents" in obj and obj["/Contents"]:
+                        contents = str(obj["/Contents"]).strip()
+                    elif "/Popup" in obj:
+                        popup = obj["/Popup"].get_object()
+                        if popup and "/Contents" in popup and popup["/Contents"]:
+                            contents = str(popup["/Contents"]).strip()
+
+                    if not contents:
+                        continue
+
+                    author = str(obj.get("/T", "") or "").strip()
+                    if not author and "/Popup" in obj:
+                        popup = obj["/Popup"].get_object()
+                        if popup:
+                            author = str(popup.get("/T", "") or "").strip()
+
+                    date_str = _format_pdf_date(
+                        str(obj.get("/M", "") or obj.get("/CreationDate", "") or "")
+                    )
+                    rect = obj.get("/Rect", [])
+                    rel_rect = _relative_rect(
+                        [float(v) for v in rect] if len(rect) == 4 else None,
+                        origin_x, origin_y, cw, ch,
+                    )
+
+                    page_comments.append(
+                        {
+                            "page": page_idx,
+                            "subtype": subtype,
+                            "contents": contents,
+                            "author": author,
+                            "date": date_str,
+                            "rel_rect": rel_rect,
+                        }
+                    )
+                except Exception:
+                    continue
+            if page_comments:
+                comments[page_idx] = page_comments
+    except Exception as e:
+        print(f"[Warning] Failed to load external PDF comments: {e}")
+    return comments
+
 
 
 class CommentViewDialog(QDialog):
@@ -378,95 +519,39 @@ class AnnotationsMixin:
         self.render_visible_pages()
 
     def _load_external_comments(self, path: str) -> None:
-        """Extracts native PDF comments/annotations created by external applications."""
-        self.external_comments: Dict[int, List[Dict[str, Any]]] = {}
-        if not path or not os.path.isfile(path) or path.lower().endswith(".md"):
-            return
+        """Loads comments made in other applications, blocking until done."""
+        self.external_comments = read_external_comments(path)
 
-        try:
-            import pypdf
+    def _load_external_comments_async(self, path: str) -> None:
+        """
+        Loads comments made in other applications on a background thread.
+        Parsing them with pypdf on the UI thread took about two seconds on the
+        756-page PDF spec and delayed the first page by as much.
+        """
+        self.external_comments = {}
+        bridge = getattr(self, "_comments_bridge", None)
+        if bridge is None:
+            bridge = _CommentsBridge(self)
+            bridge.loaded.connect(self._on_external_comments_loaded)
+            self._comments_bridge = bridge
 
-            reader = pypdf.PdfReader(path)
-            for page_idx, page in enumerate(reader.pages):
-                if "/Annots" not in page:
-                    continue
-                annots = page["/Annots"]
-                crop = page.cropbox
-                origin_x = float(crop.left)
-                origin_y = float(crop.bottom)
-                cw = float(crop.width) if float(crop.width) > 0 else 1.0
-                ch = float(crop.height) if float(crop.height) > 0 else 1.0
+        doc = getattr(self, "current_doc", None)
+        use_core = doc is not None and hasattr(doc, "get_comments")
 
-                page_comments = []
-                for annot_ref in annots:
-                    try:
-                        obj = annot_ref.get_object()
-                        if not obj:
-                            continue
-                        subtype = str(obj.get("/Subtype", "")).lstrip("/")
-                        if subtype in ("Link", "Widget"):
-                            continue
+        def work():
+            # pypdf is pure Python and held the GIL for about two seconds on the
+            # PDF spec, which starved the UI thread; the core does not.
+            result = read_comments_from_core(doc) if use_core else read_external_comments(path)
+            try:
+                bridge.loaded.emit(path, result)
+            except RuntimeError:
+                pass  # the tab was closed before parsing finished
 
-                        contents = ""
-                        if "/Contents" in obj and obj["/Contents"]:
-                            contents = str(obj["/Contents"]).strip()
-                        elif "/Popup" in obj:
-                            popup = obj["/Popup"].get_object()
-                            if popup and "/Contents" in popup and popup["/Contents"]:
-                                contents = str(popup["/Contents"]).strip()
+        threading.Thread(target=work, name="riemann-comments", daemon=True).start()
 
-                        if not contents:
-                            continue
-
-                        author = str(obj.get("/T", "") or "").strip()
-                        if not author and "/Popup" in obj:
-                            popup = obj["/Popup"].get_object()
-                            if popup:
-                                author = str(popup.get("/T", "") or "").strip()
-
-                        date_str = str(
-                            obj.get("/M", "") or obj.get("/CreationDate", "") or ""
-                        ).strip()
-                        if date_str.startswith("D:"):
-                            raw = date_str[2:16]
-                            if len(raw) >= 8:
-                                date_str = f"{raw[0:4]}-{raw[4:6]}-{raw[6:8]}"
-                                if len(raw) >= 14:
-                                    date_str += (
-                                        f" {raw[8:10]}:{raw[10:12]}:{raw[12:14]}"
-                                    )
-
-                        rect = obj.get("/Rect", [])
-                        if len(rect) == 4:
-                            x1 = (float(min(rect[0], rect[2])) - origin_x) / cw
-                            x2 = (float(max(rect[0], rect[2])) - origin_x) / cw
-                            y1 = 1.0 - ((float(max(rect[1], rect[3])) - origin_y) / ch)
-                            y2 = 1.0 - ((float(min(rect[1], rect[3])) - origin_y) / ch)
-                            rel_rect = (
-                                min(x1, x2),
-                                min(y1, y2),
-                                max(x1, x2),
-                                max(y1, y2),
-                            )
-                        else:
-                            rel_rect = (0.0, 0.0, 0.0, 0.0)
-
-                        page_comments.append(
-                            {
-                                "page": page_idx,
-                                "subtype": subtype,
-                                "contents": contents,
-                                "author": author,
-                                "date": date_str,
-                                "rel_rect": rel_rect,
-                            }
-                        )
-                    except Exception:
-                        continue
-                if page_comments:
-                    self.external_comments[page_idx] = page_comments
-        except Exception as e:
-            print(f"[Warning] Failed to load external PDF comments: {e}")
+    def _on_external_comments_loaded(self, path: str, comments: dict) -> None:
+        if path == getattr(self, "current_path", None):
+            self.external_comments = comments
 
     def _get_comment_at_pos(
         self, page_idx: int, pos: Any, page_w: int, page_h: int

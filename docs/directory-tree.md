@@ -14,10 +14,25 @@ riemann/
 ├── .github/
 │   └── workflows/
 │       └── release.yml
+├── benchmarks/
+│   ├── README.md
+│   ├── _common.py
+│   ├── fetch_corpus.py
+│   ├── bench_core.py
+│   ├── bench_memory.py
+│   ├── bench_scroll.py
+│   ├── bench_startup.py
+│   └── results/
+│       └── (JSON results per benchmark and version, coverage.json)
 ├── docs/
 │   ├── DevGuide.md
 │   ├── README.md
-│   └── directory-tree.md
+│   ├── directory-tree.md
+│   └── images/
+│       ├── collapsed-tabs.png
+│       ├── preview-markdown.png
+│       ├── split-view.png
+│       └── workspace.png
 ├── libs/
 │   ├── libpdfium.so
 │   └── pdfium.dll
@@ -75,6 +90,7 @@ riemann/
 │   │   │   ├── components.py
 │   │   │   ├── explorer.py
 │   │   │   ├── favourites.py
+│   │   │   ├── palette.py
 │   │   │   └── reader/
 │   │   │       ├── __init__.py
 │   │   │       ├── render_worker.py

@@ -36,12 +36,25 @@ def test_detect_signatures_found(mock_open, mock_pdf_reader, reader):
     mock_reader_instance = MagicMock()
     mock_reader_instance.embedded_signatures = ["sig1", "sig2"]
     mock_pdf_reader.return_value = mock_reader_instance
+    reader.current_doc = MagicMock(spec=["page_count"])  # an older core without signature_count
 
     reader._detect_signatures("/fake.pdf")
 
     reader.signature_banner.setVisible.assert_called_with(True)
     assert "2 signature(s)" in reader.lbl_sig_status.setText.call_args[0][0]
     reader.btn_trust_cert.setVisible.assert_called_with(True)
+
+
+@patch("riemann.ui.reader.mixins.signatures.PdfFileReader")
+def test_detect_signatures_uses_core_count(mock_pdf_reader, reader):
+    reader.current_doc.signature_count.return_value = 3
+    reader._detect_signatures("/fake.pdf")
+    assert "3 signature(s)" in reader.lbl_sig_status.setText.call_args[0][0]
+    mock_pdf_reader.assert_not_called()
+
+    reader.current_doc.signature_count.return_value = 0
+    reader._detect_signatures("/fake.pdf")
+    reader.signature_banner.setVisible.assert_called_with(False)
 
 
 @patch(

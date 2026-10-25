@@ -51,9 +51,11 @@ from PySide6.QtPrintSupport import QPrintDialog, QPrinter
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QComboBox,
     QFileDialog,
+    QFrame,
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QInputDialog,
@@ -89,6 +91,7 @@ from .mixins.signatures import SignaturesMixin
 from .render_worker import PAGE_CACHE, PageRenderWorker
 from .utils import generate_markdown_html
 from .widgets import DropZoneLabel, PageWidget
+from ..palette import FONT_STACK, GridCanvas, path_row, short_folder, tinted_pixmap, tokens
 
 try:
     import riemann_core
@@ -386,9 +389,22 @@ class ReaderTab(
         self.hover_trigger.installEventFilter(self)
         self.hover_trigger.hide()
 
-        t_layout = QHBoxLayout(self.toolbar)
+        # The buttons sit in a strip that scrolls sideways instead of being
+        # squeezed: in a narrow pane (split view, vertical tabs, a folder tree)
+        # the layout used to shrink them below their size until they overlapped.
+        outer = QHBoxLayout(self.toolbar)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.toolbar_scroll = QScrollArea()
+        self.toolbar_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.toolbar_scroll.setWidgetResizable(True)
+        self.toolbar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.toolbar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        toolbar_inner = QWidget()
+        t_layout = QHBoxLayout(toolbar_inner)
         self._setup_toolbar_buttons(t_layout)
         t_layout.addStretch()
+        self.toolbar_scroll.setWidget(toolbar_inner)
+        outer.addWidget(self.toolbar_scroll)
         layout.addWidget(self.toolbar)
 
         self.anno_toolbar = AnnotationToolbar(self)
@@ -434,8 +450,6 @@ class ReaderTab(
 
         self.stack = QStackedWidget()
         self._setup_scroll_area()
-
-        self.scroll_content = QWidget()
         self.stack.addWidget(self.scroll)
 
         self._web_placeholder = QWidget()
@@ -880,22 +894,38 @@ class ReaderTab(
             self._populate_home_recents()
 
     def _populate_home_recents(self) -> None:
-        """
-        Translates globally tracked history records into list selection entities shown on initial placeholder empty states.
-        """
+        """Fills the start page's recent documents list from the history manager."""
         if not hasattr(self, "list_recent"):
             return
+        win = self.window()
+        dark = getattr(win, "dark_mode", self._home_dark)
+        if dark != self._home_dark:
+            self._style_home_page(dark)
+            return  # _style_home_page repopulates
         self.list_recent.clear()
+        t = tokens(self._home_dark)
+        icon_pm = tinted_pixmap("file-text", t["muted"], 18)
 
-        if self.window() and hasattr(self.window(), "history_manager"):
-            recent_pdfs = self.window().history_manager.history.get("pdf", [])
+        if win and hasattr(win, "history_manager"):
+            recent_pdfs = win.history_manager.history.get("pdf", [])
             for path in recent_pdfs[:13]:
-                if os.path.exists(path):
-                    name = os.path.basename(path)
-                    item = QListWidgetItem(f"📄 {name}")
-                    item.setToolTip(path)
-                    item.setData(Qt.ItemDataRole.UserRole, path)
-                    self.list_recent.addItem(item)
+                if not os.path.exists(path):
+                    continue
+                folder = short_folder(os.path.dirname(path))
+                item = QListWidgetItem()
+                item.setToolTip(path)
+                item.setData(Qt.ItemDataRole.UserRole, path)
+                item.setSizeHint(QSize(0, 54))
+                self.list_recent.addItem(item)
+                self.list_recent.setItemWidget(
+                    item, path_row(icon_pm, os.path.basename(path), folder)
+                )
+
+        count = self.list_recent.count()
+        self.list_recent.setFixedHeight(min(count, 9) * 56 + 4)
+        self.lbl_recent_count.setText(str(count) if count else "")
+        self.list_recent.setVisible(count > 0)
+        self.lbl_recent_empty.setVisible(count == 0)
 
     def load_document(
         self,
@@ -971,7 +1001,7 @@ class ReaderTab(
             # Preview tabs skip annotations, comments, signature checks, AI
             # indexing and metadata extraction; that is what keeps them light.
             self.load_annotations()
-            self._load_external_comments(path)
+            self._load_external_comments_async(path)
             QTimer.singleShot(500, lambda: self._detect_signatures(path))
             QTimer.singleShot(1000, self.index_pdf_for_ai)
 
@@ -2853,102 +2883,185 @@ class ReaderTab(
         self.show_toast(f"Theme set to: {mode_names[self.theme_mode]}")
 
     def _setup_home_page(self) -> None:
-        """
-        Constructs default placeholder interface showing initial history interactions explicitly configuring bounds structurally precisely flawlessly correctly gracefully.
-        """
-        self.home_page_widget = QWidget()
-        self.home_page_widget.setStyleSheet("""
-            QWidget { background-color: #0f0f13; color: #eee; font-family: 'Segoe UI', system-ui, sans-serif; }
-            QLineEdit { background: #1a1a20; border: 1px solid #333; border-radius: 20px; padding: 12px 20px; font-size: 15px; color: white; }
-            QLineEdit:focus { border: 1px solid #ff4500; }
-            QPushButton { background: transparent; border: 2px dashed #555; color: #aaa; border-radius: 12px; padding: 12px 24px; font-size: 15px; font-weight: bold; }
-            QPushButton:hover { border-color: #ff4500; color: #fff; background: rgba(255, 69, 0, 0.1); }
-            QListWidget { background: transparent; border: none; font-size: 14px; outline: none; }
-            QListWidget::item { padding: 12px; border-radius: 8px; margin-bottom: 6px; background: rgba(30, 30, 35, 0.8); border: 1px solid #222; }
-            QListWidget::item:hover { background: rgba(255, 69, 0, 0.1); border-color: #ff4500; }
-            
-            #dropZone {
-                border: 3px dashed #555;
-                border-radius: 15px;
-                background: rgba(30, 30, 35, 0.4);
-            }
-        """)
+        """Builds the start page shown in an empty reader tab: a drop target, a path
+        field, a browse button and the recent documents list."""
+        self._home_dark = QSettings("Riemann", "PDFReader").value(
+            "darkMode", False, type=bool
+        )
+        self.home_page_widget = GridCanvas(self._home_dark)
+        self.home_page_widget.setObjectName("pdfHome")
 
-        layout = QHBoxLayout(self.home_page_widget)
-        layout.setContentsMargins(24, 40, 24, 40)
+        outer = QHBoxLayout(self.home_page_widget)
+        outer.setContentsMargins(40, 36, 40, 36)
+        outer.setSpacing(40)
 
-        left_layout = QVBoxLayout()
-        left_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left = QVBoxLayout()
+        left.setSpacing(0)
 
         title = QLabel("Riemann")
-        title.setStyleSheet(
-            "font-size: 54px; font-weight: 300; letter-spacing: 4px; color: #ff4500; margin-bottom: 10px; background: transparent;"
-        )
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
+        title.setObjectName("homeWordmark")
         subtitle = QLabel("High-Performance Research Environment")
-        subtitle.setStyleSheet(
-            "font-size: 16px; color: #888; margin-bottom: 50px; background: transparent;"
-        )
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setObjectName("homeTagline")
 
-        self.drop_zone = DropZoneLabel("Drop PDF Here")
+        self.drop_zone = DropZoneLabel("")
         self.drop_zone.setObjectName("dropZone")
         self.drop_zone.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.drop_zone.setStyleSheet(
-            "font-size: 24px; color: #888; font-weight: bold; letter-spacing: 2px;"
-        )
-        self.drop_zone.setMinimumHeight(150)
+        self.drop_zone.setMinimumHeight(190)
         self.drop_zone.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         self.drop_zone.file_dropped.connect(self._on_file_dropped)
+        dz = QVBoxLayout(self.drop_zone)
+        dz.setContentsMargins(16, 24, 16, 24)
+        dz.setSpacing(6)
+        self.lbl_drop_icon = QLabel()
+        drop_title = QLabel("Drop a PDF here")
+        drop_title.setObjectName("dropTitle")
+        drop_sub = QLabel("Markdown files work too")
+        drop_sub.setObjectName("dropSub")
+        dz.addStretch()
+        for w in (self.lbl_drop_icon, drop_title, drop_sub):
+            w.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            dz.addWidget(w)
+        dz.insertSpacing(2, 6)
+        dz.addStretch()
 
         self.txt_open_path = QLineEdit()
-        self.txt_open_path.setPlaceholderText(
-            "Paste PDF absolute path here and press Enter..."
-        )
+        self.txt_open_path.setObjectName("homePath")
+        self.txt_open_path.setPlaceholderText("Paste a file path and press Enter")
         self.txt_open_path.returnPressed.connect(self._on_home_path_entered)
 
-        btn_browse = QPushButton("Browse Files (Ctrl+O)")
-        btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_browse.clicked.connect(self.open_pdf_dialog)
+        self.btn_home_browse = QPushButton("Browse Files")
+        self.btn_home_browse.setObjectName("homePrimary")
+        self.btn_home_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_home_browse.clicked.connect(self.open_pdf_dialog)
+        browse_hint = QLabel("Ctrl+O")
+        browse_hint.setObjectName("homeHint")
 
-        left_layout.addStretch()
-        left_layout.addWidget(title)
-        left_layout.addWidget(subtitle)
-        left_layout.addWidget(self.drop_zone)
-        left_layout.addSpacing(30)
-        left_layout.addWidget(self.txt_open_path)
-        left_layout.addSpacing(20)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
+        btn_row.addWidget(self.btn_home_browse)
+        btn_row.addWidget(browse_hint)
+        btn_row.addStretch()
 
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        btn_layout.addWidget(btn_browse)
-        btn_layout.addStretch()
-        left_layout.addLayout(btn_layout)
-        left_layout.addStretch()
+        left.addStretch(2)
+        left.addWidget(title)
+        left.addSpacing(4)
+        left.addWidget(subtitle)
+        left.addSpacing(32)
+        left.addWidget(self.drop_zone)
+        left.addSpacing(16)
+        left.addWidget(self.txt_open_path)
+        left.addSpacing(16)
+        left.addLayout(btn_row)
+        left.addStretch(3)
 
-        right_layout = QVBoxLayout()
+        recent_card = QFrame()
+        recent_card.setObjectName("homeCard")
+        right = QVBoxLayout(recent_card)
+        right.setContentsMargins(8, 18, 8, 8)
+        right.setSpacing(6)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(14, 0, 14, 0)
         recent_label = QLabel("Recent Documents")
-        recent_label.setStyleSheet(
-            "font-size: 18px; font-weight: bold; margin-bottom: 15px; color: #ccc; background: transparent;"
-        )
+        recent_label.setObjectName("homeSection")
+        self.lbl_recent_count = QLabel("")
+        self.lbl_recent_count.setObjectName("homeHint")
+        header.addWidget(recent_label)
+        header.addStretch()
+        header.addWidget(self.lbl_recent_count)
 
         self.list_recent = QListWidget()
+        self.list_recent.setObjectName("homeRecent")
         self.list_recent.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.list_recent.setMinimumWidth(260)
+        self.list_recent.setVerticalScrollMode(
+            QAbstractItemView.ScrollMode.ScrollPerPixel
+        )
         self.list_recent.itemClicked.connect(self._on_recent_item_clicked)
 
-        self.list_recent.setMinimumWidth(180)
+        self.lbl_recent_empty = QLabel("Documents you open will show up here.")
+        self.lbl_recent_empty.setObjectName("homeEmpty")
+        self.lbl_recent_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_recent_empty.hide()
 
-        right_layout.addWidget(recent_label)
-        right_layout.addWidget(self.list_recent)
+        right.addLayout(header)
+        right.addSpacing(6)
+        right.addWidget(self.list_recent)
+        right.addWidget(self.lbl_recent_empty)
 
-        layout.addStretch(1)
-        layout.addLayout(left_layout, 2)
-        layout.addStretch(1)
-        layout.addLayout(right_layout, 3)
-        layout.addStretch(1)
+        left_box = QWidget()
+        left_box.setLayout(left)
+        left_box.setMaximumWidth(520)
+        recent_card.setMaximumWidth(620)
+
+        right_col = QVBoxLayout()
+        right_col.addStretch(2)
+        right_col.addWidget(recent_card)
+        right_col.addStretch(3)
+
+        outer.addStretch(1)
+        outer.addWidget(left_box, 5)
+        outer.addLayout(right_col, 6)
+        outer.addStretch(1)
+
+        self._style_home_page(self._home_dark)
+
+    def _style_home_page(self, dark: bool) -> None:
+        """Applies the light or dark palette to the start page."""
+        self._home_dark = dark
+        t = tokens(dark)
+        self.home_page_widget.set_dark(dark)
+        self.home_page_widget.setStyleSheet(f"""
+            QWidget {{ background: transparent; color: {t["text"]}; font-family: {FONT_STACK}; }}
+            #homeWordmark {{ font-size: 44px; font-weight: 300; letter-spacing: 3px; color: {t["text"]}; }}
+            #homeTagline {{ font-size: 15px; color: {t["muted"]}; }}
+            #homeSection {{ font-size: 15px; font-weight: 600; color: {t["text"]}; }}
+            #homeHint {{ font-size: 13px; color: {t["faint"]}; }}
+            #homeEmpty {{ font-size: 14px; color: {t["faint"]}; padding: 40px 12px; }}
+            #homeCard {{
+                background: {t["surface"]}; border: 1px solid {t["border"]}; border-radius: 16px;
+            }}
+            #dropZone {{
+                background: {t["surface"]}; border: 2px dashed {t["border_strong"]};
+                border-radius: 16px; color: {t["muted"]}; font-size: 15px;
+            }}
+            #dropZone:hover {{ border-color: {t["faint"]}; }}
+            #dropZone[dragActive="true"] {{ background: {t["accent_soft"]}; border-color: {t["accent"]}; }}
+            #dropTitle {{ font-size: 17px; font-weight: 600; color: {t["text"]}; }}
+            #dropZone[dragActive="true"] #dropTitle {{ color: {t["accent"]}; }}
+            #dropSub {{ font-size: 13px; color: {t["muted"]}; }}
+            QLineEdit#homePath {{
+                background: {t["surface"]}; border: 1px solid {t["border"]}; border-radius: 10px;
+                padding: 10px 14px; font-size: 14px; color: {t["text"]};
+                selection-background-color: {t["accent"]}; selection-color: {t["accent_text"]};
+            }}
+            QLineEdit#homePath:focus {{ border-color: {t["accent"]}; }}
+            QPushButton#homePrimary {{
+                background: {t["accent"]}; color: {t["accent_text"]}; border: none; border-radius: 10px;
+                padding: 10px 22px; font-size: 14px; font-weight: 600;
+            }}
+            QPushButton#homePrimary:hover {{ background: {t["accent_hover"]}; }}
+            QListWidget#homeRecent {{ background: transparent; border: none; outline: none; padding: 0; }}
+            QListWidget#homeRecent::item {{ border: none; border-radius: 10px; margin: 1px 0; padding: 0; }}
+            QListWidget#homeRecent::item:hover {{ background: {t["raised"]}; }}
+            QListWidget#homeRecent::item:selected {{ background: {t["accent_soft"]}; }}
+            #recentName {{ font-size: 14px; color: {t["text"]}; }}
+            #recentDir {{ font-size: 12px; color: {t["faint"]}; }}
+            QScrollBar:vertical {{ background: transparent; width: 10px; }}
+            QScrollBar::handle:vertical {{ background: {t["border_strong"]}; border-radius: 4px; margin: 2px; min-height: 24px; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+        """)
+        self.lbl_drop_icon.setPixmap(tinted_pixmap("file-text", t["accent"], 36))
+        if self.list_recent.count():
+            self._populate_home_recents()
+
+    def apply_ui_theme(self, dark: bool) -> None:
+        """Called by the main window when the interface theme changes."""
+        if hasattr(self, "home_page_widget") and dark != self._home_dark:
+            self._style_home_page(dark)
 
     def _on_home_path_entered(self) -> None:
         """

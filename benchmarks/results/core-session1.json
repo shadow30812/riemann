@@ -1,0 +1,184 @@
+{
+  "machine": {
+    "date": "2026-10-25 08:26 UTC",
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13500H",
+    "logical_cores": 16,
+    "ram_gb": 13.1,
+    "os": "Rocky Linux 10.2 (Red Quartz) (kernel 6.12.0-211.61.1.el10_2.0.1.x86_64)",
+    "python": "3.11.16",
+    "commit": "4f65f07",
+    "dirty": true,
+    "pyside6": "6.10.1"
+  },
+  "settings": {
+    "scales": "1,2,3",
+    "pages": 40,
+    "repeats": 3,
+    "core_path": "/tmp/claude-1000/-mnt-Windows-Well-Projects-SDE-riemann/5c87edec-2fca-494a-a5d9-5e86012ca624/scratchpad/core_base",
+    "label": "session1",
+    "no_mupdf": true
+  },
+  "documents": {
+    "attention.pdf": {
+      "description": "arXiv paper, 15 pages, text and vector figures",
+      "engines": {
+        "riemann (Rust + PDFium)": {
+          "open_ms": 1.4,
+          "render": {
+            "1.0": {
+              "pages": 15,
+              "median_ms": 5.18,
+              "p95_ms": 38.94,
+              "max_ms": 42.83
+            },
+            "2.0": {
+              "pages": 15,
+              "median_ms": 14.65,
+              "p95_ms": 68.89,
+              "max_ms": 76.37
+            },
+            "3.0": {
+              "pages": 15,
+              "median_ms": 33.53,
+              "p95_ms": 114.33,
+              "max_ms": 134.98
+            }
+          },
+          "text": {
+            "pages": 15,
+            "chars": 40371,
+            "total_ms": 62.9,
+            "pages_per_s": 238
+          },
+          "search": {
+            "term": "attention",
+            "hits": 97,
+            "total_ms": 52.4
+          }
+        }
+      },
+      "pages": 15
+    },
+    "latent_diffusion.pdf": {
+      "description": "arXiv paper, 45 pages, dense raster images (41 MB)",
+      "engines": {
+        "riemann (Rust + PDFium)": {
+          "open_ms": 0.35,
+          "render": {
+            "1.0": {
+              "pages": 40,
+              "median_ms": 25.64,
+              "p95_ms": 98.29,
+              "max_ms": 174.11
+            },
+            "2.0": {
+              "pages": 40,
+              "median_ms": 38.6,
+              "p95_ms": 117.77,
+              "max_ms": 197.64
+            },
+            "3.0": {
+              "pages": 40,
+              "median_ms": 58.27,
+              "p95_ms": 139.98,
+              "max_ms": 215.56
+            }
+          },
+          "text": {
+            "pages": 45,
+            "chars": 102259,
+            "total_ms": 77.5,
+            "pages_per_s": 580
+          },
+          "search": {
+            "term": "diffusion",
+            "hits": 74,
+            "total_ms": 69.1
+          }
+        }
+      },
+      "pages": 45
+    },
+    "thinkpython2.pdf": {
+      "description": "Think Python 2e, 244 pages, book typesetting",
+      "engines": {
+        "riemann (Rust + PDFium)": {
+          "open_ms": 1.72,
+          "render": {
+            "1.0": {
+              "pages": 40,
+              "median_ms": 2.75,
+              "p95_ms": 3.64,
+              "max_ms": 3.94
+            },
+            "2.0": {
+              "pages": 40,
+              "median_ms": 8.17,
+              "p95_ms": 10.32,
+              "max_ms": 11.02
+            },
+            "3.0": {
+              "pages": 40,
+              "median_ms": 20.61,
+              "p95_ms": 24.05,
+              "max_ms": 25.32
+            }
+          },
+          "text": {
+            "pages": 244,
+            "chars": 453690,
+            "total_ms": 278.8,
+            "pages_per_s": 875
+          },
+          "search": {
+            "term": "function",
+            "hits": 767,
+            "total_ms": 254.6
+          }
+        }
+      },
+      "pages": 244
+    },
+    "pdf17_spec.pdf": {
+      "description": "ISO 32000-1 (PDF 1.7) specification, 756 pages, tables and links",
+      "engines": {
+        "riemann (Rust + PDFium)": {
+          "open_ms": 20.1,
+          "render": {
+            "1.0": {
+              "pages": 40,
+              "median_ms": 4.68,
+              "p95_ms": 5.72,
+              "max_ms": 6.69
+            },
+            "2.0": {
+              "pages": 40,
+              "median_ms": 11.22,
+              "p95_ms": 12.71,
+              "max_ms": 13.76
+            },
+            "3.0": {
+              "pages": 40,
+              "median_ms": 24.68,
+              "p95_ms": 27.05,
+              "max_ms": 28.98
+            }
+          },
+          "text": {
+            "pages": 756,
+            "chars": 2063668,
+            "total_ms": 1679.2,
+            "pages_per_s": 450
+          },
+          "search": {
+            "term": "stream",
+            "hits": 1529,
+            "total_ms": 1580.6
+          }
+        }
+      },
+      "pages": 756
+    }
+  },
+  "core_module": "/tmp/claude-1000/-mnt-Windows-Well-Projects-SDE-riemann/5c87edec-2fca-494a-a5d9-5e86012ca624/scratchpad/core_base/riemann_core/__init__.py"
+}

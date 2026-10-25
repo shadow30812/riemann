@@ -5,7 +5,7 @@ Custom UI Widgets for the Reader Module.
 from typing import List, Optional
 
 from PySide6.QtCore import QPoint, QRect, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QPolygon
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QPolygon
 from PySide6.QtWidgets import QLabel
 
 
@@ -19,14 +19,19 @@ class DropZoneLabel(QLabel):
     def __init__(self, text: str = "Drop PDF Here", parent=None) -> None:
         super().__init__(text, parent)
         self.setAcceptDrops(True)
+        self.setProperty("dragActive", False)
+
+    def _set_drag_active(self, active: bool) -> None:
+        """Flips the dragActive property the start page's stylesheet keys on."""
+        self.setProperty("dragActive", active)
+        for w in [self, *self.findChildren(QLabel)]:
+            w.style().unpolish(w)
+            w.style().polish(w)
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            self.setStyleSheet(
-                "font-size: 24px; color: #ff4500; font-weight: bold; letter-spacing: 2px; "
-                "border: 3px dashed #ff4500; border-radius: 15px; background: rgba(255, 69, 0, 0.1);"
-            )
+            self._set_drag_active(True)
         else:
             event.ignore()
 
@@ -37,20 +42,16 @@ class DropZoneLabel(QLabel):
             event.ignore()
 
     def dragLeaveEvent(self, event) -> None:
-        self.setStyleSheet(
-            "font-size: 24px; color: #888; font-weight: bold; letter-spacing: 2px;"
-        )
+        self._set_drag_active(False)
         event.accept()
 
     def dropEvent(self, event) -> None:
         for url in event.mimeData().urls():
             if url.isLocalFile():
                 path = url.toLocalFile()
+                self._set_drag_active(False)
                 self.file_dropped.emit(path)
                 event.acceptProposedAction()
-                self.setStyleSheet(
-                    "font-size: 24px; color: #888; font-weight: bold; letter-spacing: 2px;"
-                )
                 return
         event.ignore()
 
@@ -86,6 +87,41 @@ class PageWidget(QLabel):
         self.temp_shape_type: str = ""
         self.temp_shape_color: str = ""
         self.temp_shape_thick: int = 1
+
+        self._page_pixmap: Optional[QPixmap] = None
+
+    # The page image is drawn by paintEvent rather than by QLabel. With
+    # scaledContents, QLabel converted and smooth-scaled every new pixmap on its
+    # first paint whenever the render was a pixel off the slot size (rounding
+    # makes that the usual case), about 12 ms per page while scrolling.
+
+    def setPixmap(self, pixmap: QPixmap) -> None:
+        super().clear()
+        self._page_pixmap = pixmap if pixmap is not None and not pixmap.isNull() else None
+        self.update()
+
+    def pixmap(self) -> QPixmap:
+        return self._page_pixmap if self._page_pixmap is not None else QPixmap()
+
+    def clear(self) -> None:
+        self._page_pixmap = None
+        super().clear()
+
+    def setText(self, text: str) -> None:
+        self._page_pixmap = None
+        super().setText(text)
+
+    def _draw_page_pixmap(self, painter: QPainter) -> None:
+        pix = self._page_pixmap
+        if pix is None:
+            return
+        size = pix.deviceIndependentSize()
+        if abs(size.width() - self.width()) <= 2 and abs(size.height() - self.height()) <= 2:
+            painter.drawPixmap(0, 0, pix)
+        else:
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            painter.drawPixmap(self.rect(), pix)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
 
     def set_text_selection(self, rects: List[QRect]) -> None:
         """
@@ -168,6 +204,7 @@ class PageWidget(QLabel):
         """
         super().paintEvent(event)
         painter = QPainter(self)
+        self._draw_page_pixmap(painter)
 
         if self.temp_points and len(self.temp_points) > 1:
             painter.setPen(self.temp_pen)

@@ -1,0 +1,98 @@
+{
+  "label": "original",
+  "machine": {
+    "date": "2026-10-25 08:33 UTC",
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13500H",
+    "logical_cores": 16,
+    "ram_gb": 13.1,
+    "os": "Rocky Linux 10.2 (Red Quartz) (kernel 6.12.0-211.61.1.el10_2.0.1.x86_64)",
+    "python": "3.11.16",
+    "commit": "a2d54af",
+    "dirty": false,
+    "pyside6": "6.10.1"
+  },
+  "settings": {
+    "app_path": "/tmp/claude-1000/-mnt-Windows-Well-Projects-SDE-riemann/5c87edec-2fca-494a-a5d9-5e86012ca624/scratchpad/before/python-app",
+    "core_path": "/tmp/claude-1000/-mnt-Windows-Well-Projects-SDE-riemann/5c87edec-2fca-494a-a5d9-5e86012ca624/scratchpad/core_orig",
+    "label": "original",
+    "docs": "pdf17_spec.pdf,latent_diffusion.pdf",
+    "speeds": "2000,6000,19000",
+    "seconds": 5.0,
+    "runs": 3,
+    "window": "1400x1000",
+    "zoom": "Fit Width",
+    "platform": "offscreen"
+  },
+  "documents": {
+    "pdf17_spec.pdf": {
+      "2000": {
+        "runs": 3,
+        "ticks": 300,
+        "sharp_pct": 24.0,
+        "standin_pct": 0.0,
+        "blank_pct": 76.0,
+        "ui_pass_max_ms": 73.5,
+        "ui_pass_p99_ms": 7.3,
+        "settle_ms": 214.6,
+        "first_sharp_ms": 1836.8
+      },
+      "6000": {
+        "runs": 3,
+        "ticks": 300,
+        "sharp_pct": 8.0,
+        "standin_pct": 0.0,
+        "blank_pct": 92.0,
+        "ui_pass_max_ms": 90.5,
+        "ui_pass_p99_ms": 4.3,
+        "settle_ms": 230.8,
+        "first_sharp_ms": 1800.0
+      },
+      "19000": {
+        "runs": 3,
+        "ticks": 300,
+        "sharp_pct": 2.3,
+        "standin_pct": 0.0,
+        "blank_pct": 97.7,
+        "ui_pass_max_ms": 130.9,
+        "ui_pass_p99_ms": 4.2,
+        "settle_ms": 271.2,
+        "first_sharp_ms": 1904.6
+      }
+    },
+    "latent_diffusion.pdf": {
+      "2000": {
+        "runs": 3,
+        "ticks": 300,
+        "sharp_pct": 21.3,
+        "standin_pct": 0.0,
+        "blank_pct": 78.7,
+        "ui_pass_max_ms": 200.2,
+        "ui_pass_p99_ms": 8.9,
+        "settle_ms": 334.1,
+        "first_sharp_ms": 484.1
+      },
+      "6000": {
+        "runs": 3,
+        "ticks": 300,
+        "sharp_pct": 7.0,
+        "standin_pct": 0.0,
+        "blank_pct": 93.0,
+        "ui_pass_max_ms": 102.9,
+        "ui_pass_p99_ms": 4.0,
+        "settle_ms": 244.4,
+        "first_sharp_ms": 474.9
+      },
+      "19000": {
+        "runs": 3,
+        "ticks": 250,
+        "sharp_pct": 2.4,
+        "standin_pct": 0.0,
+        "blank_pct": 97.6,
+        "ui_pass_max_ms": 342.9,
+        "ui_pass_p99_ms": 4.5,
+        "settle_ms": 484.0,
+        "first_sharp_ms": 499.5
+      }
+    }
+  }
+}

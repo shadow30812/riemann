@@ -1,0 +1,320 @@
+{
+  "machine": {
+    "date": "2026-10-25 08:24 UTC",
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13500H",
+    "logical_cores": 16,
+    "ram_gb": 13.1,
+    "os": "Rocky Linux 10.2 (Red Quartz) (kernel 6.12.0-211.61.1.el10_2.0.1.x86_64)",
+    "python": "3.11.16",
+    "commit": "4f65f07",
+    "dirty": true,
+    "pyside6": "6.10.1"
+  },
+  "settings": {
+    "scales": "1,2,3",
+    "pages": 40,
+    "repeats": 3,
+    "core_path": null,
+    "label": "current",
+    "no_mupdf": false
+  },
+  "documents": {
+    "attention.pdf": {
+      "description": "arXiv paper, 15 pages, text and vector figures",
+      "engines": {
+        "riemann (Rust + PDFium)": {
+          "open_ms": 0.82,
+          "render": {
+            "1.0": {
+              "pages": 15,
+              "median_ms": 4.0,
+              "p95_ms": 31.85,
+              "max_ms": 33.6
+            },
+            "2.0": {
+              "pages": 15,
+              "median_ms": 8.04,
+              "p95_ms": 54.44,
+              "max_ms": 60.59
+            },
+            "3.0": {
+              "pages": 15,
+              "median_ms": 14.35,
+              "p95_ms": 85.75,
+              "max_ms": 98.93
+            }
+          },
+          "text": {
+            "pages": 15,
+            "chars": 40371,
+            "total_ms": 48.5,
+            "pages_per_s": 310
+          },
+          "search": {
+            "term": "attention",
+            "hits": 97,
+            "total_ms": 46.7
+          }
+        },
+        "PyMuPDF 1.28.2 (MuPDF)": {
+          "open_ms": 1.24,
+          "render": {
+            "1.0": {
+              "pages": 15,
+              "median_ms": 2.47,
+              "p95_ms": 37.78,
+              "max_ms": 43.48
+            },
+            "2.0": {
+              "pages": 15,
+              "median_ms": 4.05,
+              "p95_ms": 78.24,
+              "max_ms": 96.46
+            },
+            "3.0": {
+              "pages": 15,
+              "median_ms": 6.53,
+              "p95_ms": 136.64,
+              "max_ms": 169.44
+            }
+          },
+          "text": {
+            "pages": 15,
+            "chars": 39498,
+            "total_ms": 54.3,
+            "pages_per_s": 276
+          },
+          "search": {
+            "term": "attention",
+            "hits": 97,
+            "total_ms": 61.8
+          }
+        }
+      },
+      "pages": 15
+    },
+    "latent_diffusion.pdf": {
+      "description": "arXiv paper, 45 pages, dense raster images (41 MB)",
+      "engines": {
+        "riemann (Rust + PDFium)": {
+          "open_ms": 0.31,
+          "render": {
+            "1.0": {
+              "pages": 40,
+              "median_ms": 27.03,
+              "p95_ms": 100.56,
+              "max_ms": 179.95
+            },
+            "2.0": {
+              "pages": 40,
+              "median_ms": 36.17,
+              "p95_ms": 114.92,
+              "max_ms": 176.29
+            },
+            "3.0": {
+              "pages": 40,
+              "median_ms": 44.67,
+              "p95_ms": 129.16,
+              "max_ms": 196.81
+            }
+          },
+          "text": {
+            "pages": 45,
+            "chars": 102259,
+            "total_ms": 69.9,
+            "pages_per_s": 644
+          },
+          "search": {
+            "term": "diffusion",
+            "hits": 74,
+            "total_ms": 63.7
+          }
+        },
+        "PyMuPDF 1.28.2 (MuPDF)": {
+          "open_ms": 2.18,
+          "render": {
+            "1.0": {
+              "pages": 40,
+              "median_ms": 4.73,
+              "p95_ms": 7.78,
+              "max_ms": 13.44
+            },
+            "2.0": {
+              "pages": 40,
+              "median_ms": 12.46,
+              "p95_ms": 25.43,
+              "max_ms": 26.55
+            },
+            "3.0": {
+              "pages": 40,
+              "median_ms": 20.13,
+              "p95_ms": 44.33,
+              "max_ms": 45.55
+            }
+          },
+          "text": {
+            "pages": 45,
+            "chars": 100721,
+            "total_ms": 81.2,
+            "pages_per_s": 555
+          },
+          "search": {
+            "term": "diffusion",
+            "hits": 73,
+            "total_ms": 90.9
+          }
+        }
+      },
+      "pages": 45
+    },
+    "thinkpython2.pdf": {
+      "description": "Think Python 2e, 244 pages, book typesetting",
+      "engines": {
+        "riemann (Rust + PDFium)": {
+          "open_ms": 1.42,
+          "render": {
+            "1.0": {
+              "pages": 40,
+              "median_ms": 1.9,
+              "p95_ms": 2.83,
+              "max_ms": 3.09
+            },
+            "2.0": {
+              "pages": 40,
+              "median_ms": 4.0,
+              "p95_ms": 6.05,
+              "max_ms": 6.44
+            },
+            "3.0": {
+              "pages": 40,
+              "median_ms": 7.1,
+              "p95_ms": 10.55,
+              "max_ms": 12.02
+            }
+          },
+          "text": {
+            "pages": 244,
+            "chars": 453690,
+            "total_ms": 284.3,
+            "pages_per_s": 858
+          },
+          "search": {
+            "term": "function",
+            "hits": 767,
+            "total_ms": 251.8
+          }
+        },
+        "PyMuPDF 1.28.2 (MuPDF)": {
+          "open_ms": 18.11,
+          "render": {
+            "1.0": {
+              "pages": 40,
+              "median_ms": 1.51,
+              "p95_ms": 2.04,
+              "max_ms": 2.68
+            },
+            "2.0": {
+              "pages": 40,
+              "median_ms": 2.44,
+              "p95_ms": 3.16,
+              "max_ms": 3.68
+            },
+            "3.0": {
+              "pages": 40,
+              "median_ms": 3.74,
+              "p95_ms": 4.6,
+              "max_ms": 5.27
+            }
+          },
+          "text": {
+            "pages": 244,
+            "chars": 445458,
+            "total_ms": 282.4,
+            "pages_per_s": 864
+          },
+          "search": {
+            "term": "function",
+            "hits": 767,
+            "total_ms": 326.7
+          }
+        }
+      },
+      "pages": 244
+    },
+    "pdf17_spec.pdf": {
+      "description": "ISO 32000-1 (PDF 1.7) specification, 756 pages, tables and links",
+      "engines": {
+        "riemann (Rust + PDFium)": {
+          "open_ms": 20.26,
+          "render": {
+            "1.0": {
+              "pages": 40,
+              "median_ms": 3.69,
+              "p95_ms": 4.61,
+              "max_ms": 5.54
+            },
+            "2.0": {
+              "pages": 40,
+              "median_ms": 6.74,
+              "p95_ms": 8.24,
+              "max_ms": 9.22
+            },
+            "3.0": {
+              "pages": 40,
+              "median_ms": 11.63,
+              "p95_ms": 14.28,
+              "max_ms": 18.76
+            }
+          },
+          "text": {
+            "pages": 756,
+            "chars": 2063668,
+            "total_ms": 1695.0,
+            "pages_per_s": 446
+          },
+          "search": {
+            "term": "stream",
+            "hits": 1529,
+            "total_ms": 1567.8
+          }
+        },
+        "PyMuPDF 1.28.2 (MuPDF)": {
+          "open_ms": 34.59,
+          "render": {
+            "1.0": {
+              "pages": 40,
+              "median_ms": 3.14,
+              "p95_ms": 3.93,
+              "max_ms": 4.08
+            },
+            "2.0": {
+              "pages": 40,
+              "median_ms": 4.68,
+              "p95_ms": 5.64,
+              "max_ms": 10.43
+            },
+            "3.0": {
+              "pages": 40,
+              "median_ms": 6.22,
+              "p95_ms": 9.04,
+              "max_ms": 12.62
+            }
+          },
+          "text": {
+            "pages": 756,
+            "chars": 2044583,
+            "total_ms": 1541.4,
+            "pages_per_s": 490
+          },
+          "search": {
+            "term": "stream",
+            "hits": 1462,
+            "total_ms": 1539.6
+          }
+        }
+      },
+      "pages": 756
+    }
+  },
+  "core_module": "/mnt/Windows/Well/Projects/SDE/riemann/riemann/lib/python3.11/site-packages/riemann_core/__init__.py"
+}

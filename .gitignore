@@ -30,3 +30,7 @@ commands.txt
 target.*
 models/
 logs/
+.state
+# Benchmark corpus (downloaded by benchmarks/fetch_corpus.py) and scratch state
+benchmarks/corpus/
+benchmarks/.state/

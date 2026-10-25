@@ -319,3 +319,27 @@ def test_comment_interaction_events(reader_tab):
         mock_show_dlg.assert_called_once_with(dummy_comment)
 
 
+
+
+def test_home_page_follows_the_interface_theme(reader_tab):
+    assert reader_tab._home_dark is True  # QSettings is mocked to return True
+    reader_tab.apply_ui_theme(False)
+    assert reader_tab._home_dark is False
+    assert "#FFFFFF" in reader_tab.home_page_widget.styleSheet()  # light card surface
+    reader_tab.apply_ui_theme(True)
+    assert "#232428" in reader_tab.home_page_widget.styleSheet()  # dark card surface
+
+
+def test_home_page_lists_recent_documents_with_their_folder(reader_tab, tmp_path):
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    window = MagicMock()
+    window.dark_mode = True
+    window.history_manager.history = {"pdf": [str(pdf), str(tmp_path / "gone.pdf")]}
+    with patch.object(reader_tab, "window", return_value=window):
+        reader_tab._populate_home_recents()
+    assert reader_tab.list_recent.count() == 1
+    item = reader_tab.list_recent.item(0)
+    assert item.data(Qt.ItemDataRole.UserRole) == str(pdf)
+    assert reader_tab.lbl_recent_count.text() == "1"
+    assert reader_tab.lbl_recent_empty.isHidden()

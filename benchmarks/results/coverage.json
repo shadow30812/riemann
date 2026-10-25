@@ -1,0 +1,24 @@
+{
+  "tool": "pytest-cov (coverage.py 7.17.0)",
+  "tests_passed": 192,
+  "statements": 10417,
+  "covered": 5051,
+  "percent": 48.5,
+  "files": {
+    "riemann/app.py": 52,
+    "riemann/core/features.py": 13,
+    "riemann/core/managers.py": 49,
+    "riemann/core/mini_player.py": 71,
+    "riemann/core/window_snap.py": 37,
+    "riemann/ui/browser.py": 60,
+    "riemann/ui/components.py": 63,
+    "riemann/ui/explorer.py": 30,
+    "riemann/ui/reader/mixins/ai.py": 42,
+    "riemann/ui/reader/mixins/annotations.py": 69,
+    "riemann/ui/reader/mixins/rendering.py": 38,
+    "riemann/ui/reader/mixins/signatures.py": 52,
+    "riemann/ui/reader/tab.py": 42,
+    "riemann/ui/reader/widgets.py": 65,
+    "riemann/ui/reader/workers.py": 55
+  }
+}

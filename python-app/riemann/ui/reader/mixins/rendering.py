@@ -24,7 +24,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QCheckBox, QHBoxLayout, QLineEdit, QWidget
 
 from ....core.constants import ViewMode, ZoomMode
-from ..render_worker import PAGE_CACHE
+from ..render_worker import PAGE_CACHE, PAGE_IMAGE_FORMAT
 from ..utils import generate_markdown_html, generate_reflow_html
 from ..widgets import PageWidget
 
@@ -88,15 +88,17 @@ class RenderingMixin:
         QApplication.processEvents()
 
         self.current_page_index = target_page
-        self._ignore_scroll = False
 
+        # Unblock before restoring the position: QScrollArea only moves the
+        # content when it sees valueChanged. _ignore_scroll keeps the reader's
+        # own handler out of it.
+        sb.blockSignals(was_blocked)
         if target_max > 0 and sb.maximum() > 0:
             ratio = target_value / target_max
             sb.setValue(int(ratio * sb.maximum()))
         else:
             self.ensure_visible(target_page)
-
-        sb.blockSignals(was_blocked)
+        self._ignore_scroll = False
         if hasattr(self, "scroll") and self.scroll:
             self.scroll.setFocus()
 
@@ -337,7 +339,7 @@ class RenderingMixin:
             if worker is None:
                 res = self.current_doc.render_page(idx, render_scale, theme)
                 img = QImage(
-                    res.data, res.width, res.height, QImage.Format.Format_ARGB32
+                    res.data, res.width, res.height, PAGE_IMAGE_FORMAT
                 ).copy()
                 PAGE_CACHE.put((owner, idx, render_scale, theme), img)
                 self._display_page_image(idx, img, scale, dpr)
@@ -422,6 +424,17 @@ class RenderingMixin:
         rotation = getattr(self, "rotation", 0)
         if rotation != 0:
             pix = pix.transformed(QTransform().rotate(rotation))
+        # Stretch once here. Left to QLabel's scaledContents, the small image
+        # was rescaled on every repaint, about 8 ms per page per scroll tick.
+        dpr = self.devicePixelRatio()
+        target = widget.size() * dpr
+        if not target.isEmpty() and pix.size() != target:
+            pix = pix.scaled(
+                target,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            pix.setDevicePixelRatio(dpr)
         widget.has_full_page = False
         widget.setPixmap(pix)
 
@@ -597,10 +610,17 @@ class RenderingMixin:
             lw (float): The logical dimension width calculation.
             lh (float): The logical dimension height calculation.
         """
+        has_search = bool(self.search_result and self.search_result[0] == idx)
+        has_annotations = bool(self.annotations.get(str(idx)))
+        if not has_search and not has_annotations:
+            # Painting detaches the pixmap from the cached image it shares
+            # memory with, a full copy of the page, so skip it when idle.
+            return
+
         painter = QPainter(pix)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        if self.search_result and self.search_result[0] == idx:
+        if has_search:
             c = QColor(255, 255, 0, 100 if self.theme_mode != 0 else 128)
             painter.setBrush(c)
             painter.setPen(Qt.PenStyle.NoPen)
@@ -610,7 +630,7 @@ class RenderingMixin:
                 y = int(lh - (t * scale))
                 painter.drawRect(x, y, w, h)
 
-        if str(idx) in self.annotations:
+        if has_annotations:
             for anno in self.annotations[str(idx)]:
                 self._draw_annotation(painter, anno, lw, lh, scale)
 
@@ -1008,24 +1028,32 @@ class RenderingMixin:
 
     def _set_scroll_value_silently(self, value: int) -> None:
         """
-        Moves the vertical scrollbar without triggering scroll handlers. If the
-        range has not caught up yet, the move is retried once the layout settles.
+        Moves the vertical scrollbar without running the reader's own scroll
+        handler. If the range has not caught up yet, the move is retried once
+        the layout settles.
+
+        The scrollbar's signals must stay connected: QScrollArea moves its
+        content in response to valueChanged, so blocking them left the old
+        pages on screen under a scrollbar that had already moved.
         """
         vbar = self.scroll.verticalScrollBar()
-        was_v_blocked = vbar.signalsBlocked()
-        vbar.blockSignals(True)
-        vbar.setValue(value)
-        vbar.blockSignals(was_v_blocked)
 
+        def _apply():
+            was_ignoring = getattr(self, "_ignore_scroll", False)
+            self._ignore_scroll = True
+            try:
+                vbar.setValue(value)
+            finally:
+                self._ignore_scroll = was_ignoring
+
+        _apply()
         if vbar.value() == value:
             return
 
         def _retry():
             if not shiboken6.isValid(vbar):
                 return
-            vbar.blockSignals(True)
-            vbar.setValue(value)
-            vbar.blockSignals(was_v_blocked)
+            _apply()
             if hasattr(self, "render_visible_pages"):
                 self.render_visible_pages()
 

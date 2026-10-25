@@ -145,16 +145,22 @@ class SignaturesMixin:
             path (str): The document file system pathway query payload.
         """
         try:
-            with open(path, "rb") as f:
-                reader = PdfFileReader(f, strict=False)
-                sigs = reader.embedded_signatures
-                if not sigs:
-                    self.signature_banner.setVisible(False)
-                    return
+            doc = getattr(self, "current_doc", None)
+            if doc is not None and hasattr(doc, "signature_count"):
+                # PDFium reads the count straight from the AcroForm. pyhanko
+                # parsed the whole cross-reference table on the UI thread
+                # first, which froze the window for about 0.7 s on large files.
+                count = doc.signature_count()
+            else:
+                with open(path, "rb") as f:
+                    count = len(PdfFileReader(f, strict=False).embedded_signatures)
+            if not count:
+                self.signature_banner.setVisible(False)
+                return
 
             self.signature_banner.setVisible(True)
             self.lbl_sig_status.setText(
-                f"ℹ️ Document contains {len(sigs)} signature(s)."
+                f"ℹ️ Document contains {count} signature(s)."
             )
             self.signature_banner.setStyleSheet(
                 "background-color: #1976D2; color: white;"
