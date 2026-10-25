@@ -2,7 +2,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication
 from riemann.core.constants import ViewMode, ZoomMode
@@ -27,6 +27,9 @@ def reader_tab(qapp):
         tab = ReaderTab()
         yield tab
         tab.deleteLater()
+        # No event loop runs under pytest, so flush the deletion explicitly;
+        # otherwise the tab's QWebEngineView outlives the default profile.
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def test_initialization(reader_tab):

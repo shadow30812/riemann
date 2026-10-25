@@ -15,7 +15,14 @@ def qapp():
     app = QApplication.instance()
     if not app:
         app = QApplication(sys.argv)
-    return app
+    yield app
+    # BrowserTab attaches a CaptionsServer to the app; it is normally stopped on
+    # aboutToQuit, which never fires under pytest. Its running QThread would
+    # otherwise abort the interpreter on exit.
+    server = getattr(app, "captions_server", None)
+    if server is not None:
+        server.stop()
+        del app.captions_server
 
 try:
     import pytestqt

@@ -1,7 +1,8 @@
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
-from PySide6.QtCore import QEvent, QUrl
+import shiboken6
+from PySide6.QtCore import QCoreApplication, QEvent, QUrl
 from PySide6.QtGui import QFocusEvent
 from PySide6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
@@ -24,6 +25,71 @@ from riemann.ui.browser import (
 @pytest.fixture
 def app(qtbot):
     return qtbot
+
+
+def _flush_deferred_deletes():
+    for _ in range(3):
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        QCoreApplication.processEvents()
+
+
+class _WebEngineTracker:
+    """Holds QtWebEngine objects created by a test and deletes them in order.
+
+    QtWebEngine aborts the process if a QWebEngineProfile is destroyed while
+    a page using it is still alive, so pages, views and tabs must go first.
+    Garbage collection or Qt child order (BrowserTab parents its profile
+    before its view) does not guarantee that.
+    """
+
+    def __init__(self):
+        self._objects = []
+        self._profiles = []
+
+    def profile(self):
+        profile = QWebEngineProfile()
+        self._profiles.append(profile)
+        return profile
+
+    def add(self, obj):
+        self._objects.append(obj)
+        return obj
+
+    def tab(self, **kwargs):
+        return self.add(BrowserTab(**kwargs))
+
+    def dispose(self):
+        for obj in reversed(self._objects):
+            if not shiboken6.isValid(obj):
+                continue
+            if isinstance(obj, BrowserTab):
+                devtools = getattr(obj, "_devtools_window", None)
+                if devtools is not None:
+                    devtools.close()
+                    devtools.deleteLater()
+                    _flush_deferred_deletes()
+                # The tab owns its profile and creates it before its view, so
+                # Qt's child order would delete the profile first. Detach it
+                # and release it after the tab (and its page) are gone.
+                if obj.profile.parent() is obj:
+                    obj.profile.setParent(None)
+                    self._profiles.append(obj.profile)
+            if isinstance(obj, QWidget):
+                obj.close()
+            obj.deleteLater()
+            _flush_deferred_deletes()
+        self._objects.clear()
+        for profile in reversed(self._profiles):
+            profile.deleteLater()
+        _flush_deferred_deletes()
+        self._profiles.clear()
+
+
+@pytest.fixture
+def webengine(qapp):
+    tracker = _WebEngineTracker()
+    yield tracker
+    tracker.dispose()
 
 
 @patch("yt_dlp.YoutubeDL")
@@ -64,54 +130,54 @@ def test_ytdlpworker_stop():
 
 
 
-def test_webpage_createwindow_background(qtbot):
-    profile = QWebEngineProfile()
-    main_win = QWidget()
+def test_webpage_createwindow_background(qtbot, webengine):
+    profile = webengine.profile()
+    main_win = webengine.add(QWidget())
     qtbot.addWidget(main_win)
     parent_view = QWebEngineView(main_win)
 
     mock_tab = MagicMock()
-    mock_tab.web.page.return_value = QWebEnginePage(profile)
+    mock_tab.web.page.return_value = webengine.add(QWebEnginePage(profile))
     main_win.new_browser_tab = MagicMock(return_value=mock_tab)
 
-    page = WebPage(profile, parent_view)
+    page = webengine.add(WebPage(profile, parent_view))
     new_page = page.createWindow(QWebEnginePage.WebWindowType.WebBrowserBackgroundTab)
 
     main_win.new_browser_tab.assert_called_with(url="", background=True)
     assert new_page is not None
 
 
-def test_webpage_createwindow_tab(qtbot):
-    profile = QWebEngineProfile()
-    main_win = QWidget()
+def test_webpage_createwindow_tab(qtbot, webengine):
+    profile = webengine.profile()
+    main_win = webengine.add(QWidget())
     qtbot.addWidget(main_win)
     parent_view = QWebEngineView(main_win)
 
     mock_tab = MagicMock()
-    mock_tab.web.page.return_value = QWebEnginePage(profile)
+    mock_tab.web.page.return_value = webengine.add(QWebEnginePage(profile))
     main_win.new_browser_tab = MagicMock(return_value=mock_tab)
 
-    page = WebPage(profile, parent_view)
+    page = webengine.add(WebPage(profile, parent_view))
     new_page = page.createWindow(QWebEnginePage.WebWindowType.WebBrowserTab)
 
     main_win.new_browser_tab.assert_called_with(url="", background=False)
     assert new_page is not None
 
 
-def test_webpage_createwindow_popup(qtbot):
-    profile = QWebEngineProfile()
-    page = WebPage(profile)
+def test_webpage_createwindow_popup(qtbot, webengine):
+    profile = webengine.profile()
+    page = webengine.add(WebPage(profile))
     new_page = page.createWindow(QWebEnginePage.WebWindowType.WebDialog)
     assert len(page._popups) == 1
 
-    popup_view = page._popups[0]
+    popup_view = webengine.add(page._popups[0])
     page._cleanup_popup(popup_view)
     assert len(page._popups) == 0
 
 
-def test_webpage_js_console():
-    profile = QWebEngineProfile()
-    page = WebPage(profile)
+def test_webpage_js_console(webengine):
+    profile = webengine.profile()
+    page = webengine.add(WebPage(profile))
     page.javaScriptConsoleMessage(
         QWebEnginePage.JavaScriptConsoleMessageLevel.InfoMessageLevel,
         "Test Message",
@@ -121,9 +187,9 @@ def test_webpage_js_console():
 
 
 @patch("PySide6.QtCore.QSettings.setValue")
-def test_webpage_accept_navigation_request(mock_set_value):
-    profile = QWebEngineProfile()
-    page = WebPage(profile)
+def test_webpage_accept_navigation_request(mock_set_value, webengine):
+    profile = webengine.profile()
+    page = webengine.add(WebPage(profile))
     url = QUrl("riemann-save://test_payload")
     result = page.acceptNavigationRequest(
         url, QWebEnginePage.NavigationType.NavigationTypeTyped, True
@@ -152,23 +218,23 @@ def test_request_interceptor_whatsapp():
 
 
 @patch("riemann.ui.browser.ScriptInjector")
-def test_browser_tab_init(mock_injector, qtbot):
-    tab = BrowserTab(start_url="https://example.com")
+def test_browser_tab_init(mock_injector, qtbot, webengine):
+    tab = webengine.tab(start_url="https://example.com")
     qtbot.addWidget(tab)
     assert tab.txt_url.placeholderText() == "Enter URL or Search..."
 
 
 @patch("riemann.ui.browser.ScriptInjector")
-def test_browser_tab_incognito_init(mock_injector, qtbot):
-    tab = BrowserTab(incognito=True)
+def test_browser_tab_incognito_init(mock_injector, qtbot, webengine):
+    tab = webengine.tab(incognito=True)
     qtbot.addWidget(tab)
     assert tab.txt_url.placeholderText() == "Incognito Mode"
     assert tab.incognito is True
 
 
 @patch("riemann.ui.browser.ScriptInjector")
-def test_browser_tab_focus_in(mock_injector, qtbot):
-    tab = BrowserTab()
+def test_browser_tab_focus_in(mock_injector, qtbot, webengine):
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     event = QFocusEvent(QEvent.Type.FocusIn)
     with patch.object(tab.web, "setFocus") as mock_set_focus:
@@ -178,8 +244,8 @@ def test_browser_tab_focus_in(mock_injector, qtbot):
 
 @patch("riemann.ui.browser.ScriptInjector")
 @patch("os.getlogin", return_value="TestUser")
-def test_browser_tab_homepage_load(mock_login, mock_injector, qtbot):
-    tab = BrowserTab()
+def test_browser_tab_homepage_load(mock_login, mock_injector, qtbot, webengine):
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     tab.web.page().runJavaScript = MagicMock()
     with patch.object(tab.web, "url", return_value=QUrl("file:///homepage.html")):
@@ -188,8 +254,8 @@ def test_browser_tab_homepage_load(mock_login, mock_injector, qtbot):
 
 
 @patch("riemann.ui.browser.ScriptInjector")
-def test_browser_tab_feature_permission(mock_injector, qtbot):
-    tab = BrowserTab()
+def test_browser_tab_feature_permission(mock_injector, qtbot, webengine):
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     tab.web.page().setFeaturePermission = MagicMock()
 
@@ -201,8 +267,8 @@ def test_browser_tab_feature_permission(mock_injector, qtbot):
 
 
 @patch("riemann.ui.browser.ScriptInjector")
-def test_browser_tab_devtools(mock_injector, qtbot):
-    tab = BrowserTab()
+def test_browser_tab_devtools(mock_injector, qtbot, webengine):
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     tab.open_devtools()
     assert hasattr(tab, "_devtools_window")
@@ -210,8 +276,8 @@ def test_browser_tab_devtools(mock_injector, qtbot):
 
 
 @patch("riemann.ui.browser.ScriptInjector")
-def test_browser_tab_zoom(mock_injector, qtbot):
-    tab = BrowserTab()
+def test_browser_tab_zoom(mock_injector, qtbot, webengine):
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     tab.web.setZoomFactor = MagicMock()
     tab.web.zoomFactor = MagicMock(return_value=1.0)
@@ -226,8 +292,8 @@ def test_browser_tab_zoom(mock_injector, qtbot):
 
 
 @patch("riemann.ui.browser.ScriptInjector")
-def test_browser_tab_search_toggle(mock_injector, qtbot):
-    tab = BrowserTab()
+def test_browser_tab_search_toggle(mock_injector, qtbot, webengine):
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     assert tab.search_bar.isHidden() is True
     tab.toggle_search()
@@ -235,8 +301,8 @@ def test_browser_tab_search_toggle(mock_injector, qtbot):
 
 
 @patch("riemann.ui.browser.ScriptInjector")
-def test_browser_tab_navigate(mock_injector, qtbot):
-    tab = BrowserTab()
+def test_browser_tab_navigate(mock_injector, qtbot, webengine):
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     tab.web.load = MagicMock()
 
@@ -246,8 +312,8 @@ def test_browser_tab_navigate(mock_injector, qtbot):
 
 
 @patch("riemann.ui.browser.ScriptInjector")
-def test_browser_tab_toast(mock_injector, qtbot):
-    tab = BrowserTab()
+def test_browser_tab_toast(mock_injector, qtbot, webengine):
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     tab.show_toast("Hello World")
     assert tab.lbl_toast.isHidden() is False
@@ -255,11 +321,11 @@ def test_browser_tab_toast(mock_injector, qtbot):
 
 
 @patch("riemann.ui.browser.ScriptInjector")
-def test_browser_tab_bookmark_toggle(mock_injector, qtbot):
+def test_browser_tab_bookmark_toggle(mock_injector, qtbot, webengine):
     main_win = MagicMock()
     main_win.bookmarks_manager.is_bookmarked.return_value = False
 
-    tab = BrowserTab()
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     with patch.object(tab, "window", return_value=main_win):
         tab.toggle_bookmark()
@@ -269,8 +335,8 @@ def test_browser_tab_bookmark_toggle(mock_injector, qtbot):
 @patch("riemann.ui.browser.ScriptInjector")
 @patch("builtins.open", new_callable=mock_open, read_data="console.log('audio');")
 @patch("os.path.exists", return_value=True)
-def test_browser_tab_music_mode(mock_exists, mock_file, mock_injector, qtbot):
-    tab = BrowserTab()
+def test_browser_tab_music_mode(mock_exists, mock_file, mock_injector, qtbot, webengine):
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     tab.web.page().runJavaScript = MagicMock()
 
@@ -286,8 +352,8 @@ def test_browser_tab_music_mode(mock_exists, mock_file, mock_injector, qtbot):
 @patch(
     "PySide6.QtWidgets.QFileDialog.getSaveFileName", return_value=("/fake/path.pdf", "")
 )
-def test_browser_tab_download_handler(mock_dialog, mock_injector, qtbot):
-    tab = BrowserTab()
+def test_browser_tab_download_handler(mock_dialog, mock_injector, qtbot, webengine):
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     mock_item = MagicMock()
 
@@ -301,10 +367,10 @@ def test_browser_tab_download_handler(mock_dialog, mock_injector, qtbot):
 @patch("riemann.ui.browser.ScriptInjector")
 @patch("PySide6.QtWidgets.QFileDialog.getExistingDirectory", return_value="/fake/dir")
 @patch("riemann.ui.browser.YtDlpWorker")
-def test_browser_tab_download_video(mock_worker, mock_dialog, mock_injector, mock_settings_dlg, qtbot):
+def test_browser_tab_download_video(mock_worker, mock_dialog, mock_injector, mock_settings_dlg, qtbot, webengine):
     mock_settings_dlg.return_value.exec.return_value = 1
     mock_settings_dlg.return_value.get_options.return_value = {}
-    tab = BrowserTab()
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     with patch.object(tab.web, "url", return_value=QUrl("http://youtube.com")):
         tab.download_video()
@@ -313,8 +379,8 @@ def test_browser_tab_download_video(mock_worker, mock_dialog, mock_injector, moc
 
 
 @patch("riemann.ui.browser.ScriptInjector")
-def test_browser_tab_cancel_video(mock_injector, qtbot):
-    tab = BrowserTab()
+def test_browser_tab_cancel_video(mock_injector, qtbot, webengine):
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     tab.dl_worker = MagicMock()
     tab.dl_worker.isRunning.return_value = True
@@ -323,8 +389,8 @@ def test_browser_tab_cancel_video(mock_injector, qtbot):
 
 
 @patch("riemann.ui.browser.ScriptInjector")
-def test_browser_tab_download_finished(mock_injector, qtbot):
-    tab = BrowserTab()
+def test_browser_tab_download_finished(mock_injector, qtbot, webengine):
+    tab = webengine.tab()
     qtbot.addWidget(tab)
     tab._on_download_finished(True, "Done")
     assert tab.progress.value() == 100
@@ -368,7 +434,7 @@ def test_ytdlp_stream_worker_remote_components():
         assert opts.get("remote_components") == ["ejs:github"]
 
 
-def test_ytdlp_settings_dialog_playlist_autodetection():
+def test_ytdlp_settings_dialog_playlist_autodetection(qapp):
     """Item 8: Settings dialog reflects playlist autodetection."""
     dlg_single = YtDlpSettingsDialog(None, is_playlist=False)
     assert not dlg_single.chk_playlist.isChecked()

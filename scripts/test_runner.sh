@@ -4,6 +4,17 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_FILE="$PROJECT_ROOT/logs/test_results.log"
 FAIL=0
 
+# Python tests run in the uv environment created by `uv venv riemann` (see
+# docs/README.md). Set RIEMANN_VENV to point at a different uv environment.
+VENV_DIR="${RIEMANN_VENV:-$PROJECT_ROOT/riemann}"
+VENV_PYTHON="$VENV_DIR/bin/python"
+if [ ! -x "$VENV_PYTHON" ]; then
+    echo -e "\033[0;31mNo uv environment at $VENV_DIR. Create it with: uv venv riemann --python 3.11 && uv pip install -e \".[dev]\"\033[0m"
+    exit 1
+fi
+# A system LD_LIBRARY_PATH can shadow PySide6's bundled Qt libraries.
+PYTEST="env -u LD_LIBRARY_PATH \"$VENV_PYTHON\" -m pytest"
+
 cd "$PROJECT_ROOT"
 > "$LOG_FILE"
 
@@ -24,7 +35,7 @@ else
 fi
 
 echo -e "\033[0;34mRunning rust-core tests...\033[0m"
-if cd rust-core && run_and_log "LD_LIBRARY_PATH=\$(python3 -c \"import sysconfig; print(sysconfig.get_config_var('LIBDIR'))\"):\$LD_LIBRARY_PATH cargo test --no-default-features"; then
+if cd rust-core && run_and_log "PYO3_PYTHON=\"$VENV_PYTHON\" LD_LIBRARY_PATH=\$(\"$VENV_PYTHON\" -c \"import sysconfig; print(sysconfig.get_config_var('LIBDIR'))\"):\$LD_LIBRARY_PATH cargo test --no-default-features"; then
     echo -e "\033[0;32mrust-core tests passed!\033[0m\n"
     cd ..
 else
@@ -42,7 +53,7 @@ else
 fi
 
 echo -e "\033[0;34mRunning riemann-ai backend tests...\033[0m"
-if cd riemann-ai && run_and_log "conda run -n rmai python3 -m pytest --forked"; then
+if cd riemann-ai && run_and_log "$PYTEST --forked"; then
     echo -e "\033[0;32mriemann-ai tests passed!\033[0m\n"
     cd ..
 else
@@ -52,7 +63,7 @@ else
 fi
 
 echo -e "\033[0;34mRunning python-app tests...\033[0m"
-if cd python-app && run_and_log "conda run -n riemann python3 -m pytest"; then
+if cd python-app && run_and_log "$PYTEST"; then
     echo -e "\033[0;32mpython-app tests passed!\033[0m\n"
     cd ..
 else

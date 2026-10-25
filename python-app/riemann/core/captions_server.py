@@ -88,5 +88,6 @@ class CaptionsServer(QObject):
 
     def stop(self):
         self.server.close()
-        self.worker.quit()
-        self.worker.wait()
+        # The worker lives in worker_thread; that is the thread to shut down.
+        self.worker_thread.quit()
+        self.worker_thread.wait()
