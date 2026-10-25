@@ -6,7 +6,7 @@ compiled Rust backend. It ensures type safety for rendering, OCR, and
 document interaction features.
 """
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 class RenderResult:
     """
@@ -43,6 +43,37 @@ class RiemannDocument:
 
         Returns:
             A RenderResult object containing image dimensions and data.
+        """
+        ...
+
+    def get_page_size(self, page_index: int) -> Tuple[float, float]:
+        """
+        Returns the size of a page in PDF points.
+
+        Args:
+            page_index: Zero-based index of the page.
+
+        Returns:
+            (width, height) in points.
+        """
+        ...
+
+    def get_links(
+        self, page_index: int
+    ) -> List[Tuple[str, Tuple[float, float, float, float]]]:
+        """
+        Extracts clickable links from the page.
+
+        Internal links (explicit or named destinations and GoTo actions) are
+        returned as "#page=N", with "&top=Y" appended when the destination names
+        a vertical position (PDF user space, origin at the bottom-left).
+        External links carry their URI.
+
+        Args:
+            page_index: Zero-based index of the page.
+
+        Returns:
+            A list of (target, (left, top, right, bottom)) tuples.
         """
         ...
 
@@ -141,7 +172,7 @@ class PdfEngine:
         """Initialize the PDF engine and internal libraries."""
         ...
 
-    def load_document(self, path: str) -> RiemannDocument:
+    def load_document(self, path: str, password: Optional[str] = None) -> RiemannDocument:
         """
         Loads a PDF document from the file system.
 

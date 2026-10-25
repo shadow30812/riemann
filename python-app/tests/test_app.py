@@ -610,3 +610,100 @@ def test_multi_window_sequential_close_preserves_windows(qtbot):
 
 
 
+
+
+def test_toggle_split_view_twice_merges_back(qtbot):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    window.show()
+
+    window.toggle_split_view()
+    assert window._split_view_active()
+    assert window.tabs_side.count() == 1
+
+    window.toggle_split_view()
+    assert not window._split_view_active()
+    assert window.tabs_side.count() == 0
+    assert window.tabs_main.count() == 2
+
+
+def test_move_single_tab_to_other_pane_keeps_main_pane_populated(qtbot):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    window.show()
+    window.close_tab(1)
+    assert window.tabs_main.count() == 1
+
+    window.move_tab_to_other_pane(window.tabs_main, 0)
+    assert window.tabs_side.count() == 1
+    assert window.tabs_main.count() == 1
+
+
+def test_auto_save_refreshes_the_record_used_for_crash_recovery(qtbot):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    window.new_browser_tab("https://example.com")
+
+    window.settings.setValue("session/windows", [{"main_tabs": [], "side_tabs": []}])
+    window._auto_save_session()
+
+    saved = window.settings.value("session/windows", [])
+    assert saved and any(t.get("type") == "web" for t in saved[0]["main_tabs"])
+    assert window.settings.value("session/clean_exit", True) is False
+
+
+def test_document_kind_by_extension_and_magic(tmp_path):
+    fake_pdf = tmp_path / "scan.bin"
+    fake_pdf.write_bytes(b"%PDF-1.7 rest")
+    notes = tmp_path / "notes.txt"
+    notes.write_text("hi")
+    assert RiemannWindow._document_kind("a.PDF") == "pdf"
+    assert RiemannWindow._document_kind("a.md") == "markdown"
+    assert RiemannWindow._document_kind("a.htm") == "html"
+    assert RiemannWindow._document_kind(str(fake_pdf)) == "pdf"
+    assert RiemannWindow._document_kind(str(notes)) == "text"
+
+
+def test_preview_mode_setting_applies_to_any_opened_document(qtbot, tmp_path):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    window.settings.setValue("reader/open_in_preview_mode", True)
+
+    md = tmp_path / "notes.md"
+    md.write_text("# Title\n\nBody")
+    md_tab = window._open_document(str(md))
+    assert getattr(md_tab, "is_preview", False) is True
+
+    with patch("os.path.exists", return_value=True):
+        pdf_tab = window._open_document("/fake/document.pdf")
+    assert pdf_tab.is_preview is True
+
+    serialized = window._serialize_tab_state(window.tabs_main)
+    assert {"type": "doc", "data": str(md), "preview": True} in serialized
+
+
+def test_double_clicking_a_preview_tab_opens_full_mode(qtbot):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+
+    with patch("os.path.exists", return_value=True):
+        preview = window._open_document("/fake/document.pdf", preview=True)
+        idx = window.tabs_main.indexOf(preview)
+        window._on_tab_bar_double_clicked(window.tabs_main, idx)
+
+    promoted = window.tabs_main.widget(idx)
+    assert promoted is not preview
+    assert promoted.is_preview is False
+    assert promoted.current_path == "/fake/document.pdf"
+
+
+def test_dropping_a_folder_opens_folder_session(qtbot, tmp_path):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+
+    event = MagicMock()
+    url = QUrl.fromLocalFile(str(tmp_path))
+    event.mimeData.return_value.urls.return_value = [url]
+    with patch.object(window, "open_folder") as mock_open_folder:
+        window.dropEvent(event)
+    mock_open_folder.assert_called_once_with(str(tmp_path))

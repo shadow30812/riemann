@@ -86,6 +86,7 @@ from .mixins.metadata import MetadataMixin
 from .mixins.rendering import RenderingMixin
 from .mixins.search import SearchMixin
 from .mixins.signatures import SignaturesMixin
+from .render_worker import PAGE_CACHE, PageRenderWorker
 from .utils import generate_markdown_html
 from .widgets import DropZoneLabel, PageWidget
 
@@ -156,6 +157,7 @@ class ReaderTab(
     """
 
     signatures_detected = Signal(list)
+    is_preview = False
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         """
@@ -210,6 +212,10 @@ class ReaderTab(
         self._bottom_spacer: Optional[QWidget] = None
         self._virtual_range: Tuple[int, int] = (0, 0)
         self._cached_base_size: Optional[Tuple[int, int]] = None
+        self._doc_generation: int = 0
+        self._render_worker: Optional[PageRenderWorker] = None
+        self._raw_links_cache: Dict[int, list] = {}
+        self._raw_forms_cache: Dict[int, list] = {}
 
         self._autoscroll_active: bool = False
         self._autoscroll_origin_global: Optional[QPoint] = None
@@ -226,9 +232,11 @@ class ReaderTab(
         self.apply_theme()
         self._setup_scroller()
 
+        # Throttled (not debounced): while scrolling continuously the handler
+        # still runs every few frames, so pages keep loading during the scroll.
         self.scroll_timer = QTimer()
         self.scroll_timer.setSingleShot(True)
-        self.scroll_timer.setInterval(150)
+        self.scroll_timer.setInterval(40)
         self.scroll_timer.timeout.connect(self.real_scroll_handler)
 
         self.autoscroll_timer = QTimer(self)
@@ -931,6 +939,8 @@ class ReaderTab(
         """Callback for when the thread successfully returns the PDF."""
         self.load_progress.accept()
         self.current_doc = doc
+        self._reset_document_caches()
+        self._start_render_worker()
 
         path = self._load_path
         restore_state = self._load_restore_state
@@ -949,19 +959,31 @@ class ReaderTab(
                 50, lambda: self.show_toast("Document unlocked successfully.")
             )
 
-        self.toolbar.show()
+        if not self.is_preview:
+            self.toolbar.show()
         self.stack.setCurrentIndex(0)
         self.view_mode = ViewMode.IMAGE
         if hasattr(self.window(), "_update_window_title"):
             self.window()._update_window_title()
 
         self.settings.setValue("lastFile", path)
-        self.load_annotations()
-        self._load_external_comments(path)
-        QTimer.singleShot(500, lambda: self._detect_signatures(path))
-        QTimer.singleShot(1000, self.index_pdf_for_ai)
+        if not self.is_preview:
+            # Preview tabs skip annotations, comments, signature checks, AI
+            # indexing and metadata extraction; that is what keeps them light.
+            self.load_annotations()
+            self._load_external_comments(path)
+            QTimer.singleShot(500, lambda: self._detect_signatures(path))
+            QTimer.singleShot(1000, self.index_pdf_for_ai)
 
-        if restore_state:
+        initial_page = getattr(self, "pending_initial_page", None)
+        self.pending_initial_page = None
+        if initial_page is not None:
+            self.current_page_index = max(
+                0, min(int(initial_page), self.current_doc.page_count - 1)
+            )
+            self.rebuild_layout()
+            self.jump_to_page(self.current_page_index)
+        elif restore_state:
             saved_page = self.settings.value("lastPage", 0, type=int)
             saved_scroll = self.settings.value("lastScrollY", 0, type=int)
             self.current_page_index = min(saved_page, self.current_doc.page_count - 1)
@@ -975,7 +997,43 @@ class ReaderTab(
             self.rebuild_layout()
             self.update_view()
 
-        QTimer.singleShot(2000, self.extract_document_metadata)
+        if not self.is_preview:
+            QTimer.singleShot(2000, self.extract_document_metadata)
+
+    def _reset_document_caches(self) -> None:
+        """Drops everything derived from the previously loaded document."""
+        PAGE_CACHE.drop_owner(self._render_owner())
+        self._doc_generation += 1
+        self._cached_base_size = None
+        self._raw_links_cache = {}
+        self._raw_forms_cache = {}
+        self.text_segments_cache.clear()
+        if hasattr(self, "_char_geometry_cache"):
+            self._char_geometry_cache.clear()
+        self.clear_text_selection_state()
+
+    def _start_render_worker(self) -> None:
+        """Points the background renderer at the current document."""
+        if self._render_worker is None:
+            self._render_worker = PageRenderWorker()
+            self._render_worker.page_rendered.connect(self._on_page_rendered)
+            self._render_worker.start()
+        self._render_worker.set_document(self.current_doc, self._render_owner())
+
+    def _stop_render_worker(self) -> None:
+        worker = self._render_worker
+        self._render_worker = None
+        if worker is None:
+            return
+        try:
+            worker.page_rendered.disconnect(self._on_page_rendered)
+        except (RuntimeError, TypeError):
+            pass
+        worker.stop()
+        if not worker.wait(3000):
+            worker.terminate()
+            worker.wait()
+        worker.deleteLater()
 
     def _on_document_load_error(self, err_str):
         """Callback if the background thread encounters a loading exception."""
@@ -1396,7 +1454,8 @@ class ReaderTab(
             if self.current_doc:
                 self.txt_page.setText(str(closest + 1))
 
-        self.scroll_timer.start()
+        if not self.scroll_timer.isActive():
+            self.scroll_timer.start()
         self._trigger_fullscreen_page_indicator()
 
     def _trigger_fullscreen_page_indicator(self) -> None:
@@ -1704,26 +1763,73 @@ class ReaderTab(
         bar = self.scroll.verticalScrollBar()
         bar.setValue(int(bar.value() + (direction * ph)))
 
-    def jump_to_page(self, idx: int) -> None:
-        """Jumps directly to the given 0-based page index, updating view and scroll position."""
+    @staticmethod
+    def _parse_internal_link(url: str) -> Optional[Tuple[int, Optional[float]]]:
+        """
+        Parses '#page=N' or '#page=N&top=Y' into a 0-based page index and an
+        optional vertical target in PDF points (origin at the page bottom).
+        """
+        try:
+            params = urllib.parse.parse_qs(url.lstrip("#"))
+            page = int(float(params["page"][0])) - 1
+            top = float(params["top"][0]) if "top" in params else None
+            return page, top
+        except (KeyError, ValueError, IndexError):
+            return None
+
+    def jump_to_page(self, idx: int, top_pts: Optional[float] = None) -> None:
+        """
+        Jumps to the given 0-based page. The page top is aligned with the top of
+        the viewport, or, when top_pts is given, that position on the page is.
+        """
         if not self.current_doc:
             return
         idx = max(0, min(self.current_doc.page_count - 1, idx))
         self.current_page_index = idx
         if hasattr(self, "txt_page"):
             self.txt_page.setText(str(idx + 1))
-        if not self.continuous_scroll or (
-            self._virtual_enabled
-            and (
-                idx < self._virtual_range[0]
-                or idx >= self._virtual_range[1]
+        if (
+            not self.continuous_scroll
+            or idx not in self.page_widgets
+            or (
+                self._virtual_enabled
+                and (idx < self._virtual_range[0] or idx >= self._virtual_range[1])
             )
         ):
             self.rebuild_layout()
+            self.current_page_index = idx
+
+        self._flush_scroll_layout()
+        page_top = self._page_top_y(idx)
+        if page_top is None:
+            self.ensure_visible(idx)
+        else:
+            offset = 0
+            widget = self.page_widgets[idx]
+            if (
+                top_pts is not None
+                and self._cached_base_size
+                and getattr(self, "rotation", 0) == 0
+            ):
+                page_h_pts = self._page_height_pts(idx)
+                scale = widget.height() / max(1, self._cached_base_size[1])
+                offset = max(0, int((page_h_pts - top_pts) * scale) - 12)
+                offset = min(offset, max(0, widget.height() - 40))
+            self._set_scroll_value_silently(max(0, page_top + offset - 8))
+
+        self.current_page_index = idx
         self.update_view()
-        self.ensure_visible(idx)
         if hasattr(self, "scroll") and self.scroll:
             self.scroll.setFocus()
+
+    def _page_height_pts(self, idx: int) -> float:
+        """Returns a page's height in PDF points, falling back to the layout size."""
+        if getattr(type(self.current_doc), "get_page_size", None) is not None:
+            try:
+                return float(self.current_doc.get_page_size(idx)[1])
+            except Exception:
+                pass
+        return float(self._cached_base_size[1]) if self._cached_base_size else 842.0
 
     def on_page_input_return(self) -> None:
         """
@@ -1847,6 +1953,16 @@ class ReaderTab(
             if source == getattr(self, "scroll", None) or isinstance(
                 source, PageWidget
             ):
+                if self._handle_selection_key(event):
+                    return True
+                if (
+                    event.modifiers() & Qt.KeyboardModifier.ControlModifier
+                    and event.key() == Qt.Key.Key_C
+                    and getattr(self, "current_selected_text", "")
+                ):
+                    QApplication.clipboard().setText(self.current_selected_text)
+                    self.show_toast("Copied text to clipboard! 📋")
+                    return True
                 key = event.key()
                 if getattr(self, "view_mode", None) == ViewMode.IMAGE:
                     if key == Qt.Key.Key_Left:
@@ -2080,6 +2196,14 @@ class ReaderTab(
                 self._mouse_press_pos = event.pos()
                 self.is_selecting_text = False
                 self.text_select_start = event.pos()
+                self._press_on_link = any(
+                    r.contains(event.pos()) for r, _ in getattr(source, "link_rects", [])
+                )
+                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                    if self._extend_selection_to_pos(page_idx, event.pos()):
+                        self._just_selected_multi_click = True
+                        return True
+                self._set_caret_at_pos(page_idx, event.pos())
 
                 now = time.time()
                 last_time = getattr(self, "_last_click_time", 0.0)
@@ -2141,10 +2265,9 @@ class ReaderTab(
 
                     if hovered_url:
                         if hovered_url.startswith("#page="):
-                            target_page_str = hovered_url.split("page=")[-1]
-                            self.link_tooltip.setText(
-                                f"Jump to Page {target_page_str} ↗"
-                            )
+                            target = self._parse_internal_link(hovered_url)
+                            page_label = target[0] + 1 if target else "?"
+                            self.link_tooltip.setText(f"Jump to Page {page_label} ↗")
                         else:
                             self.link_tooltip.setText(hovered_url)
                         self.link_tooltip.adjustSize()
@@ -2190,9 +2313,12 @@ class ReaderTab(
                     and not self.is_snipping
                 ):
                     if not getattr(self, "is_selecting_text", False):
+                        # Clicks on links tolerate more hand jitter before they
+                        # turn into a text selection and stop following the link.
+                        threshold = 14 if getattr(self, "_press_on_link", False) else 5
                         if (
                             event.pos() - self._mouse_press_pos
-                        ).manhattanLength() >= 5:
+                        ).manhattanLength() >= threshold:
                             self.is_selecting_text = True
                             self._just_selected_multi_click = False
                     if getattr(self, "is_selecting_text", False):
@@ -2216,14 +2342,10 @@ class ReaderTab(
                             if rect.contains(pos):
                                 self.clear_all_text_selections()
                                 if url.startswith("#page="):
-                                    try:
-                                        target_page = (
-                                            int(url.split("page=")[-1]) - 1
-                                        )
-                                        self.jump_to_page(target_page)
+                                    target = self._parse_internal_link(url)
+                                    if target is not None:
+                                        self.jump_to_page(target[0], top_pts=target[1])
                                         return True
-                                    except ValueError:
-                                        pass
                                 elif (
                                     event.modifiers()
                                     == Qt.KeyboardModifier.ControlModifier
@@ -2300,6 +2422,20 @@ class ReaderTab(
         """
         key = event.key()
         mod = event.modifiers()
+
+        if self._handle_selection_key(event):
+            event.accept()
+            return
+
+        if (
+            mod & Qt.KeyboardModifier.ControlModifier
+            and key == Qt.Key.Key_C
+            and getattr(self, "current_selected_text", "")
+        ):
+            QApplication.clipboard().setText(self.current_selected_text)
+            self.show_toast("Copied text to clipboard! 📋")
+            event.accept()
+            return
 
         if key == Qt.Key.Key_Escape:
             if getattr(self, "_reader_fullscreen", False):
@@ -2739,7 +2875,7 @@ class ReaderTab(
         """)
 
         layout = QHBoxLayout(self.home_page_widget)
-        layout.setContentsMargins(60, 60, 60, 60)
+        layout.setContentsMargins(24, 40, 24, 40)
 
         left_layout = QVBoxLayout()
         left_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2803,7 +2939,7 @@ class ReaderTab(
         self.list_recent.setCursor(Qt.CursorShape.PointingHandCursor)
         self.list_recent.itemClicked.connect(self._on_recent_item_clicked)
 
-        self.list_recent.setMinimumWidth(400)
+        self.list_recent.setMinimumWidth(180)
 
         right_layout.addWidget(recent_label)
         right_layout.addWidget(self.list_recent)
@@ -2973,9 +3109,15 @@ class ReaderTab(
             )
 
     def clear_all_text_selections(self) -> None:
-        """Clears text selections and copied text across all page widgets."""
+        """
+        Clears text selections and copied text across all page widgets. The
+        keyboard caret survives (collapsed onto its moving end) so Shift+arrows
+        can start a new selection from the last click.
+        """
         self.current_selected_text = ""
         self.is_selecting_text = False
+        if getattr(self, "_sel_focus", None) is not None:
+            self._sel_anchor = self._sel_focus
         if hasattr(self, "page_widgets"):
             for w in self.page_widgets.values():
                 if hasattr(w, "set_text_selection") and getattr(
@@ -2983,19 +3125,203 @@ class ReaderTab(
                 ):
                     w.set_text_selection([])
 
-    def _get_linear_text_selection(
-        self, page_idx: int, start_pos: QPoint, end_pos: QPoint
-    ) -> tuple[List[QRect], str]:
-        """
-        Calculates character-level linear text selection with precise font metrics,
-        robust reading order line-clustering, and clean multi-line box merging.
-        """
-        if not start_pos or not end_pos:
-            return [], ""
+    def clear_text_selection_state(self) -> None:
+        """Forgets the selection and the keyboard caret entirely."""
+        self._sel_page = None
+        self._sel_anchor = None
+        self._sel_focus = None
+        self.clear_all_text_selections()
 
+    # The keyboard selection is kept as two caret positions (anchor and focus)
+    # between characters of one page: position i sits just before character i,
+    # so the selected characters are [min(anchor, focus), max(anchor, focus)).
+
+    def _set_caret_at_pos(self, page_idx: int, pos: QPoint) -> None:
+        """Places the keyboard caret next to the character under pos."""
+        if self.view_mode != ViewMode.IMAGE or not self.current_doc:
+            return
+        try:
+            all_chars = self._get_page_chars(page_idx)
+            idx = self._closest_char_index(all_chars, pos)
+        except Exception:
+            idx = None
+        if idx is None:
+            self._sel_page = self._sel_anchor = self._sel_focus = None
+            return
+        caret = idx + (1 if pos.x() > all_chars[idx][1].center().x() else 0)
+        self._sel_page, self._sel_anchor, self._sel_focus = page_idx, caret, caret
+
+    def _extend_selection_to_pos(self, page_idx: int, pos: QPoint) -> bool:
+        """Shift+click: extends the current selection on this page up to pos."""
+        if getattr(self, "_sel_anchor", None) is None or self._sel_page != page_idx:
+            return False
+        all_chars = self._get_page_chars(page_idx)
+        idx = self._closest_char_index(all_chars, pos)
+        if idx is None:
+            return False
+        self._sel_focus = idx + (1 if pos.x() > all_chars[idx][1].center().x() else 0)
+        self._apply_keyboard_selection()
+        return True
+
+    def _apply_keyboard_selection(self) -> None:
+        """Paints the anchor..focus range and keeps the moving end in view."""
+        page_idx = self._sel_page
         widget = self.page_widgets.get(page_idx)
-        if not widget:
-            return [], ""
+        all_chars = self._get_page_chars(page_idx) if widget else []
+        if not all_chars:
+            return
+        n = len(all_chars)
+        self._sel_anchor = max(0, min(n, self._sel_anchor))
+        self._sel_focus = max(0, min(n, self._sel_focus))
+        lo, hi = sorted((self._sel_anchor, self._sel_focus))
+
+        for idx, w in self.page_widgets.items():
+            if idx != page_idx and getattr(w, "selected_text_rects", None):
+                w.set_text_selection([])
+
+        if lo == hi:
+            widget.set_text_selection([])
+            self.current_selected_text = ""
+        else:
+            rects, text = self._rects_for_char_range(all_chars, lo, hi - 1)
+            widget.set_text_selection(rects)
+            self.current_selected_text = text
+
+        focus_rect = all_chars[min(self._sel_focus, n - 1)][1]
+        top = self._page_top_y(page_idx)
+        if top is not None:
+            row = widget.parentWidget()
+            x = (row.x() if row else 0) + widget.x() + focus_rect.center().x()
+            self.scroll.ensureVisible(int(x), int(top + focus_rect.center().y()), 40, 60)
+
+    def _handle_selection_key(self, event: QKeyEvent) -> bool:
+        """
+        Shift+Left/Right extend the selection by one character (with Ctrl, by a
+        word), Shift+Up/Down by one line and Shift+Home/End to the line edges.
+        """
+        mods = event.modifiers()
+        if not (mods & Qt.KeyboardModifier.ShiftModifier):
+            return False
+        key = event.key()
+        if key not in (
+            Qt.Key.Key_Left,
+            Qt.Key.Key_Right,
+            Qt.Key.Key_Up,
+            Qt.Key.Key_Down,
+            Qt.Key.Key_Home,
+            Qt.Key.Key_End,
+        ):
+            return False
+        if self.view_mode != ViewMode.IMAGE or not self.current_doc:
+            return False
+
+        if (
+            getattr(self, "_sel_anchor", None) is None
+            or getattr(self, "_sel_page", None) not in self.page_widgets
+        ):
+            # No caret yet: start at the beginning of the page in view.
+            page_idx = self.current_page_index
+            if page_idx not in self.page_widgets or not self._get_page_chars(page_idx):
+                return True
+            self._sel_page, self._sel_anchor, self._sel_focus = page_idx, 0, 0
+
+        all_chars = self._get_page_chars(self._sel_page)
+        if not all_chars:
+            return True
+        n = len(all_chars)
+        focus = max(0, min(n, self._sel_focus))
+
+        def same_line(a: int, b: int) -> bool:
+            ra, rb = all_chars[a][1], all_chars[b][1]
+            return abs(ra.center().y() - rb.center().y()) < max(ra.height(), 1) * 0.5
+
+        def line_bounds(i: int) -> Tuple[int, int]:
+            start = end = i
+            while start > 0 and same_line(start - 1, i):
+                start -= 1
+            while end < n - 1 and same_line(end + 1, i):
+                end += 1
+            return start, end
+
+        # A caret between two lines belongs to the line before it right after
+        # Shift+End, and to the line after it otherwise.
+        at_line_end = getattr(self, "_sel_at_line_end", False) and focus > 0
+        ref = focus - 1 if at_line_end else min(focus, n - 1)
+        self._sel_at_line_end = False
+
+        word = bool(mods & Qt.KeyboardModifier.ControlModifier)
+        if key == Qt.Key.Key_Right:
+            if word:
+                # Words end at whitespace or at the end of a line.
+                i = focus
+                while i < n and all_chars[i][0].isspace():
+                    i += 1
+                while i < n and not all_chars[i][0].isspace():
+                    i += 1
+                    if i < n and not same_line(i - 1, i):
+                        break
+                focus = i
+            else:
+                focus = min(n, focus + 1)
+        elif key == Qt.Key.Key_Left:
+            if word:
+                i = focus
+                while i > 0 and all_chars[i - 1][0].isspace():
+                    i -= 1
+                while i > 0 and not all_chars[i - 1][0].isspace():
+                    i -= 1
+                    if i > 0 and not same_line(i - 1, i):
+                        break
+                focus = i
+            else:
+                focus = max(0, focus - 1)
+        elif key in (Qt.Key.Key_Home, Qt.Key.Key_End):
+            start, end = line_bounds(ref)
+            if key == Qt.Key.Key_Home:
+                focus = start
+            else:
+                focus = end + 1
+                self._sel_at_line_end = True
+        else:
+            cur = all_chars[ref][1]
+            cy = cur.center().y()
+            cx = cur.right() if at_line_end or focus > ref else cur.left()
+            half = max(cur.height(), 1) * 0.5
+            going_up = key == Qt.Key.Key_Up
+            if going_up:
+                candidates = [i for i, (_, r, _) in enumerate(all_chars) if r.center().y() < cy - half]
+            else:
+                candidates = [i for i, (_, r, _) in enumerate(all_chars) if r.center().y() > cy + half]
+            if candidates:
+                ys = [all_chars[i][1].center().y() for i in candidates]
+                target_y = max(ys) if going_up else min(ys)
+                on_line = [
+                    i
+                    for i in candidates
+                    if abs(all_chars[i][1].center().y() - target_y)
+                    < max(all_chars[i][1].height(), 1) * 0.5
+                ]
+                best = min(on_line, key=lambda i: abs(all_chars[i][1].center().x() - cx))
+                focus = best + (1 if cx > all_chars[best][1].center().x() else 0)
+                last_on_line = max(on_line)
+                if focus == last_on_line + 1:
+                    self._sel_at_line_end = True
+            else:
+                focus = 0 if going_up else n
+
+        self._sel_focus = focus
+        self._apply_keyboard_selection()
+        return True
+
+    def _get_page_chars(self, page_idx: int) -> List[tuple]:
+        """
+        Returns the page's characters in reading order as (char, QRect, segment)
+        tuples in widget coordinates, using precise font metrics and robust
+        line clustering. Results are cached per page geometry.
+        """
+        widget = self.page_widgets.get(page_idx)
+        if not widget or not self.current_doc:
+            return []
 
         logical_w = widget.width()
         logical_h = widget.height()
@@ -3137,51 +3463,47 @@ class ReaderTab(
                 )
             self._char_geometry_cache[cache_key] = all_chars
 
-        all_chars = self._char_geometry_cache[cache_key]
+        return self._char_geometry_cache[cache_key]
+
+    @staticmethod
+    def _closest_char_index(all_chars: List[tuple], pos: QPoint) -> Optional[int]:
+        """Finds the character under pos, or the nearest one on the same line."""
         if not all_chars:
-            return [], ""
+            return None
+        for idx, (_, r, _) in enumerate(all_chars):
+            if r.contains(pos):
+                return idx
 
-        def get_closest_char_idx(pos: QPoint) -> Optional[int]:
-            if not all_chars:
-                return None
-            for idx, (_, r, _) in enumerate(all_chars):
-                if r.contains(pos):
-                    return idx
+        px, py = pos.x(), pos.y()
+        best_idx = None
+        min_dist = float("inf")
 
-            px, py = pos.x(), pos.y()
-            best_idx = None
-            min_dist = float("inf")
+        for idx, (_, r, _) in enumerate(all_chars):
+            ry = r.center().y()
+            rx = r.center().x()
+            dy = abs(py - ry)
+            dx = abs(px - rx)
 
-            for idx, (_, r, _) in enumerate(all_chars):
-                ry = r.center().y()
-                rx = r.center().x()
-                dy = abs(py - ry)
-                dx = abs(px - rx)
+            if dy <= r.height() * 0.8:
+                dist = dx + dy * 2.0
+                if dist < min_dist:
+                    min_dist = dist
+                    best_idx = idx
+            elif dy < 35:
+                dist = dx * 1.5 + dy * 6.0
+                if dist < min_dist:
+                    min_dist = dist
+                    best_idx = idx
 
-                if dy <= r.height() * 0.8:
-                    dist = dx + dy * 2.0
-                    if dist < min_dist:
-                        min_dist = dist
-                        best_idx = idx
-                elif dy < 35:
-                    dist = dx * 1.5 + dy * 6.0
-                    if dist < min_dist:
-                        min_dist = dist
-                        best_idx = idx
+        if min_dist > 150:
+            return None
+        return best_idx
 
-            if min_dist > 150:
-                return None
-            return best_idx
-
-        start_idx = get_closest_char_idx(start_pos)
-        end_idx = get_closest_char_idx(end_pos)
-
-        if start_idx is None or end_idx is None:
-            return [], ""
-
-        min_idx = min(start_idx, end_idx)
-        max_idx = max(start_idx, end_idx)
-
+    @staticmethod
+    def _rects_for_char_range(
+        all_chars: List[tuple], min_idx: int, max_idx: int
+    ) -> tuple[List[QRect], str]:
+        """Merges the boxes of a character range into per-line highlight rects."""
         selected_rects: List[QRect] = []
         selected_chars: List[str] = []
 
@@ -3190,26 +3512,60 @@ class ReaderTab(
 
         for i in range(min_idx, max_idx + 1):
             ch, rect, _ = all_chars[i]
-            selected_chars.append(ch)
 
             if current_box is None:
                 current_box = QRect(rect)
                 prev_cy = rect.center().y()
             else:
-                if (
-                    abs(rect.center().y() - prev_cy) < rect.height() * 0.5
-                    and rect.left() <= current_box.right() + 8
-                ):
+                same_line = abs(rect.center().y() - prev_cy) < rect.height() * 0.5
+                if same_line and rect.left() <= current_box.right() + 8:
                     current_box = current_box.united(rect)
                 else:
                     selected_rects.append(current_box)
                     current_box = QRect(rect)
                     prev_cy = rect.center().y()
+                    if (
+                        not same_line
+                        and selected_chars
+                        and not selected_chars[-1].isspace()
+                        and not ch.isspace()
+                    ):
+                        selected_chars.append("\n")
+            selected_chars.append(ch)
 
         if current_box is not None:
             selected_rects.append(current_box)
 
         return selected_rects, "".join(selected_chars)
+
+    def _get_linear_text_selection(
+        self, page_idx: int, start_pos: QPoint, end_pos: QPoint
+    ) -> tuple[List[QRect], str]:
+        """
+        Calculates the character-level linear text selection between two points
+        and remembers it as the anchor/focus of the keyboard selection.
+        """
+        if not start_pos or not end_pos:
+            return [], ""
+
+        all_chars = self._get_page_chars(page_idx)
+        if not all_chars:
+            return [], ""
+
+        start_idx = self._closest_char_index(all_chars, start_pos)
+        end_idx = self._closest_char_index(all_chars, end_pos)
+
+        if start_idx is None or end_idx is None:
+            return [], ""
+
+        self._sel_page = page_idx
+        if start_idx <= end_idx:
+            self._sel_anchor, self._sel_focus = start_idx, end_idx + 1
+        else:
+            self._sel_anchor, self._sel_focus = start_idx + 1, end_idx
+        return self._rects_for_char_range(
+            all_chars, min(start_idx, end_idx), max(start_idx, end_idx)
+        )
 
     def _get_word_at_pos(
         self, page_idx: int, pos: QPoint
@@ -3219,14 +3575,7 @@ class ReaderTab(
         if not widget:
             return [], ""
 
-        scale = self.calculate_scale()
-        logical_w = widget.width()
-        logical_h = widget.height()
-        rotation = getattr(self, "rotation", 0)
-        cache_key = (page_idx, scale, logical_w, logical_h, rotation)
-
-        self._get_linear_text_selection(page_idx, pos, pos)
-        all_chars = self._char_geometry_cache.get(cache_key, [])
+        all_chars = self._get_page_chars(page_idx)
         if not all_chars:
             return [], ""
 
@@ -3274,6 +3623,7 @@ class ReaderTab(
                 break
             end_i += 1
 
+        self._sel_page, self._sel_anchor, self._sel_focus = page_idx, start_i, end_i + 1
         word_rect = all_chars[start_i][1]
         word_chars = []
         for i in range(start_i, end_i + 1):
@@ -3294,14 +3644,7 @@ class ReaderTab(
         if not widget:
             return [], ""
 
-        scale = self.calculate_scale()
-        logical_w = widget.width()
-        logical_h = widget.height()
-        rotation = getattr(self, "rotation", 0)
-        cache_key = (page_idx, scale, logical_w, logical_h, rotation)
-
-        self._get_linear_text_selection(page_idx, pos, pos)
-        all_chars = self._char_geometry_cache.get(cache_key, [])
+        all_chars = self._get_page_chars(page_idx)
         if not all_chars:
             return [], ""
 
@@ -3354,6 +3697,7 @@ class ReaderTab(
             start_i += 1
         while end_i > start_i and all_chars[end_i][0].isspace():
             end_i -= 1
+        self._sel_page, self._sel_anchor, self._sel_focus = page_idx, start_i, end_i + 1
 
         selected_rects: List[QRect] = []
         selected_chars: List[str] = []
@@ -3662,6 +4006,8 @@ class ReaderTab(
         """Explicitly severs references to heavy resources to trigger native destructors."""
         self.scroll_timer.stop()
         self.autoscroll_timer.stop()
+        self._stop_render_worker()
+        PAGE_CACHE.drop_owner(self._render_owner())
         if hasattr(self, "_zoom_debounce_timer"):
             self._zoom_debounce_timer.stop()
         if hasattr(self, "_rebuild_debounce_timer"):
@@ -3751,27 +4097,41 @@ class ReaderTab(
 
 class PreviewReaderTab(ReaderTab):
     """
-    A lightweight, read-only PDF viewer for the Explorer preview.
-    Inherits core rendering from ReaderTab but disables all heavy UI/formatting.
+    A lightweight, read-only PDF viewer.
+
+    It shares the rendering core with ReaderTab but has no toolbar and skips
+    annotations, signature validation, AI indexing and metadata extraction.
+    Double-clicking its tab title switches it to the full reader.
     """
+
+    is_preview = True
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.is_preview = True
         self.current_path = ""
 
-        if hasattr(self, "toolbar") and self.toolbar:
-            self.toolbar.setVisible(False)
-        if hasattr(self, "anno_toolbar") and self.anno_toolbar:
-            self.anno_toolbar.setVisible(False)
-        if hasattr(self, "search_bar") and self.search_bar:
-            self.search_bar.setVisible(False)
-        if hasattr(self, "ai_search_bar") and self.ai_search_bar:
-            self.ai_search_bar.setVisible(False)
-        if hasattr(self, "signature_banner") and self.signature_banner:
-            self.signature_banner.setVisible(False)
+        for bar in (
+            "toolbar",
+            "anno_toolbar",
+            "search_bar",
+            "ai_search_bar",
+            "signature_banner",
+        ):
+            widget = getattr(self, bar, None)
+            if widget is not None:
+                widget.setVisible(False)
 
-        self._ignore_scroll = True
+        self.preview_banner = QLabel(
+            "Preview mode  ·  double-click the tab title to open the full reader"
+        )
+        self.preview_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_banner.setStyleSheet(
+            "QLabel { background: rgba(60, 140, 255, 0.12); color: palette(text);"
+            " padding: 3px; font-size: 11px; }"
+        )
+        self.preview_banner.setVisible(False)
+        self.layout().insertWidget(0, self.preview_banner)
+
         self.scroll.verticalScrollBar().setStyleSheet(
             "QScrollBar:vertical { width: 8px; background: transparent; }"
         )
@@ -3786,7 +4146,11 @@ class PreviewReaderTab(ReaderTab):
         self.current_path = path
         super().load_document(path, restore_state, password, is_retry)
 
-    def cleanup(self):
-        """Ensures PDFium background threads are killed when the preview is replaced."""
-        if hasattr(self, "close_document"):
-            self.close_document()
+    def _on_document_loaded(self, doc):
+        super()._on_document_loaded(doc)
+        self.preview_banner.setVisible(True)
+
+    def _load_markdown(self, path: str) -> None:
+        super()._load_markdown(path)
+        self.toolbar.setVisible(False)
+        self.preview_banner.setVisible(True)

@@ -66,9 +66,9 @@ riemann/
 │   │   │   ├── constants.py
 │   │   │   ├── dependencies.py
 │   │   │   ├── features.py
-│   │   │   ├── links.py
 │   │   │   ├── managers.py
-│   │   │   └── mini_player.py
+│   │   │   ├── mini_player.py
+│   │   │   └── window_snap.py
 │   │   ├── ui/
 │   │   │   ├── browser.py
 │   │   │   ├── browser_handlers.py
@@ -77,6 +77,7 @@ riemann/
 │   │   │   ├── favourites.py
 │   │   │   └── reader/
 │   │   │       ├── __init__.py
+│   │   │       ├── render_worker.py
 │   │   │       ├── tab.py
 │   │   │       ├── utils.py
 │   │   │       ├── widgets.py
@@ -98,12 +99,14 @@ riemann/
 │       ├── test_constants.py
 │       ├── test_managers.py
 │       ├── test_metadata.py
+│       ├── test_reader_features.py
 │       ├── test_rendering.py
 │       ├── test_search.py
 │       ├── test_signatures.py
 │       ├── test_tab.py
 │       ├── test_utils.py
 │       ├── test_widgets.py
+│       ├── test_window_snap.py
 │       └── test_workers.py
 ├── requirements/
 │   ├── requirements.in

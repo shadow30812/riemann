@@ -9,7 +9,7 @@ import os
 import sys
 from typing import Optional
 
-from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, Signal
+from PySide6.QtCore import QMimeData, QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -17,10 +17,13 @@ from PySide6.QtGui import (
     QDrag,
     QDragEnterEvent,
     QDropEvent,
+    QFont,
+    QFontMetrics,
     QIcon,
     QLinearGradient,
     QMouseEvent,
     QPainter,
+    QPalette,
 )
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -32,6 +35,9 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QSpinBox,
+    QStyle,
+    QStyleOptionTab,
+    QStylePainter,
     QTabBar,
     QTabWidget,
     QToolButton,
@@ -56,6 +62,18 @@ class DraggableTabWidget(QTabWidget):
         self.setAcceptDrops(True)
         self.setMovable(True)
         self.setTabBar(DraggableTabBar(self))
+
+    def set_vertical_tabs(self, vertical: bool) -> None:
+        """Moves the tab strip to the left edge (vertical) or back to the top."""
+        self.setTabPosition(
+            QTabWidget.TabPosition.West if vertical else QTabWidget.TabPosition.North
+        )
+        bar = self.tabBar()
+        if isinstance(bar, DraggableTabBar):
+            bar.set_vertical(vertical)
+
+    def is_vertical_tabs(self) -> bool:
+        return self.tabPosition() == QTabWidget.TabPosition.West
 
     def dragEnterEvent(self, e: QDragEnterEvent) -> None:
         """
@@ -119,6 +137,8 @@ class DraggableTabBar(QTabBar):
     _dragged_data = None
     _dragged_tooltip = ""
 
+    VERTICAL_TAB_WIDTH = 220
+
     def __init__(self, parent=None):
         """
         Initializes the draggable tab bar component.
@@ -128,6 +148,106 @@ class DraggableTabBar(QTabBar):
         """
         super().__init__(parent)
         self.setAcceptDrops(True)
+        self._vertical = False
+
+    # ---- Vertical mode -------------------------------------------------
+    # Qt draws West-side tabs with rotated text. In vertical mode the tabs
+    # keep a fixed width and their labels and close buttons are laid out
+    # horizontally, like a browser's vertical tab strip.
+
+    def set_vertical(self, vertical: bool) -> None:
+        self._vertical = vertical
+        self.setElideMode(
+            Qt.TextElideMode.ElideRight if vertical else Qt.TextElideMode.ElideNone
+        )
+        self.updateGeometry()
+        self.update()
+
+    def is_vertical(self) -> bool:
+        return self._vertical
+
+    def _vertical_tab_height(self) -> int:
+        return max(32, self.fontMetrics().height() + 18)
+
+    def tabSizeHint(self, index: int) -> QSize:
+        if self._vertical:
+            return QSize(self.VERTICAL_TAB_WIDTH, self._vertical_tab_height())
+        return super().tabSizeHint(index)
+
+    def minimumTabSizeHint(self, index: int) -> QSize:
+        if self._vertical:
+            return QSize(self.VERTICAL_TAB_WIDTH, self._vertical_tab_height())
+        return super().minimumTabSizeHint(index)
+
+    def _tab_close_button(self, index: int) -> Optional[QWidget]:
+        for side in (QTabBar.ButtonPosition.RightSide, QTabBar.ButtonPosition.LeftSide):
+            btn = self.tabButton(index, side)
+            if btn is not None:
+                return btn
+        return None
+
+    def _position_vertical_buttons(self) -> None:
+        for i in range(self.count()):
+            btn = self._tab_close_button(i)
+            if btn is None:
+                continue
+            r = self.tabRect(i)
+            target = QPoint(
+                r.right() - btn.width() - 8, r.center().y() - btn.height() // 2 + 1
+            )
+            if btn.pos() != target:
+                btn.move(target)
+
+    def tabLayoutChange(self) -> None:
+        super().tabLayoutChange()
+        if self._vertical:
+            self._position_vertical_buttons()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._vertical:
+            self._position_vertical_buttons()
+
+    def _paint_vertical(self) -> None:
+        painter = QStylePainter(self)
+        base_font = self.font()
+        text_color = self.palette().color(QPalette.ColorRole.WindowText)
+        muted_color = QColor(text_color)
+        muted_color.setAlphaF(0.7)
+        icon_size = self.iconSize()
+
+        for i in range(self.count()):
+            opt = QStyleOptionTab()
+            self.initStyleOption(opt, i)
+            painter.drawControl(QStyle.ControlElement.CE_TabBarTabShape, opt)
+
+            # Labels are painted by hand: the style would centre them (and on
+            # West-side tabs, rotate them).
+            rect = QRect(self.tabRect(i))
+            btn = self._tab_close_button(i)
+            reserved = (btn.width() + 14) if btn is not None and btn.isVisible() else 8
+            x = rect.left() + 12
+            if not opt.icon.isNull():
+                pix = opt.icon.pixmap(icon_size, self.devicePixelRatioF())
+                painter.drawPixmap(
+                    x, rect.center().y() - icon_size.height() // 2 + 1, pix
+                )
+                x += icon_size.width() + 8
+
+            selected = i == self.currentIndex()
+            font = QFont(base_font)
+            font.setBold(selected)
+            painter.setFont(font)
+            painter.setPen(text_color if selected else muted_color)
+            text_rect = QRect(x, rect.top(), rect.right() - reserved - x, rect.height())
+            text = QFontMetrics(font).elidedText(
+                self.tabText(i), Qt.TextElideMode.ElideRight, max(10, text_rect.width())
+            )
+            painter.drawText(
+                text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text
+            )
+        painter.end()
+        self._position_vertical_buttons()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """
@@ -158,7 +278,13 @@ class DraggableTabBar(QTabBar):
         super().mouseMoveEvent(event)
 
         if hasattr(self, "drag_start_pos"):
-            if abs(event.pos().y() - self.drag_start_pos.y()) > 40:
+            # Tear a tab off by dragging it away from the strip: downwards for
+            # a horizontal bar, sideways for a vertical one.
+            if self._vertical:
+                pulled = abs(event.pos().x() - self.drag_start_pos.x()) > 60
+            else:
+                pulled = abs(event.pos().y() - self.drag_start_pos.y()) > 40
+            if pulled:
                 tab_index = self.tabAt(self.drag_start_pos)
                 if tab_index < 0:
                     return
@@ -262,7 +388,10 @@ class DraggableTabBar(QTabBar):
 
     def paintEvent(self, event) -> None:
         """Draws native tabs, then overlays a gradient on media-playing tabs."""
-        super().paintEvent(event)
+        if self._vertical:
+            self._paint_vertical()
+        else:
+            super().paintEvent(event)
         painter = QPainter(self)
         for i in range(self.count()):
             if self.tabData(i) == "playing":

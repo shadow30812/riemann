@@ -43,13 +43,13 @@ Type=Application
 Name=$APP_NAME
 GenericName=PDF Reader
 Comment=A standalone PDF reader and manager
-Exec=$EXEC_PATH
+Exec=$EXEC_PATH %F
 Icon=$ICON_PATH
 Terminal=false
 Categories=Office;Viewer;Utility;
 Keywords=pdf;reader;document;
 StartupWMClass=$APP_NAME
-MimeType=application/pdf;
+MimeType=application/pdf;text/markdown;text/html;inode/directory;
 Actions=NewWindow;
 
 [Desktop Action NewWindow]

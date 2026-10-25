@@ -251,3 +251,23 @@ QPushButton#bookmarkBtn:checked {
     border: 1px solid transparent;
     color: #007FD4;
 }
+
+/* --- Vertical tab strip (View > Vertical Tabs) --- */
+QTabWidget[verticalTabs="true"]::pane {
+    border-top: none;
+    border-left: 1px solid #CCCCCC;
+}
+
+QTabBar::tab:left {
+    margin: 0px 4px 2px 4px;
+    border: none;
+    border-radius: 6px;
+    min-width: 0px;
+    padding: 0px;
+}
+
+QTabBar::tab:left:selected {
+    border: none;
+    border-left: 3px solid #007FD4;
+    margin: 0px 4px 2px 4px;
+}

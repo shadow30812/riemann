@@ -55,6 +55,7 @@ from PySide6.QtCore import (
     QEvent,
     QObject,
     QSettings,
+    QSize,
     QStandardPaths,
     QStringListModel,
     Qt,
@@ -108,6 +109,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -128,10 +130,17 @@ from .core.managers import (
     YtDlpDownloadManager,
 )
 from .core.mini_player import MiniAudioPlayer
+from .core.window_snap import (
+    WindowSnapper,
+    is_wayland_session,
+    prefer_xwayland_for_snapping,
+    snapping_default,
+)
 from .ui.browser import BrowserTab, PreviewTextTab
 from .ui.components import DraggableTabWidget
 from .ui.explorer import FileExplorerPanel, FolderHomeTab
 from .ui.favourites import ManageFavoritesDialog
+from .ui.reader.render_worker import stop_all_render_workers
 from .ui.reader.tab import PreviewReaderTab, ReaderTab
 
 
@@ -215,6 +224,21 @@ class SettingsDialog(QDialog):
         self.cb_dark = QCheckBox()
         self.cb_dark.setChecked(parent.dark_mode)
 
+        self.cb_vertical_tabs = QCheckBox()
+        self.cb_vertical_tabs.setChecked(
+            parent.settings.value("app/vertical_tabs", False, type=bool)
+        )
+
+        self.cb_window_snap = QCheckBox()
+        self.cb_window_snap.setToolTip(
+            "Drag the window to a screen edge to tile it: left/right/bottom edge for "
+            "that half, top edge (middle) to maximise, top corners for the top half.\n"
+            "On Wayland, turning this on runs Riemann through XWayland after a restart."
+        )
+        self.cb_window_snap.setChecked(
+            parent.settings.value("app/window_snapping", snapping_default(), type=bool)
+        )
+
         self.cb_pdf_preview_mode = QCheckBox()
         self.cb_pdf_preview_mode.setChecked(
             parent.settings.value("reader/open_in_preview_mode", False, type=bool)
@@ -278,6 +302,8 @@ class SettingsDialog(QDialog):
         form_layout.addRow("Display Size (UI Scale):", scale_layout)
         form_layout.addRow("Default Dialog Directory:", dir_layout)
         form_layout.addRow("Enable Dark Mode:", self.cb_dark)
+        form_layout.addRow("Vertical Tabs:", self.cb_vertical_tabs)
+        form_layout.addRow("Snap Window to Screen Edges:", self.cb_window_snap)
         form_layout.addRow("Auto-open Downloaded PDFs:", self.cb_auto_pdf)
         form_layout.addRow(
             "Open Documents in Preview Mode:", self.cb_pdf_preview_mode
@@ -651,6 +677,9 @@ class RiemannWindow(QMainWindow):
         self.tabs_main.tabBar().customContextMenuRequested.connect(
             lambda pos: self._show_tab_context_menu(pos, self.tabs_main)
         )
+        self.tabs_main.tabBarDoubleClicked.connect(
+            lambda idx: self._on_tab_bar_double_clicked(self.tabs_main, idx)
+        )
         self.splitter.addWidget(self.tabs_main)
 
         self.tabs_side = DraggableTabWidget()
@@ -667,6 +696,9 @@ class RiemannWindow(QMainWindow):
         self.tabs_side.tabBar().customContextMenuRequested.connect(
             lambda pos: self._show_tab_context_menu(pos, self.tabs_side)
         )
+        self.tabs_side.tabBarDoubleClicked.connect(
+            lambda idx: self._on_tab_bar_double_clicked(self.tabs_side, idx)
+        )
         self.tabs_side.hide()
         self.splitter.addWidget(self.tabs_side)
 
@@ -681,6 +713,9 @@ class RiemannWindow(QMainWindow):
         )
 
         self.library_manager = LibraryManager()
+        self._apply_vertical_tabs(
+            self.settings.value("app/vertical_tabs", False, type=bool)
+        )
 
         self.setup_menu()
         self._init_shortcuts()
@@ -700,6 +735,18 @@ class RiemannWindow(QMainWindow):
         self._session_autosave_timer.timeout.connect(self._auto_save_session)
         self._session_autosave_timer.start()
 
+        # Opening, closing or switching tabs also saves soon after, so a crash
+        # right after opening a document can still bring it back.
+        self._session_save_soon = QTimer(self)
+        self._session_save_soon.setSingleShot(True)
+        self._session_save_soon.setInterval(2500)
+        self._session_save_soon.timeout.connect(self._auto_save_session)
+        for tab_widget in (self.tabs_main, self.tabs_side):
+            tab_widget.currentChanged.connect(lambda _: self._session_save_soon.start())
+            tab_widget.tabBar().tabMoved.connect(
+                lambda *_: self._session_save_soon.start()
+            )
+
         self.floating_fs_btn = QPushButton(self)
         self.floating_fs_btn.setFixedSize(40, 40)
         self.floating_fs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -715,6 +762,13 @@ class RiemannWindow(QMainWindow):
         self.fs_tracker_timer = QTimer(self)
         self.fs_tracker_timer.setInterval(100)
         self.fs_tracker_timer.timeout.connect(self._track_mouse_for_fs)
+
+        self.window_snapper = WindowSnapper(
+            self,
+            enabled=self.settings.value(
+                "app/window_snapping", snapping_default(), type=bool
+            ),
+        )
 
         self.enforce_global_stylesheet()
 
@@ -1235,21 +1289,34 @@ class RiemannWindow(QMainWindow):
             if isinstance(item, str) and os.path.exists(item):
                 self._add_pdf_tab(item, target_widget, True)
             elif isinstance(item, dict):
-                if (
-                    item.get("type") == "pdf"
-                    and item.get("data")
-                    and os.path.exists(item.get("data"))
-                ):
-                    self._add_pdf_tab(
-                        item["data"],
+                kind = item.get("type")
+                data = item.get("data")
+                if kind in ("pdf", "doc") and data and os.path.exists(data):
+                    page = item.get("page")
+                    try:
+                        page = int(page) if page is not None else None
+                    except (TypeError, ValueError):
+                        page = None
+                    self._open_document(
+                        data,
                         target_widget,
-                        True,
-                        is_preview=item.get("preview", None),
+                        preview=self._as_bool(item.get("preview")),
+                        restore_state=page is None,
+                        page=page,
                     )
-                elif item.get("type") == "web" and item.get("data"):
-                    self._add_browser_tab(item["data"], target_widget)
-                elif item.get("type") == "folder_home":
+                elif kind == "web" and data:
+                    self._add_browser_tab(data, target_widget)
+                elif kind == "folder_home":
                     self.new_folder_home_tab(target_widget)
+
+    @staticmethod
+    def _as_bool(value) -> Optional[bool]:
+        """Reads a boolean back from QSettings, which may hand back strings."""
+        if value is None or isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in ("true", "1", "yes")
+        return bool(value)
 
     def _restore_tabs_from_settings(self, key: str, target_widget: QTabWidget) -> None:
         """
@@ -1338,40 +1405,184 @@ class RiemannWindow(QMainWindow):
         is_preview: Optional[bool] = None,
     ) -> None:
         """
-        Internal helper to instantiate and add a ReaderTab.
+        Opens a document in a new tab of target_widget (kept for callers that
+        predate _open_document, which handles every supported file type).
 
         Args:
-            path (str): Path to the PDF file.
+            path (str): Path to the document.
             target_widget (QTabWidget): The tab widget to add the tab to.
             restore_state (bool): Whether to restore scroll position/zoom.
-            is_preview (Optional[bool]): If provided, forces preview or extended mode.
+            is_preview (Optional[bool]): If provided, forces preview or full mode.
         """
-        self.add_to_history(path, "pdf")
-        if is_preview is not None:
-            open_preview = is_preview
-        else:
-            open_preview = self.settings.value(
-                "reader/open_in_preview_mode", False, type=bool
+        self._open_document(
+            path, target_widget, preview=is_preview, restore_state=restore_state
+        )
+
+    def _preview_mode_enabled(self) -> bool:
+        return self.settings.value("reader/open_in_preview_mode", False, type=bool)
+
+    @staticmethod
+    def _document_kind(path: str) -> str:
+        """Classifies a file as 'pdf', 'markdown', 'html' or 'text'."""
+        lower = path.lower()
+        if lower.endswith(".pdf"):
+            return "pdf"
+        if lower.endswith((".md", ".markdown")):
+            return "markdown"
+        if lower.endswith((".html", ".htm", ".xhtml")):
+            return "html"
+        try:
+            with open(path, "rb") as f:
+                if f.read(5) == b"%PDF-":
+                    return "pdf"
+        except Exception:
+            pass
+        return "text"
+
+    def _create_reader(self, preview: bool) -> "ReaderTab":
+        """Creates an empty reader tab, lightweight when preview is True."""
+        if preview:
+            return PreviewReaderTab()
+        reader = ReaderTab()
+        reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
+        return reader
+
+    def _preview_icon(self) -> QIcon:
+        suffix = "-white.svg" if getattr(self, "dark_mode", False) else ".svg"
+        icon_path = get_resource_path(os.path.join("assets", "icons", f"scan-eye{suffix}"))
+        if not os.path.exists(icon_path):
+            icon_path = get_resource_path(os.path.join("assets", "icons", "scan-eye.svg"))
+        return QIcon(icon_path)
+
+    def _open_document(
+        self,
+        path: str,
+        target_widget: Optional[QTabWidget] = None,
+        preview: Optional[bool] = None,
+        restore_state: bool = False,
+        page: Optional[int] = None,
+        insert_idx: Optional[int] = None,
+        activate: bool = True,
+    ) -> Optional[QWidget]:
+        """
+        Opens any supported file as a tab. PDFs and Markdown go to the reader;
+        HTML and other text files go to the browser. Preview tabs use the
+        lightweight viewers instead. When preview is None, the "Open Documents
+        in Preview Mode" setting decides.
+
+        Returns:
+            The new tab widget, or None if nothing was opened.
+        """
+        if not path:
+            return None
+        if target_widget is None:
+            target_widget = self.tabs_main
+        if preview is None:
+            preview = self._preview_mode_enabled()
+
+        kind = self._document_kind(path)
+        self.add_to_history(path, "web" if kind in ("html", "text") else "pdf")
+
+        if not preview and kind in ("html", "text"):
+            url = QUrl.fromLocalFile(os.path.abspath(path)).toString()
+            browser = self._add_browser_tab(url, target_widget)
+            idx = target_widget.indexOf(browser)
+            if insert_idx is not None and idx != -1 and idx != insert_idx:
+                target_widget.tabBar().moveTab(idx, insert_idx)
+            if activate:
+                target_widget.setCurrentWidget(browser)
+            return browser
+
+        if kind == "pdf" or (kind == "markdown" and not preview):
+            widget = self._create_reader(preview)
+            if page is not None:
+                widget.pending_initial_page = page
+            widget.load_document(path, restore_state=restore_state)
+            icon = (
+                self._preview_icon()
+                if preview
+                else QIcon(get_resource_path(os.path.join("assets", "icons", "pdf.png")))
             )
-
-        if open_preview:
-            reader = PreviewReaderTab()
         else:
-            reader = ReaderTab()
-            reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
-        reader.load_document(path, restore_state=restore_state)
+            widget = PreviewTextTab(path, getattr(self, "dark_mode", False))
+            icon = self._preview_icon()
 
-        icon_path = get_resource_path(os.path.join("assets", "icons", "pdf.png"))
-        pdf_icon = QIcon(icon_path)
+        if insert_idx is None:
+            current_idx = target_widget.currentIndex()
+            insert_idx = current_idx + 1 if current_idx != -1 else target_widget.count()
 
-        current_idx = target_widget.currentIndex()
-        insert_idx = current_idx + 1 if current_idx != -1 else target_widget.count()
-
-        target_widget.insertTab(insert_idx, reader, pdf_icon, os.path.basename(path))
+        target_widget.insertTab(insert_idx, widget, icon, os.path.basename(path))
         self._update_tab_tooltip(target_widget, insert_idx)
-        target_widget.setCurrentIndex(insert_idx)
+        if activate:
+            target_widget.setCurrentIndex(insert_idx)
+        return widget
 
-    def _add_browser_tab(self, url: str, target_widget: QTabWidget) -> None:
+    def open_path(self, path: str) -> None:
+        """
+        Opens a file handed over from outside (command line, file manager,
+        another instance), switching to it instead if it is already open.
+        """
+        target = os.path.abspath(path)
+        for tab_widget in (self.tabs_main, self.tabs_side):
+            for i in range(tab_widget.count()):
+                widget = tab_widget.widget(i)
+                # A tab still loading in the background only knows its _load_path.
+                current = getattr(widget, "current_path", None) or getattr(
+                    widget, "_load_path", None
+                )
+                if current and os.path.abspath(current) == target:
+                    tab_widget.setCurrentIndex(i)
+                    return
+        self.new_pdf_tab(target)
+
+    def _replace_tab_document(
+        self, tab_widget: QTabWidget, idx: int, preview: bool
+    ) -> Optional[QWidget]:
+        """
+        Reopens the document shown in tab idx in preview or full mode, keeping
+        its position in the tab bar and, for PDFs, the current page.
+        """
+        old = tab_widget.widget(idx)
+        path = getattr(old, "current_path", None) if old else None
+        if not path or not os.path.exists(path):
+            return None
+
+        page = getattr(old, "current_page_index", None)
+        if not isinstance(page, int) or not getattr(old, "current_doc", None):
+            page = None
+        was_current = tab_widget.currentIndex() == idx
+
+        new_widget = self._open_document(
+            path, tab_widget, preview=preview, page=page, insert_idx=idx, activate=False
+        )
+        if new_widget is None:
+            return None
+
+        old_idx = tab_widget.indexOf(old)
+        if old_idx != -1:
+            tab_widget.removeTab(old_idx)
+        if getattr(self, "preview_tab_widget", None) is old:
+            self.preview_tab_widget = None
+        if hasattr(old, "cleanup"):
+            old.cleanup()
+        old.deleteLater()
+
+        new_idx = tab_widget.indexOf(new_widget)
+        if was_current and new_idx != -1:
+            tab_widget.setCurrentIndex(new_idx)
+            new_widget.setFocus()
+        self._auto_save_session()
+        return new_widget
+
+    def _on_tab_bar_double_clicked(self, tab_widget: QTabWidget, idx: int) -> None:
+        """Double-clicking a preview tab's title opens it in full mode."""
+        if idx < 0:
+            return
+        widget = tab_widget.widget(idx)
+        if widget is not None and getattr(widget, "is_preview", False):
+            self._replace_tab_document(tab_widget, idx, preview=False)
+
+    def _add_browser_tab(self, url: str, target_widget: QTabWidget) -> BrowserTab:
         """
         Internal helper to instantiate and add a BrowserTab.
         Passing the shared profile to avoid database locking.
@@ -1401,6 +1612,7 @@ class RiemannWindow(QMainWindow):
         browser.web.urlChanged.connect(lambda qurl: self._update_tab_title(browser))
         browser.web.loadFinished.connect(lambda ok: self._update_tab_title(browser))
         browser.web.titleChanged.connect(lambda title: self._update_tab_title(browser))
+        return browser
 
     def setup_menu(self) -> None:
         """
@@ -1497,6 +1709,12 @@ class RiemannWindow(QMainWindow):
                 action.setShortcut(shortcut)
             action.triggered.connect(slot)
 
+        view_menu.addSeparator()
+        self.action_vertical_tabs = view_menu.addAction("Vertical Tabs")
+        self.action_vertical_tabs.setCheckable(True)
+        self.action_vertical_tabs.setChecked(self.tabs_main.is_vertical_tabs())
+        self.action_vertical_tabs.toggled.connect(self.set_vertical_tabs)
+
         if psutil:
             self._last_net_io = psutil.net_io_counters()
             self._last_net_time = time.time()
@@ -1518,6 +1736,37 @@ class RiemannWindow(QMainWindow):
         self.menu_corner_layout.setSpacing(0)
 
         self.mini_player = MiniAudioPlayer(self)
+
+        self.btn_split_view = QToolButton(self)
+        self.btn_split_view.setCheckable(True)
+        self.btn_split_view.setAutoRaise(True)
+        self.btn_split_view.setToolTip(
+            "Split view: show two tabs side by side (Ctrl+\\)\n"
+            "Tip: right-click a tab and choose 'Move to Other Pane', "
+            "or drag a tab onto the other pane."
+        )
+        self.btn_split_view.clicked.connect(self.toggle_split_view)
+
+        self.btn_vertical_tabs = QToolButton(self)
+        self.btn_vertical_tabs.setCheckable(True)
+        self.btn_vertical_tabs.setAutoRaise(True)
+        self.btn_vertical_tabs.setToolTip("Vertical tabs")
+        self.btn_vertical_tabs.setChecked(self.tabs_main.is_vertical_tabs())
+        self.btn_vertical_tabs.toggled.connect(self.set_vertical_tabs)
+
+        self.btn_split_view.setText("Split View")
+        self.btn_vertical_tabs.setText("Vertical Tabs")
+        for btn in (self.btn_split_view, self.btn_vertical_tabs):
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            btn.setIconSize(QSize(15, 15))
+            btn.setStyleSheet(
+                "QToolButton { font-size: 11px; padding: 1px 6px; border-radius: 4px; }"
+                "QToolButton:checked { background: rgba(0, 127, 212, 0.25); }"
+            )
+            self.menu_corner_layout.addWidget(btn)
+        self.menu_corner_layout.addSpacing(8)
+        self._update_layout_button_icons()
 
         self.menu_corner_layout.addWidget(self.mini_player)
         self.menu_corner_layout.addWidget(self.metrics_label)
@@ -1617,6 +1866,24 @@ class RiemannWindow(QMainWindow):
         if dlg.exec():
             if dlg.cb_dark.isChecked() != self.dark_mode:
                 self.toggle_ui_theme()
+            self.set_vertical_tabs(dlg.cb_vertical_tabs.isChecked())
+            old_snap = self.settings.value(
+                "app/window_snapping", snapping_default(), type=bool
+            )
+            new_snap = dlg.cb_window_snap.isChecked()
+            self.settings.setValue("app/window_snapping", new_snap)
+            for win in RiemannWindow._all_open_windows + [self]:
+                if hasattr(win, "window_snapper"):
+                    win.window_snapper.set_enabled(new_snap)
+            if new_snap != old_snap and is_wayland_session():
+                QMessageBox.information(
+                    self,
+                    "Restart Required",
+                    "Wayland does not let applications place their own windows, so "
+                    "edge snapping makes Riemann run through XWayland instead.\n\n"
+                    "This takes effect the next time Riemann starts. With fractional "
+                    "display scaling, XWayland windows can look slightly soft.",
+                )
             self.toggle_auto_pdf(dlg.cb_auto_pdf.isChecked())
             self.settings.setValue(
                 "homepage/custom_name", dlg.txt_custom_name.text().strip()
@@ -1685,53 +1952,27 @@ class RiemannWindow(QMainWindow):
 
     def _switch_open_documents_mode(self, to_preview: bool) -> None:
         """
-        Switches existing open PDF documents between Extended PDF mode (ReaderTab)
-        and Preview mode (PreviewReaderTab).
+        Reopens every open document (PDF, Markdown, HTML preview) in preview
+        or full mode, leaving browser pages and the explorer preview alone.
         """
         for tab_widget in [self.tabs_main, self.tabs_side]:
-            tabs_to_convert = []
+            to_convert = []
             for i in range(tab_widget.count()):
                 widget = tab_widget.widget(i)
-                if isinstance(widget, ReaderTab):
-                    if getattr(self, "preview_tab_widget", None) == widget:
-                        continue
-                    is_current_preview = getattr(widget, "is_preview", False)
-                    if to_preview and not is_current_preview:
-                        tabs_to_convert.append((i, widget, True))
-                    elif not to_preview and is_current_preview:
-                        tabs_to_convert.append((i, widget, False))
+                if widget is getattr(self, "preview_tab_widget", None):
+                    continue
+                is_doc = isinstance(widget, (ReaderTab, PreviewTextTab))
+                if (
+                    is_doc
+                    and getattr(widget, "current_path", None)
+                    and bool(getattr(widget, "is_preview", False)) != to_preview
+                ):
+                    to_convert.append(widget)
 
-            for idx, old_widget, make_preview in tabs_to_convert:
-                path = getattr(old_widget, "current_path", "")
-                page_idx = getattr(old_widget, "current_page_index", 0)
-                scroll_y = 0
-                if hasattr(old_widget, "scroll") and hasattr(old_widget.scroll, "verticalScrollBar"):
-                    scroll_y = old_widget.scroll.verticalScrollBar().value()
-
-                title = tab_widget.tabText(idx)
-                icon = tab_widget.tabIcon(idx)
-
-                if make_preview:
-                    new_widget = PreviewReaderTab()
-                else:
-                    new_widget = ReaderTab()
-                    new_widget.signatures_detected.connect(
-                        lambda _: self.refresh_signature_panel()
-                    )
-
-                if path and os.path.exists(path):
-                    new_widget.load_document(path)
-                    new_widget.current_page_index = page_idx
-                    if hasattr(new_widget, "scroll") and new_widget.scroll:
-                        new_widget.scroll.verticalScrollBar().setValue(scroll_y)
-
-                tab_widget.removeTab(idx)
-                if hasattr(old_widget, "cleanup"):
-                    old_widget.cleanup()
-                old_widget.deleteLater()
-
-                tab_widget.insertTab(idx, new_widget, icon, title)
-                tab_widget.setCurrentIndex(idx)
+            for widget in to_convert:
+                idx = tab_widget.indexOf(widget)
+                if idx != -1:
+                    self._replace_tab_document(tab_widget, idx, preview=to_preview)
 
     def new_pdf_tab(
         self, path: Optional[str] = None, restore_state: bool = False
@@ -1744,15 +1985,9 @@ class RiemannWindow(QMainWindow):
             restore_state (bool): Whether to restore reading state.
         """
         if path:
-            self._add_pdf_tab(path, self.tabs_main, restore_state)
+            self._open_document(path, self.tabs_main, restore_state=restore_state)
         else:
-            if self.settings.value("reader/open_in_preview_mode", False, type=bool):
-                reader = PreviewReaderTab()
-            else:
-                reader = ReaderTab()
-                reader.signatures_detected.connect(
-                    lambda _: self.refresh_signature_panel()
-                )
+            reader = self._create_reader(self._preview_mode_enabled())
 
             icon_path = get_resource_path(os.path.join("assets", "icons", "pdf.png"))
             pdf_icon = QIcon(icon_path)
@@ -1851,32 +2086,24 @@ class RiemannWindow(QMainWindow):
 
         save_last_directory(self.settings, paths[0])
 
+        preview = self._preview_mode_enabled()
         for i, path in enumerate(paths):
-            self.add_to_history(path)
-            is_web_file = path.lower().endswith((".html", ".css", ".js"))
-            self.add_to_history(path, "web" if is_web_file else "pdf")
-
-            if i == 0:
-                current = self.tabs_main.currentWidget()
-                if (
-                    not is_web_file
-                    and isinstance(current, ReaderTab)
-                    and not current.current_path
-                ):
-                    current.load_document(path)
-                    self.tabs_main.setTabText(
-                        self.tabs_main.currentIndex(), os.path.basename(path)
-                    )
-                elif is_web_file:
-                    self.new_browser_tab(f"file:///{path.replace(chr(92), '/')}")
-                else:
-                    self.new_pdf_tab(path)
-
+            current = self.tabs_main.currentWidget()
+            reuse_empty_reader = (
+                i == 0
+                and self._document_kind(path) == "pdf"
+                and isinstance(current, ReaderTab)
+                and not current.current_path
+                and bool(getattr(current, "is_preview", False)) == preview
+            )
+            if reuse_empty_reader:
+                self.add_to_history(path, "pdf")
+                current.load_document(path)
+                self.tabs_main.setTabText(
+                    self.tabs_main.currentIndex(), os.path.basename(path)
+                )
             else:
-                if is_web_file:
-                    self.new_browser_tab(f"file:///{path.replace(chr(92), '/')}")
-                else:
-                    self.new_pdf_tab(path)
+                self._open_document(path, self.tabs_main, preview=preview)
 
     def show_toast(self, msg: str) -> None:
         """
@@ -1897,36 +2124,131 @@ class RiemannWindow(QMainWindow):
         self.lbl_toast.show()
         QTimer.singleShot(4000, self.lbl_toast.hide)
 
+    def _split_view_active(self) -> bool:
+        """True when the side pane is showing at least one real tab."""
+        if self.tabs_side.isHidden():
+            return False
+        return any(
+            self.tabs_side.widget(i) is not self.tree_signatures
+            for i in range(self.tabs_side.count())
+        )
+
+    def _move_tab_between(
+        self, source: QTabWidget, idx: int, target: QTabWidget
+    ) -> Optional[QWidget]:
+        """Moves a tab (with its title, icon and tooltip) to the other pane."""
+        widget = source.widget(idx)
+        if widget is None:
+            return None
+        text = source.tabText(idx)
+        icon = source.tabIcon(idx)
+        tooltip = source.tabToolTip(idx)
+        source.removeTab(idx)
+
+        if target is self.tabs_side and self.tabs_side.isHidden():
+            self.tabs_side.show()
+            self._split_evenly()
+            QTimer.singleShot(0, self._split_evenly)
+
+        new_idx = target.addTab(widget, icon, text)
+        target.setTabToolTip(new_idx, tooltip)
+        target.setCurrentIndex(new_idx)
+        widget.show()
+        widget.setFocus()
+
+        if source is self.tabs_side and self.tabs_side.count() == 0:
+            self.tabs_side.hide()
+        self._update_layout_button_icons()
+        return widget
+
+    def _split_evenly(self) -> None:
+        """Gives the main and side panes equal width."""
+        total = self.splitter.width()
+        if total > 0 and not self.tabs_side.isHidden():
+            self.splitter.setSizes([total // 2, total - total // 2])
+
+    def move_tab_to_other_pane(self, tab_widget: QTabWidget, idx: int) -> None:
+        """Sends a tab to the other half of the split view, opening it if needed."""
+        if getattr(self, "is_folder_session_active", False):
+            self.show_toast("Split view is disabled during an active folder session.")
+            return
+        target = self.tabs_side if tab_widget is self.tabs_main else self.tabs_main
+        if tab_widget is self.tabs_main and self.tabs_main.count() == 1:
+            self.new_pdf_tab()
+            idx = 0
+        self._move_tab_between(tab_widget, idx, target)
+
+    def close_split_view(self) -> None:
+        """Moves every side-pane tab back into the main pane and hides the side pane."""
+        idx = 0
+        while idx < self.tabs_side.count():
+            if self.tabs_side.widget(idx) is self.tree_signatures:
+                idx += 1
+                continue
+            self._move_tab_between(self.tabs_side, idx, self.tabs_main)
+        if self.tabs_side.count() == 0:
+            self.tabs_side.hide()
+        self._update_layout_button_icons()
+
     def toggle_split_view(self) -> None:
         """
-        Toggles the horizontal split-screen view.
-        Moves the current tab to the side view if opening, or hides it if empty.
+        Opens the split view by moving the current tab into a second pane next
+        to the main one, or closes it by merging the side pane back.
         """
         if getattr(self, "is_folder_session_active", False):
             self.show_toast("Split view is disabled during an active folder session.")
+            self._update_layout_button_icons()
+            return
+
+        if self._split_view_active():
+            self.close_split_view()
             return
 
         current = self.tabs_main.currentWidget()
         if not current:
+            self._update_layout_button_icons()
             return
+        if self.tabs_main.count() == 1:
+            # Keep something in the main pane after the tab moves over.
+            self.new_pdf_tab()
+            self.tabs_main.setCurrentWidget(current)
 
-        was_hidden = self.tabs_side.isHidden()
-        idx = self.tabs_main.indexOf(current)
-        text = self.tabs_main.tabText(idx)
-        self.tabs_main.removeTab(idx)
+        self._move_tab_between(self.tabs_main, self.tabs_main.indexOf(current), self.tabs_side)
 
-        if was_hidden:
-            self.tabs_side.show()
-            QApplication.processEvents()
+    def _update_layout_button_icons(self) -> None:
+        """Syncs the split/vertical-tab toolbar buttons with the current layout."""
+        if not hasattr(self, "btn_split_view"):
+            return
+        suffix = "-white" if getattr(self, "dark_mode", False) else ""
+        for btn, name in (
+            (self.btn_split_view, "columns-2"),
+            (self.btn_vertical_tabs, "panel-left"),
+        ):
+            path = get_resource_path(os.path.join("assets", "icons", f"{name}{suffix}.svg"))
+            btn.setIcon(QIcon(path))
+        self.btn_split_view.setChecked(self._split_view_active())
 
-            total = self.splitter.width()
-            self.splitter.setSizes([int(total * 0.7), int(total * 0.3)])
+    def _apply_vertical_tabs(self, vertical: bool) -> None:
+        # Only the main pane gets the vertical strip: the split-view pane is
+        # usually narrow and keeps its compact horizontal tabs.
+        self.tabs_main.set_vertical_tabs(vertical)
+        self.tabs_main.setProperty("verticalTabs", vertical)
+        self.tabs_main.style().unpolish(self.tabs_main)
+        self.tabs_main.style().polish(self.tabs_main)
 
-        new_idx = self.tabs_side.addTab(current, text)
-        self.tabs_side.setCurrentIndex(new_idx)
-
-        current.show()
-        current.setFocus()
+    def set_vertical_tabs(self, vertical: bool) -> None:
+        """Switches the tab strip between the top edge and a vertical left column."""
+        vertical = bool(vertical)
+        self.settings.setValue("app/vertical_tabs", vertical)
+        self._apply_vertical_tabs(vertical)
+        for control in (
+            getattr(self, "action_vertical_tabs", None),
+            getattr(self, "btn_vertical_tabs", None),
+        ):
+            if control is not None and control.isChecked() != vertical:
+                control.blockSignals(True)
+                control.setChecked(vertical)
+                control.blockSignals(False)
 
     def _record_closed_tab(self, widget: QWidget) -> None:
         """
@@ -1935,8 +2257,14 @@ class RiemannWindow(QMainWindow):
         Args:
             widget (QWidget): The tab widget being closed (ReaderTab or BrowserTab).
         """
-        if isinstance(widget, ReaderTab) and widget.current_path:
-            self.closed_tabs_stack.append({"type": "pdf", "data": widget.current_path})
+        if isinstance(widget, (ReaderTab, PreviewTextTab)) and widget.current_path:
+            self.closed_tabs_stack.append(
+                {
+                    "type": "pdf",
+                    "data": widget.current_path,
+                    "preview": bool(getattr(widget, "is_preview", False)),
+                }
+            )
         elif isinstance(widget, BrowserTab):
             url_str = getattr(
                 widget, "_original_url_before_close", widget.web.url().toString()
@@ -1959,7 +2287,9 @@ class RiemannWindow(QMainWindow):
         )
 
         if last["type"] == "pdf":
-            self._add_pdf_tab(last["data"], target, True)
+            self._open_document(
+                last["data"], target, preview=last.get("preview"), restore_state=True
+            )
         elif last["type"] == "web":
             self._add_browser_tab(last["data"], target)
 
@@ -2031,6 +2361,7 @@ class RiemannWindow(QMainWindow):
         self.tabs_side.removeTab(index)
         if self.tabs_side.count() == 0:
             self.tabs_side.hide()
+        self._update_layout_button_icons()
         self._check_all_tabs_closed()
         self._auto_save_session()
 
@@ -2076,11 +2407,21 @@ class RiemannWindow(QMainWindow):
             if isinstance(wid, FolderHomeTab):
                 tabs_data.append({"type": "folder_home", "data": ""})
             elif isinstance(wid, ReaderTab) and getattr(wid, "current_path", None):
+                entry = {
+                    "type": "pdf",
+                    "data": os.path.abspath(wid.current_path),
+                    "preview": bool(getattr(wid, "is_preview", False)),
+                }
+                page = getattr(wid, "current_page_index", None)
+                if isinstance(page, int) and getattr(wid, "current_doc", None):
+                    entry["page"] = page
+                tabs_data.append(entry)
+            elif isinstance(wid, PreviewTextTab) and getattr(wid, "current_path", None):
                 tabs_data.append(
                     {
-                        "type": "pdf",
+                        "type": "doc",
                         "data": os.path.abspath(wid.current_path),
-                        "preview": getattr(wid, "is_preview", False),
+                        "preview": True,
                     }
                 )
 
@@ -2107,21 +2448,13 @@ class RiemannWindow(QMainWindow):
         Periodically writes the active session state to settings so an abrupt
         PC shutdown or application termination does not lose the session.
         """
-        if self.incognito or not getattr(self, "restore_session", True):
+        if self.incognito:
             return
 
-        main_tabs = self._serialize_tab_state(self.tabs_main)
-        side_tabs = self._serialize_tab_state(self.tabs_side)
-
-        self.settings.setValue("session/main_tabs", main_tabs)
-        self.settings.setValue("session/side_tabs", side_tabs)
-        self.settings.setValue(
-            "session/main_active_idx", self.tabs_main.currentIndex()
-        )
-        self.settings.setValue(
-            "session/side_active_idx", self.tabs_side.currentIndex()
-        )
-        self.settings.sync()
+        # Crash recovery reads "session/windows" first, so the periodic save
+        # has to refresh that record (for every window), not just the legacy
+        # per-window keys; otherwise "Restore" brings back a stale session.
+        RiemannWindow._save_all_windows_session(clean_exit=False)
 
     def restore_previous_session(self) -> None:
         """
@@ -2334,7 +2667,10 @@ class RiemannWindow(QMainWindow):
             for i in range(tab_widget.count()):
                 w = tab_widget.widget(i)
                 if hasattr(w, "toolbar"):
-                    w.toolbar.setVisible(visible)
+                    if getattr(w, "is_preview", False):
+                        w.toolbar.setVisible(False)
+                    elif getattr(w, "current_path", True):
+                        w.toolbar.setVisible(visible)
 
     def toggle_ui_theme(self) -> None:
         """
@@ -2344,6 +2680,7 @@ class RiemannWindow(QMainWindow):
         self.settings.setValue("darkMode", self.dark_mode)
         self.enforce_global_stylesheet()
         self._update_floating_btn_style()
+        self._update_layout_button_icons()
 
         if hasattr(self, "explorer_panel"):
             self.explorer_panel.update_theme(self.dark_mode)
@@ -2464,15 +2801,21 @@ class RiemannWindow(QMainWindow):
             if tabs.currentIndex() == 2:
                 self.open_folder(data)
             elif tabs.currentIndex() == 1:
-                if os.path.exists(data):
-                    current = self.tabs_main.currentWidget()
-                    if isinstance(current, ReaderTab) and not current.current_path:
-                        current.load_document(data)
-                        self.tabs_main.setTabText(
-                            self.tabs_main.currentIndex(), os.path.basename(data)
-                        )
+                if not os.path.exists(data):
+                    self.show_toast("That file no longer exists.")
+                    return
+                current = self.tabs_main.currentWidget()
+                if (
+                    isinstance(current, ReaderTab)
+                    and not current.current_path
+                    and self._document_kind(data) == "pdf"
+                ):
+                    current.load_document(data)
+                    self.tabs_main.setTabText(
+                        self.tabs_main.currentIndex(), os.path.basename(data)
+                    )
                 else:
-                    self._add_pdf_tab(data, self.tabs_main)
+                    self._open_document(data, self.tabs_main)
             else:
                 self.new_browser_tab(data)
 
@@ -2649,6 +2992,8 @@ class RiemannWindow(QMainWindow):
         else:
             tooltip = tab_widget.tabText(idx)
 
+        if getattr(widget, "is_preview", False) and getattr(widget, "current_path", None):
+            tooltip += "\n\nPreview mode: double-click the tab title to open it fully."
         tab_widget.setTabToolTip(idx, tooltip)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
@@ -2680,10 +3025,10 @@ class RiemannWindow(QMainWindow):
         for url in event.mimeData().urls():
             if url.isLocalFile():
                 path = url.toLocalFile()
-                if path.lower().endswith(".pdf") or path.lower().endswith(".md"):
-                    self.new_pdf_tab(path)
-                elif path.lower().endswith((".html", ".css", ".js")):
-                    self.new_browser_tab(f"file:///{path.replace(chr(92), '/')}")
+                if os.path.isdir(path):
+                    self.open_folder(path)
+                elif os.path.isfile(path):
+                    self._open_document(path)
         event.acceptProposedAction()
 
     def _show_tab_context_menu(self, pos, tab_widget: QTabWidget) -> None:
@@ -2713,6 +3058,16 @@ class RiemannWindow(QMainWindow):
 
         menu.addSeparator()
         action_duplicate = menu.addAction("Duplicate Tab")
+        action_other_pane = None
+        if widget is not self.tree_signatures:
+            action_other_pane = menu.addAction(
+                "Move to Other Pane (Split View)"
+                if tab_widget is self.tabs_main
+                else "Move Back to Main Pane"
+            )
+        action_open_full = None
+        if getattr(widget, "is_preview", False) and getattr(widget, "current_path", None):
+            action_open_full = menu.addAction("Open in Full Mode")
 
         if hasattr(widget, "get_open_with_menu") and getattr(widget, "current_path", None):
             open_with_sub = widget.get_open_with_menu(menu)
@@ -2727,6 +3082,13 @@ class RiemannWindow(QMainWindow):
         action = menu.exec(tab_widget.tabBar().mapToGlobal(pos))
 
         if not action:
+            return
+
+        if action_other_pane is not None and action == action_other_pane:
+            self.move_tab_to_other_pane(tab_widget, idx)
+            return
+        if action_open_full is not None and action == action_open_full:
+            self._replace_tab_document(tab_widget, idx, preview=False)
             return
 
         if action == rename_action:
@@ -2785,7 +3147,11 @@ class RiemannWindow(QMainWindow):
 
         elif action == action_duplicate:
             if hasattr(widget, "current_path") and widget.current_path:
-                self._add_pdf_tab(widget.current_path, tab_widget)
+                self._open_document(
+                    widget.current_path,
+                    tab_widget,
+                    preview=bool(getattr(widget, "is_preview", False)),
+                )
             elif hasattr(widget, "web"):
                 self._add_browser_tab(widget.web.url().toString(), tab_widget)
 
@@ -3189,69 +3555,42 @@ class RiemannWindow(QMainWindow):
             self.show_toast("Folder session closed.")
 
     def _open_single_file(self, path: str, insert_idx: int = -1):
-        file_type = self._detect_file_type(path)
-        self.add_to_history(path, "web" if file_type == "text" else "pdf")
-
-        target = self.tabs_main
-
-        if file_type == "text":
-            tab = self.new_browser_tab(
-                f"file:///{path.replace(chr(92), '/')}", background=True
-            )
-            if insert_idx != -1:
-                target.removeTab(target.count() - 1)
-                target.insertTab(insert_idx, tab, os.path.basename(path))
-                target.setCurrentIndex(insert_idx)
-        else:
-            if self.settings.value("reader/open_in_preview_mode", False, type=bool):
-                reader = PreviewReaderTab()
-            else:
-                reader = ReaderTab()
-                reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
-            reader.load_document(path)
-            icon_path = get_resource_path(os.path.join("assets", "icons", "pdf.png"))
-            idx = insert_idx if insert_idx != -1 else target.count()
-            target.insertTab(idx, reader, QIcon(icon_path), os.path.basename(path))
-            target.setCurrentIndex(idx)
+        """Opens a file from the explorer or favourites, honouring preview mode."""
+        self._open_document(
+            path, self.tabs_main, insert_idx=None if insert_idx == -1 else insert_idx
+        )
 
     def _on_file_single_clicked(self, path: str):
+        """
+        A single click in the explorer shows the file in a transient preview
+        tab, replaced by the next single click (like VS Code's preview tab).
+        """
         if not os.path.isfile(path):
             return
 
-        file_type = self._detect_file_type(path)
-
         idx = -1
-        if getattr(self, "preview_tab_widget", None):
-            idx = self.tabs_main.indexOf(self.preview_tab_widget)
+        old = getattr(self, "preview_tab_widget", None)
+        if old is not None:
+            idx = self.tabs_main.indexOf(old)
 
-        if file_type == "text":
-            new_preview = PreviewTextTab(path, getattr(self, "dark_mode", True))
-        else:
+        if self._document_kind(path) == "pdf":
             new_preview = PreviewReaderTab()
             new_preview.load_document(path)
-
-        suffix = "-white.svg" if getattr(self, "dark_mode", False) else ".svg"
-        icon_path = get_resource_path(
-            os.path.join("assets", "icons", f"scan-eye{suffix}")
-        )
-        if not os.path.exists(icon_path):
-            icon_path = get_resource_path(
-                os.path.join("assets", "icons", "scan-eye.svg")
-            )
+        else:
+            new_preview = PreviewTextTab(path, getattr(self, "dark_mode", False))
 
         title = f"Preview: {os.path.basename(path)}"
 
         if idx != -1:
             self.tabs_main.removeTab(idx)
-            if hasattr(self.preview_tab_widget, "cleanup"):
-                self.preview_tab_widget.cleanup()
-
-            self.preview_tab_widget.deleteLater()
-            self.tabs_main.insertTab(idx, new_preview, QIcon(icon_path), title)
-            self.tabs_main.setCurrentIndex(idx)
+            if hasattr(old, "cleanup"):
+                old.cleanup()
+            old.deleteLater()
+            self.tabs_main.insertTab(idx, new_preview, self._preview_icon(), title)
         else:
-            new_idx = self.tabs_main.addTab(new_preview, QIcon(icon_path), title)
-            self.tabs_main.setCurrentIndex(new_idx)
+            idx = self.tabs_main.addTab(new_preview, self._preview_icon(), title)
+        self.tabs_main.setCurrentIndex(idx)
+        self._update_tab_tooltip(self.tabs_main, idx)
 
         self.preview_tab_widget = new_preview
         self._update_window_title()
@@ -3270,35 +3609,21 @@ class RiemannWindow(QMainWindow):
         self._open_single_file(path)
 
     def promote_preview_tab(self):
+        """Turns the transient explorer preview into a regular tab."""
         if not getattr(self, "preview_tab_widget", None):
             return
 
         idx = self.tabs_main.indexOf(self.preview_tab_widget)
         if idx == -1:
             return
-
-        path = self.preview_tab_widget.current_path
-        self.tabs_main.removeTab(idx)
-        if hasattr(self.preview_tab_widget, "cleanup"):
-            self.preview_tab_widget.cleanup()
-        self.preview_tab_widget.deleteLater()
+        self._replace_tab_document(
+            self.tabs_main, idx, preview=self._preview_mode_enabled()
+        )
         self.preview_tab_widget = None
-
-        self._open_single_file(path, insert_idx=idx)
 
     def _detect_file_type(self, path: str) -> str:
         """Determines if a file is a PDF (by extension or magic bytes) or generic text/web."""
-        if path.lower().endswith(".pdf"):
-            return "pdf"
-
-        try:
-            with open(path, "rb") as f:
-                if f.read(5) == b"%PDF-":
-                    return "pdf"
-        except Exception:
-            pass
-
-        return "text"
+        return "pdf" if self._document_kind(path) == "pdf" else "text"
 
     def new_folder_home_tab(self, target_widget=None):
         """Spawns the workspace/folder dashboard."""
@@ -3310,6 +3635,9 @@ class RiemannWindow(QMainWindow):
 
         idx = target_widget.addTab(tab, QIcon(icon_path), "Workspaces")
         target_widget.setCurrentIndex(idx)
+
+
+ACTIVATE_MESSAGE = "--activate"
 
 
 def run() -> None:
@@ -3341,6 +3669,9 @@ def run() -> None:
     if ui_scale and ui_scale != 100:
         os.environ["QT_SCALE_FACTOR"] = f"{ui_scale / 100.0:.2f}"
 
+    if init_settings.value("app/window_snapping", snapping_default(), type=bool):
+        prefer_xwayland_for_snapping()
+
     app = QApplication(sys.argv)
     app.setApplicationName("Riemann")
     app.setDesktopFileName("Riemann")
@@ -3350,11 +3681,14 @@ def run() -> None:
     args = app.arguments()
     is_new_window = "--new-window" in args
     files_to_open = []
+    folders_to_open = []
     for arg in args[1:]:
         if not arg.startswith("-"):
             clean_arg = QUrl(arg).toLocalFile() if arg.startswith("file://") else arg
             if os.path.isfile(clean_arg):
                 files_to_open.append(os.path.abspath(clean_arg))
+            elif os.path.isdir(clean_arg):
+                folders_to_open.append(os.path.abspath(clean_arg))
 
     server_name = "RiemannSingleInstance"
 
@@ -3363,10 +3697,11 @@ def run() -> None:
         socket.connectToServer(server_name)
 
         if socket.waitForConnected(500):
-            if files_to_open:
-                msg = "|".join(files_to_open)
-                socket.write(msg.encode("utf-8"))
-                socket.waitForBytesWritten(500)
+            # Hand the paths to the running instance (or just ask it to come
+            # to the front) and exit.
+            msg = "|".join(files_to_open + folders_to_open) or ACTIVATE_MESSAGE
+            socket.write(msg.encode("utf-8"))
+            socket.waitForBytesWritten(500)
             sys.exit(0)
 
     server = QLocalServer()
@@ -3377,7 +3712,7 @@ def run() -> None:
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
 
-    window = RiemannWindow(external_files=files_to_open)
+    window = RiemannWindow(external_files=files_to_open + folders_to_open)
 
     def handle_connection():
         """Handles incoming IPC connections from secondary instances."""
@@ -3392,7 +3727,7 @@ def run() -> None:
             new tabs within the existing primary window.
             """
             msg = client.readAll().data().decode("utf-8")
-            if msg:
+            if msg and msg != ACTIVATE_MESSAGE:
                 for path in msg.split("|"):
                     clean_p = (
                         QUrl(path).toLocalFile()
@@ -3400,7 +3735,9 @@ def run() -> None:
                         else path
                     )
                     if os.path.isfile(clean_p):
-                        window.new_pdf_tab(os.path.abspath(clean_p))
+                        window.open_path(os.path.abspath(clean_p))
+                    elif os.path.isdir(clean_p):
+                        window.open_folder(os.path.abspath(clean_p))
 
             window.activateWindow()
             window.raise_()
@@ -3411,9 +3748,14 @@ def run() -> None:
     server.newConnection.connect(handle_connection)
 
     for path in files_to_open:
-        window.new_pdf_tab(path)
+        window.open_path(path)
+    for folder in folders_to_open:
+        window.open_folder(folder)
+    if folders_to_open and window.tabs_main.count() == 0:
+        window.new_pdf_tab()
 
     app.aboutToQuit.connect(RiemannWindow._save_all_windows_session)
+    app.aboutToQuit.connect(stop_all_render_workers)
     window.show()
     sys.exit(app.exec())
 
@@ -3424,6 +3766,16 @@ def install_linux_integration():
     the .desktop shortcut and icon in the user's local share.
     """
     if not sys.platform.startswith("linux"):
+        return
+
+    # Running from source would point the menu entry at a .py file, so only
+    # packaged (PyInstaller/Nuitka) builds register themselves.
+    is_packaged = (
+        getattr(sys, "frozen", False)
+        or "__compiled__" in globals()
+        or bool(os.environ.get("NUITKA_ONEFILE_BINARY"))
+    )
+    if not is_packaged:
         return
 
     try:
@@ -3454,12 +3806,12 @@ def install_linux_integration():
             f"Name={app_name}\n"
             "GenericName=PDF Reader\n"
             "Comment=A standalone PDF reader and manager\n"
-            f'Exec="{exe_path}" %f\n'
+            f'Exec="{exe_path}" %F\n'
             f"Icon={persistent_icon_path}\n"
             "Terminal=false\n"
             "Categories=Office;Viewer;Utility;\n"
             f"StartupWMClass={app_name}\n"
-            "MimeType=application/pdf;\n"
+            "MimeType=application/pdf;text/markdown;text/html;inode/directory;\n"
             "Actions=NewWindow;\n\n"
             "[Desktop Action NewWindow]\n"
             "Name=New Window\n"

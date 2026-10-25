@@ -655,14 +655,19 @@ Qt then converts these into viewport-space overlays.
 
 ---
 
-## PDFium Link Extraction & Caching (`core/links.py`)
+## Links and Background Rendering
 
-Hyperlink detection and destination routing are handled by `PdfLinkExtractor`:
+**Links.** `RiemannDocument.get_links(page)` (Rust) resolves every link annotation on a page. Internal links, whether explicit destinations, named destinations or GoTo actions, come back as `#page=N`, plus `&top=Y` when the destination names a vertical position (PDF points, origin at the page bottom). External links come back as their URI. `RenderingMixin._render_links` caches the raw tuples per page in `_raw_links_cache` and scales them to widget coordinates with a couple of pixels of slack. `ReaderTab._parse_internal_link` decodes the target, and `jump_to_page(idx, top_pts)` scrolls so that the destination sits at the top of the viewport. A press that lands on a link tolerates 14 px of jitter before it turns into a text selection.
 
-* **C API ctypes Integration**: Directly interfaces with PDFium C libraries (`FPDFLink_Enumerate`, `FPDFLink_GetDest`, `FPDFLink_GetAction`, `FPDFAction_GetURIPath`) to extract internal document targets (`#page=N`) and external web URIs.
-* **Performance Cache (`_page_links_cache`)**: Link extraction across dense technical documents involves expensive C-level traversal. Riemann caches extracted link rectangles per page path, reducing repeated lookup latency from ~19ms down to **0.0057ms**.
-* **Cache Invalidation**: `PdfLinkExtractor.close_document(doc_path)` safely purges cached link geometry when a document tab is closed.
-* **Viewport Navigation**: In `ReaderTab.eventFilter`, hovering over an internal link displays `Jump to Page X ↗` and sets `Qt.CursorShape.PointingHandCursor`. Clicking jumps directly to `target_page = int(url.split("page=")[-1]) - 1`. External URLs open in browser tabs.
+**Rendering.** Pages are rasterised off the UI thread by `PageRenderWorker` (`ui/reader/render_worker.py`):
+
+* The Rust core releases the GIL while PDFium renders. A global PDFium lock serialises every call into the library, including document loads and closes, because PDFium is not thread-safe.
+* `render_visible_pages()` queues jobs for the pages around the reading position. A page with nothing on screen first gets a cheap thumbnail at a quarter of the target resolution, then the full-resolution render. The worker takes jobs in order of distance from the current page.
+* Finished images land in `PAGE_CACHE`, a byte-budgeted LRU (384 MB) shared by all tabs and keyed by `(tab, document generation, page, render scale, theme)`. Rebuilding the virtual layout, scrolling back, or switching tabs re-displays cached pages instantly. Annotations and search highlights are composited onto a copy at display time, so `rendered_pages.remove(idx)` stays cheap.
+* The worker also fetches each page's links and form fields while it already holds the PDFium lock, so the UI thread never waits on that lock.
+* Scroll handling is throttled (40 ms) rather than debounced, so pages keep loading during continuous scrolling, including middle-click autoscroll.
+* Fit-to-width ignores whether the vertical scrollbar is visible (`_scrollbar_allowance`). Otherwise the scale would change every time the scrollbar appears, and renders already in flight would be thrown away.
+* `apply_visual_zoom()` anchors the point at the centre of the viewport, flushes the layout so the scrollbar range matches the new page sizes, and only then repositions. Before this change, switching from Fit Height to Fit Width clamped the position to the old, smaller range.
 
 ---
 
@@ -1483,7 +1488,6 @@ riemann/
 │   │   │   ├── theme/
 │   │   │   └── __tests__/
 │   │   ├── core/
-│   │   │   ├── links.py
 │   │   │   ├── managers.py
 │   │   │   ├── features.py
 │   │   │   ├── constants.py

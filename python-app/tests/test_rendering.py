@@ -30,6 +30,8 @@ class DummyRenderingReader(RenderingMixin):
         self.scroll = MagicMock()
         self.scroll.verticalScrollBar().maximum.return_value = 100
         self.scroll.verticalScrollBar().value.return_value = 50
+        self.scroll.viewport().width.return_value = 1030
+        self.scroll.viewport().height.return_value = 820
 
         self.scroll_layout = MagicMock()
         self.scroll_content = MagicMock()

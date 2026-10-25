@@ -7,9 +7,10 @@ Handles layout calculation, virtualization, and PDF page rendering.
 import os
 import sys
 import urllib.parse
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
-from PySide6.QtCore import QPoint, QRect, Qt, QTimer
+import shiboken6
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
     QCursor,
@@ -23,8 +24,13 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QCheckBox, QHBoxLayout, QLineEdit, QWidget
 
 from ....core.constants import ViewMode, ZoomMode
+from ..render_worker import PAGE_CACHE
 from ..utils import generate_markdown_html, generate_reflow_html
 from ..widgets import PageWidget
+
+# Thumbnails are rendered at this fraction of the target resolution and shown
+# (upscaled) until the full-resolution page arrives.
+THUMBNAIL_FACTOR = 0.25
 
 
 class RenderingMixin:
@@ -56,6 +62,9 @@ class RenderingMixin:
         self.rendered_pages.clear()
         self._virtual_enabled = False
         self._virtual_range = (0, 0)
+        worker = getattr(self, "_render_worker", None)
+        if worker is not None:
+            worker.clear()
 
         while self.scroll_layout.count():
             item = self.scroll_layout.takeAt(0)
@@ -71,6 +80,7 @@ class RenderingMixin:
             self._build_standard_layout(count)
 
         self.scroll_content.adjustSize()
+        self._last_applied_scale = self.calculate_scale()
 
         if hasattr(self, "scroll_layout") and self.scroll_layout:
             self.scroll_layout.activate()
@@ -111,8 +121,8 @@ class RenderingMixin:
             count (int): The total number of pages in the current document.
         """
         self._virtual_enabled = True
-        buf_before = 5
-        buf_after = 10
+        buf_before = 8
+        buf_after = 16
         start = max(0, self.current_page_index - buf_before)
         end = min(count, self.current_page_index + buf_after)
 
@@ -234,10 +244,16 @@ class RenderingMixin:
             return
 
         scale = self.calculate_scale()
+        last_scale = getattr(self, "_last_applied_scale", None)
+        if last_scale and abs(last_scale - scale) > 1e-4 and hasattr(self, "apply_visual_zoom"):
+            # The viewport changed size without a zoom event; resize the page
+            # slots first so they match what is about to be rendered.
+            self.apply_visual_zoom()
+            scale = self.calculate_scale()
         target_indices = set()
 
         if self._virtual_enabled:
-            margin = 1 if scale >= 2.0 else (2 if scale >= 1.2 else 4)
+            margin = 2 if scale >= 2.0 else (3 if scale >= 1.2 else 5)
             start = max(0, self.current_page_index - margin)
             end = min(self.current_doc.page_count, self.current_page_index + margin + 1)
             for i in range(start, end):
@@ -270,12 +286,18 @@ class RenderingMixin:
                 for i in range(start, end):
                     target_indices.add(i)
 
+        worker = getattr(self, "_render_worker", None)
         for idx in list(self.rendered_pages):
             if idx not in target_indices:
                 if idx in self.page_widgets:
                     self.page_widgets[idx].clear()
                     self.page_widgets[idx].setText(f"Page {idx + 1}")
                 self.rendered_pages.remove(idx)
+                if worker is not None:
+                    worker.cancel_page(idx)
+
+        if worker is not None:
+            worker.set_focus(self.current_page_index)
 
         # Prioritize rendering the visible page first for instant visual feedback
         sorted_indices = sorted(
@@ -286,9 +308,15 @@ class RenderingMixin:
                 self._render_single_page(idx, scale)
                 self.rendered_pages.add(idx)
 
+    def _render_owner(self):
+        """Identifies the currently loaded document in the shared page cache."""
+        return (id(self), getattr(self, "_doc_generation", 0))
+
     def _render_single_page(self, idx: int, scale: float) -> None:
         """
-        Executes rendering logic for a singular page utilizing the internal document bridge.
+        Puts a page on screen, preferring the shared cache and otherwise queueing
+        it on the background render worker. Without a worker (tests, embedded
+        use) the page is rendered synchronously.
 
         Args:
             idx (int): The index of the specific page to evaluate and draw.
@@ -296,30 +324,139 @@ class RenderingMixin:
         """
         try:
             dpr = self.devicePixelRatio()
-            render_scale = scale * dpr
-            res = self.current_doc.render_page(idx, render_scale, self.theme_mode)
+            render_scale = round(scale * dpr, 4)
+            theme = self.theme_mode
+            owner = self._render_owner()
 
-            img = QImage(res.data, res.width, res.height, QImage.Format.Format_ARGB32)
-            img.setDevicePixelRatio(dpr)
-            pix = QPixmap.fromImage(img)
+            cached = PAGE_CACHE.get((owner, idx, render_scale, theme))
+            if cached is not None:
+                self._display_page_image(idx, cached, scale, dpr)
+                return
 
-            w, h = pix.width() / dpr, pix.height() / dpr
+            worker = getattr(self, "_render_worker", None)
+            if worker is None:
+                res = self.current_doc.render_page(idx, render_scale, theme)
+                img = QImage(
+                    res.data, res.width, res.height, QImage.Format.Format_ARGB32
+                ).copy()
+                PAGE_CACHE.put((owner, idx, render_scale, theme), img)
+                self._display_page_image(idx, img, scale, dpr)
+                return
 
-            self._render_forms(idx, scale, w, h)
-            self._render_links(idx, scale, w, h)
-            self._render_overlays(idx, pix, scale, w, h)
+            # Links already known for this page work before the pixels arrive.
+            if idx in getattr(self, "_raw_links_cache", {}):
+                w, h = self._get_target_page_size()
+                if getattr(self, "rotation", 0) in (90, 270):
+                    w, h = h, w
+                self._render_links(idx, scale, w, h)
 
-            rotation = getattr(self, "rotation", 0)
-            if rotation != 0:
-                transform = QTransform().rotate(rotation)
-                pix = pix.transformed(
-                    transform, Qt.TransformationMode.SmoothTransformation
-                )
-
-            self.page_widgets[idx].setPixmap(pix)
+            stand_in = PAGE_CACHE.find_any(owner, idx, theme)
+            if stand_in is not None:
+                self._display_stand_in(idx, stand_in)
+            else:
+                thumb_scale = max(0.12, render_scale * THUMBNAIL_FACTOR)
+                worker.request(idx, round(thumb_scale, 4), theme, True)
+            worker.request(idx, render_scale, theme, False)
 
         except Exception as e:
             sys.stderr.write(f"Render error page {idx}: {e}\n")
+
+    def _on_page_rendered(
+        self,
+        generation,
+        idx: int,
+        render_scale: float,
+        theme: int,
+        thumbnail: bool,
+        img,
+        meta=None,
+    ) -> None:
+        """Receives a page from the render worker and shows it if still wanted."""
+        if generation != self._render_owner() or not self.current_doc:
+            return
+        if meta is not None:
+            links, forms = meta
+            self._raw_links_cache.setdefault(idx, links)
+            self._raw_forms_cache.setdefault(idx, forms)
+        if not thumbnail:
+            PAGE_CACHE.put((generation, idx, render_scale, theme), img)
+
+        widget = self.page_widgets.get(idx)
+        if widget is None or not shiboken6.isValid(widget):
+            return
+        if idx not in self.rendered_pages or theme != self.theme_mode:
+            return
+
+        scale = self.calculate_scale()
+        dpr = self.devicePixelRatio()
+        if thumbnail:
+            if not getattr(widget, "has_full_page", False):
+                self._display_stand_in(idx, img)
+                w, h = self._get_target_page_size()
+                if getattr(self, "rotation", 0) in (90, 270):
+                    w, h = h, w
+                self._render_links(idx, scale, w, h)
+            return
+
+        wanted_scale = round(scale * dpr, 4)
+        if abs(render_scale - wanted_scale) > 1e-3:
+            # Zoom changed while this page was in flight: show it as a stand-in
+            # and make sure a render at the current scale is on its way.
+            if not getattr(widget, "has_full_page", False):
+                self._display_stand_in(idx, img)
+            worker = getattr(self, "_render_worker", None)
+            cached = PAGE_CACHE.get((generation, idx, wanted_scale, theme))
+            if cached is not None:
+                self._display_page_image(idx, cached, scale, dpr)
+            elif worker is not None:
+                worker.request(idx, wanted_scale, theme, False)
+            return
+        self._display_page_image(idx, img, scale, dpr)
+
+    def _display_stand_in(self, idx: int, img) -> None:
+        """Shows a low-resolution or wrong-scale image, stretched to the page slot."""
+        widget = self.page_widgets.get(idx)
+        if widget is None:
+            return
+        pix = QPixmap.fromImage(img)
+        rotation = getattr(self, "rotation", 0)
+        if rotation != 0:
+            pix = pix.transformed(QTransform().rotate(rotation))
+        widget.has_full_page = False
+        widget.setPixmap(pix)
+
+    def _display_page_image(self, idx: int, img, scale: float, dpr: float) -> None:
+        """Composites overlays onto a rendered page image and displays it."""
+        widget = self.page_widgets.get(idx)
+        if widget is None:
+            return
+
+        pix = QPixmap.fromImage(img)
+        pix.setDevicePixelRatio(dpr)
+        w, h = pix.width() / dpr, pix.height() / dpr
+
+        self._render_forms(idx, scale, w, h)
+        self._render_links(idx, scale, w, h)
+        self._render_overlays(idx, pix, scale, w, h)
+
+        rotation = getattr(self, "rotation", 0)
+        if rotation != 0:
+            transform = QTransform().rotate(rotation)
+            pix = pix.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+
+        widget.has_full_page = True
+        widget.setPixmap(pix)
+
+    def invalidate_page_cache(self, idx: Optional[int] = None) -> None:
+        """Forgets cached renders after the PDF content itself changed."""
+        owner = self._render_owner()
+        if idx is None:
+            PAGE_CACHE.drop_owner(owner)
+            self._raw_links_cache = {}
+            self._raw_forms_cache = {}
+        else:
+            PAGE_CACHE.drop_page(owner, idx)
+            getattr(self, "_raw_forms_cache", {}).pop(idx, None)
 
     def _render_forms(
         self, idx: int, scale: float, logical_w: float, logical_h: float
@@ -334,11 +471,17 @@ class RenderingMixin:
         """
         if idx in self.form_widgets:
             for w in self.form_widgets[idx]:
-                w.deleteLater()
+                if shiboken6.isValid(w):
+                    w.deleteLater()
         self.form_widgets[idx] = []
 
         try:
-            forms = self.current_doc.get_form_widgets(idx)
+            forms_cache = getattr(self, "_raw_forms_cache", None)
+            if forms_cache is None:
+                forms_cache = self._raw_forms_cache = {}
+            if idx not in forms_cache:
+                forms_cache[idx] = self.current_doc.get_form_widgets(idx)
+            forms = forms_cache[idx]
             for _, rect_tuple, f_type, value, is_checked in forms:
                 cache_key = (idx, rect_tuple)
                 if cache_key in self.form_values_cache:
@@ -399,19 +542,16 @@ class RenderingMixin:
         """Extracts and scales link bounding boxes from the PDF to the UI widget."""
         scaled_links = []
         try:
-            links = []
-            if hasattr(self, "pdf_path") and self.pdf_path:
-                try:
-                    from riemann.core.links import PdfLinkExtractor
-
-                    links = PdfLinkExtractor.get_instance().get_links_for_page(
-                        self.pdf_path, idx
-                    )
-                except Exception:
-                    links = []
-
-            if not links and hasattr(self.current_doc, "get_links"):
-                links = self.current_doc.get_links(idx)
+            links_cache = getattr(self, "_raw_links_cache", None)
+            if links_cache is None:
+                links_cache = self._raw_links_cache = {}
+            if idx not in links_cache:
+                links_cache[idx] = (
+                    self.current_doc.get_links(idx)
+                    if hasattr(self.current_doc, "get_links")
+                    else []
+                )
+            links = links_cache[idx]
 
             for url, (l, t, r, b) in links:
                 x = int(l * scale)
@@ -435,7 +575,8 @@ class RenderingMixin:
                     x, y = y, int(logical_w) - x - w_rect
                     w_rect, h_rect = h_rect, w_rect
 
-                rect = QRect(x, y, max(1, w_rect), h_rect)
+                # A little slack around the link makes small targets easy to hit.
+                rect = QRect(x, y, max(1, w_rect), max(1, h_rect)).adjusted(-2, -2, 2, 2)
                 scaled_links.append((rect, url))
         except Exception as e:
             sys.stderr.write(f"Link extraction error page {idx}: {e}\n")
@@ -605,7 +746,7 @@ class RenderingMixin:
 
         bw, bh = self._cached_base_size
         viewport = self.scroll.viewport()
-        vw = max(10, viewport.width() - 30)
+        vw = max(10, viewport.width() + self._scrollbar_allowance() - 30)
         vh = max(10, viewport.height() - 20)
 
         if self.zoom_mode == ZoomMode.AUTO_FIT:
@@ -620,6 +761,19 @@ class RenderingMixin:
         elif self.zoom_mode == ZoomMode.FIT_HEIGHT:
             return vh / bh
         return 1.0
+
+    def _scrollbar_allowance(self) -> int:
+        """
+        Width to add back to the viewport so fit-to-width ignores whether the
+        vertical scrollbar happens to be shown. Otherwise the scale (and every
+        rendered page) would change whenever the scrollbar appears or hides.
+        """
+        try:
+            sb = self.scroll.verticalScrollBar()
+            shown = int(sb.width()) if sb.isVisible() else 0
+            return shown - int(sb.sizeHint().width())
+        except Exception:
+            return 0
 
     def update_view(self) -> None:
         """
@@ -703,12 +857,18 @@ class RenderingMixin:
             max_w, max_h = 0, 0
             test_scale = 0.1
             probe_limit = min(5, self.current_doc.page_count)
+            # Exact sizes come straight from the core when available; the
+            # low-resolution render is the fallback for older builds.
+            exact_size = getattr(type(self.current_doc), "get_page_size", None)
 
             for i in range(probe_limit):
-                res = self.current_doc.render_page(i, test_scale, 0)
-
-                w = int(res.width / test_scale)
-                h = int(res.height / test_scale)
+                if exact_size is not None:
+                    pw, ph = self.current_doc.get_page_size(i)
+                    w, h = int(round(pw)), int(round(ph))
+                else:
+                    res = self.current_doc.render_page(i, test_scale, 0)
+                    w = int(res.width / test_scale)
+                    h = int(res.height / test_scale)
 
                 if getattr(self, "rotation", 0) in (90, 270):
                     max_w = max(max_w, h)
@@ -754,47 +914,70 @@ class RenderingMixin:
         self._cached_base_size = None
         self.on_zoom_changed_internal()
 
+    def _flush_scroll_layout(self) -> None:
+        """
+        Applies pending size changes to the scroll content immediately so the
+        scrollbar range reflects the new page sizes before we reposition.
+        """
+        if hasattr(self, "scroll_layout") and self.scroll_layout:
+            self.scroll_layout.invalidate()
+            self.scroll_layout.activate()
+        for _ in range(2):
+            QApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
+
+    def _page_top_y(self, idx: int) -> Optional[int]:
+        """Returns the y offset of a page inside the scroll content, if laid out."""
+        widget = self.page_widgets.get(idx)
+        if widget is None or not shiboken6.isValid(widget):
+            return None
+        row = widget.parentWidget()
+        if row is None:
+            return None
+        return row.y() + widget.y()
+
+    def _page_anchor(self, y: float) -> Tuple[int, float]:
+        """
+        Finds the page under content position y and how far down it lies,
+        as (page index, fraction of page height).
+        """
+        for idx, widget in self.page_widgets.items():
+            top = self._page_top_y(idx)
+            if top is None:
+                continue
+            h = max(1, widget.height())
+            if top <= y < top + h + self.scroll_layout.spacing():
+                return idx, max(0.0, min(1.0, (y - top) / h))
+
+        idx = getattr(self, "current_page_index", 0)
+        scale = getattr(self, "_last_applied_scale", None) or self.calculate_scale()
+        base_h = self._cached_base_size[1] if self._cached_base_size else 842
+        ph = int(base_h * scale) + self.scroll_layout.spacing()
+        row = idx // 2 if getattr(self, "facing_mode", False) else idx
+        frac = (y - row * ph) / ph if ph > 0 else 0.0
+        return idx, max(0.0, min(1.0, frac))
+
     def apply_visual_zoom(self) -> None:
         """
         Updates the physical dimensions of the layout and active widgets immediately
-        while mathematically anchoring the document to prevent bouncing/vibration
-        and maintaining the exact current page and scroll position.
+        while anchoring the point at the centre of the viewport, so the same spot
+        of the same page stays in view whatever the zoom direction.
         """
         if not hasattr(self, "scroll") or not self.scroll:
             return
 
         viewport = self.scroll.viewport()
         vbar = self.scroll.verticalScrollBar()
-        hbar = self.scroll.horizontalScrollBar()
-
-        target_page = getattr(self, "current_page_index", 0)
-        old_scale = getattr(self, "_last_applied_scale", None) or self.calculate_scale()
-
-        base_h = (
-            self._cached_base_size[1]
-            if getattr(self, "_cached_base_size", None)
-            else 842
-        )
-        spacing = (
-            self.scroll_layout.spacing()
-            if hasattr(self, "scroll_layout")
-            else 10
-        )
-        old_ph = int(base_h * old_scale) + spacing
-
-        is_facing = getattr(self, "facing_mode", False)
-        old_page_top = (
-            (target_page // 2 * old_ph) if is_facing else (target_page * old_ph)
-        )
-        offset_in_page = vbar.value() - old_page_top
-        page_frac = offset_in_page / old_ph if old_ph > 0 else 0.0
-        page_frac = max(0.0, min(1.0, page_frac))
+        half_view = viewport.height() / 2
+        anchor_idx, anchor_frac = self._page_anchor(vbar.value() + half_view)
 
         self._update_all_widget_sizes()
 
         new_scale = self.calculate_scale()
         self._last_applied_scale = new_scale
+        base_h = self._cached_base_size[1] if self._cached_base_size else 842
+        spacing = self.scroll_layout.spacing()
         new_ph = int(base_h * new_scale) + spacing
+        is_facing = getattr(self, "facing_mode", False)
 
         if self._virtual_enabled and self._cached_base_size:
             start, end = self._virtual_range
@@ -813,12 +996,37 @@ class RenderingMixin:
             if getattr(self, "_bottom_spacer", None) and self.current_doc:
                 self._bottom_spacer.setFixedHeight(max(0, bottom_spacer_height))
 
-        new_page_top = (
-            (target_page // 2 * new_ph) if is_facing else (target_page * new_ph)
-        )
-        target_y = new_page_top + int(page_frac * new_ph)
+        self._flush_scroll_layout()
 
+        page_top = self._page_top_y(anchor_idx)
+        if page_top is None:
+            row = anchor_idx // 2 if is_facing else anchor_idx
+            page_top = row * new_ph
+        page_h = new_ph - spacing
+        target_y = int(page_top + anchor_frac * page_h - half_view)
+        self._set_scroll_value_silently(max(0, target_y))
+
+    def _set_scroll_value_silently(self, value: int) -> None:
+        """
+        Moves the vertical scrollbar without triggering scroll handlers. If the
+        range has not caught up yet, the move is retried once the layout settles.
+        """
+        vbar = self.scroll.verticalScrollBar()
         was_v_blocked = vbar.signalsBlocked()
         vbar.blockSignals(True)
-        vbar.setValue(int(target_y))
+        vbar.setValue(value)
         vbar.blockSignals(was_v_blocked)
+
+        if vbar.value() == value:
+            return
+
+        def _retry():
+            if not shiboken6.isValid(vbar):
+                return
+            vbar.blockSignals(True)
+            vbar.setValue(value)
+            vbar.blockSignals(was_v_blocked)
+            if hasattr(self, "render_visible_pages"):
+                self.render_visible_pages()
+
+        QTimer.singleShot(0, _retry)
