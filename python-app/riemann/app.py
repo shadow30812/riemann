@@ -142,6 +142,7 @@ from .core.window_snap import (
 from .ui.browser import BrowserTab, PreviewTextTab
 from .ui.components import DraggableTabWidget
 from .ui.explorer import FileExplorerPanel, FolderHomeTab
+from .ui.palette import tinted_icon, tokens
 from .ui.favourites import ManageFavoritesDialog
 from .ui.reader.render_worker import stop_all_render_workers
 from .ui.reader.tab import PreviewReaderTab, ReaderTab
@@ -1471,11 +1472,8 @@ class RiemannWindow(QMainWindow):
         return reader
 
     def _preview_icon(self) -> QIcon:
-        suffix = "-white.svg" if getattr(self, "dark_mode", False) else ".svg"
-        icon_path = get_resource_path(os.path.join("assets", "icons", f"scan-eye{suffix}"))
-        if not os.path.exists(icon_path):
-            icon_path = get_resource_path(os.path.join("assets", "icons", "scan-eye.svg"))
-        return QIcon(icon_path)
+        """The eye shown on preview tabs, in the theme's accent so it reads on both backgrounds."""
+        return tinted_icon("scan-eye", tokens(getattr(self, "dark_mode", False))["accent"], 16)
 
     def _open_document(
         self,
@@ -2762,6 +2760,8 @@ class RiemannWindow(QMainWindow):
                     w._update_icons()
                 if hasattr(w, "apply_ui_theme"):
                     w.apply_ui_theme(self.dark_mode)
+                if getattr(w, "is_preview", False):
+                    tab_widget.setTabIcon(i, self._preview_icon())
 
         self.refresh_signature_panel()
 

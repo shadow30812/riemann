@@ -4238,16 +4238,24 @@ class PreviewReaderTab(ReaderTab):
             "Preview mode  ·  double-click the tab title to open the full reader"
         )
         self.preview_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_banner.setStyleSheet(
-            "QLabel { background: rgba(60, 140, 255, 0.12); color: palette(text);"
-            " padding: 3px; font-size: 11px; }"
-        )
+        self._style_preview_banner(self._home_dark)
         self.preview_banner.setVisible(False)
         self.layout().insertWidget(0, self.preview_banner)
 
         self.scroll.verticalScrollBar().setStyleSheet(
             "QScrollBar:vertical { width: 8px; background: transparent; }"
         )
+
+    def _style_preview_banner(self, dark: bool) -> None:
+        t = tokens(dark)
+        self.preview_banner.setStyleSheet(
+            f"QLabel {{ background: {t['accent_soft']}; color: {t['text']};"
+            f" border-bottom: 1px solid {t['border']}; padding: 4px; font-size: 11px; }}"
+        )
+
+    def apply_ui_theme(self, dark: bool) -> None:
+        super().apply_ui_theme(dark)
+        self._style_preview_banner(dark)
 
     def load_document(
         self,

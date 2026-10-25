@@ -343,3 +343,19 @@ def test_home_page_lists_recent_documents_with_their_folder(reader_tab, tmp_path
     assert item.data(Qt.ItemDataRole.UserRole) == str(pdf)
     assert reader_tab.lbl_recent_count.text() == "1"
     assert reader_tab.lbl_recent_empty.isHidden()
+
+
+def test_preview_banner_follows_the_interface_theme(qapp):
+    from riemann.ui.palette import DARK, LIGHT
+    from riemann.ui.reader.tab import PreviewReaderTab
+
+    with patch("riemann.ui.reader.tab.QSettings") as mock_settings:
+        mock_settings.return_value.value.return_value = True
+        tab = PreviewReaderTab()
+    try:
+        assert DARK["text"] in tab.preview_banner.styleSheet()
+        tab.apply_ui_theme(False)
+        assert LIGHT["text"] in tab.preview_banner.styleSheet()
+    finally:
+        tab.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
