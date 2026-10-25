@@ -2,7 +2,7 @@
 
 Riemann is a desktop PDF reader and web browser in one window. PDFs, Markdown files and web pages open as tabs. Two tabs can sit side by side, so a paper and the page it came from share one screen. The interface is Python with PySide6 (Qt 6). Rendering, text extraction, search and annotation reading run in a Rust extension built on PDFium, Google's PDF engine.
 
-It runs on Linux and Windows. Version 5.1.0, MIT licensed.
+It runs on Linux and Windows. Version 5.2.1, MIT licensed.
 
 ![A paper in the reader on the left and its arXiv page in the browser on the right](images/split-view.png)
 
@@ -115,7 +115,7 @@ Measured on 2026-10-25 on an Intel Core i5-13500H (16 logical cores, 13 GB RAM),
 A reader tab in a 1400x1000 window at Fit Width (pages render at about 2.2x), scrolled at a fixed speed with 60 ticks a second for 5 seconds. "Sharp" is how often the page in the middle of the viewport was fully rendered when checked after a tick. "Longest freeze" is the longest single pass of the Qt event loop, the longest the window could not respond.
 
 | Document | Speed | Sharp, before | Sharp, now | Longest freeze, before | Longest freeze, now | Sharp after stopping, before | Sharp after stopping, now |
-|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- |
 | PDF 1.7 spec (756 pages) | 2,000 px/s | 24% | 100% | 74 ms | 19 ms | 215 ms | 2 ms |
 | | 6,000 px/s | 8% | 100% | 91 ms | 40 ms | 231 ms | 2 ms |
 | | 19,000 px/s | 2% | 100% | 131 ms | 38 ms | 271 ms | 2 ms |
@@ -132,7 +132,7 @@ The time from opening a document in a reader tab to a sharp first page went from
 Launching the full app with the PDF spec on the command line, median of 5 launches:
 
 | | Before | Now |
-|---|---|---|
+| --- | --- | --- |
 | Window shown | 1.89 s | 1.78 s |
 | First page sharp | 3.87 s | 1.96 s |
 | Memory at that point | 386 MB | 296 MB |
@@ -143,7 +143,7 @@ The first launch is slower because it creates the private virtual environment fo
 Memory with 1, 5 and 10 PDF tabs open, after paging through 60 pages in each. The comparison is with commit `4f65f07`, the first version with the shared page cache:
 
 | Tabs | `4f65f07` | Now | Page cache |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | 399 MB | 339 MB | 135 MB |
 | 5 | 2,192 MB | 1,060 MB | 381 MB |
 | 10 | 3,515 MB | 1,759 MB | 378 MB |
@@ -155,14 +155,14 @@ The cache stays within its 384 MB budget. The rest grows by roughly 140 MB per t
 Median time to render one page, sampled across each document, before and now, with PyMuPDF (MuPDF) on the same pages for reference. 1x is 72 DPI; 3x is 216 DPI, roughly a 1.5x-scaled screen at Fit Width.
 
 | Document | 1x before | 1x now | 3x before | 3x now | 3x PyMuPDF |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | Attention Is All You Need (15 pages) | 4.4 ms | 4.0 ms | 28.7 ms | 14.4 ms | 6.5 ms |
 | Latent Diffusion (45 pages, images) | 26.7 ms | 27.0 ms | 66.2 ms | 44.7 ms | 20.1 ms |
 | Think Python (244 pages) | 2.8 ms | 1.9 ms | 25.2 ms | 7.1 ms | 3.7 ms |
 | PDF 1.7 spec (756 pages) | 4.7 ms | 3.7 ms | 30.8 ms | 11.6 ms | 6.2 ms |
 
 | Document | Open, Riemann | Open, PyMuPDF | Text, Riemann | Text, PyMuPDF | Search, Riemann | Search, PyMuPDF |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | Attention | 0.8 ms | 1.2 ms | 310 pages/s | 276 pages/s | 47 ms | 62 ms |
 | Latent Diffusion | 0.3 ms | 2.2 ms | 644 pages/s | 555 pages/s | 64 ms | 91 ms |
 | Think Python | 1.4 ms | 18.1 ms | 858 pages/s | 864 pages/s | 252 ms | 327 ms |
@@ -185,7 +185,7 @@ The other scripts (`bench_core.py`, `bench_startup.py`, `bench_memory.py`) run t
 ## Project in numbers
 
 | | |
-|---|---|
+| --- | --- |
 | Python (app) | 19,400 lines in 30 files |
 | Python (tests) | 3,600 lines, 200 tests |
 | Rust (core and OCR worker) | 1,050 lines |
@@ -197,7 +197,7 @@ The other scripts (`bench_core.py`, `bench_startup.py`, `bench_memory.py`) run t
 ## Keyboard shortcuts
 
 | Keys | Action |
-|---|---|
+| --- | --- |
 | Ctrl+O | Open files |
 | Ctrl+T / Ctrl+B | New PDF tab / new browser tab |
 | Ctrl+W, Ctrl+Shift+T | Close tab, reopen last closed tab |
