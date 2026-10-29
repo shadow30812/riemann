@@ -176,6 +176,8 @@ class FolderHomeTab(QWidget):
     def __init__(self, parent=None, dark_mode=True):
         super().__init__(parent)
         self.dark_mode = dark_mode
+        # Set by the per-tab theme toggle (N); None follows the interface theme.
+        self._dark_override = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -317,14 +319,24 @@ class FolderHomeTab(QWidget):
 
     def apply_ui_theme(self, dark: bool):
         """Called by the main window when the interface theme changes."""
+        self._dark_override = None
         if dark != self.dark_mode:
             self.dark_mode = dark
             self._apply_style()
             self._populate_lists()
 
+    def toggle_theme(self):
+        """The per-tab theme toggle (N): switches this page between light and dark."""
+        self._dark_override = not self.dark_mode
+        self.dark_mode = self._dark_override
+        self._apply_style()
+        self._populate_lists()
+
     def showEvent(self, event):
         super().showEvent(event)
-        dark = getattr(self.window(), "dark_mode", self.dark_mode)
+        dark = self._dark_override
+        if dark is None:
+            dark = getattr(self.window(), "dark_mode", self.dark_mode)
         if dark != self.dark_mode:
             self.dark_mode = dark
             self._apply_style()

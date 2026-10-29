@@ -1,10 +1,6 @@
 import os
 
 import certifi
-from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
-from pyhanko.pdf_utils.reader import PdfFileReader
-from pyhanko.sign import signers
-from pyhanko.sign.fields import SigFieldSpec, append_signature_field
 from PySide6.QtCore import QSettings, QStandardPaths
 from PySide6.QtWidgets import (
     QDialog,
@@ -152,6 +148,8 @@ class SignaturesMixin:
                 # first, which froze the window for about 0.7 s on large files.
                 count = doc.signature_count()
             else:
+                from pyhanko.pdf_utils.reader import PdfFileReader
+
                 with open(path, "rb") as f:
                     count = len(PdfFileReader(f, strict=False).embedded_signatures)
             if not count:
@@ -371,6 +369,10 @@ class SignaturesMixin:
             password (str): Extracted cleartext user input validating credential usage policies locally.
         """
         try:
+            from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+            from pyhanko.sign import signers
+            from pyhanko.sign.fields import SigFieldSpec, append_signature_field
+
             signer = signers.SimpleSigner.load_pkcs12(cert_path, password.encode())
             output_path = self.current_path.replace(".pdf", "_signed.pdf")
 

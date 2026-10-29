@@ -282,8 +282,8 @@ def test_library_search_dialog_execute(qtbot):
     "riemann.app.QFileDialog.getOpenFileNames", return_value=(["/a.pdf", "/b.pdf"], "")
 )
 @patch("riemann.app.QFileDialog.getSaveFileName", return_value=("/dest.pdf", ""))
-@patch("riemann.app.PdfReader")
-@patch("riemann.app.PdfWriter")
+@patch("pypdf.PdfReader")
+@patch("pypdf.PdfWriter")
 @patch("riemann.app.QMessageBox.question", return_value=QMessageBox.StandardButton.No)
 def test_join_pdfs(
     mock_msgbox, mock_writer_cls, mock_reader_cls, mock_save, mock_open, qtbot
@@ -697,6 +697,48 @@ def test_double_clicking_a_preview_tab_opens_full_mode(qtbot):
     assert promoted.current_path == "/fake/document.pdf"
 
 
+def test_folder_view_preview_is_added_to_history(qtbot, tmp_path):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.7")
+    notes = tmp_path / "notes.txt"
+    notes.write_text("hi")
+
+    with patch.object(window.history_manager, "add") as mock_add:
+        window._on_file_single_clicked(str(pdf))
+        window._on_file_single_clicked(str(notes))
+
+    assert mock_add.call_args_list[0].args == (str(pdf), "pdf")
+    assert mock_add.call_args_list[1].args == (str(notes), "web")
+
+
+def test_double_clicking_a_file_in_the_folder_view_opens_full_mode(qtbot, tmp_path):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    window.settings.setValue("reader/open_in_preview_mode", True)
+    first = tmp_path / "first.pdf"
+    second = tmp_path / "second.pdf"
+    for f in (first, second):
+        f.write_bytes(b"%PDF-1.7")
+
+    # Not previewed yet: opens straight into the full reader.
+    window._on_file_double_clicked(str(first))
+    opened = window.tabs_main.currentWidget()
+    assert opened.current_path == str(first)
+    assert opened.is_preview is False
+
+    # A double-click arrives after the single click that previewed the file.
+    window._on_file_single_clicked(str(second))
+    preview = window.preview_tab_widget
+    window._on_file_double_clicked(str(second))
+    promoted = window.tabs_main.currentWidget()
+    assert promoted is not preview
+    assert promoted.current_path == str(second)
+    assert promoted.is_preview is False
+    assert window.preview_tab_widget is None
+
+
 def test_dropping_a_folder_opens_folder_session(qtbot, tmp_path):
     window = RiemannWindow(incognito=False, restore_session=False)
     qtbot.addWidget(window)
@@ -749,6 +791,34 @@ def test_frozen_build_never_uses_itself_as_the_venv_python():
 
     with patch.object(dependencies, "_is_frozen", return_value=False):
         assert dependencies._find_base_python() == sys.executable
+
+
+def test_venv_lookups_skip_the_interpreter_once_cached(tmp_path):
+    """Launches read the venv's version and site folders without starting its Python."""
+    import os
+
+    from riemann.core import dependencies
+
+    cfg = tmp_path / "pyvenv.cfg"
+    cfg.write_text("home = /usr/bin\ninclude-system-site-packages = true\nversion = 3.11.16\n")
+    py = str(tmp_path / "bin" / "python")
+
+    with patch.object(dependencies.subprocess, "check_output") as mock_run:
+        assert dependencies._venv_version(str(tmp_path), py) == "3.11"
+        mock_run.assert_not_called()
+
+    with patch.object(
+        dependencies.subprocess, "check_output", return_value='["/venv/site-packages"]\n'
+    ) as mock_run:
+        assert dependencies._venv_site_paths(str(tmp_path), py) == ["/venv/site-packages"]
+        assert dependencies._venv_site_paths(str(tmp_path), py) == ["/venv/site-packages"]
+        assert mock_run.call_count == 1
+
+        # A recreated venv writes a new pyvenv.cfg, which invalidates the cache.
+        st = cfg.stat()
+        os.utime(cfg, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+        dependencies._venv_site_paths(str(tmp_path), py)
+        assert mock_run.call_count == 2
 
 
 def test_greeting_name_falls_back_without_pwd():

@@ -1,4 +1,3 @@
-import numpy as np
 from PySide6.QtCore import QByteArray, QObject, QThread, Signal, Slot
 from PySide6.QtNetwork import QHostAddress
 from PySide6.QtWebSockets import QWebSocket, QWebSocketServer
@@ -17,6 +16,8 @@ class WhisperWorker(QThread):
     def _process_chunk(self, byte_data: bytes, client_ws: object):
         """Processes the 32-bit float audio array using faster-whisper."""
         try:
+            import numpy as np
+
             from ..core import captions
 
             audio_array = np.frombuffer(byte_data, dtype=np.float32)

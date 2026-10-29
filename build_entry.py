@@ -86,6 +86,19 @@ if sys.platform.startswith("linux"):
             os.symlink(_this_dir, _qt_lib)
         except Exception:
             pass
+        else:
+            # The link points back at the unpack folder. Nuitka's onefile cleanup
+            # follows links, so the loop made it give up part way and every launch
+            # left about 1 GB behind in /tmp. Remove it before the bootstrap cleans up.
+            import atexit
+
+            def _drop_qt_lib_link(path=_qt_lib):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+
+            atexit.register(_drop_qt_lib_link)
 
     # Ensure QT_PLUGIN_PATH points to Nuitka's extracted plugins
     _plugins_dir = os.path.join(_this_dir, "PySide6", "qt-plugins")

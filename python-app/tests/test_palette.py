@@ -54,3 +54,26 @@ def test_folder_home_lists_favourites_and_recents_and_switches_theme(qapp, tmp_p
             assert tab.dark_mode is False
             assert LIGHT["surface"] in tab.styleSheet()
     tab.deleteLater()
+
+
+def test_folder_home_tab_theme_toggle_survives_being_shown_again(qapp):
+    from PySide6.QtGui import QShowEvent
+
+    window = MagicMock()
+    window.dark_mode = True
+    window.history_manager.get_list.return_value = []
+    with patch("riemann.ui.explorer.QSettings") as settings:
+        settings.return_value.value.return_value = []
+        tab = FolderHomeTab(None, dark_mode=True)
+        with patch.object(tab, "window", return_value=window):
+            tab.toggle_theme()  # N
+            assert tab.dark_mode is False
+            assert LIGHT["surface"] in tab.styleSheet()
+
+            tab.showEvent(QShowEvent())  # switching back to the tab
+            assert tab.dark_mode is False
+
+            tab.apply_ui_theme(True)  # Ctrl+D hands it back to the interface theme
+            tab.showEvent(QShowEvent())
+            assert tab.dark_mode is True
+    tab.deleteLater()

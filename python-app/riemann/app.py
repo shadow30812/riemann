@@ -50,7 +50,6 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import psutil
-from pypdf import PdfReader, PdfWriter
 from PySide6.QtCore import (
     QEvent,
     QObject,
@@ -795,8 +794,6 @@ class RiemannWindow(QMainWindow):
             ),
         )
 
-        self.enforce_global_stylesheet()
-
     def _init_shortcuts(self) -> None:
         """
         Initializes and binds global application keyboard shortcuts.
@@ -830,6 +827,8 @@ class RiemannWindow(QMainWindow):
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(slot)
 
+        # Applied once, before the session's tabs exist: tabs added later are
+        # polished as they appear, and setting it again would restyle every widget.
         self.enforce_global_stylesheet()
 
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
@@ -993,6 +992,8 @@ class RiemannWindow(QMainWindow):
 
         save_last_directory(self.settings, dest_path)
         try:
+            from pypdf import PdfReader, PdfWriter
+
             reader = PdfReader(source_path)
             writer = PdfWriter()
             max_idx = len(reader.pages) - 1
@@ -1054,6 +1055,8 @@ class RiemannWindow(QMainWindow):
         save_last_directory(self.settings, dest_path)
         paths.sort()
         try:
+            from pypdf import PdfReader, PdfWriter
+
             writer = PdfWriter()
             for path in paths:
                 reader = PdfReader(path)
@@ -3637,12 +3640,15 @@ class RiemannWindow(QMainWindow):
         if not os.path.isfile(path):
             return
 
+        kind = self._document_kind(path)
+        self.add_to_history(path, "web" if kind in ("html", "text") else "pdf")
+
         idx = -1
         old = getattr(self, "preview_tab_widget", None)
         if old is not None:
             idx = self.tabs_main.indexOf(old)
 
-        if self._document_kind(path) == "pdf":
+        if kind == "pdf":
             new_preview = PreviewReaderTab()
             new_preview.load_document(path)
         else:
@@ -3665,6 +3671,7 @@ class RiemannWindow(QMainWindow):
         self._update_window_title()
 
     def _on_file_double_clicked(self, path: str):
+        """Double-clicking a file opens it in the full reader, like double-clicking a preview tab's title."""
         if not os.path.isfile(path):
             return
 
@@ -3675,19 +3682,17 @@ class RiemannWindow(QMainWindow):
             self.promote_preview_tab()
             return
 
-        self._open_single_file(path)
+        self._open_document(path, self.tabs_main, preview=False)
 
     def promote_preview_tab(self):
-        """Turns the transient explorer preview into a regular tab."""
+        """Turns the transient explorer preview into a regular full-mode tab."""
         if not getattr(self, "preview_tab_widget", None):
             return
 
         idx = self.tabs_main.indexOf(self.preview_tab_widget)
         if idx == -1:
             return
-        self._replace_tab_document(
-            self.tabs_main, idx, preview=self._preview_mode_enabled()
-        )
+        self._replace_tab_document(self.tabs_main, idx, preview=False)
         self.preview_tab_widget = None
 
     def _detect_file_type(self, path: str) -> str:
@@ -3881,7 +3886,14 @@ def install_linux_integration():
             return
 
         persistent_icon_path = icons_dir / "riemann.png"
-        shutil.copy2(internal_icon_path, persistent_icon_path)
+        try:
+            icon_current = (
+                persistent_icon_path.read_bytes() == Path(internal_icon_path).read_bytes()
+            )
+        except OSError:
+            icon_current = False
+        if not icon_current:
+            shutil.copy2(internal_icon_path, persistent_icon_path)
 
         desktop_file_path = apps_dir / f"{app_name}.desktop"
         exe_path = os.path.abspath(sys.argv[0])
@@ -3903,6 +3915,14 @@ def install_linux_integration():
             "Name=New Window\n"
             f'Exec="{exe_path}" --new-window\n'
         )
+
+        # Already registered (the usual case): skip the rewrite and the
+        # update-desktop-database run, which happened on every launch.
+        try:
+            if desktop_file_path.read_text() == desktop_entry:
+                return
+        except OSError:
+            pass
 
         with open(desktop_file_path, "w") as f:
             f.write(desktop_entry)

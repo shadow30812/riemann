@@ -86,8 +86,8 @@ def test_inference_thread_failure(qtbot):
 
 
 @patch("builtins.open")
-@patch("riemann.ui.reader.workers.PdfFileReader")
-@patch("riemann.ui.reader.workers.ValidationContext")
+@patch("pyhanko.pdf_utils.reader.PdfFileReader")
+@patch("pyhanko_certvalidator.ValidationContext")
 def test_signature_validation_worker_no_sigs(mock_vc, mock_reader, mock_open, qtbot):
     mock_instance = MagicMock()
     mock_instance.embedded_signatures = []

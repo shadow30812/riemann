@@ -17,11 +17,6 @@ import time
 import urllib.parse
 from typing import Any, Optional
 
-try:
-    import yt_dlp
-except ImportError:
-    pass
-
 _deno_dir = os.path.expanduser("~/.deno/bin")
 if os.path.isdir(_deno_dir) and _deno_dir not in os.environ.get("PATH", ""):
     os.environ["PATH"] = f"{_deno_dir}:{os.environ.get('PATH', '')}"
@@ -175,6 +170,8 @@ class YtDlpStreamWorker(QThread):
             ydl_opts["cookiesfrombrowser"] = (self.cookies_browser,)
 
         try:
+            import yt_dlp
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(self.url, download=False)
                 if info and "url" in info:
@@ -270,6 +267,8 @@ class YtDlpWorker(QThread):
             ydl_opts["postprocessors"] = postprocessors
 
         try:
+            import yt_dlp
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([self.url])
 
@@ -2337,6 +2336,8 @@ class BrowserTab(QWidget):
                         "cookiefile": cookie_file,
                     }
                     try:
+                        import yt_dlp
+
                         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                             info = ydl.extract_info(
                                 self.stream_worker.url, download=False

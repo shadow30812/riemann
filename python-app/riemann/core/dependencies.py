@@ -70,6 +70,71 @@ def _find_base_python() -> str:
     )
 
 
+def _venv_version(venv_dir: str, python_exe: str) -> str:
+    """
+    The venv's Python major.minor, read from pyvenv.cfg. Starting the venv's
+    interpreter to ask took tens of milliseconds on every launch.
+    """
+    try:
+        with open(os.path.join(venv_dir, "pyvenv.cfg"), encoding="utf-8") as f:
+            for line in f:
+                key, _, value = line.partition("=")
+                if key.strip() in ("version", "version_info"):
+                    return ".".join(value.strip().split(".")[:2])
+    except OSError:
+        pass
+    return subprocess.check_output(
+        [python_exe, "-c", "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')"],
+        text=True,
+        **_NO_WINDOW,
+    ).strip()
+
+
+def _venv_site_paths(venv_dir: str, python_exe: str) -> list:
+    """
+    The venv's site-packages folders. Asking its interpreter costs a process
+    start, so the answer is cached in the venv and reused until pyvenv.cfg
+    changes (the venv was recreated).
+    """
+    cache_path = os.path.join(venv_dir, "riemann_site_paths.json")
+    try:
+        st = os.stat(os.path.join(venv_dir, "pyvenv.cfg"))
+        key = [st.st_mtime_ns, st.st_size]
+    except OSError:
+        key = None
+
+    if key is not None:
+        try:
+            with open(cache_path, encoding="utf-8") as f:
+                cached = json.load(f)
+            if cached.get("key") == key and isinstance(cached.get("paths"), list):
+                return cached["paths"]
+        except (OSError, ValueError):
+            pass
+
+    # Interrogate site-packages only; NEVER inject standard library directories into sys.path
+    out = subprocess.check_output(
+        [
+            python_exe,
+            "-c",
+            "import site, sysconfig, json; "
+            "paths = list(dict.fromkeys(site.getsitepackages() + [sysconfig.get_path('purelib'), sysconfig.get_path('platlib')])); "
+            "print(json.dumps(paths))",
+        ],
+        text=True,
+        **_NO_WINDOW,
+    )
+    paths = json.loads(out.strip())
+
+    if key is not None:
+        try:
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump({"key": key, "paths": paths}, f)
+        except OSError:
+            pass
+    return paths
+
+
 def setup_and_get_venv() -> str:
     """
     Ensures a local virtual environment exists, dynamically interrogates it
@@ -90,11 +155,7 @@ def setup_and_get_venv() -> str:
     # If the venv exists, ensure its Python major/minor matches the current interpreter
     if os.path.exists(python_exe):
         try:
-            ver = subprocess.check_output(
-                [python_exe, "-c", "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')"],
-                text=True,
-                **_NO_WINDOW,
-            ).strip()
+            ver = _venv_version(venv_dir, python_exe)
             curr_ver = f"{sys.version_info[0]}.{sys.version_info[1]}"
             if ver != curr_ver:
                 print(f"[Riemann] Python version mismatch in venv ({ver} vs current {curr_ver}). Recreating...")
@@ -111,19 +172,7 @@ def setup_and_get_venv() -> str:
         )
 
     try:
-        # Interrogate site-packages only; NEVER inject standard library directories into sys.path
-        out = subprocess.check_output(
-            [
-                python_exe,
-                "-c",
-                "import site, sysconfig, json; "
-                "paths = list(dict.fromkeys(site.getsitepackages() + [sysconfig.get_path('purelib'), sysconfig.get_path('platlib')])); "
-                "print(json.dumps(paths))",
-            ],
-            text=True,
-            **_NO_WINDOW,
-        )
-        site_paths = json.loads(out.strip())
+        site_paths = _venv_site_paths(venv_dir, python_exe)
 
         for sp in site_paths:
             if os.path.exists(sp) and sp not in sys.path:

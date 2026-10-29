@@ -15,7 +15,6 @@ import urllib.parse
 from math import inf
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import pikepdf
 import shiboken6
 from PySide6.QtCore import (
     QEasingCurve,
@@ -898,7 +897,9 @@ class ReaderTab(
         if not hasattr(self, "list_recent"):
             return
         win = self.window()
-        dark = getattr(win, "dark_mode", self._home_dark)
+        dark = self._home_dark_override
+        if dark is None:
+            dark = getattr(win, "dark_mode", self._home_dark)
         if dark != self._home_dark:
             self._style_home_page(dark)
             return  # _style_home_page repopulates
@@ -2867,7 +2868,16 @@ class ReaderTab(
         """
         Cycles configuration properties through Light, Fast Dark, and Smart Dark modes.
         Saves preferences globally and triggers visual reconstructions safely.
+        On the start page (no document open) it switches the page between light and dark instead.
         """
+        if self._showing_home_page():
+            self._home_dark_override = not self._home_dark
+            self._style_home_page(self._home_dark_override)
+            self.show_toast(
+                "Home page: Dark Mode" if self._home_dark_override else "Home page: Light Mode"
+            )
+            return
+
         self.theme_mode = (self.theme_mode + 1) % 3
         self.settings.setValue("themeMode", self.theme_mode)
         self.apply_theme()
@@ -2888,8 +2898,13 @@ class ReaderTab(
         self._home_dark = QSettings("Riemann", "PDFReader").value(
             "darkMode", False, type=bool
         )
+        # Set by the per-tab theme toggle (N); None follows the interface theme.
+        self._home_dark_override: Optional[bool] = None
         self.home_page_widget = GridCanvas(self._home_dark)
         self.home_page_widget.setObjectName("pdfHome")
+        # Clicking the empty page takes focus from the path field, so N (theme
+        # toggle) is not typed into it.
+        self.home_page_widget.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
 
         outer = QHBoxLayout(self.home_page_widget)
         outer.setContentsMargins(40, 36, 40, 36)
@@ -3060,8 +3075,19 @@ class ReaderTab(
 
     def apply_ui_theme(self, dark: bool) -> None:
         """Called by the main window when the interface theme changes."""
-        if hasattr(self, "home_page_widget") and dark != self._home_dark:
+        if not hasattr(self, "home_page_widget"):
+            return
+        self._home_dark_override = None
+        if dark != self._home_dark:
             self._style_home_page(dark)
+
+    def _showing_home_page(self) -> bool:
+        stack = getattr(self, "stack", None)
+        return (
+            stack is not None
+            and hasattr(self, "home_page_widget")
+            and stack.currentWidget() is self.home_page_widget
+        )
 
     def _on_home_path_entered(self) -> None:
         """
@@ -3203,6 +3229,8 @@ class ReaderTab(
 
         save_last_directory(self.settings, save_path)
         try:
+            import pikepdf
+
             with pikepdf.Pdf.open(self.current_path) as pdf:
                 encryption = pikepdf.Encryption(
                     user=password,

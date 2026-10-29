@@ -151,6 +151,7 @@ def test_zoom_step(reader_tab):
 
 
 def test_toggle_theme(reader_tab):
+    reader_tab.stack.setCurrentIndex(0)  # a document is showing, not the start page
     initial_theme = reader_tab.theme_mode
     with (
         patch.object(reader_tab, "apply_theme") as mock_apply,
@@ -328,6 +329,29 @@ def test_home_page_follows_the_interface_theme(reader_tab):
     assert "#FFFFFF" in reader_tab.home_page_widget.styleSheet()  # light card surface
     reader_tab.apply_ui_theme(True)
     assert "#232428" in reader_tab.home_page_widget.styleSheet()  # dark card surface
+
+
+def test_tab_theme_toggle_switches_the_home_page_and_keeps_it(reader_tab):
+    window = MagicMock()
+    window.dark_mode = True
+    window.history_manager.history = {"pdf": []}
+    mode = reader_tab.theme_mode
+    with (
+        patch.object(reader_tab, "window", return_value=window),
+        patch.object(reader_tab, "show_toast"),
+    ):
+        reader_tab.toggle_theme()  # N on the start page
+        assert reader_tab._home_dark is False
+        assert "#FFFFFF" in reader_tab.home_page_widget.styleSheet()
+        assert reader_tab.theme_mode == mode  # the PDF theme is left alone
+
+        reader_tab._populate_home_recents()  # runs whenever the tab is shown again
+        assert reader_tab._home_dark is False
+
+        reader_tab.apply_ui_theme(True)  # Ctrl+D hands it back to the interface theme
+        assert reader_tab._home_dark is True
+        reader_tab._populate_home_recents()
+        assert reader_tab._home_dark is True
 
 
 def test_home_page_lists_recent_documents_with_their_folder(reader_tab, tmp_path):

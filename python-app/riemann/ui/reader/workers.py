@@ -10,12 +10,6 @@ import urllib.request
 import zipfile
 from typing import Any
 
-import requests
-from asn1crypto import pem, x509
-from pyhanko.pdf_utils.reader import PdfFileReader
-from pyhanko.sign.validation import validate_pdf_signature
-from pyhanko_certvalidator import ValidationContext
-from pyhanko_certvalidator.policy_decl import DisallowWeakAlgorithmsPolicy
 from PySide6.QtCore import QThread, Signal
 
 from ...core.dependencies import setup_and_get_venv
@@ -182,6 +176,12 @@ class SignatureValidationWorker(QThread):
         Operates fundamental PyHanko validation passes routing outcomes returning detailed status groupings seamlessly.
         """
         try:
+            from asn1crypto import pem, x509
+            from pyhanko.pdf_utils.reader import PdfFileReader
+            from pyhanko.sign.validation import validate_pdf_signature
+            from pyhanko_certvalidator import ValidationContext
+            from pyhanko_certvalidator.policy_decl import DisallowWeakAlgorithmsPolicy
+
             relaxed_policy = DisallowWeakAlgorithmsPolicy(
                 weak_hash_algos=set(), weak_signature_algos=set()
             )
@@ -328,6 +328,8 @@ class MetadataExtractionWorker(QThread):
         """
         Enacts sequential network searches evaluating academic signatures utilizing CrossRef algorithms seamlessly resolving queries.
         """
+        import requests
+
         metadata = {}
 
         with requests.Session() as session:

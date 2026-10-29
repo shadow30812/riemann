@@ -30,7 +30,7 @@ def reader():
     return DummySignaturesReader()
 
 
-@patch("riemann.ui.reader.mixins.signatures.PdfFileReader")
+@patch("pyhanko.pdf_utils.reader.PdfFileReader")
 @patch("builtins.open", new_callable=MagicMock)
 def test_detect_signatures_found(mock_open, mock_pdf_reader, reader):
     mock_reader_instance = MagicMock()
@@ -45,7 +45,7 @@ def test_detect_signatures_found(mock_open, mock_pdf_reader, reader):
     reader.btn_trust_cert.setVisible.assert_called_with(True)
 
 
-@patch("riemann.ui.reader.mixins.signatures.PdfFileReader")
+@patch("pyhanko.pdf_utils.reader.PdfFileReader")
 def test_detect_signatures_uses_core_count(mock_pdf_reader, reader):
     reader.current_doc.signature_count.return_value = 3
     reader._detect_signatures("/fake.pdf")
@@ -133,9 +133,9 @@ def test_initiate_signing_flow(
     mock_execute.assert_called_once_with("/keys/cert.pfx", "mypassword")
 
 
-@patch("riemann.ui.reader.mixins.signatures.signers")
-@patch("riemann.ui.reader.mixins.signatures.IncrementalPdfFileWriter")
-@patch("riemann.ui.reader.mixins.signatures.append_signature_field")
+@patch("pyhanko.sign.signers")
+@patch("pyhanko.pdf_utils.incremental_writer.IncrementalPdfFileWriter")
+@patch("pyhanko.sign.fields.append_signature_field")
 @patch("builtins.open", new_callable=MagicMock)
 def test_execute_pyhanko_signing(
     mock_open, mock_append, mock_writer, mock_signers, reader
