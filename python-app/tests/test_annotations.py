@@ -49,22 +49,39 @@ def test_get_annotation_path(reader):
 @patch("os.path.exists", return_value=True)
 @patch("builtins.open", new_callable=MagicMock)
 def test_load_annotations_existing(mock_open, mock_exists, reader):
-    mock_open.return_value.__enter__.return_value.read.return_value = (
-        '{"0": [{"type": "note"}]}'
-    )
-    with patch("json.load", return_value={"0": [{"type": "note"}]}):
+    with patch("json.load", return_value={"0": [{"type": "note"}]}), patch.object(
+        reader, "_check_pdf_annotations_async"
+    ) as check:
         reader.load_annotations()
     assert "0" in reader.annotations
     assert reader.annotations["0"][0]["type"] == "note"
+    assert reader.annotations["0"][0]["id"]
+    check.assert_called_once_with("/fake/path/doc.pdf")
+
+
+@patch("os.path.exists", return_value=True)
+@patch("builtins.open", new_callable=MagicMock)
+def test_load_annotations_new_format(mock_open, mock_exists, reader):
+    data = {"pages": {"2": [{"type": "note", "id": "abc"}]}, "pdf": [10, 20]}
+    with patch("json.load", return_value=data), patch.object(
+        reader, "_check_pdf_annotations_async"
+    ):
+        reader.load_annotations()
+    assert reader.annotations == {"2": [{"type": "note", "id": "abc"}]}
+    assert reader._anno_file_sig == [10, 20]
 
 
 @patch("builtins.open", new_callable=MagicMock)
 def test_save_annotations(mock_open, reader):
     reader.annotations = {"1": [{"type": "note", "text": "test"}]}
-    with patch("json.dump") as mock_json_dump:
+    reader._anno_file_sig = None
+    with patch("json.dump") as mock_json_dump, patch(
+        "riemann.ui.reader.mixins.annotations.store_in_pdf_enabled", return_value=False
+    ):
         reader.save_annotations()
         mock_json_dump.assert_called_once_with(
-            reader.annotations, mock_open.return_value.__enter__.return_value
+            {"pages": reader.annotations, "pdf": None},
+            mock_open.return_value.__enter__.return_value,
         )
 
 
@@ -219,5 +236,3 @@ def test_comment_view_dialog():
         mock_clipboard.return_value = mock_cb_inst
         dialog.findChildren(QPushButton)[0].click()
         mock_cb_inst.setText.assert_called_with("Please revise this section.")
-
-

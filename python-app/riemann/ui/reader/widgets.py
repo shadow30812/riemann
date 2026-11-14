@@ -4,9 +4,16 @@ Custom UI Widgets for the Reader Module.
 
 from typing import List, Optional
 
-from PySide6.QtCore import QPoint, QRect, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QPolygon
-from PySide6.QtWidgets import QLabel
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QCursor, QPainter, QPen, QPixmap, QPolygon
+from PySide6.QtWidgets import (
+    QAbstractButton,
+    QFrame,
+    QLabel,
+    QScrollArea,
+    QToolButton,
+    QWidget,
+)
 
 
 class DropZoneLabel(QLabel):
@@ -78,7 +85,6 @@ class PageWidget(QLabel):
         self.markup_rects: List[QRect] = []
         self.markup_color: QColor = QColor()
 
-        self.signature_overlays: List[dict] = []
         self.selected_text_rects: List[QRect] = []
         self.link_rects: List[tuple[QRect, str]] = []
 
@@ -197,7 +203,7 @@ class PageWidget(QLabel):
 
     def paintEvent(self, event) -> None:
         """
-        Draws the cached PDF image alongside any temporary graphical overlays or signature bounds.
+        Draws the cached PDF image alongside any temporary graphical overlays.
 
         Args:
             event: The paint event triggered by the Qt framework signaling drawing routines.
@@ -225,41 +231,6 @@ class PageWidget(QLabel):
             elif self.temp_shape_type == "oval":
                 painter.drawEllipse(rect)
 
-        for overlay in getattr(self, "signature_overlays", []):
-            rect = overlay["rect"]
-            status = overlay["status"]
-            subject = overlay["subject"]
-
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(255, 255, 255, 255))
-            painter.drawRect(rect)
-
-            if status == "VALID":
-                color = QColor(46, 125, 50)
-                msg = "Signature Valid"
-            elif status == "UNKNOWN":
-                color = QColor(245, 127, 23)
-                msg = "Identity Unknown"
-            else:
-                color = QColor(198, 40, 40)
-                msg = "Invalid / Modified"
-
-            painter.setPen(QPen(color, 3))
-            painter.drawRect(rect)
-            painter.setPen(color)
-
-            font = painter.font()
-            font.setPointSize(max(8, int(rect.height() / 6)))
-            font.setBold(True)
-            painter.setFont(font)
-
-            text_rect = rect.adjusted(5, 5, -5, -5)
-            painter.drawText(
-                text_rect,
-                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
-                f"{msg}\n{subject}",
-            )
-
         if hasattr(self, "selected_text_rects") and self.selected_text_rects:
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(0, 120, 215, 80))
@@ -268,12 +239,133 @@ class PageWidget(QLabel):
 
         painter.end()
 
-    def set_signature_overlays(self, overlays: List[dict]) -> None:
-        """
-        Updates the visual validation bounds and status indicators for embedded digital signatures.
 
-        Args:
-            overlays (List[dict]): A list of dictionaries containing signature properties and bounding boxes.
-        """
-        self.signature_overlays = overlays
-        self.update()
+class ToolbarStrip(QScrollArea):
+    """
+    Holds the reader's toolbar buttons in one row that never squeezes them.
+    When the row is wider than the pane, the icons shrink first; whatever
+    still does not fit scrolls sideways with the mouse wheel, the edge arrows,
+    or by resting the pointer near either edge.
+    """
+
+    EDGE = 36
+    NORMAL_ICON = 20
+    COMPACT_ICON = 16
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._compact = False
+        self._normal_width = 0
+
+        self.btn_left = QToolButton(self)
+        self.btn_left.setToolTip("Scroll left")
+        self.btn_right = QToolButton(self)
+        self.btn_right.setToolTip("Scroll right")
+        for btn, step in ((self.btn_left, -1), (self.btn_right, 1)):
+            btn.setFixedSize(22, 36)
+            btn.setIconSize(QSize(16, 16))
+            btn.setAutoRaise(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setAutoRepeat(True)
+            btn.setAutoRepeatInterval(30)
+            btn.clicked.connect(lambda _=False, d=step: self._scroll_by(d * 40))
+            btn.hide()
+
+        self._edge_timer = QTimer(self)
+        self._edge_timer.setInterval(16)
+        self._edge_timer.timeout.connect(self._edge_scroll)
+        self.horizontalScrollBar().rangeChanged.connect(lambda *_: self._update_arrows())
+        self.horizontalScrollBar().valueChanged.connect(lambda *_: self._update_arrows())
+
+    def set_arrow_color(self, color: str) -> None:
+        from ..palette import tinted_icon
+
+        self.btn_left.setIcon(tinted_icon("chevron-left", color, 16))
+        self.btn_right.setIcon(tinted_icon("chevron-right", color, 16))
+
+    def _scroll_by(self, dx: int) -> None:
+        bar = self.horizontalScrollBar()
+        bar.setValue(bar.value() + dx)
+
+    def _update_arrows(self) -> None:
+        bar = self.horizontalScrollBar()
+        h = self.viewport().height()
+        self.btn_left.move(0, (h - self.btn_left.height()) // 2)
+        self.btn_right.move(self.width() - self.btn_right.width(), (h - self.btn_right.height()) // 2)
+        self.btn_left.setVisible(bar.value() > bar.minimum())
+        self.btn_right.setVisible(bar.value() < bar.maximum())
+        self.btn_left.raise_()
+        self.btn_right.raise_()
+
+    def _set_compact(self, compact: bool) -> None:
+        self._compact = compact
+        size = self.COMPACT_ICON if compact else self.NORMAL_ICON
+        inner = self.widget()
+        if inner is None:
+            return
+        for btn in inner.findChildren(QAbstractButton):
+            if btn.iconSize().width() in (self.NORMAL_ICON, self.COMPACT_ICON):
+                btn.setIconSize(QSize(size, size))
+        if inner.layout() is not None:
+            inner.layout().setSpacing(2 if compact else 6)
+
+    def fit(self) -> None:
+        """Switches between full-size and compact icons to suit the width available."""
+        inner = self.widget()
+        if inner is None:
+            return
+        available = self.viewport().width()
+        if not self._compact:
+            self._normal_width = inner.sizeHint().width()
+            if self._normal_width > available:
+                self._set_compact(True)
+        elif self._normal_width and self._normal_width <= available:
+            self._set_compact(False)
+        self._update_arrows()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.fit()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self.fit)
+
+    def wheelEvent(self, event) -> None:
+        delta = event.pixelDelta()
+        step = delta.x() or delta.y()
+        if not step:
+            angle = event.angleDelta()
+            step = (angle.x() or angle.y()) // 2
+        if step and self.horizontalScrollBar().maximum() > 0:
+            self._scroll_by(-step)
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
+    def enterEvent(self, event) -> None:
+        super().enterEvent(event)
+        self._edge_timer.start()
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        self._edge_timer.stop()
+
+    def _edge_scroll(self) -> None:
+        """Scrolls while the pointer rests near an edge that hides more buttons."""
+        pos = self.mapFromGlobal(QCursor.pos())
+        if not self.rect().contains(pos):
+            self._edge_timer.stop()
+            return
+        bar = self.horizontalScrollBar()
+        if bar.maximum() <= 0:
+            return
+        if pos.x() < self.EDGE and bar.value() > 0:
+            self._scroll_by(-max(2, (self.EDGE - pos.x()) // 4))
+        elif pos.x() > self.width() - self.EDGE and bar.value() < bar.maximum():
+            self._scroll_by(max(2, (pos.x() - self.width() + self.EDGE) // 4))
+

@@ -25,6 +25,12 @@ class RenderResult:
 class RiemannDocument:
     """
     A thread-safe wrapper around a loaded PDF document.
+
+    Boxes returned by search_page, get_text_segments, get_char_boxes,
+    get_links and get_form_widgets are (left, top, right, bottom) in points
+    on the page as displayed: the crop box with the page's /Rotate applied,
+    origin at its bottom-left, y up. They line up with render_page output
+    and get_page_size, whatever the page's rotation.
     """
 
     page_count: int
@@ -34,7 +40,8 @@ class RiemannDocument:
         self, page_index: int, scale: float, dark_mode_int: int
     ) -> RenderResult:
         """
-        Renders a specific page to a bitmap buffer.
+        Renders a specific page to a bitmap buffer. Annotations Riemann wrote
+        into the file are hidden, since Riemann draws them itself.
 
         Args:
             page_index: Zero-based index of the page.
@@ -92,7 +99,8 @@ class RiemannDocument:
     ]:
         """
         Lists comments left on a page by other applications: every annotation
-        with text contents except links, form widgets and popups.
+        with text contents except links, form widgets, popups and the
+        annotations Riemann itself wrote (named "riemann:...").
 
         Args:
             page_index: Zero-based index of the page.
@@ -155,6 +163,32 @@ class RiemannDocument:
 
         Returns:
             A list of tuples containing (text, (left, top, right, bottom)).
+        """
+        ...
+
+    def get_char_boxes(
+        self, page_index: int
+    ) -> List[Tuple[str, Tuple[float, float, float, float]]]:
+        """
+        Retrieves every character on the page with its loose bounding box, in
+        content order. Generated characters (spaces and line breaks PDFium
+        synthesises) are included and may have empty boxes.
+
+        Args:
+            page_index: Zero-based index of the page.
+
+        Returns:
+            A list of (character, (left, top, right, bottom)) tuples.
+        """
+        ...
+
+    def get_outline(self) -> List[Tuple[int, str, int]]:
+        """
+        Returns the document outline (bookmarks), flattened depth-first.
+
+        Returns:
+            A list of (depth, title, page_index) tuples; page_index is -1 when
+            an entry has no destination inside the document.
         """
         ...
 

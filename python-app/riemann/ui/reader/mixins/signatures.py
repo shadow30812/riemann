@@ -1,7 +1,9 @@
 import os
+import tempfile
 
 import certifi
 from PySide6.QtCore import QSettings, QStandardPaths
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -18,6 +20,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from ..render_worker import PAGE_IMAGE_FORMAT
 from ..workers import SignatureValidationWorker
 
 
@@ -298,14 +301,46 @@ class SignaturesMixin:
 
     def _apply_signature_overlays(self) -> None:
         """
-        Matches internally extracted physical form coordinate properties mapping onto standard screen bounds dynamically.
+        Shows each signature field's validation result on the page, in place
+        of the "validity unknown" layer stored in the file.
         """
-        if not self.current_doc or not getattr(self, "current_signatures", None):
+        by_page = {}
+        for sig in getattr(self, "current_signatures", None) or []:
+            for appearance in sig.get("appearances", []):
+                by_page.setdefault(appearance["page"], []).append(dict(appearance, images={}))
+        if by_page == {} and not getattr(self, "signature_appearances", None):
             return
+        changed = set(by_page) | set(getattr(self, "signature_appearances", {}) or {})
+        self.signature_appearances = by_page
+        for page in changed:
+            self.refresh_page_render(page)
 
-        for widget in getattr(self, "page_widgets", {}).values():
-            if hasattr(widget, "set_signature_overlays"):
-                widget.set_signature_overlays([])
+    def _signature_appearance_image(self, appearance: dict, width_px: int):
+        """Renders a status appearance with PDFium, cached per size and theme."""
+        key = (width_px, self.theme_mode)
+        image = appearance["images"].get(key)
+        if image is not None or self.engine is None:
+            return image
+        fd, path = tempfile.mkstemp(suffix=".pdf")
+        doc = None
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(appearance["pdf"])
+            doc = self.engine.load_document(path, None)
+            width_pt = doc.get_page_size(0)[0] or 1.0
+            res = doc.render_page(0, width_px / width_pt, self.theme_mode)
+            image = QImage(res.data, res.width, res.height, res.width * 4, PAGE_IMAGE_FORMAT).copy()
+        except Exception as e:
+            print(f"Could not render signature appearance: {e}")
+            image = QImage()
+        finally:
+            del doc
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        appearance["images"] = {key: image}
+        return image
 
     def _populate_signatures_panel(self, signatures: list) -> None:
         """

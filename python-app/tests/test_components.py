@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QMouseEvent
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import QColorDialog, QInputDialog, QMenu, QWidget
 from riemann.ui.components import AnnotationToolbar, DraggableTabBar, DraggableTabWidget
 
@@ -16,7 +16,8 @@ def test_draggable_tab_widget_init(qtbot):
     widget = DraggableTabWidget()
     qtbot.addWidget(widget)
     assert widget.acceptDrops() is True
-    assert widget.isMovable() is False
+    assert widget.isMovable() is True
+    assert widget.tabBar().isMovable() is True
     assert isinstance(widget.tabBar(), DraggableTabBar)
 
 
@@ -116,3 +117,31 @@ def test_annotation_toolbar_thickness(qtbot):
     with qtbot.waitSignal(toolbar.thickness_changed, timeout=1000) as blocker:
         toolbar.spin_thick.setValue(10)
     assert blocker.args == [10]
+
+
+def test_build_open_with_menu(qtbot, tmp_path):
+    from riemann.ui.components import build_open_with_menu
+
+    def labels(menu):
+        return [a.text() for a in menu.actions()]
+
+    assert "System Default Browser" in labels(build_open_with_menu(None, "https://example.com"))
+    assert "System File Manager" in labels(build_open_with_menu(None, str(tmp_path)))
+
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    assert "System Default Application" in labels(build_open_with_menu(None, str(pdf)))
+    assert labels(build_open_with_menu(None, str(tmp_path / "missing.pdf"))) == ["Nothing to open"]
+
+
+def test_tab_bar_drop_index(qtbot):
+    widget = DraggableTabWidget()
+    qtbot.addWidget(widget)
+    for name in ("A", "B", "C"):
+        widget.addTab(QWidget(), name)
+    widget.resize(600, 200)
+    widget.show()
+    bar = widget.tabBar()
+    assert bar.drop_index(bar.tabRect(0).topLeft()) == 0
+    assert bar.drop_index(bar.tabRect(1).center() + QPoint(5, 0)) == 2
+    assert bar.drop_index(QPoint(bar.width() - 1, 5)) == 3

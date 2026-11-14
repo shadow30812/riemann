@@ -14,7 +14,6 @@ def test_pagewidget_init():
     widget = PageWidget()
     assert widget.temp_points == []
     assert widget.markup_rects == []
-    assert widget.signature_overlays == []
 
 
 def test_pagewidget_set_temp_stroke():
@@ -44,9 +43,6 @@ def test_pagewidget_paintEvent(mock_qpainter_class):
 
     widget.temp_points = [QPoint(1, 1), QPoint(2, 2)]
     widget.markup_rects = [QRect(0, 0, 10, 10)]
-    widget.signature_overlays = [
-        {"rect": QRect(5, 5, 20, 20), "status": "VALID", "subject": "Test Sub"}
-    ]
 
     mock_event = MagicMock()
 
@@ -57,16 +53,4 @@ def test_pagewidget_paintEvent(mock_qpainter_class):
     mock_painter.setBrush.assert_called()
     mock_painter.drawPolyline.assert_called_once()
     mock_painter.drawRect.assert_called()
-    mock_painter.drawText.assert_called()
     mock_painter.end.assert_called_once()
-
-
-def test_pagewidget_set_signature_overlays():
-    widget = PageWidget()
-    widget.update = MagicMock()
-
-    overlays = [{"rect": QRect(), "status": "VALID", "subject": "John"}]
-    widget.set_signature_overlays(overlays)
-
-    assert widget.signature_overlays == overlays
-    widget.update.assert_called_once()

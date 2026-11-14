@@ -6,14 +6,17 @@ including a draggable tab system and a specialized annotation toolbar.
 """
 
 import os
+import shutil
+import subprocess
 import sys
 from typing import Optional
 
-from PySide6.QtCore import QMimeData, QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QRect, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
     QCursor,
+    QDesktopServices,
     QDrag,
     QDragEnterEvent,
     QDropEvent,
@@ -24,15 +27,19 @@ from PySide6.QtGui import (
     QMouseEvent,
     QPainter,
     QPalette,
+    QPixmap,
 )
 from PySide6.QtWidgets import (
     QButtonGroup,
     QColorDialog,
     QComboBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QInputDialog,
+    QLabel,
     QMenu,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QStyle,
@@ -43,6 +50,154 @@ from PySide6.QtWidgets import (
     QToolButton,
     QWidget,
 )
+
+
+_BROWSERS = [
+    ("Google Chrome", ["google-chrome-stable", "google-chrome", "chrome"]),
+    ("Mozilla Firefox", ["firefox"]),
+    ("Chromium", ["chromium-browser", "chromium"]),
+    ("Brave Browser", ["brave-browser", "brave"]),
+    ("Microsoft Edge", ["microsoft-edge-stable", "microsoft-edge", "msedge"]),
+]
+
+_FOLDER_APPS = [
+    ("Files (Nautilus)", ["nautilus"]),
+    ("Dolphin", ["dolphin"]),
+    ("Nemo", ["nemo"]),
+    ("Thunar", ["thunar"]),
+    ("Visual Studio Code", ["code"]),
+]
+
+
+def _launch(parent: Optional[QWidget], cmd: str, arg: str) -> None:
+    try:
+        subprocess.Popen([cmd, arg])
+    except Exception as e:
+        QMessageBox.warning(parent, "Launch Error", f"Could not launch {cmd}:\n{e}")
+
+
+def populate_open_with_menu(
+    menu: QMenu, target: str, parent: Optional[QWidget] = None
+) -> None:
+    """
+    Fills menu with ways to open target outside Riemann: the system default
+    application and the browsers (or, for folders, file managers and editors)
+    found on this machine. target is a local file, a folder or a URL.
+    """
+    menu.clear()
+    is_url = "://" in target and not target.startswith("file://")
+    if target.startswith("file://"):
+        target = QUrl(target).toLocalFile()
+    if not target or (not is_url and not os.path.exists(target)):
+        menu.addAction("Nothing to open").setEnabled(False)
+        return
+
+    is_folder = not is_url and os.path.isdir(target)
+    arg = target if is_url else os.path.abspath(target)
+    url = QUrl(target) if is_url else QUrl.fromLocalFile(arg)
+
+    default_label = (
+        "System File Manager" if is_folder else "System Default Browser" if is_url else "System Default Application"
+    )
+    menu.addAction(default_label).triggered.connect(lambda: QDesktopServices.openUrl(url))
+    menu.addSeparator()
+
+    apps = _FOLDER_APPS if is_folder else _BROWSERS
+    found = False
+    for label, binaries in apps:
+        cmd = next((b for b in binaries if shutil.which(b)), None)
+        if cmd:
+            menu.addAction(label).triggered.connect(
+                lambda _=False, c=cmd: _launch(parent, c, arg)
+            )
+            found = True
+    if not found:
+        menu.addAction(
+            "No file managers detected" if is_folder else "No web browsers detected"
+        ).setEnabled(False)
+
+    def choose_other():
+        start = "/usr/bin" if os.path.isdir("/usr/bin") else ""
+        app_path, _ = QFileDialog.getOpenFileName(parent, "Choose Application", start, "Executables (*)")
+        if app_path:
+            _launch(parent, app_path, arg)
+
+    menu.addSeparator()
+    menu.addAction("Choose Other Application...").triggered.connect(choose_other)
+
+
+def build_open_with_menu(
+    parent: Optional[QWidget], target: str, title: str = "Open in External Application"
+) -> QMenu:
+    """A submenu offering populate_open_with_menu's choices for target."""
+    menu = QMenu(title, parent)
+    populate_open_with_menu(menu, target, parent)
+    return menu
+
+
+class SplitPaneBadge(QFrame):
+    """
+    The chip floating at the bottom of the split-view pane not in use: it
+    names the pane's tab, brings the pane into focus when clicked, and its
+    close button ends the split.
+    """
+
+    activate_requested = Signal()
+    close_requested = Signal()
+
+    def __init__(self, pane: QWidget):
+        super().__init__(pane)
+        self.setObjectName("SplitPaneBadge")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 4, 4, 4)
+        layout.setSpacing(6)
+        self.icon = QLabel()
+        self.icon.setFixedSize(16, 16)
+        self.label = QLabel()
+        self.btn_close = QPushButton("✕")
+        self.btn_close.setFixedSize(22, 22)
+        self.btn_close.setToolTip("Close split view")
+        self.btn_close.clicked.connect(self.close_requested.emit)
+        layout.addWidget(self.icon)
+        layout.addWidget(self.label)
+        layout.addWidget(self.btn_close)
+        pane.installEventFilter(self)
+        self.hide()
+
+    def update_theme(self, t: dict) -> None:
+        self.setStyleSheet(
+            f"#SplitPaneBadge {{ background: {t['surface']}; border: 1px solid {t['border_strong']};"
+            f" border-radius: 15px; }}"
+            f"#SplitPaneBadge QLabel {{ color: {t['text']}; background: transparent; font-size: 12px; }}"
+            f"#SplitPaneBadge QPushButton {{ color: {t['muted']}; background: transparent; border: none;"
+            f" border-radius: 11px; }}"
+            f"#SplitPaneBadge QPushButton:hover {{ background: {t['raised']}; color: {t['text']}; }}"
+        )
+
+    def show_for(self, title: str, icon: QIcon) -> None:
+        metrics = self.label.fontMetrics()
+        self.label.setText(metrics.elidedText(title, Qt.TextElideMode.ElideMiddle, 240))
+        self.icon.setPixmap(icon.pixmap(16, 16) if not icon.isNull() else QPixmap())
+        self.icon.setVisible(not icon.isNull())
+        self.adjustSize()
+        self._place()
+        self.show()
+        self.raise_()
+
+    def _place(self) -> None:
+        pane = self.parentWidget()
+        self.move((pane.width() - self.width()) // 2, pane.height() - self.height() - 14)
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self.parentWidget() and event.type() == QEvent.Type.Resize and self.isVisible():
+            self._place()
+        return False
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.activate_requested.emit()
+        super().mousePressEvent(event)
 
 
 class DraggableTabWidget(QTabWidget):
@@ -60,8 +215,11 @@ class DraggableTabWidget(QTabWidget):
         """
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self.setMovable(True)
+        # The flags belong to the tab bar, so set them after replacing it.
         self.setTabBar(DraggableTabBar(self))
+        self.setMovable(True)
+        self.setElideMode(Qt.TextElideMode.ElideRight)
+        self.setUsesScrollButtons(True)
 
     def set_vertical_tabs(self, vertical: bool) -> None:
         """Moves the tab strip to the left edge (vertical) or back to the top."""
@@ -99,15 +257,15 @@ class DraggableTabWidget(QTabWidget):
             event (QDropEvent): The drop event containing the file path payload.
         """
         if event.mimeData().hasFormat("application/x-riemann-tab"):
-            widget = DraggableTabBar._dragged_widget
-            if widget:
-                idx = self.addTab(
-                    widget,
-                    DraggableTabBar._dragged_icon,
-                    DraggableTabBar._dragged_title,
-                )
-                self.tabBar().setTabData(idx, DraggableTabBar._dragged_data)
-                self.setCurrentIndex(idx)
+            bar = self.tabBar()
+            pos = bar.mapFrom(self, event.position().toPoint())
+            if bar.rect().adjusted(0, -8, 0, 8).contains(pos):
+                index = bar.drop_index(pos)
+            elif DraggableTabBar._dragged_source is self:
+                index = DraggableTabBar._dragged_index
+            else:
+                index = self.currentIndex() + 1
+            if DraggableTabBar.insert_dragged_tab(self, index):
                 event.acceptProposedAction()
             return
 
@@ -136,6 +294,8 @@ class DraggableTabBar(QTabBar):
     _dragged_icon = QIcon()
     _dragged_data = None
     _dragged_tooltip = ""
+    _dragged_source = None
+    _dragged_index = -1
 
     VERTICAL_TAB_WIDTH = 220
 
@@ -157,9 +317,6 @@ class DraggableTabBar(QTabBar):
 
     def set_vertical(self, vertical: bool) -> None:
         self._vertical = vertical
-        self.setElideMode(
-            Qt.TextElideMode.ElideRight if vertical else Qt.TextElideMode.ElideNone
-        )
         self.updateGeometry()
         self.update()
 
@@ -264,100 +421,114 @@ class DraggableTabBar(QTabBar):
             self.drag_start_pos = event.pos()
         super().mousePressEvent(event)
 
+    def drop_index(self, pos: QPoint) -> int:
+        """The index a tab dropped at pos should take: before the first tab whose middle is past pos."""
+        for i in range(self.count()):
+            center = self.tabRect(i).center()
+            if (pos.y() < center.y()) if self._vertical else (pos.x() < center.x()):
+                return i
+        return self.count()
+
+    @classmethod
+    def insert_dragged_tab(cls, tab_widget: QTabWidget, index: int) -> bool:
+        """Inserts the tab being dragged into tab_widget at index."""
+        widget = cls._dragged_widget
+        if widget is None:
+            return False
+        index = max(0, min(index, tab_widget.count()))
+        idx = tab_widget.insertTab(index, widget, cls._dragged_icon, cls._dragged_title)
+        tab_widget.tabBar().setTabData(idx, cls._dragged_data)
+        if cls._dragged_tooltip:
+            tab_widget.setTabToolTip(idx, cls._dragged_tooltip)
+        tab_widget.setCurrentIndex(idx)
+        cls._dragged_widget = None
+        return True
+
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """
-        Initiates a drag operation when a tab is actively dragged by the user.
+        Reorders tabs within the strip (Qt's movable tabs) and tears a tab off
+        into a drag once it is pulled away from the strip.
 
         Args:
             event (QMouseEvent): The mouse move event triggering the check.
         """
-        if event.buttons() != Qt.MouseButton.LeftButton:
-            super().mouseMoveEvent(event)
+        super().mouseMoveEvent(event)
+        if event.buttons() != Qt.MouseButton.LeftButton or not hasattr(self, "drag_start_pos"):
             return
 
-        super().mouseMoveEvent(event)
+        # Pulled downwards out of a horizontal strip, or sideways out of a vertical one.
+        pos = event.position().toPoint()
+        if self._vertical:
+            pulled = not (-40 <= pos.x() <= self.width() + 40)
+        else:
+            pulled = not (-30 <= pos.y() <= self.height() + 30)
+        if not pulled:
+            return
 
-        if hasattr(self, "drag_start_pos"):
-            # Tear a tab off by dragging it away from the strip: downwards for
-            # a horizontal bar, sideways for a vertical one.
-            if self._vertical:
-                pulled = abs(event.pos().x() - self.drag_start_pos.x()) > 60
-            else:
-                pulled = abs(event.pos().y() - self.drag_start_pos.y()) > 40
-            if pulled:
-                tab_index = self.tabAt(self.drag_start_pos)
-                if tab_index < 0:
-                    return
+        tab_index = self.tabAt(self.drag_start_pos)
+        tab_widget = self.parent()
+        if tab_index < 0 or not isinstance(tab_widget, QTabWidget):
+            return
+        widget = tab_widget.widget(tab_index)
+        if not widget:
+            return
+        del self.drag_start_pos
 
-                tab_widget = self.parent()
-                if not isinstance(tab_widget, QTabWidget):
-                    return
+        # End Qt's own in-strip move before the tab is taken out.
+        release = QMouseEvent(
+            QEvent.Type.MouseButtonRelease,
+            event.position(),
+            event.globalPosition(),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            event.modifiers(),
+        )
+        super().mouseReleaseEvent(release)
+        tab_index = tab_widget.indexOf(widget)
 
-                widget = tab_widget.widget(tab_index)
-                if not widget:
-                    return
+        cls = DraggableTabBar
+        cls._dragged_widget = widget
+        cls._dragged_title = self.tabText(tab_index)
+        cls._dragged_icon = self.tabIcon(tab_index)
+        cls._dragged_data = self.tabData(tab_index)
+        cls._dragged_tooltip = self.tabToolTip(tab_index)
+        cls._dragged_source = tab_widget
+        cls._dragged_index = tab_index
 
-                tab_text = self.tabText(tab_index)
-                tab_icon = self.tabIcon(tab_index)
-                tab_data = self.tabData(tab_index)
-                tab_tooltip = self.tabToolTip(tab_index)
+        mime = QMimeData()
+        mime.setData("application/x-riemann-tab", b"tab")
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(
+            widget.grab().scaled(
+                200, 150, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+            )
+        )
+        drag.setHotSpot(QPoint(100, 20))
 
-                DraggableTabBar._dragged_widget = widget
-                DraggableTabBar._dragged_title = tab_text
-                DraggableTabBar._dragged_icon = tab_icon
-                DraggableTabBar._dragged_data = tab_data
-                DraggableTabBar._dragged_tooltip = tab_tooltip
+        tab_widget.removeTab(tab_index)
+        result = drag.exec(Qt.DropAction.MoveAction)
 
-                mime = QMimeData()
-                mime.setData("application/x-riemann-tab", b"tab")
-
-                drag = QDrag(self)
-                drag.setMimeData(mime)
-
-                pixmap = widget.grab()
-                drag.setPixmap(
-                    pixmap.scaled(200, 150, Qt.AspectRatioMode.KeepAspectRatio)
+        if result == Qt.DropAction.IgnoreAction and cls._dragged_widget is widget:
+            main_window = self.window()
+            global_pos = QCursor.pos()
+            if not main_window.geometry().contains(global_pos):
+                new_window = type(main_window)()
+                new_window.setGeometry(
+                    global_pos.x() - 100,
+                    global_pos.y() - 100,
+                    main_window.width(),
+                    main_window.height(),
                 )
-                drag.setHotSpot(QPoint(100, 75))
+                new_window.show()
+                target = new_window.findChild(QTabWidget)
+                cls.insert_dragged_tab(target or tab_widget, target.count() if target else tab_index)
+            else:
+                cls.insert_dragged_tab(tab_widget, tab_index)
 
-                tab_widget.removeTab(tab_index)
-                result = drag.exec(Qt.DropAction.MoveAction)
-
-                if result == Qt.DropAction.IgnoreAction:
-                    main_window = self.window()
-                    global_pos = QCursor.pos()
-
-                    if not main_window.geometry().contains(global_pos):
-                        new_window = type(main_window)()
-                        new_window.setGeometry(
-                            global_pos.x() - 100,
-                            global_pos.y() - 100,
-                            main_window.width(),
-                            main_window.height(),
-                        )
-                        new_window.show()
-
-                        target_tab_widget = new_window.findChild(QTabWidget)
-                        if target_tab_widget:
-                            new_idx = target_tab_widget.addTab(
-                                widget, tab_icon, tab_text
-                            )
-                            target_tab_widget.tabBar().setTabData(new_idx, tab_data)
-                            target_tab_widget.setTabToolTip(new_idx, tab_tooltip)
-                            target_tab_widget.setCurrentIndex(new_idx)
-                        else:
-                            tab_widget.insertTab(tab_index, widget, tab_icon, tab_text)
-                            tab_widget.setTabToolTip(tab_index, tab_tooltip)
-                            tab_widget.setCurrentIndex(tab_index)
-
-                    else:
-                        tab_widget.insertTab(tab_index, widget, tab_icon, tab_text)
-                        self.setTabData(tab_index, tab_data)
-                        tab_widget.setTabToolTip(tab_index, tab_tooltip)
-                        tab_widget.setCurrentIndex(tab_index)
-
-                DraggableTabBar._dragged_widget = None
-                DraggableTabBar._dragged_tooltip = ""
+        cls._dragged_widget = None
+        cls._dragged_tooltip = ""
+        cls._dragged_source = None
 
     def dragEnterEvent(self, event) -> None:
         """Accept the drag if it is an internal Riemann tab."""
@@ -366,25 +537,22 @@ class DraggableTabBar(QTabBar):
         else:
             super().dragEnterEvent(event)
 
-    def dropEvent(self, event) -> None:
-        """Handle dropping a tab from another window directly onto this tab bar."""
+    def dragMoveEvent(self, event) -> None:
         if event.mimeData().hasFormat("application/x-riemann-tab"):
-            widget = DraggableTabBar._dragged_widget
-            if widget:
-                tab_widget = self.parent()
-                if isinstance(tab_widget, QTabWidget):
-                    idx = tab_widget.addTab(
-                        widget,
-                        DraggableTabBar._dragged_icon,
-                        DraggableTabBar._dragged_title,
-                    )
-                    self.setTabData(idx, DraggableTabBar._dragged_data)
-                    if DraggableTabBar._dragged_tooltip:
-                        tab_widget.setTabToolTip(idx, DraggableTabBar._dragged_tooltip)
-                    tab_widget.setCurrentIndex(idx)
-                    event.acceptProposedAction()
+            event.acceptProposedAction()
         else:
-            super().dropEvent(event)
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        """Drops a dragged tab into this strip, between the tabs under the cursor."""
+        if event.mimeData().hasFormat("application/x-riemann-tab"):
+            tab_widget = self.parent()
+            if isinstance(tab_widget, QTabWidget) and DraggableTabBar.insert_dragged_tab(
+                tab_widget, self.drop_index(event.position().toPoint())
+            ):
+                event.acceptProposedAction()
+            return
+        super().dropEvent(event)
 
     def paintEvent(self, event) -> None:
         """Draws native tabs, then overlays a gradient on media-playing tabs."""
@@ -447,9 +615,7 @@ class DraggableTabBar(QTabBar):
                 self.setTabText(tab_index, original_name)
 
         elif meta_action and action == meta_action:
-            title = widget.document_metadata["title"]
-            display_title = (title[:25] + "..") if len(title) > 25 else title
-            self.setTabText(tab_index, display_title)
+            self.setTabText(tab_index, widget.document_metadata["title"])
 
 
 class AnnotationToolbar(QWidget):

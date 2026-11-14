@@ -347,15 +347,15 @@ QTabBar::tab:hover:!selected {
 QScrollBar:vertical {
     border: none;
     background: transparent;
-    width: 12px;
+    width: 16px;
     margin: 0px;
 }
 
 QScrollBar::handle:vertical {
     background: #CBCBC4;
     min-height: 24px;
-    border-radius: 4px;
-    margin: 3px;
+    border-radius: 5px;
+    margin: 2px;
 }
 
 QScrollBar::handle:vertical:hover {
@@ -373,14 +373,14 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
 QScrollBar:horizontal {
     border: none;
     background: transparent;
-    height: 12px;
+    height: 16px;
     margin: 0px;
 }
 QScrollBar::handle:horizontal {
     background: #CBCBC4;
     min-width: 24px;
-    border-radius: 4px;
-    margin: 3px;
+    border-radius: 5px;
+    margin: 2px;
 }
 QScrollBar::handle:horizontal:hover { background: #8C9098; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
@@ -496,4 +496,13 @@ QTabBar::tab:left:selected {
     border: none;
     border-left: 3px solid #2F6FEB;
     margin: 0px 4px 2px 4px;
+}
+
+/* Splitters: a plain gap between panes that lights up when grabbed */
+QSplitter::handle {
+    background-color: transparent;
+}
+QSplitter::handle:hover,
+QSplitter::handle:pressed {
+    background-color: rgba(47, 111, 235, 0.30);
 }

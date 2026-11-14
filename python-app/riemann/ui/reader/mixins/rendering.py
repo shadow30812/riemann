@@ -10,10 +10,9 @@ import urllib.parse
 from typing import Dict, Optional, Tuple
 
 import shiboken6
-from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
-    QCursor,
     QImage,
     QPainter,
     QPen,
@@ -612,13 +611,23 @@ class RenderingMixin:
         """
         has_search = bool(self.search_result and self.search_result[0] == idx)
         has_annotations = bool(self.annotations.get(str(idx)))
-        if not has_search and not has_annotations:
+        signatures = (getattr(self, "signature_appearances", None) or {}).get(idx)
+        if not has_search and not has_annotations and not signatures:
             # Painting detaches the pixmap from the cached image it shares
             # memory with, a full copy of the page, so skip it when idle.
             return
 
         painter = QPainter(pix)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        for appearance in signatures or ():
+            l, t, r, b = appearance["rect"]
+            target = QRectF(l * lw, t * lh, (r - l) * lw, (b - t) * lh)
+            image = self._signature_appearance_image(
+                appearance, max(1, round(target.width() * pix.devicePixelRatio()))
+            )
+            if image is not None and not image.isNull():
+                painter.drawImage(target, image)
 
         if has_search:
             c = QColor(255, 255, 0, 100 if self.theme_mode != 0 else 128)
@@ -656,6 +665,18 @@ class RenderingMixin:
             painter.setPen(QPen(QColor(255, 255, 0, 180), 2))
             painter.setBrush(QColor(255, 255, 0, 50))
             painter.drawEllipse(QPoint(int(pos[0] * lw), int(pos[1] * lh)), 10, 10)
+
+        elif atype == "text":
+            pos = anno.get("rel_pos", (0, 0))
+            font = painter.font()
+            font.setFamily("Helvetica")
+            font.setPixelSize(max(6, int(12 * scale)))
+            painter.setFont(font)
+            painter.setPen(QColor(anno.get("color", "#000000")))
+            line_h = int(12 * scale * 1.25)
+            x, y = int(pos[0] * lw) + int(4 * scale), int(pos[1] * lh)
+            for i, line in enumerate(str(anno.get("text", "")).splitlines()):
+                painter.drawText(x, y + int(12 * scale) + i * line_h, line)
 
         elif atype == "drawing":
             points = anno.get("points", [])
@@ -725,13 +746,11 @@ class RenderingMixin:
                 color = QColor(c_val)
 
             for l, t, r, b in anno["rects"]:
-                x = int(l * scale)
-                w = int((r - l) * scale)
-                h = int((t - b) * scale)
-                y = int(lh - (t * scale))
-                if h < 0:
-                    y += h
-                    h = abs(h)
+                # Rects are relative to the unrotated page, top-left origin.
+                x1, x2 = sorted((l * lw, r * lw))
+                y1, y2 = sorted((t * lh, b * lh))
+                x, y = int(x1), int(y1)
+                w, h = max(1, int(x2 - x1)), max(1, int(y2 - y1))
 
                 if subtype == "highlight":
                     color.setAlpha(120)
@@ -741,7 +760,7 @@ class RenderingMixin:
                 elif subtype == "underline":
                     pen = QPen(color, max(1, int(2 * scale)))
                     painter.setPen(pen)
-                    base_y = y + int(1.25 * h) - int(2 * scale)
+                    base_y = y + h - max(1, int(scale))
                     painter.drawLine(x, base_y, x + w, base_y)
                 elif subtype == "strikeout":
                     pen = QPen(color, max(1, int(2 * scale)))

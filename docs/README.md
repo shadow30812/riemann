@@ -20,13 +20,15 @@ On the test machine (numbers and method under [Performance](#performance)):
 - Continuous or single-page scrolling, facing pages, and Auto Fit, Fit Width, Fit Height or manual zoom. Changing the zoom keeps the same spot of the same page in view.
 - Pages render on a background thread into a shared memory cache. A quick low-resolution pass fills a page first and the sharp version replaces it a moment later, so fast scrolling (including middle-click autoscroll) shows pages instead of blank space.
 - Internal links (table of contents entries, cross-references, citations) jump to the exact spot they point at. External links open in a browser tab with Ctrl+click.
-- Select text with the mouse: drag, double-click for a word, triple-click for a line. Or use the keyboard: Shift+arrow keys extend the selection by a character or a line, Ctrl+Shift+Left/Right by a word, and Shift+Home/End to the line edges. Ctrl+C copies.
+- A sidebar (Ctrl+Alt+S or the first toolbar button) lists the document's sections and its page thumbnails. Click either to jump there; the current section and page stay highlighted as you scroll.
+- Select text with the mouse: drag, double-click for a word, triple-click for a line. Or use the keyboard: Shift+arrow keys extend the selection by a character or a line, Ctrl+Shift+Left/Right by a word, and Shift+Home/End to the line edges. Ctrl+C copies. Selection follows PDFium's own glyph boxes, and a letter joins the selection once the pointer passes its middle.
 - Three page themes: light, fast dark (inverted) and smart dark (inverts lightness, keeps hues, so figures stay readable).
 - Text reflow mode, find in page, OCR of the current page, and snipping an equation to LaTeX (needs the optional Pix2Tex modules).
 - Annotations: sticky notes, text labels, pen, highlighter, text highlight, underline and strikeout, rectangles, ovals, tick and cross stamps, with undo and redo. Notes export to Markdown. Comments left in Acrobat, Preview or Okular show up too.
-- Digital signatures: a signed PDF shows a banner on open, a side panel shows the validation result, and you can sign a document with a PKCS#12 certificate.
+- Annotations are saved inside the PDF as standard PDF annotations, so Acrobat, Preview, Okular and browsers show them, and text edited there comes back to Riemann. The file is changed the way other editors do it (an incremental update appended to the end), which keeps it valid while open and leaves existing signatures intact. Signed, encrypted and read-only files keep their annotations in Riemann only; Settings > "Save Annotations Inside PDF Files" turns this off.
+- Digital signatures: a signed PDF shows a banner on open, a side panel shows the validation result, and you can sign a document with a PKCS#12 certificate. After "Verify Signatures", fields drawn by Acrobat-style signers show a green tick (valid and trusted) or a red cross (invalid) in place of the stored "Signature Not Verified" question mark; signers you have not trusted keep the question mark. The file is not changed.
 - Password-protected PDFs open after a prompt, and "Lock | Save" writes an encrypted copy.
-- Rotation, printing, saving a copy, renaming a file from its metadata, copying a BibTeX citation, and opening the file in another application.
+- Rotation, printing, saving a copy with its annotations (Ctrl+S), renaming a file from its metadata, copying a BibTeX citation, and opening the file in another application.
 - AI semantic search (Ctrl+I) finds passages by meaning. It runs a local sidecar process with a small sentence-embedding model; nothing leaves your machine.
 
 ### Browsing
@@ -38,7 +40,9 @@ On the test machine (numbers and method under [Performance](#performance)):
 
 ### Folders and preview mode
 
-Open a folder (Ctrl+K, Ctrl+O, or "Open with Riemann" on a folder in your file manager) and it appears as a file tree on the left. A single click shows a file in a temporary preview tab that the next click replaces; a double click opens it for good. Favourite and recent folders are listed on the Workspaces dashboard (Ctrl+Shift+E).
+Open a folder (Ctrl+K, Ctrl+O, or "Open with Riemann" on a folder in your file manager) and it appears as a file tree on the left. A single click shows a file in a temporary preview tab that the next click replaces; a double click (on the file or on the preview tab's title) opens it for good. A file that is already open is brought to the front instead of opening twice. The tree collapses out of the way without ending the session (the arrow in its header, the "Folder" button or Ctrl+Shift+F). Favourite and recent folders are listed on the Workspaces dashboard (Ctrl+Shift+E).
+
+"Open in External Application" (File menu, a tab's right-click menu, or right-click in the folder tree) works for PDFs and other files, web pages (the system browser or any installed browser) and folders (the system file manager, other file managers or VS Code).
 
 ![A folder tree, vertical tabs and a PDF in the smart dark page theme](images/workspace.png)
 
@@ -48,12 +52,14 @@ Turn on Settings > "Open Documents in Preview Mode" and every document opens as 
 
 ### Layout
 
-- Split view shows two tabs side by side: the "Split View" button in the menu bar, Ctrl+\\, or right-click a tab and choose "Move to Other Pane". You can also drag a tab onto the other pane, or out of the window to give it a window of its own.
+- Split view shows two tabs side by side: the "Split View" button in the menu bar, Ctrl+\\, or right-click a tab and choose "Move to Other Pane". You can also drag a tab onto the other pane, or out of the window to give it a window of its own. Each pane is drawn as a rounded card; the one you are using is outlined, and the other shows a chip naming its tab, with a button that closes the split.
+- Drag a tab along the tab strip to reorder it; drop it on another strip to insert it between the tabs under the pointer. Tab titles show in full and are shortened only when the tabs no longer fit.
+- AI assistant (Ctrl+Alt+A or the "AI Assistant" button): ask questions about the open PDF in a panel beside it. Pick a provider (Claude, OpenAI, Gemini, OpenRouter, or a local Ollama server) and any model it offers; the list comes from the provider. Answers cite pages, and clicking a page number jumps there. Add API keys with the key button in the panel, or set ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY or OPENROUTER_API_KEY. Saved keys go in `~/.config/Riemann/ai.env` (`%APPDATA%\Riemann\ai.env` on Windows), a file only your user account can read; environment variables take precedence. The document's text (the pages nearest the current one, for long files) is sent to the provider you pick; with Ollama it stays on your machine.
 - Vertical tabs put the main tab strip in a column on the left ("Vertical Tabs" button, the View menu or Settings).
 - "Collapse Tabs" (button, View menu or Ctrl+Shift+B) hides the tab row, or the tab column with vertical tabs, to give the page the room. Ctrl+Tab still switches tabs.
 - Edge snapping: drag the window until the pointer touches a screen edge. Left or right gives that half of the screen, the bottom edge the bottom half, the middle of the top edge maximises, and the top corners give the top half. A translucent preview shows the target first. See the Wayland note under [Known limitations](#known-limitations).
 - Three-step fullscreen (F11 or F): reading mode with toolbars, then pure fullscreen, then back.
-- When a pane is too narrow for the reader toolbar, the toolbar scrolls sideways with the mouse wheel instead of squeezing its buttons.
+- When a pane is too narrow for the reader toolbar, its icons shrink first; the rest scrolls sideways with the mouse wheel, the arrows at either end, or by resting the pointer near an edge.
 - Light and dark interface themes (Ctrl+D). The PDF start page, the browser homepage and the Workspaces dashboard share one palette and follow the theme.
 
 ![The same workspace with the tab strip collapsed](images/collapsed-tabs.png)
@@ -64,7 +70,7 @@ Split and merge PDFs, convert PDFs to images, text, Markdown or HTML, and compre
 
 ### Sessions
 
-Open tabs, split panes, the folder session and each PDF's page are saved every few seconds and shortly after you open or switch tabs. If Riemann closes uncleanly it offers to restore them on the next start, and File > "Restore Last Opened Tabs" brings back the last session at any time. Ctrl+Shift+T reopens the last closed tab.
+Open tabs, split panes, the folder session and each PDF's page are saved every few seconds and shortly after you open or switch tabs. History (Ctrl+H) lists web pages, PDFs and folder sessions with the date and time each was last opened; folders and files show their name and location separately. If Riemann closes uncleanly it offers to restore them on the next start, and File > "Restore Last Opened Tabs" brings back the last session at any time. Ctrl+Shift+T reopens the last closed tab.
 
 ## How it works
 
@@ -203,6 +209,9 @@ The other scripts (`bench_core.py`, `bench_startup.py`, `bench_memory.py`) run t
 | Ctrl+W, Ctrl+Shift+T | Close tab, reopen last closed tab |
 | Ctrl+Tab, Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+\\ | Toggle split view |
+| Ctrl+Alt+A | AI assistant |
+| Ctrl+Alt+S | Sections and thumbnails sidebar |
+| Ctrl+Shift+F | Collapse or show the folder tree |
 | Ctrl+Shift+B | Collapse or expand the tab strip |
 | Ctrl+N, Ctrl+Shift+N | New window, new incognito window |
 | Ctrl+K, Ctrl+O / Ctrl+K, F | Open folder / close folder session |
@@ -218,6 +227,7 @@ The other scripts (`bench_core.py`, `bench_startup.py`, `bench_memory.py`) run t
 | Shift+arrows, Ctrl+Shift+Left/Right, Shift+Home/End | Extend the text selection |
 | Ctrl+F / Ctrl+I | Find / AI search |
 | Ctrl+Shift+A | Annotation tools |
+| Ctrl+S | Save a copy, with annotations |
 | Ctrl+R / Ctrl+Shift+R | Rotate clockwise / counter-clockwise |
 | Ctrl+P, Ctrl+Shift+S, F5 | Print, save an encrypted copy, reload from disk |
 

@@ -359,7 +359,7 @@ def test_home_page_lists_recent_documents_with_their_folder(reader_tab, tmp_path
     pdf.write_bytes(b"%PDF-1.4")
     window = MagicMock()
     window.dark_mode = True
-    window.history_manager.history = {"pdf": [str(pdf), str(tmp_path / "gone.pdf")]}
+    window.history_manager.get_list.return_value = [str(pdf), str(tmp_path / "gone.pdf")]
     with patch.object(reader_tab, "window", return_value=window):
         reader_tab._populate_home_recents()
     assert reader_tab.list_recent.count() == 1

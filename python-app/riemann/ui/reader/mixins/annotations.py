@@ -9,9 +9,9 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from ....core import pdf_annotations
 from ..widgets import PageWidget
 
 
@@ -31,6 +32,17 @@ class _CommentsBridge(QObject):
     """Carries comments parsed on a worker thread back to the UI thread."""
 
     loaded = Signal(str, object)
+
+
+class _PdfStoreBridge(QObject):
+    """Carries results of reading or writing annotations in the PDF back to the UI thread."""
+
+    read_done = Signal(str, object, object)
+    write_done = Signal(str, object, str)
+
+
+def store_in_pdf_enabled() -> bool:
+    return QSettings("Riemann", "PDFReader").value("annotations/store_in_pdf", True, type=bool)
 
 
 def _format_pdf_date(value: str) -> str:
@@ -119,6 +131,8 @@ def read_external_comments(path: str) -> Dict[int, List[Dict[str, Any]]]:
                         continue
                     subtype = str(obj.get("/Subtype", "")).lstrip("/")
                     if subtype in ("Link", "Widget"):
+                        continue
+                    if str(obj.get("/NM", "")).startswith(pdf_annotations.NAME_PREFIX):
                         continue
 
                     contents = ""
@@ -252,27 +266,186 @@ class AnnotationsMixin:
 
     def load_annotations(self) -> None:
         """
-        Loads the annotation data from the persistent JSON storage into memory.
-        If the file does not exist, initializes an empty annotation dictionary.
+        Loads the document's annotations. Riemann's JSON copy is read first;
+        the copy stored inside the PDF is then checked on a worker thread and
+        wins if another application changed the file since Riemann last
+        wrote it (so edits made there come back).
         """
         if not self.current_path:
             return
+        self.annotations = {}
+        self._anno_file_sig = None
+        self._pdf_store_blocked = False
+        timer = getattr(self, "_pdf_store_timer", None)
+        if timer is not None:
+            timer.stop()
         p = self._get_annotation_path()
         if os.path.exists(p):
-            with open(p, "r") as f:
-                self.annotations = json.load(f)
-        else:
-            self.annotations = {}
+            try:
+                with open(p, "r") as f:
+                    data = json.load(f)
+            except (OSError, ValueError):
+                data = {}
+            if isinstance(data, dict) and "pages" in data:
+                self.annotations = data.get("pages") or {}
+                self._anno_file_sig = data.get("pdf")
+            elif isinstance(data, dict):
+                self.annotations = data
+        for annos in self.annotations.values():
+            for anno in annos:
+                anno.setdefault("id", pdf_annotations.new_annotation_id())
+
+        if self.current_path.lower().endswith(".pdf") and store_in_pdf_enabled():
+            self._check_pdf_annotations_async(self.current_path)
+
+    def _pdf_store_bridge(self) -> "_PdfStoreBridge":
+        bridge = getattr(self, "_store_bridge", None)
+        if bridge is None:
+            bridge = _PdfStoreBridge(self if isinstance(self, QObject) else None)
+            bridge.read_done.connect(self._on_pdf_annotations_read)
+            bridge.write_done.connect(self._on_pdf_annotations_written)
+            self._store_bridge = bridge
+        return bridge
+
+    def _check_pdf_annotations_async(self, path: str) -> None:
+        current_sig = pdf_annotations.file_signature(path)
+        if current_sig is not None and current_sig == self._anno_file_sig:
+            return
+        bridge = self._pdf_store_bridge()
+
+        def work():
+            try:
+                stored = pdf_annotations.read_annotations(path)
+            except Exception as e:
+                print(f"[Warning] Could not read annotations stored in {path}: {e}")
+                stored = None
+            try:
+                bridge.read_done.emit(path, stored, current_sig)
+            except RuntimeError:
+                pass
+
+        threading.Thread(target=work, name="riemann-anno-read", daemon=True).start()
+
+    def _on_pdf_annotations_read(self, path: str, stored, sig) -> None:
+        if path != getattr(self, "current_path", None):
+            return
+        if stored is not None:
+            # The file was changed outside Riemann: its copy is the newer one.
+            self.annotations = stored
+            self._anno_file_sig = sig
+            self.undo_stack.clear()
+            self.redo_stack.clear()
+            self._write_annotation_json()
+            for pid in list(stored):
+                self.refresh_page_render(int(pid))
+        elif any(self.annotations.values()):
+            # Annotations known only to Riemann (made before they were stored
+            # in files, or the file was regenerated): put them into the PDF.
+            self.save_annotations()
+
+    def _write_annotation_json(self) -> None:
+        p = self._get_annotation_path()
+        if not p:
+            return
+        with open(p, "w") as f:
+            json.dump({"pages": self.annotations, "pdf": self._anno_file_sig}, f)
 
     def save_annotations(self) -> None:
         """
-        Serializes the current in-memory annotation dictionary and saves it to the persistent JSON storage.
+        Saves the annotations to Riemann's JSON copy right away and, shortly
+        after the last change, into the PDF itself so other apps see them.
         """
         if not self.current_path:
             return
-        p = self._get_annotation_path()
-        with open(p, "w") as f:
-            json.dump(self.annotations, f)
+        self._write_annotation_json()
+        if (
+            self.current_path.lower().endswith(".pdf")
+            and store_in_pdf_enabled()
+            and not getattr(self, "_pdf_store_blocked", False)
+        ):
+            timer = getattr(self, "_pdf_store_timer", None)
+            if timer is None:
+                timer = QTimer(self if isinstance(self, QObject) else None)
+                timer.setSingleShot(True)
+                timer.setInterval(1200)
+                timer.timeout.connect(self._store_annotations_in_pdf)
+                self._pdf_store_timer = timer
+            timer.start()
+
+    def _annotation_snapshot(self) -> Dict[str, List[Dict[str, Any]]]:
+        return json.loads(json.dumps(self.annotations))
+
+    def _store_annotations_in_pdf(self, blocking: bool = False) -> None:
+        """Writes the annotations into the PDF on a worker thread (or inline when blocking)."""
+        path = self.current_path
+        if not path:
+            return
+        if getattr(self, "_pdf_store_busy", False) and not blocking:
+            self._pdf_store_again = True
+            return
+        snapshot = self._annotation_snapshot()
+        bridge = self._pdf_store_bridge()
+        try:
+            self._pdf_store_mtime_before = os.path.getmtime(path)
+        except OSError:
+            self._pdf_store_mtime_before = None
+        self._pdf_store_busy = True
+        self._pdf_store_again = False
+
+        def work():
+            error = ""
+            sig = None
+            try:
+                if not pdf_annotations.can_store_in(path):
+                    error = "blocked"
+                elif pdf_annotations.write_annotations(path, snapshot):
+                    sig = pdf_annotations.file_signature(path)
+                else:
+                    error = "changed"
+            except Exception as e:
+                error = str(e) or type(e).__name__
+            if blocking:
+                self._on_pdf_annotations_written(path, sig, error)
+                return
+            try:
+                bridge.write_done.emit(path, sig, error)
+            except RuntimeError:
+                pass
+
+        if blocking:
+            work()
+        else:
+            threading.Thread(target=work, name="riemann-anno-write", daemon=True).start()
+
+    def _on_pdf_annotations_written(self, path: str, sig, error: str) -> None:
+        self._pdf_store_busy = False
+        if path != getattr(self, "current_path", None):
+            return
+        if sig is not None:
+            self._anno_file_sig = sig
+            self._write_annotation_json()
+            # Riemann's own write is not a change "on disk" for the reload prompt.
+            if getattr(self, "_loaded_mtime", None) == self._pdf_store_mtime_before:
+                try:
+                    self._loaded_mtime = os.path.getmtime(path)
+                except OSError:
+                    pass
+        elif error == "blocked":
+            # Signed, encrypted or read-only files keep their annotations in
+            # Riemann only; changing them would break signatures or fail.
+            self._pdf_store_blocked = True
+        elif error and error != "changed":
+            print(f"[Warning] Could not store annotations in {path}: {error}")
+        if getattr(self, "_pdf_store_again", False):
+            self._pdf_store_again = False
+            self._store_annotations_in_pdf()
+
+    def flush_annotations_to_pdf(self) -> None:
+        """Writes pending annotation changes into the PDF before the tab closes."""
+        timer = getattr(self, "_pdf_store_timer", None)
+        if timer is not None and timer.isActive():
+            timer.stop()
+            self._store_annotations_in_pdf(blocking=True)
 
     def toggle_annotation_mode(self, checked: bool) -> None:
         """
@@ -434,6 +607,7 @@ class AnnotationsMixin:
         pid = str(page_idx)
         if pid not in self.annotations:
             self.annotations[pid] = []
+        data.setdefault("id", pdf_annotations.new_annotation_id())
         self.annotations[pid].append(data)
         self.undo_stack.append(("add", page_idx, len(self.annotations[pid]) - 1))
         self.redo_stack.clear()

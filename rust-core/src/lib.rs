@@ -18,6 +18,66 @@ use riemann_ocr_worker::OcrEngine;
 use std::mem::ManuallyDrop;
 use std::sync::{Mutex, MutexGuard};
 
+/// Maps PDF user space onto the page as displayed: the crop box with the
+/// page's /Rotate applied, origin at its bottom-left, y up. PDFium reports
+/// text, link and widget boxes in user space, but pages are rendered (and
+/// sized by `get_page_size`) rotated, so every box handed to Python goes
+/// through this first.
+struct DisplayFrame {
+    rotation: u16,
+    left: f32,
+    bottom: f32,
+    right: f32,
+    top: f32,
+}
+
+impl DisplayFrame {
+    fn of(page: &PdfPage) -> Self {
+        let rotation = match page.rotation() {
+            Ok(PdfPageRenderRotation::Degrees90) => 90,
+            Ok(PdfPageRenderRotation::Degrees180) => 180,
+            Ok(PdfPageRenderRotation::Degrees270) => 270,
+            _ => 0,
+        };
+        let edges = |r: PdfRect| {
+            let (l, rr) = (r.left().value.min(r.right().value), r.left().value.max(r.right().value));
+            let (b, t) = (r.bottom().value.min(r.top().value), r.bottom().value.max(r.top().value));
+            (l, b, rr, t)
+        };
+        let boundaries = page.boundaries();
+        let media = boundaries.media().ok().map(|b| edges(b.bounds));
+        let crop = boundaries.crop().ok().map(|b| edges(b.bounds));
+        let (left, bottom, right, top) = match (crop, media) {
+            (Some(c), Some(m)) if c.0.max(m.0) < c.2.min(m.2) && c.1.max(m.1) < c.3.min(m.3) => {
+                (c.0.max(m.0), c.1.max(m.1), c.2.min(m.2), c.3.min(m.3))
+            }
+            (_, Some(m)) => m,
+            (Some(c), None) => c,
+            (None, None) => {
+                let (w, h) = (page.width().value, page.height().value);
+                if rotation % 180 == 90 { (0.0, 0.0, h, w) } else { (0.0, 0.0, w, h) }
+            }
+        };
+        DisplayFrame { rotation, left, bottom, right, top }
+    }
+
+    fn point(&self, x: f32, y: f32) -> (f32, f32) {
+        match self.rotation {
+            90 => (y - self.bottom, self.right - x),
+            180 => (self.right - x, self.top - y),
+            270 => (self.top - y, x - self.left),
+            _ => (x - self.left, y - self.bottom),
+        }
+    }
+
+    /// Converts a (left, top, right, bottom) box.
+    fn rect(&self, r: &PdfRect) -> (f32, f32, f32, f32) {
+        let (x1, y1) = self.point(r.left().value, r.top().value);
+        let (x2, y2) = self.point(r.right().value, r.bottom().value);
+        (x1.min(x2), y1.max(y2), x1.max(x2), y1.min(y2))
+    }
+}
+
 /// A thread-safe wrapper for the `Pdfium` library instance.
 ///
 /// required because `pdfium_render::Pdfium` does not implement `Send` or `Sync`
@@ -160,6 +220,41 @@ fn smart_dark(b_raw: u8, g_raw: u8, r_raw: u8) -> (u8, u8, u8) {
     )
 }
 
+/// Resolves the page a bookmark points at, directly or through a GoTo action.
+fn bookmark_page(bookmark: &PdfBookmark) -> i32 {
+    if let Some(dest) = bookmark.destination() {
+        if let Ok(idx) = dest.page_index() {
+            return idx as i32;
+        }
+    }
+    if let Some(action) = bookmark.action() {
+        if let Some(local) = action.as_local_destination_action() {
+            if let Ok(dest) = local.destination() {
+                if let Ok(idx) = dest.page_index() {
+                    return idx as i32;
+                }
+            }
+        }
+    }
+    -1
+}
+
+/// Appends `first` and its following siblings (and their children) to `out`.
+fn collect_outline(first: Option<PdfBookmark>, depth: u32, out: &mut Vec<OutlineEntry>) {
+    // Malformed files can loop their sibling or child chains; the cap keeps
+    // the walk finite.
+    let mut current = first;
+    while let Some(bookmark) = current {
+        if out.len() >= 20_000 || depth > 32 {
+            return;
+        }
+        let title = bookmark.title().unwrap_or_default();
+        out.push((depth, title.trim().to_string(), bookmark_page(&bookmark)));
+        collect_outline(bookmark.first_child(), depth + 1, out);
+        current = bookmark.next_sibling();
+    }
+}
+
 /// Encodes a link destination as `#page=N`, adding `&top=Y` (PDF user space,
 /// origin at the bottom-left) when the destination names a vertical position.
 fn destination_target(dest: &PdfDestination) -> Option<String> {
@@ -275,6 +370,15 @@ type FormWidget = (usize, (f32, f32, f32, f32), String, String, bool);
 /// Tuple structure: `(text_content, bounds_tuple)`.
 type TextSegment = (String, (f32, f32, f32, f32));
 
+/// Type definition for per-character geometry.
+/// Tuple structure: `(character, loose_bounds_tuple)`.
+type CharBox = (String, (f32, f32, f32, f32));
+
+/// Type definition for one outline (bookmark) entry, flattened depth-first.
+/// Tuple structure: `(depth, title, page_index)`, with -1 when the entry has no
+/// destination inside the document.
+type OutlineEntry = (u32, String, i32);
+
 /// Type definition for link data.
 /// Tuple structure: `(url, bounds_tuple)`.
 type Link = (String, (f32, f32, f32, f32));
@@ -282,6 +386,17 @@ type Link = (String, (f32, f32, f32, f32));
 /// Type definition for a comment made in another application.
 /// Tuple structure: `(subtype, contents, author, date, bounds_tuple)`.
 type Comment = (String, String, String, String, (f32, f32, f32, f32));
+
+/// Prefix of the `/NM` (annotation name) Riemann gives the annotations it
+/// writes into PDF files. Riemann draws those itself, so they are hidden from
+/// PDFium's renderer and left out of the comments made in other applications.
+const RIEMANN_ANNOT_PREFIX: &str = "riemann:";
+
+fn is_riemann_annotation(annotation: &PdfPageAnnotation) -> bool {
+    annotation
+        .name()
+        .is_some_and(|name| name.starts_with(RIEMANN_ANNOT_PREFIX))
+}
 
 /// The PDF `/Subtype` name for an annotation type.
 fn annotation_subtype_name(kind: PdfPageAnnotationType) -> String {
@@ -386,7 +501,13 @@ impl RiemannDocument {
             {
                 let _guard = pdfium_guard();
                 let doc_guard = lock_doc(inner);
-                let page = doc_guard.0.pages().get(page_index).map_err(value_err)?;
+                let mut page = doc_guard.0.pages().get(page_index).map_err(value_err)?;
+                // Only in memory: the flag is never saved back to the file.
+                for mut annotation in page.annotations_mut().iter() {
+                    if is_riemann_annotation(&annotation) && !annotation.is_hidden() {
+                        let _ = annotation.set_is_hidden(true);
+                    }
+                }
                 let mut bitmap = unsafe {
                     PdfBitmap::from_bytes(
                         width,
@@ -532,16 +653,11 @@ impl RiemannDocument {
                 .search(&term, &search_options)
                 .map_err(runtime_err)?;
 
+            let frame = DisplayFrame::of(&page);
             let mut rects = Vec::new();
             for segments in search.iter(PdfSearchDirection::SearchForward) {
                 for segment in segments.iter() {
-                    let rect = segment.bounds();
-                    rects.push((
-                        rect.left().value,
-                        rect.top().value,
-                        rect.right().value,
-                        rect.bottom().value,
-                    ));
+                    rects.push(frame.rect(&segment.bounds()));
                 }
             }
 
@@ -575,21 +691,63 @@ impl RiemannDocument {
                 .text()
                 .map_err(|e| runtime_err(format!("Text Access Error: {}", e)))?;
 
+            let frame = DisplayFrame::of(&page);
             let mut segments = Vec::new();
             for segment in text_accessor.segments().iter() {
-                let rect = segment.bounds();
-                segments.push((
-                    segment.text(),
-                    (
-                        rect.left().value,
-                        rect.top().value,
-                        rect.right().value,
-                        rect.bottom().value,
-                    ),
-                ));
+                segments.push((segment.text(), frame.rect(&segment.bounds())));
             }
 
             Ok(segments)
+        })
+    }
+
+    /// Retrieves every character on a page with its loose bounding box (the
+    /// full advance width and font height PDFium reports), in content order.
+    /// Generated characters (synthesised spaces and line breaks) are included
+    /// so callers see the same text as `get_page_text`.
+    ///
+    /// # Arguments
+    /// * `page_index` - Zero-based index of the page.
+    fn get_char_boxes(&self, py: Python, page_index: u16) -> PyResult<Vec<CharBox>> {
+        let inner = &self.inner;
+        py.allow_threads(|| {
+            let _guard = pdfium_guard();
+            let doc_guard = lock_doc(inner);
+            let pages = doc_guard.0.pages();
+
+            if (page_index as usize) >= (pages.len() as usize) {
+                return Ok(Vec::new());
+            }
+
+            let page = pages.get(page_index).map_err(value_err)?;
+            let text_accessor = page
+                .text()
+                .map_err(|e| runtime_err(format!("Text Access Error: {}", e)))?;
+
+            let frame = DisplayFrame::of(&page);
+            let mut boxes = Vec::new();
+            for ch in text_accessor.chars().iter() {
+                let Some(s) = ch.unicode_string() else { continue };
+                let rect = match ch.loose_bounds() {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                boxes.push((s, frame.rect(&rect)));
+            }
+            Ok(boxes)
+        })
+    }
+
+    /// Returns the document outline (bookmarks) flattened depth-first as
+    /// `(depth, title, page_index)` tuples. Empty when the file has none.
+    fn get_outline(&self, py: Python) -> PyResult<Vec<OutlineEntry>> {
+        let inner = &self.inner;
+        py.allow_threads(|| {
+            let _guard = pdfium_guard();
+            let doc_guard = lock_doc(inner);
+            let mut out = Vec::new();
+            collect_outline(doc_guard.0.bookmarks().root(), 0, &mut out);
+            Ok(out)
         })
     }
 
@@ -714,6 +872,7 @@ impl RiemannDocument {
             }
 
             let page = pages.get(page_index).map_err(value_err)?;
+            let frame = DisplayFrame::of(&page);
             let annotations = page.annotations();
             let mut widgets = Vec::new();
 
@@ -738,12 +897,7 @@ impl RiemannDocument {
 
                     widgets.push((
                         idx,
-                        (
-                            rect.left().value,
-                            rect.top().value,
-                            rect.right().value,
-                            rect.bottom().value,
-                        ),
+                        frame.rect(&rect),
                         f_type,
                         value,
                         checked,
@@ -796,7 +950,8 @@ impl RiemannDocument {
                         | PdfPageAnnotationType::Widget
                         | PdfPageAnnotationType::XfaWidget
                         | PdfPageAnnotationType::Popup
-                ) {
+                ) || is_riemann_annotation(&annotation)
+                {
                     continue;
                 }
                 let contents = annotation.contents().unwrap_or_default().trim().to_string();
@@ -840,6 +995,7 @@ impl RiemannDocument {
             }
 
             let page = pages.get(page_index).map_err(value_err)?;
+            let frame = DisplayFrame::of(&page);
             let mut links = Vec::new();
 
             for link in page.links().iter() {
@@ -848,15 +1004,7 @@ impl RiemannDocument {
                     Err(_) => continue,
                 };
                 if let Some(target) = link_target(&link) {
-                    links.push((
-                        target,
-                        (
-                            rect.left().value,
-                            rect.top().value,
-                            rect.right().value,
-                            rect.bottom().value,
-                        ),
-                    ));
+                    links.push((target, frame.rect(&rect)));
                 }
             }
             Ok(links)

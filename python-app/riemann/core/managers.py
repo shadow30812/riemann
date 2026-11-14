@@ -11,6 +11,7 @@ import json
 import math
 import os
 import sqlite3
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QStandardPaths, Qt, QUrl
@@ -268,7 +269,7 @@ class HistoryManager:
             QStandardPaths.StandardLocation.AppDataLocation
         )
         self.path = os.path.join(base, "history.json")
-        self.history: Dict[str, List[str]] = {"pdf": [], "web": [], "folder": []}
+        self.history: Dict[str, List[Dict[str, str]]] = {"pdf": [], "web": [], "folder": []}
         self.popular_sites: List[str] = [
             "music.youtube.com",
             "whatsapp.com",
@@ -297,14 +298,24 @@ class HistoryManager:
             try:
                 with open(self.path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    if isinstance(data, list):
-                        self.history = {"pdf": [], "web": data, "folder": []}
-                    elif isinstance(data, dict):
-                        self.history = data
-                        if "folder" not in self.history:
-                            self.history["folder"] = []
+                if isinstance(data, list):
+                    data = {"web": data}
+                if isinstance(data, dict):
+                    self.history = {
+                        kind: [e for e in map(self._entry, data.get(kind, [])) if e]
+                        for kind in ("pdf", "web", "folder")
+                    }
             except (json.JSONDecodeError, OSError):
                 self.history = {"pdf": [], "web": [], "folder": []}
+
+    @staticmethod
+    def _entry(value) -> Optional[Dict[str, str]]:
+        """Normalises a stored item; older versions kept bare paths without a time."""
+        if isinstance(value, dict) and value.get("path"):
+            return {"path": str(value["path"]), "timestamp": str(value.get("timestamp", ""))}
+        if isinstance(value, str) and value:
+            return {"path": value, "timestamp": ""}
+        return None
 
     def save(self) -> None:
         """
@@ -318,18 +329,16 @@ class HistoryManager:
 
     def add(self, item: str, item_type: str = "web") -> None:
         """
-        Adds an item to history, promoting it to the top of the specified category, and enforces size limits.
+        Adds an item to history with the current time, moving it to the top of
+        its category, and enforces the size limit.
 
         Args:
             item (str): The URL or file path.
-            item_type (str): The category type, typically 'pdf' or 'web'. Defaults to 'web'.
+            item_type (str): The category: 'pdf', 'web' or 'folder'. Defaults to 'web'.
         """
-        if item_type not in self.history:
-            self.history[item_type] = []
-        if item in self.history[item_type]:
-            self.history[item_type].remove(item)
-        self.history[item_type].insert(0, item)
-        self.history[item_type] = self.history[item_type][:500]
+        entries = [e for e in self.history.setdefault(item_type, []) if e["path"] != item]
+        entries.insert(0, {"path": item, "timestamp": datetime.now().isoformat(timespec="minutes")})
+        self.history[item_type] = entries[:500]
         self.save()
 
     def get_model_data(self) -> List[str]:
@@ -339,7 +348,7 @@ class HistoryManager:
         Returns:
             List[str]: A combined list of unique historical URLs and predefined popular sites.
         """
-        combined = list(self.history.get("web", []))
+        combined = self.get_list("web")
         for site in self.popular_sites:
             if site not in combined:
                 combined.append(site)
@@ -347,15 +356,19 @@ class HistoryManager:
 
     def get_list(self, item_type: str) -> List[str]:
         """
-        Retrieves the history list for a specific category.
+        Retrieves the paths or URLs of a category, newest first.
 
         Args:
-            item_type (str): The history category, such as 'pdf' or 'web'.
-
-        Returns:
-            List[str]: The list of historical items for the specified category.
+            item_type (str): The history category: 'pdf', 'web' or 'folder'.
         """
-        return self.history.get(item_type, [])
+        return [e["path"] for e in self.history.get(item_type, [])]
+
+    def get_entries(self, item_type: str) -> List[Dict[str, str]]:
+        """
+        Retrieves a category's entries, newest first, as dicts with 'path' and
+        'timestamp' (ISO 8601, empty for items recorded by older versions).
+        """
+        return list(self.history.get(item_type, []))
 
 
 class DownloadManager(QDialog):

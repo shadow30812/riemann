@@ -21,6 +21,7 @@ _deno_dir = os.path.expanduser("~/.deno/bin")
 if os.path.isdir(_deno_dir) and _deno_dir not in os.environ.get("PATH", ""):
     os.environ["PATH"] = f"{_deno_dir}:{os.environ.get('PATH', '')}"
 
+import shiboken6
 from PySide6.QtCore import (
     QBuffer,
     QByteArray,
@@ -68,7 +69,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
-    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QSizePolicy,
@@ -1404,6 +1404,10 @@ class BrowserTab(QWidget):
         Returns:
             bool: Indication of whether the event was successfully consumed.
         """
+        if not shiboken6.isValid(self.web):
+            # The tab is closing: its view is gone but children still report events.
+            return False
+
         if source == self.web and event.type() == QEvent.Type.ChildAdded:
             event.child().installEventFilter(self)
             return False
@@ -1702,9 +1706,7 @@ class BrowserTab(QWidget):
             if isinstance(parent, QTabWidget):
                 idx = parent.indexOf(self)
                 if idx != -1:
-                    parent.setTabText(
-                        idx, (title[:20] + "..") if len(title) > 20 else title
-                    )
+                    parent.setTabText(idx, title)
                 break
             parent = parent.parent()
 

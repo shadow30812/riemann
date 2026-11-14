@@ -76,14 +76,17 @@ Python should not perform large-scale rasterization or heavy synchronous compute
 Responsible for:
 
 * PDF rendering
-* text extraction
+* text extraction, including per-character glyph boxes (`get_char_boxes`)
+* the document outline (`get_outline`)
 * OCR delegation
 * search indexing
 * page geometry
 * annotation embedding
-* reading third-party comments (`get_comments`) and counting signature fields (`signature_count`)
+* reading third-party comments (`get_comments`, which skips Riemann's own `riemann:` annotations) and counting signature fields (`signature_count`)
 
 The Rust backend exists primarily to bypass Python's GIL and improve long-session responsiveness.
+
+Every box the core returns (search hits, text segments, glyph boxes, links, form widgets) is in points on the page as displayed: the crop box with the page's `/Rotate` applied, origin bottom-left (`DisplayFrame` in `lib.rs`). PDFium reports them in unrotated user space, which put selection, search highlights and links in the wrong place on rotated pages (scanned documents and landscape certificates often use `/Rotate 90`).
 
 ---
 
@@ -214,11 +217,26 @@ Fullscreen mode in `RiemannWindow` integrates auto-hiding controls to maximize r
 
 ## External Application Dispatcher
 
-Riemann allows delegating document rendering to external viewers and browsers via `_populate_external_app_menu()`:
+`populate_open_with_menu()` and `build_open_with_menu()` in `ui/components.py` build every "Open in External Application" menu (File menu, tab context menu, the reader's toolbar button and the folder tree):
 
-* **Dynamic Discovery**: Scans `$PATH` using `shutil.which()` for installed browsers (Google Chrome, Chromium, Mozilla Firefox, Brave Browser, Microsoft Edge) and the system default viewer (`xdg-open` on Linux, `start` on Windows).
-* **Launch Architecture**: Dispatches external viewers asynchronously via `subprocess.Popen([binary, pdf_path])` or `QDesktopServices.openUrl(QUrl.fromLocalFile(pdf_path))`.
-* **Custom Binary Selection**: A file chooser dialog (`QFileDialog`) allows launching any arbitrary executable binary against the active PDF path.
+* **Targets**: a local file, a folder, or a web address. `RiemannWindow._external_target()` picks the right one for a tab: a document's `current_path`, or a browser tab's URL (http, https, ftp, file).
+* **Discovery**: `shutil.which()` finds installed browsers (Chrome, Firefox, Chromium, Brave, Edge) for files and URLs, and file managers or editors (Nautilus, Dolphin, Nemo, Thunar, VS Code) for folders. The system default handler is always offered through `QDesktopServices.openUrl()`.
+* **Launching**: `subprocess.Popen([binary, target])`; "Choose Other Application..." runs any executable picked in a file dialog.
+
+---
+
+## Sections and Thumbnails Sidebar
+
+`PdfSidebarWidget` (`ui/reader/sidebar.py`) sits at the left of a full-mode `ReaderTab`, hidden until toggled (Ctrl+Alt+S or `btn_toggle_sidebar`). Its visibility and mode are remembered in `reader/sidebar_visible` and `reader/sidebar_mode`.
+
+* **Outline**: read on a worker thread through the core's `get_outline()`, which walks PDFium's bookmark tree depth-first and returns `(depth, title, page_index)`; pypdf is the fallback for older core builds. Short outlines open expanded. As the reader scrolls, the last section starting at or before the current page is selected.
+* **Thumbnails**: one `_ThumbRenderer` thread renders only the rows in view (plus two either side), producing `QImage`s that become `QPixmap`s on the UI thread. At most 160 thumbnails are kept; the oldest revert to a placeholder. A generation counter drops results for a previous document or page theme.
+
+---
+
+## Toolbar Overflow
+
+The reader's buttons live in `ToolbarStrip` (`ui/reader/widgets.py`), a scroll area that never squeezes them. When the row is wider than the pane, `fit()` drops the icons from 20 to 16 px; whatever still does not fit scrolls with the mouse wheel, with the chevron buttons that appear at an edge hiding more buttons, or by resting the pointer within 36 px of that edge (a 16 ms timer, so it works over the buttons too).
 
 ---
 
@@ -409,7 +427,6 @@ Responsibilities:
 * temporary drawing overlays
 * selection rectangles
 * hyperlink overlays
-* signature overlays
 * shape previews
 * transient interaction rendering
 
@@ -580,21 +597,24 @@ Core responsibilities:
 
 ## Annotation Storage
 
-Annotations are stored separately from PDFs using JSON.
+Annotations live in two places:
 
-Storage path:
+* **Riemann's JSON copy**, `~/.local/share/riemann/annotations/<sha256 of the path>.json`, written on every change: `{"pages": {page: [annotation, ...]}, "pdf": [size, mtime_ns]}`. Files from older versions (just the pages dict) still load. Every annotation has an `id`.
+* **The PDF itself** (`core/pdf_annotations.py`), about 1.2 s after the last change, on a worker thread, and synchronously when the tab closes. Each annotation becomes a standard PDF annotation: notes `/Text`, text labels `/FreeText` (with an appearance stream), markup `/Highlight`, `/Underline` or `/StrikeOut` with `/QuadPoints`, pen and highlighter strokes and stamps `/Ink`, rectangles `/Square`, ovals `/Circle`. Each is named `riemann:<id>` in `/NM` and carries the original dict as JSON in `/RiemannData`.
 
-```text
-~/.local/share/riemann/annotations/
-```
+The PDF is changed with an **incremental update**: pikepdf parses the file, Riemann's previous annotations are dropped from each page's `/Annots`, the new objects and changed page dictionaries are serialised, and an xref section (a classic table or an xref stream, matching the file) plus trailer are appended. The original bytes stay untouched, so existing signatures stay valid and the copy PDFium has open is unaffected. The append is skipped if the file changed size while being parsed. Encrypted files, files with signature fields (`/SigFlags`) and read-only files are not written; their annotations stay in the JSON copy.
 
-The filename is generated using a SHA-256 hash of the PDF path.
+**Reading back**: on load, if the file's size and mtime differ from the ones recorded after Riemann's last write, another program changed it. If the file then holds Riemann annotations, they replace the JSON copy, taking `/Contents` and `/C` edits made elsewhere. If it holds none (for example a regenerated PDF), the JSON copy is written back into it.
 
-This allows:
+**Rendering**: Riemann draws its annotations itself, so the core hides `riemann:` annotations from PDFium's renderer (in memory only) and leaves them out of `get_comments()`, which lists other applications' comments.
 
-* persistent local overlays
-* non-destructive workflows
-* lightweight state recovery
+---
+
+## Signature Appearances
+
+Acrobat's older signing tools store a layered signature appearance: `n0` background, `n1` a "validity unknown" icon (a yellow question mark), `n2` the signer text, `n3` an "invalid" layer and `n4` status text such as "Signature Not Verified". Acrobat never shows `n1`/`n4` as stored; it draws its own validation result in their place. PDFium renders the stored appearance as is, so without help the "?" stays after a successful check.
+
+After `SignatureValidationWorker` finishes, `core/signature_appearance.py` builds, for each field whose result is VALID (intact and trusted) or INVALID, a one-page PDF: the page cropped to the field, without annotations, with a copy of the field's appearance on top in which `n1` is a green tick or red cross and `n4` is empty. The reader renders it with PDFium (`_signature_appearance_image`, cached per size and theme) and paints it over the field in `_render_overlays`, so the signer text, fonts and whatever lies behind the field stay exactly as stored. Fields whose signer is not trusted keep their stored look, which is accurate. The signed file is never modified. Appearances without `n1`/`n4` layers (modern signers) are left alone.
 
 ---
 
@@ -627,7 +647,8 @@ Redraws are localized to the affected page whenever possible.
 
 The text selection system (`tab.py`) was overhauled to handle LaTeX, math notations, scanned papers, and OCR output with high visual and clipboard accuracy:
 
-* **Font-Weighted Character Metrics**: Character bounding boxes are mapped via `get_char_weight()` rather than uniform division, accounting for narrow (e.g. 'i', 'l') and wide (e.g. 'w', 'm') glyphs and preventing rightward highlight drift.
+* **Glyph Boxes from PDFium**: `get_char_boxes()` in the core returns every character with its loose bounding box. `_runs_from_char_boxes()` splits them into runs on one line (at generated line breaks and vertical jumps) and gives generated spaces the gap up to the next glyph. Older core builds fall back to estimating widths inside each text segment from font advances.
+* **Caret Semantics**: a drag selects between caret positions, so a letter is included only once the pointer passes its middle, as in text editors.
 * **Vertical Baseline Alignment**: Selection rectangles are shifted down by +10% of font height to align strictly with rendered glyph baselines rather than ascender ceilings.
 * **Reading-Order Overlap Clustering ($\ge 40\%$)**: Text segments extracted from PDFium or OCR are clustered into reading lines using a 40% vertical overlap threshold and sorted left-to-right. This prevents multi-column text, marginalia, and inline formulas from interleaving when selected.
 * **Double-Click Word Selection (`_get_word_at_pos`)**: Double-clicking expands backward and forward across characters on the same line until whitespace or punctuation boundaries, unifying the word into a single highlight rectangle.
@@ -1092,6 +1113,7 @@ Stores:
 
 Features:
 
+* **Timestamps**: entries are stored as `{"path": ..., "timestamp": ISO 8601}`; bare paths from older versions load with an empty time. `get_list()` returns paths, `get_entries()` the full entries, which the History dialog shows with names, locations and times.
 * **Immediate Persistence**: History entries are written immediately upon opening a document or web page, rather than deferring writes until application exit. This guarantees that recently opened documents are preserved even if the application is killed abruptly.
 * **Crash Recovery State**: Tracks session exit state using a `_session_cleanly_closed` flag. If an unclean shutdown is detected on startup (e.g. system power outage or crash), the application prompts the user with a recovery dialog to restore all previously open tabs.
 * **Autocomplete Engine**: Powers address bar and file path suggestions across all viewports.
@@ -1186,16 +1208,42 @@ Contains:
 
 Tabs support:
 
-* internal movement
+* reordering within the strip (Qt's movable tabs)
 * split-view transfer
 * window detachment
 * external file drops
 
-The implementation uses custom MIME payloads:
+`DraggableTabWidget` sets `setMovable(True)` after installing its `DraggableTabBar`; the flag belongs to the bar, and setting it first left the custom bar unmovable. A tab becomes a drag (MIME `application/x-riemann-tab`) only once it is pulled 30 px off the strip (40 px sideways for vertical tabs); Qt's in-strip move is ended first. A drop on a strip lands before the first tab whose middle is past the pointer (`drop_index()`); a drop on a pane's content goes back to its original place in the same pane, or after the current tab in the other one.
 
-```text
-application/x-riemann-tab
-```
+Titles are set in full; the bar elides them (`ElideRight`) only when the tabs no longer fit.
+
+---
+
+## Split View
+
+In split view each pane's `QTabWidget::pane` gets a rounded 2 px outline: the accent colour for the pane in use (tracked through `QApplication.focusChanged`) and a neutral one for the other. The other pane also shows a `SplitPaneBadge` chip naming its tab; clicking it focuses that pane and its close button ends the split. Splitter handles are a transparent gap that lights up on hover.
+
+---
+
+## AI Assistant
+
+`AiSidecarPanel` (`ui/sidecar.py`) docks at the right of `main_splitter`. Providers: Anthropic, OpenAI, Google Gemini, OpenRouter and Ollama. Model lists are fetched from each provider (`list_models()`), so there is no hard-coded list to go stale; only Anthropic has a fallback list for when the request fails. Requests stream through `urllib` (`stream_chat()`: SSE for the hosted APIs, NDJSON for Ollama) on a worker thread. The system prompt carries the document text with `[Page N]` markers (`document_context()`, at most 150,000 characters, nearest pages first) and asks for `[p. N]` citations, which `link_citations()` turns into `page:N` links that jump the reader.
+
+Keys come from the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, `OPENROUTER_API_KEY`) or, when those are unset, from `ai.env` in Riemann's config folder (`$XDG_CONFIG_HOME/Riemann/ai.env`, usually `~/.config/Riemann/ai.env`; `%APPDATA%\Riemann\ai.env` on Windows; `RIEMANN_AI_ENV` overrides the path). It holds `NAME=value` lines with the same variable names, so it can also be sourced by a shell. Handling:
+
+* the folder is created `0700` and the file `0600`, written to a temporary file opened with mode `0600` and then renamed over the old one, so the keys are never readable by other users, even mid-write;
+* if the permissions are found looser on read (someone ran `chmod 644`), they are reset to `0600` before the keys are used;
+* on Windows `%APPDATA%` is already private to the user account through its ACL;
+* keys saved by earlier builds under `ai/keys/<provider>` in the plain settings file are moved into `ai.env` and deleted from the settings when the panel opens;
+* keys are never logged or shown; the dialog uses password fields.
+
+Google keys go in the `x-goog-api-key` header, never the URL. The Ollama address (not a secret) stays in the settings as `ai/ollama_url`.
+
+---
+
+## Scrollbars
+
+Scrollbars are 16 px wide with a 2 px margin around the handle (`modern_dark.css`, `modern_light.css`), so the handle is 12 px; the Workspaces dashboard and the PDF start page use 14 px.
 
 ---
 

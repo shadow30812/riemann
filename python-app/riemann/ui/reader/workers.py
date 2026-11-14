@@ -281,6 +281,8 @@ class SignatureValidationWorker(QThread):
                         }
                     )
 
+                self._attach_status_appearances(sig_details)
+
                 if not all_valid:
                     self.finished_validation.emit(
                         "INVALID",
@@ -303,6 +305,32 @@ class SignatureValidationWorker(QThread):
             self.finished_validation.emit(
                 "ERROR", f"Error reading signatures: {str(e)}", []
             )
+
+
+    def _attach_status_appearances(self, sig_details: list) -> None:
+        """
+        Adds the appearance each field should show for its result (see
+        signature_appearance). Fields whose identity is unknown keep their
+        stored look, which already says so.
+        """
+        from riemann.core.signature_appearance import INVALID, VALID, status_appearances
+
+        statuses = {}
+        for sig in sig_details:
+            if not sig["valid"]:
+                statuses[sig["field_name"]] = INVALID
+            elif sig["is_trusted"]:
+                statuses[sig["field_name"]] = VALID
+        try:
+            appearances = status_appearances(self.pdf_path, statuses)
+        except Exception as e:
+            print(f"Could not build signature appearances: {e}")
+            return
+        for sig in sig_details:
+            sig["appearances"] = [
+                a for a in appearances
+                if a["field"] == sig["field_name"] or a["field"].endswith("." + sig["field_name"])
+            ]
 
 
 class MetadataExtractionWorker(QThread):

@@ -8,7 +8,6 @@ the full PDF reading experience.
 import gc
 import os
 import shutil
-import subprocess
 import sys
 import time
 import urllib.parse
@@ -79,8 +78,9 @@ from PySide6.QtWidgets import (
 )
 
 from ...core.constants import ViewMode, ZoomMode
+from ...core import pdf_annotations
 from ...core.managers import PasswordDialog
-from ..components import AnnotationToolbar
+from ..components import AnnotationToolbar, build_open_with_menu
 from .mixins.ai import AiMixin
 from .mixins.annotations import AnnotationsMixin
 from .mixins.metadata import MetadataMixin
@@ -88,8 +88,9 @@ from .mixins.rendering import RenderingMixin
 from .mixins.search import SearchMixin
 from .mixins.signatures import SignaturesMixin
 from .render_worker import PAGE_CACHE, PageRenderWorker
+from .sidebar import PdfSidebarWidget
 from .utils import generate_markdown_html
-from .widgets import DropZoneLabel, PageWidget
+from .widgets import DropZoneLabel, PageWidget, ToolbarStrip
 from ..palette import FONT_STACK, GridCanvas, path_row, short_folder, tinted_pixmap, tokens
 
 try:
@@ -206,7 +207,7 @@ class ReaderTab(
         self.page_widgets: Dict[int, PageWidget] = {}
         self.rendered_pages: Set[int] = set()
         self.search_result: Optional[Tuple[int, List[Tuple[float, ...]]]] = None
-        self.text_segments_cache: Dict[int, List[Tuple[str, Tuple[float, ...]]]] = {}
+        self.text_segments_cache: Dict[int, List[Tuple[str, List[Tuple[float, ...]]]]] = {}
 
         self.virtual_threshold: int = 15
         self._virtual_enabled: bool = False
@@ -288,6 +289,8 @@ class ReaderTab(
         shortcuts = [
             ("Ctrl+F", self.toggle_search_bar),
             ("Ctrl+I", self.toggle_ai_search_bar),
+            ("Ctrl+S", self.save_document),
+            ("Ctrl+Alt+S", self.toggle_sidebar),
             ("Ctrl+P", self.print_document),
             ("Ctrl+A", self.select_all_text),
             ("Ctrl+Shift+A", self.btn_annotate.click),
@@ -340,17 +343,17 @@ class ReaderTab(
 
     def _update_tab_title(self, title: str) -> None:
         """
-        Mutates structural name mappings propagating string modifications directly targeting the parent visual tab header.
+        Shows title on this tab. The full name is set; the tab bar elides it
+        only when the tabs no longer fit.
 
         Args:
-            title (str): Output string definition utilized rendering visible identifiers.
+            title (str): The document name to show.
         """
         tw = self._get_tab_widget()
         if tw:
             idx = tw.indexOf(self)
             if idx != -1:
-                display_title = (title[:25] + "..") if len(title) > 25 else title
-                tw.setTabText(idx, display_title)
+                tw.setTabText(idx, title)
                 if hasattr(self.window(), "_update_tab_tooltip"):
                     self.window()._update_tab_tooltip(tw, idx)
                 if hasattr(self.window(), "_update_window_title"):
@@ -393,11 +396,7 @@ class ReaderTab(
         # the layout used to shrink them below their size until they overlapped.
         outer = QHBoxLayout(self.toolbar)
         outer.setContentsMargins(0, 0, 0, 0)
-        self.toolbar_scroll = QScrollArea()
-        self.toolbar_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.toolbar_scroll.setWidgetResizable(True)
-        self.toolbar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.toolbar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.toolbar_scroll = ToolbarStrip()
         toolbar_inner = QWidget()
         t_layout = QHBoxLayout(toolbar_inner)
         self._setup_toolbar_buttons(t_layout)
@@ -456,7 +455,21 @@ class ReaderTab(
 
         self._setup_home_page()
         self.stack.addWidget(self.home_page_widget)
-        layout.addWidget(self.stack)
+
+        self.sidebar_nav = PdfSidebarWidget(self, dark_mode=self._home_dark)
+        self.sidebar_nav.set_mode(self.settings.value("reader/sidebar_mode", "outline", type=str))
+        self.sidebar_nav.page_selected.connect(self.jump_to_page)
+        self.sidebar_nav.btn_thumbs.clicked.connect(self._remember_sidebar_state)
+        self.sidebar_nav.btn_outline.clicked.connect(self._remember_sidebar_state)
+        self.sidebar_nav.hide()
+
+        self.content_container = QWidget()
+        c_layout = QHBoxLayout(self.content_container)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setSpacing(0)
+        c_layout.addWidget(self.sidebar_nav)
+        c_layout.addWidget(self.stack, 1)
+        layout.addWidget(self.content_container, 1)
 
         if not getattr(self, "current_path", None):
             self.stack.setCurrentIndex(2)
@@ -481,6 +494,13 @@ class ReaderTab(
             layout (QHBoxLayout): Reference pointer tracking parent bounding alignments systematically.
         """
         icon_size = QSize(20, 20)
+
+        self.btn_toggle_sidebar = QPushButton()
+        self.btn_toggle_sidebar.setIcon(self._get_icon("panel-left.svg"))
+        self.btn_toggle_sidebar.setIconSize(icon_size)
+        self.btn_toggle_sidebar.setToolTip("Sections and Thumbnails (Ctrl+Alt+S)")
+        self.btn_toggle_sidebar.setCheckable(True)
+        self.btn_toggle_sidebar.clicked.connect(self.toggle_sidebar)
 
         self.btn_save = QPushButton()
         self.btn_save.setIcon(self._get_icon("save.svg"))
@@ -699,6 +719,7 @@ class ReaderTab(
         self.btn_sign.clicked.connect(self.initiate_signing_flow)
 
         widgets = [
+            self.btn_toggle_sidebar,
             self.btn_save,
             self.btn_print,
             self.btn_rename,
@@ -731,6 +752,23 @@ class ReaderTab(
         ]
         for w in widgets:
             layout.addWidget(w)
+
+    def toggle_sidebar(self) -> None:
+        """Shows or hides the sections and thumbnails sidebar."""
+        if self.is_preview or not self.current_doc:
+            return
+        self._set_sidebar_visible(not self.sidebar_nav.isVisible())
+        self._remember_sidebar_state()
+
+    def _set_sidebar_visible(self, visible: bool) -> None:
+        if visible != self.sidebar_nav.isVisible():
+            self.sidebar_nav.setVisible(visible)
+            self._schedule_fit_refresh()
+        self.btn_toggle_sidebar.setChecked(visible)
+
+    def _remember_sidebar_state(self) -> None:
+        self.settings.setValue("reader/sidebar_visible", self.sidebar_nav.isVisible())
+        self.settings.setValue("reader/sidebar_mode", self.sidebar_nav.mode)
 
     def _update_page_input_width(self, text: str = "") -> None:
         """Dynamically adjusts the width of the page number input box based on content length."""
@@ -908,7 +946,7 @@ class ReaderTab(
         icon_pm = tinted_pixmap("file-text", t["muted"], 18)
 
         if win and hasattr(win, "history_manager"):
-            recent_pdfs = win.history_manager.history.get("pdf", [])
+            recent_pdfs = win.history_manager.get_list("pdf")
             for path in recent_pdfs[:13]:
                 if not os.path.exists(path):
                     continue
@@ -944,6 +982,10 @@ class ReaderTab(
             restore_state (bool): Instruction dictating utilization previously saved user coordinates locally stored. Defaults to False.
             password (Optional[str]): String checking presence/absence of password protection in currently open file. Defaults to None.
         """
+        if not is_retry and getattr(self, "current_path", None):
+            # Edits waiting for the debounced save belong to the current file.
+            self.flush_annotations_to_pdf()
+
         if path.lower().endswith(".md"):
             self._load_markdown(path)
             return
@@ -970,6 +1012,8 @@ class ReaderTab(
         """Callback for when the thread successfully returns the PDF."""
         self.load_progress.accept()
         self.current_doc = doc
+        self.current_signatures = []
+        self.signature_appearances = {}
         self._reset_document_caches()
         self._start_render_worker()
 
@@ -992,6 +1036,10 @@ class ReaderTab(
 
         if not self.is_preview:
             self.toolbar.show()
+            self.sidebar_nav.load_document(path, self.current_doc, self.theme_mode)
+            self._set_sidebar_visible(
+                self.settings.value("reader/sidebar_visible", False, type=bool)
+            )
         self.stack.setCurrentIndex(0)
         self.view_mode = ViewMode.IMAGE
         if hasattr(self.window(), "_update_window_title"):
@@ -1236,9 +1284,7 @@ class ReaderTab(
             sys.stderr.write(f"Markdown Load Error: {e}\n")
 
     def save_document(self) -> None:
-        """
-        Copies memory mapped file allocations dumping identical structural variants externally safely preventing corruption reliably.
-        """
+        """Saves a copy of the document, with its annotations embedded when it has any."""
         if not self.current_path or not os.path.exists(self.current_path):
             QMessageBox.warning(self, "Save Error", "No document loaded.")
             return
@@ -1254,7 +1300,16 @@ class ReaderTab(
         if dest:
             save_last_directory(self.settings, dest)
             try:
-                shutil.copy2(self.current_path, dest)
+                written = False
+                if any(self.annotations.values()) and self.current_path.lower().endswith(".pdf"):
+                    try:
+                        written = pdf_annotations.write_annotations(
+                            self.current_path, self._annotation_snapshot(), dest=dest
+                        )
+                    except Exception as e:
+                        print(f"[Warning] Could not add annotations to the copy: {e}")
+                if not written:
+                    shutil.copy2(self.current_path, dest)
                 QMessageBox.information(self, "Success", f"Saved to {dest}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Could not save file:\n{e}")
@@ -1344,69 +1399,10 @@ class ReaderTab(
             QMessageBox.critical(self, "Export Failed", str(e))
 
     def get_open_with_menu(self, parent_widget=None) -> QMenu:
-        """
-        Constructs a QMenu offering options to open the current PDF
-        in external applications (standard web browsers and system default viewer).
-        """
-        menu = QMenu("Open With...", parent_widget or self)
-        if not getattr(self, "current_path", None) or not os.path.exists(self.current_path):
-            act = menu.addAction("No document open")
-            act.setEnabled(False)
-            return menu
-
-        path = os.path.abspath(self.current_path)
-
-        def _open_in_browser(cmd):
-            try:
-                subprocess.Popen([cmd, path])
-            except Exception as e:
-                QMessageBox.warning(self, "Launch Error", f"Could not launch {cmd}: {e}")
-
-        def _open_system_default():
-            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
-
-        def _choose_other_app():
-            app_path, _ = QFileDialog.getOpenFileName(
-                self, "Choose Application", "/usr/bin", "Executables (*)"
-            )
-            if app_path:
-                try:
-                    subprocess.Popen([app_path, path])
-                except Exception as e:
-                    QMessageBox.warning(self, "Launch Error", f"Could not launch {app_path}: {e}")
-
-        act_default = menu.addAction("System Default Viewer")
-        act_default.triggered.connect(_open_system_default)
-        menu.addSeparator()
-
-        browsers = [
-            ("Google Chrome", ["google-chrome-stable", "google-chrome"]),
-            ("Mozilla Firefox", ["firefox"]),
-            ("Chromium", ["chromium-browser", "chromium"]),
-            ("Brave Browser", ["brave-browser", "brave"]),
-            ("Microsoft Edge", ["microsoft-edge-stable", "microsoft-edge"]),
-        ]
-
-        found_any_browser = False
-        for label, binaries in browsers:
-            for b in binaries:
-                if shutil.which(b):
-                    act = menu.addAction(label)
-                    act.triggered.connect(
-                        lambda checked=False, cmd=b: _open_in_browser(cmd)
-                    )
-                    found_any_browser = True
-                    break
-
-        if not found_any_browser:
-            act_none = menu.addAction("No standard web browsers detected")
-            act_none.setEnabled(False)
-
-        menu.addSeparator()
-        act_other = menu.addAction("Choose Other Application...")
-        act_other.triggered.connect(_choose_other_app)
-
-        return menu
+        """A menu of external applications that can open the current document."""
+        return build_open_with_menu(
+            parent_widget or self, getattr(self, "current_path", "") or "", "Open With..."
+        )
 
     def show_open_with_menu(self) -> None:
         """Displays the 'Open With' external application menu below the toolbar button."""
@@ -1555,6 +1551,7 @@ class ReaderTab(
             self.current_page_index = closest
             if self.current_doc:
                 self.txt_page.setText(str(closest + 1))
+            self.sidebar_nav.set_current_page(closest)
 
         if self._virtual_enabled:
             s, e = self._virtual_range
@@ -1565,7 +1562,6 @@ class ReaderTab(
                 self.rebuild_layout()
 
         self.render_visible_pages()
-        self._apply_signature_overlays()
 
     def ensure_visible(self, index: int) -> None:
         """
@@ -1817,6 +1813,7 @@ class ReaderTab(
             return
         idx = max(0, min(self.current_doc.page_count - 1, idx))
         self.current_page_index = idx
+        self.sidebar_nav.set_current_page(idx)
         if hasattr(self, "txt_page"):
             self.txt_page.setText(str(idx + 1))
         if (
@@ -2826,6 +2823,7 @@ class ReaderTab(
 
         arrow_url = arrow_path.replace("\\", "/")
 
+        self.toolbar_scroll.set_arrow_color(fg)
         self.toolbar.setStyleSheet(f"""
             QWidget {{ background: {color.name()}; color: {fg}; }}
             QPushButton {{ border: 1px solid transparent; padding: 6px; border-radius: 4px; background: transparent; }}
@@ -2881,6 +2879,7 @@ class ReaderTab(
         self.theme_mode = (self.theme_mode + 1) % 3
         self.settings.setValue("themeMode", self.theme_mode)
         self.apply_theme()
+        self.sidebar_nav.set_theme_mode(self.theme_mode)
 
         if not hasattr(self, "_rebuild_debounce_timer"):
             self._rebuild_debounce_timer = QTimer(self)
@@ -3065,8 +3064,8 @@ class ReaderTab(
             QListWidget#homeRecent::item:selected {{ background: {t["accent_soft"]}; }}
             #recentName {{ font-size: 14px; color: {t["text"]}; }}
             #recentDir {{ font-size: 12px; color: {t["faint"]}; }}
-            QScrollBar:vertical {{ background: transparent; width: 10px; }}
-            QScrollBar::handle:vertical {{ background: {t["border_strong"]}; border-radius: 4px; margin: 2px; min-height: 24px; }}
+            QScrollBar:vertical {{ background: transparent; width: 14px; }}
+            QScrollBar::handle:vertical {{ background: {t["border_strong"]}; border-radius: 5px; margin: 2px; min-height: 24px; }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
         """)
         self.lbl_drop_icon.setPixmap(tinted_pixmap("file-text", t["accent"], 36))
@@ -3075,6 +3074,7 @@ class ReaderTab(
 
     def apply_ui_theme(self, dark: bool) -> None:
         """Called by the main window when the interface theme changes."""
+        self.sidebar_nav.update_theme(dark)
         if not hasattr(self, "home_page_widget"):
             return
         self._home_dark_override = None
@@ -3183,6 +3183,10 @@ class ReaderTab(
                 (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
             )
 
+        self._schedule_fit_refresh()
+
+    def _schedule_fit_refresh(self) -> None:
+        """Re-fits the pages shortly after the space for them changes, in the fit zoom modes."""
         if (
             getattr(self, "current_doc", None)
             and getattr(self, "view_mode", None) == ViewMode.IMAGE
@@ -3190,6 +3194,7 @@ class ReaderTab(
             if getattr(self, "zoom_mode", None) in (
                 ZoomMode.FIT_WIDTH,
                 ZoomMode.FIT_HEIGHT,
+                ZoomMode.AUTO_FIT,
             ):
                 if not hasattr(self, "_resize_timer"):
                     self._resize_timer = QTimer(self)
@@ -3456,9 +3461,9 @@ class ReaderTab(
 
     def _get_page_chars(self, page_idx: int) -> List[tuple]:
         """
-        Returns the page's characters in reading order as (char, QRect, segment)
-        tuples in widget coordinates, using precise font metrics and robust
-        line clustering. Results are cached per page geometry.
+        Returns the page's characters in reading order as (char, QRect, run)
+        tuples in widget coordinates, built from PDFium's glyph boxes and
+        clustered into lines. Results are cached per page geometry.
         """
         widget = self.page_widgets.get(page_idx)
         if not widget or not self.current_doc:
@@ -3475,85 +3480,29 @@ class ReaderTab(
 
         if cache_key not in self._char_geometry_cache:
             if page_idx not in self.text_segments_cache:
-                self.text_segments_cache[page_idx] = (
-                    self.current_doc.get_text_segments(page_idx)
-                )
+                self.text_segments_cache[page_idx] = self._page_char_runs(page_idx)
 
-            segments = self.text_segments_cache[page_idx]
             raw_segments = []
-
-            def get_char_weight(ch: str) -> float:
-                if ch in "ijl|!':;., -`'\"1":
-                    return 0.45
-                elif ch in "mwMW@#%&":
-                    return 1.35
-                elif ch.isupper():
-                    return 1.15
-                elif ch in "frt":
-                    return 0.65
-                return 0.85
-
-            for seg_idx, (text, (l, t, r, b)) in enumerate(segments):
-                if not text:
-                    continue
-
-                seg_x = int(l * scale)
-                seg_w = max(1, int((r - l) * scale))
-                seg_h = max(1, int((t - b) * scale))
-                seg_y = int(logical_h - (t * scale))
-
-                # Align visual highlight box vertically with glyphs rather than font ascender ceiling
-                y_adj = max(0, int(seg_h * 0.10))
-                seg_y += y_adj
-                seg_h = max(1, int(seg_h * 0.90))
-
-                if rotation == 90:
-                    seg_x, seg_y = int(logical_h) - seg_y - seg_h, seg_x
-                    seg_w, seg_h = seg_h, seg_w
-                elif rotation == 180:
-                    seg_x, seg_y = (
-                        int(logical_w) - seg_x - seg_w,
-                        int(logical_h) - seg_y - seg_h,
-                    )
-                elif rotation == 270:
-                    seg_x, seg_y = seg_y, int(logical_w) - seg_x - seg_w
-                    seg_w, seg_h = seg_h, seg_w
-
-                if seg_h > logical_h * 0.5 or seg_w > logical_w * 0.8:
-                    continue
-
-                total_weight = sum(get_char_weight(c) for c in text) or 1.0
+            for seg_idx, (text, boxes) in enumerate(self.text_segments_cache[page_idx]):
                 char_boxes = []
-                cur_x = seg_x
-                for ch in text:
-                    w_ch = max(
-                        1, int((get_char_weight(ch) / total_weight) * seg_w)
-                    )
-                    char_boxes.append((ch, QRect(cur_x, seg_y, w_ch, seg_h)))
-                    cur_x += w_ch
-
-                if char_boxes:
-                    last_c, last_r = char_boxes[-1]
-                    rem = (seg_x + seg_w) - (last_r.x() + last_r.width())
-                    if rem != 0:
-                        char_boxes[-1] = (
-                            last_c,
-                            QRect(
-                                last_r.x(),
-                                last_r.y(),
-                                max(1, last_r.width() + rem),
-                                last_r.height(),
-                            ),
-                        )
-
+                for ch, box in zip(text, boxes):
+                    rect = self._pdf_box_to_widget(box, scale, logical_w, logical_h, rotation)
+                    char_boxes.append((ch, rect))
+                if not char_boxes:
+                    continue
+                bounds = QRect(char_boxes[0][1])
+                for _, r in char_boxes[1:]:
+                    bounds = bounds.united(r)
+                if bounds.height() > logical_h * 0.5 or bounds.width() > logical_w * 0.8:
+                    continue
                 raw_segments.append(
                     {
                         "seg_idx": seg_idx,
                         "text": text,
-                        "x": seg_x,
-                        "y": seg_y,
-                        "w": seg_w,
-                        "h": seg_h,
+                        "x": bounds.x(),
+                        "y": bounds.y(),
+                        "w": bounds.width(),
+                        "h": bounds.height(),
                         "char_boxes": char_boxes,
                     }
                 )
@@ -3605,6 +3554,107 @@ class ReaderTab(
             self._char_geometry_cache[cache_key] = all_chars
 
         return self._char_geometry_cache[cache_key]
+
+    @staticmethod
+    def _pdf_box_to_widget(
+        box: Tuple[float, float, float, float],
+        scale: float,
+        logical_w: float,
+        logical_h: float,
+        rotation: int,
+    ) -> QRect:
+        """Maps a (left, top, right, bottom) box in PDF points to widget pixels."""
+        l, t, r, b = box
+        x = l * scale
+        w = max(1.0, (r - l) * scale)
+        h = max(1.0, (t - b) * scale)
+        y = logical_h - t * scale
+        # Loose boxes span the font's full ascent; trimming the top keeps the
+        # highlight on the glyphs.
+        y += h * 0.10
+        h *= 0.90
+        if rotation == 90:
+            x, y, w, h = logical_h - y - h, x, h, w
+        elif rotation == 180:
+            x, y = logical_w - x - w, logical_h - y - h
+        elif rotation == 270:
+            x, y, w, h = y, logical_w - x - w, h, w
+        return QRect(round(x), round(y), max(1, round(w)), max(1, round(h)))
+
+    def _page_char_runs(
+        self, page_idx: int
+    ) -> List[Tuple[str, List[Tuple[float, float, float, float]]]]:
+        """
+        Splits a page's characters into runs of text on one line, each with a
+        box per character in PDF points. Uses PDFium's own glyph boxes when the
+        core provides them, and estimates widths inside each text segment
+        otherwise (older core builds).
+        """
+        doc = self.current_doc
+        if hasattr(doc, "get_char_boxes"):
+            return self._runs_from_char_boxes(doc.get_char_boxes(page_idx))
+        return self._runs_from_segments(doc.get_text_segments(page_idx))
+
+    @staticmethod
+    def _runs_from_char_boxes(chars: List[tuple]) -> List[tuple]:
+        runs: List[tuple] = []
+        text: List[str] = []
+        boxes: List[list] = []
+
+        def flush():
+            while text and text[-1].isspace():
+                text.pop()
+                boxes.pop()
+            if text:
+                runs.append(("".join(text), [tuple(b) for b in boxes]))
+            text.clear()
+            boxes.clear()
+
+        for ch, (l, t, r, b) in chars:
+            if ch in ("\r", "\n", "\x02"):
+                flush()
+                continue
+            empty = (r - l) <= 0.01 or (t - b) <= 0.01
+            if ch.isspace() and empty:
+                if text:
+                    pl, pt, pr, pb = boxes[-1]
+                    text.append(" ")
+                    boxes.append([pr, pt, pr, pb])
+                continue
+            if empty:
+                continue
+            if boxes:
+                pl, pt, pr, pb = boxes[-1]
+                line_h = max(pt - pb, t - b, 1.0)
+                jumped = abs((t + b) / 2 - (pt + pb) / 2) > line_h * 0.6
+                if jumped or l < pl - line_h:
+                    flush()
+            if text and text[-1] == " ":
+                # A generated space reaches up to the glyph that follows it.
+                boxes[-1][2] = max(boxes[-1][0], l)
+            text.append(ch)
+            boxes.append([l, t, r, b])
+        flush()
+        return runs
+
+    @staticmethod
+    def _runs_from_segments(segments: List[tuple]) -> List[tuple]:
+        from PySide6.QtGui import QFont, QFontMetricsF
+
+        metrics = QFontMetricsF(QFont("Serif", 100))
+        runs = []
+        for text, (l, t, r, b) in segments:
+            if not text:
+                continue
+            advances = [max(1.0, metrics.horizontalAdvance(c)) for c in text]
+            total = sum(advances)
+            boxes, x = [], l
+            for adv in advances:
+                w = (adv / total) * (r - l)
+                boxes.append((x, t, x + w, b))
+                x += w
+            runs.append((text, boxes))
+        return runs
 
     @staticmethod
     def _closest_char_index(all_chars: List[tuple], pos: QPoint) -> Optional[int]:
@@ -3699,14 +3749,18 @@ class ReaderTab(
         if start_idx is None or end_idx is None:
             return [], ""
 
-        self._sel_page = page_idx
-        if start_idx <= end_idx:
-            self._sel_anchor, self._sel_focus = start_idx, end_idx + 1
-        else:
-            self._sel_anchor, self._sel_focus = start_idx + 1, end_idx
-        return self._rects_for_char_range(
-            all_chars, min(start_idx, end_idx), max(start_idx, end_idx)
-        )
+        # Selection works on caret positions between characters: a letter is
+        # only included once the pointer passes its middle, as in text editors.
+        def caret(idx: int, pos: QPoint) -> int:
+            return idx + (1 if pos.x() > all_chars[idx][1].center().x() else 0)
+
+        anchor = caret(start_idx, start_pos)
+        focus = caret(end_idx, end_pos)
+        self._sel_page, self._sel_anchor, self._sel_focus = page_idx, anchor, focus
+        lo, hi = sorted((anchor, focus))
+        if lo == hi:
+            return [], ""
+        return self._rects_for_char_range(all_chars, lo, hi - 1)
 
     def _get_word_at_pos(
         self, page_idx: int, pos: QPoint
@@ -4145,6 +4199,11 @@ class ReaderTab(
 
     def cleanup(self) -> None:
         """Explicitly severs references to heavy resources to trigger native destructors."""
+        try:
+            self.flush_annotations_to_pdf()
+        except Exception as e:
+            print(f"[Warning] Could not store annotations in the PDF: {e}")
+        self.sidebar_nav.shutdown()
         self.scroll_timer.stop()
         self.autoscroll_timer.stop()
         self._stop_render_worker()
@@ -4257,6 +4316,7 @@ class PreviewReaderTab(ReaderTab):
             "search_bar",
             "ai_search_bar",
             "signature_banner",
+            "sidebar_nav",
         ):
             widget = getattr(self, bar, None)
             if widget is not None:
@@ -4269,10 +4329,6 @@ class PreviewReaderTab(ReaderTab):
         self._style_preview_banner(self._home_dark)
         self.preview_banner.setVisible(False)
         self.layout().insertWidget(0, self.preview_banner)
-
-        self.scroll.verticalScrollBar().setStyleSheet(
-            "QScrollBar:vertical { width: 8px; background: transparent; }"
-        )
 
     def _style_preview_banner(self, dark: bool) -> None:
         t = tokens(dark)

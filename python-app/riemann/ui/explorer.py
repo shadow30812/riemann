@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QToolButton,
     QTreeView,
     QVBoxLayout,
     QWidget,
@@ -90,12 +91,36 @@ class FileIconProxyModel(QSortFilterProxyModel):
 class FileExplorerPanel(QWidget):
     file_single_clicked = Signal(str)
     file_double_clicked = Signal(str)
+    collapse_requested = Signal()
 
     def __init__(self, parent=None, dark_mode=False):
         super().__init__(parent)
         self.dark_mode = dark_mode
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
+
+        self.header = QWidget(self)
+        self.header.setObjectName("ExplorerHeader")
+        self.header_layout = QHBoxLayout(self.header)
+        self.header_layout.setContentsMargins(10, 6, 8, 6)
+        self.header_layout.setSpacing(6)
+
+        self.lbl_folder_icon = QLabel(self.header)
+        self.lbl_folder_icon.setFixedSize(16, 16)
+
+        self.lbl_folder_title = QLabel("Explorer", self.header)
+
+        self.btn_collapse = QToolButton(self.header)
+        self.btn_collapse.setAutoRaise(True)
+        self.btn_collapse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_collapse.setToolTip("Collapse the folder view (Ctrl+Shift+F)")
+        self.btn_collapse.clicked.connect(self.collapse_requested.emit)
+
+        self.header_layout.addWidget(self.lbl_folder_icon)
+        self.header_layout.addWidget(self.lbl_folder_title, 1)
+        self.header_layout.addWidget(self.btn_collapse)
+        self.layout.addWidget(self.header)
 
         self.model = QFileSystemModel()
         self.model.setRootPath("")
@@ -107,6 +132,8 @@ class FileExplorerPanel(QWidget):
         self.tree = QTreeView()
         self.tree.setModel(self.proxy)
         self.tree.setHeaderHidden(True)
+        self.tree.setEditTriggers(QTreeView.EditTrigger.NoEditTriggers)
+        self.tree.setSelectionBehavior(QTreeView.SelectionBehavior.SelectRows)
         for i in range(1, 4):
             self.tree.setColumnHidden(i, True)
 
@@ -116,20 +143,32 @@ class FileExplorerPanel(QWidget):
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_context_menu)
 
-        self.layout.addWidget(self.tree)
+        self.layout.addWidget(self.tree, 1)
         self.current_path = ""
         self.update_theme(dark_mode)
 
     def set_path(self, path: str):
         self.current_path = path
+        self.model.setRootPath(path)
         idx = self.model.index(path)
         proxy_idx = self.proxy.mapFromSource(idx)
         self.tree.setRootIndex(proxy_idx)
+        folder_name = os.path.basename(path) or path
+        self.lbl_folder_title.setText(folder_name)
+        self.lbl_folder_title.setToolTip(path)
 
     def update_theme(self, dark_mode: bool):
         self.dark_mode = dark_mode
         self.proxy.set_dark_mode(dark_mode)
         t = tokens(dark_mode)
+        self.header.setStyleSheet(
+            f"#ExplorerHeader {{ background-color: {t['surface']}; border-bottom: 1px solid {t['border']}; }}"
+            f"#ExplorerHeader QLabel {{ color: {t['text']}; font-weight: 600; font-size: 12px; background: transparent; }}"
+            f"#ExplorerHeader QToolButton {{ border: none; border-radius: 6px; padding: 2px; }}"
+            f"#ExplorerHeader QToolButton:hover {{ background: {t['raised']}; }}"
+        )
+        self.lbl_folder_icon.setPixmap(tinted_pixmap("folder", t["accent"], 16))
+        self.btn_collapse.setIcon(tinted_icon("chevron-left", t["muted"], 16))
         self.tree.setStyleSheet(
             f"QTreeView {{ background-color: {t['canvas']}; color: {t['text']}; border: none; outline: none; padding: 4px; }} "
             f"QTreeView::item {{ padding: 3px 2px; border-radius: 6px; }} "
@@ -140,34 +179,54 @@ class FileExplorerPanel(QWidget):
     def _on_clicked(self, index: QModelIndex):
         source_idx = self.proxy.mapToSource(index)
         if not self.model.isDir(source_idx):
-            self.file_single_clicked.emit(self.model.filePath(source_idx))
+            path = self.model.filePath(source_idx)
+            if path:
+                self.file_single_clicked.emit(path)
 
     def _on_double_clicked(self, index: QModelIndex):
         source_idx = self.proxy.mapToSource(index)
         if not self.model.isDir(source_idx):
-            self.file_double_clicked.emit(self.model.filePath(source_idx))
+            path = self.model.filePath(source_idx)
+            if path:
+                self.file_double_clicked.emit(path)
 
     def _on_context_menu(self, pos):
+        from .components import build_open_with_menu
+
         index = self.tree.indexAt(pos)
-        if not index.isValid():
+        if index.isValid():
+            source_idx = self.proxy.mapToSource(index)
+            path = self.model.filePath(source_idx)
+            is_dir = self.model.isDir(source_idx)
+        else:
+            path, is_dir = self.current_path, True
+        if not path:
             return
 
-        source_idx = self.proxy.mapToSource(index)
-        if self.model.isDir(source_idx):
-            path = self.model.filePath(source_idx)
-            menu = QMenu(self)
+        menu = QMenu(self)
+        act_full = act_preview = add_fav = None
+        if is_dir:
             add_fav = menu.addAction("Add to Favorites")
-            action = menu.exec(self.tree.viewport().mapToGlobal(pos))
+        else:
+            act_full = menu.addAction("Open in Full Mode")
+            act_preview = menu.addAction("Open in Preview Mode")
+        menu.addSeparator()
+        menu.addMenu(build_open_with_menu(menu, path, "Open in External Application ↗"))
+        action = menu.exec(self.tree.viewport().mapToGlobal(pos))
 
-            if action == add_fav:
-                settings = QSettings("Riemann", "Favorites")
-                favs = settings.value("folders", [], type=list)
-                if path not in favs:
-                    favs.append(path)
-                    settings.setValue("folders", favs)
-                    QMessageBox.information(
-                        self, "Favorites", "Folder added to favorites."
-                    )
+        if action is None:
+            return
+        if action == act_full:
+            self.file_double_clicked.emit(path)
+        elif action == act_preview:
+            self.file_single_clicked.emit(path)
+        elif action == add_fav:
+            settings = QSettings("Riemann", "Favorites")
+            favs = settings.value("folders", [], type=list)
+            if path not in favs:
+                favs.append(path)
+                settings.setValue("folders", favs)
+                QMessageBox.information(self, "Favorites", "Folder added to favorites.")
 
 
 class FolderHomeTab(QWidget):
@@ -311,8 +370,8 @@ class FolderHomeTab(QWidget):
             QListWidget#RecentList::item:selected {{ background-color: {t["accent_soft"]}; }}
             #recentName {{ font-size: 14px; color: {t["text"]}; }}
             #recentDir {{ font-size: 12px; color: {t["faint"]}; }}
-            QScrollBar:vertical {{ background: transparent; width: 10px; }}
-            QScrollBar::handle:vertical {{ background: {t["border_strong"]}; border-radius: 4px; margin: 2px; min-height: 24px; }}
+            QScrollBar:vertical {{ background: transparent; width: 14px; }}
+            QScrollBar::handle:vertical {{ background: {t["border_strong"]}; border-radius: 5px; margin: 2px; min-height: 24px; }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
         """)
         self.btn_open.setIcon(tinted_icon("folder", t["accent_text"], 18))
