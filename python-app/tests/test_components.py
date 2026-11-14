@@ -145,3 +145,33 @@ def test_tab_bar_drop_index(qtbot):
     assert bar.drop_index(bar.tabRect(0).topLeft()) == 0
     assert bar.drop_index(bar.tabRect(1).center() + QPoint(5, 0)) == 2
     assert bar.drop_index(QPoint(bar.width() - 1, 5)) == 3
+
+
+def test_drop_back_into_same_strip_moves_tab(qtbot):
+    widget = DraggableTabWidget()
+    qtbot.addWidget(widget)
+    pages = [QWidget() for _ in range(3)]
+    for page, name in zip(pages, "ABC"):
+        widget.addTab(page, name)
+    DraggableTabBar._dragged_widget = pages[0]
+    DraggableTabBar._dragged_source = widget
+    assert DraggableTabBar.insert_dragged_tab(widget, 3)
+    assert [widget.tabText(i) for i in range(3)] == ["B", "C", "A"]
+    assert widget.currentWidget() is pages[0]
+
+
+def test_drop_into_other_strip_takes_tab_out_of_source(qtbot):
+    source, target = DraggableTabWidget(), DraggableTabWidget()
+    qtbot.addWidget(source)
+    qtbot.addWidget(target)
+    page = QWidget()
+    source.addTab(page, "A")
+    source.addTab(QWidget(), "B")
+    target.addTab(QWidget(), "C")
+    DraggableTabBar._dragged_widget = page
+    DraggableTabBar._dragged_source = source
+    DraggableTabBar._dragged_title = "A"
+    assert DraggableTabBar.insert_dragged_tab(target, 0)
+    assert [source.tabText(i) for i in range(source.count())] == ["B"]
+    assert target.indexOf(page) == 0
+    DraggableTabBar._dragged_source = None

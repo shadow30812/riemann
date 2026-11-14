@@ -2770,7 +2770,10 @@ class ReaderTab(
         Args:
             factor (float): Step coefficient actively shaping proportional bounds efficiently seamlessly completely automatically correctly.
         """
-        self.manual_scale *= factor
+        # Step from the zoom on screen. In the fit modes manual_scale still
+        # holds the last manual zoom (even from an earlier session), so
+        # stepping from it jumped to an unrelated size.
+        self.manual_scale = max(0.1, min(self.calculate_scale() * factor, 5.0))
         self.zoom_mode = ZoomMode.MANUAL
         self.on_zoom_changed_internal()
 
@@ -3020,6 +3023,10 @@ class ReaderTab(
         outer.addWidget(left_box, 5)
         outer.addLayout(right_col, 6)
         outer.addStretch(1)
+        # The two columns need about 710 px. Without an explicit minimum that
+        # becomes every reader tab's minimum width, and with it the window's,
+        # which stops the desktop from tiling the window to half the screen.
+        self.home_page_widget.setMinimumSize(1, 1)
 
         self._style_home_page(self._home_dark)
 

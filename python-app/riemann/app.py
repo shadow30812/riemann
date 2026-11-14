@@ -2438,12 +2438,17 @@ class RiemannWindow(QMainWindow):
             active = pane is self._active_pane
             if split:
                 color = t["accent"] if active else t["border_strong"]
-                pane.setStyleSheet(
+                sheet = (
                     f"QTabWidget#{pane.objectName()}::pane {{ border: 2px solid {color};"
                     f" border-radius: 10px; top: -1px; }}"
                 )
             else:
-                pane.setStyleSheet("")
+                sheet = ""
+            # This runs on every tab change, including the swaps of a tab
+            # being dragged. Re-applying a stylesheet re-polishes the whole
+            # pane and resets the tab bar mid-drag, so only apply changes.
+            if pane.styleSheet() != sheet:
+                pane.setStyleSheet(sheet)
             badge = self.pane_badges[pane]
             badge.update_theme(t)
             if split and not active and pane.count():

@@ -11,6 +11,7 @@ import subprocess
 import sys
 from typing import Optional
 
+import shiboken6
 from PySide6.QtCore import QEvent, QMimeData, QPoint, QRect, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
@@ -166,7 +167,7 @@ class SplitPaneBadge(QFrame):
         self.hide()
 
     def update_theme(self, t: dict) -> None:
-        self.setStyleSheet(
+        sheet = (
             f"#SplitPaneBadge {{ background: {t['surface']}; border: 1px solid {t['border_strong']};"
             f" border-radius: 15px; }}"
             f"#SplitPaneBadge QLabel {{ color: {t['text']}; background: transparent; font-size: 12px; }}"
@@ -174,6 +175,8 @@ class SplitPaneBadge(QFrame):
             f" border-radius: 11px; }}"
             f"#SplitPaneBadge QPushButton:hover {{ background: {t['raised']}; color: {t['text']}; }}"
         )
+        if self.styleSheet() != sheet:
+            self.setStyleSheet(sheet)
 
     def show_for(self, title: str, icon: QIcon) -> None:
         metrics = self.label.fontMetrics()
@@ -435,6 +438,20 @@ class DraggableTabBar(QTabBar):
         widget = cls._dragged_widget
         if widget is None:
             return False
+        # The tab stays in its strip for the whole drag, so a drop back into
+        # the same strip is a move, and a drop elsewhere takes it out first.
+        current = tab_widget.indexOf(widget)
+        if current != -1:
+            target = max(0, min(index, tab_widget.count()))
+            if target > current:
+                target -= 1
+            tab_widget.tabBar().moveTab(current, min(target, tab_widget.count() - 1))
+            tab_widget.setCurrentWidget(widget)
+            cls._dragged_widget = None
+            return True
+        source = cls._dragged_source
+        if source is not None and shiboken6.isValid(source) and source.indexOf(widget) != -1:
+            source.removeTab(source.indexOf(widget))
         index = max(0, min(index, tab_widget.count()))
         idx = tab_widget.insertTab(index, widget, cls._dragged_icon, cls._dragged_title)
         tab_widget.tabBar().setTabData(idx, cls._dragged_data)
@@ -506,7 +523,6 @@ class DraggableTabBar(QTabBar):
         )
         drag.setHotSpot(QPoint(100, 20))
 
-        tab_widget.removeTab(tab_index)
         result = drag.exec(Qt.DropAction.MoveAction)
 
         if result == Qt.DropAction.IgnoreAction and cls._dragged_widget is widget:
@@ -522,9 +538,8 @@ class DraggableTabBar(QTabBar):
                 )
                 new_window.show()
                 target = new_window.findChild(QTabWidget)
-                cls.insert_dragged_tab(target or tab_widget, target.count() if target else tab_index)
-            else:
-                cls.insert_dragged_tab(tab_widget, tab_index)
+                if target is not None:
+                    cls.insert_dragged_tab(target, target.count())
 
         cls._dragged_widget = None
         cls._dragged_tooltip = ""

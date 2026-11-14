@@ -383,3 +383,28 @@ def test_preview_banner_follows_the_interface_theme(qapp):
     finally:
         tab.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_zoom_step_starts_from_the_fit_scale():
+    from riemann.ui.reader.tab import ReaderTab, ZoomMode
+
+    class Fake:
+        zoom_mode = ZoomMode.FIT_WIDTH
+        manual_scale = 0.4
+        changed = 0
+
+        def calculate_scale(self):
+            return self.manual_scale if self.zoom_mode == ZoomMode.MANUAL else 1.5
+
+        def on_zoom_changed_internal(self):
+            self.changed += 1
+
+    fake = Fake()
+    ReaderTab.zoom_step(fake, 0.9)
+    assert fake.zoom_mode == ZoomMode.MANUAL
+    assert abs(fake.manual_scale - 1.35) < 1e-9
+    ReaderTab.zoom_step(fake, 0.9)
+    assert abs(fake.manual_scale - 1.215) < 1e-9
+    fake.manual_scale = 4.9
+    ReaderTab.zoom_step(fake, 1.1)
+    assert fake.manual_scale == 5.0
