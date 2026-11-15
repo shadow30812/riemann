@@ -21,6 +21,22 @@ do not let them place windows, so snapping only works on X11 (including
 XWayland), Windows and macOS. On a Wayland session it is therefore off by
 default; turning it on makes Riemann run through XWayland (see
 `prefer_xwayland_for_snapping`), which can look soft under fractional scaling.
+
+Notes:
+
+__init__: Windows reports the button truthfully during its move loop; X servers
+(XWayland especially) can report a stale state while the window manager holds
+the pointer, so there an idle timeout ends the drag. Size to return to when a
+snapped window is dragged off.
+
+_on_window_moved: Only a move that carries the pointer along is a title-bar
+drag; that excludes restores, maximise/unmaximise and window-manager tiling.
+
+_apply: Rect is where the whole frame should go; setGeometry places the client
+area.
+
+_unsnap_for_drag: The window manager owns the position during the drag; only
+the size is ours to change.
 """
 
 import ctypes
@@ -31,8 +47,10 @@ import time
 from typing import Optional
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPen
+from PySide6.QtGui import QCursor, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import QWidget
+
+from ..ui.palette import app_is_dark, qcolor, tokens
 
 EDGE_PX = 8
 CORNER_FRACTION = 0.22
@@ -52,12 +70,10 @@ def snapping_default() -> bool:
 
 def prefer_xwayland_for_snapping() -> bool:
     """
-    On a Wayland session, asks Qt to use XWayland (the xcb platform) so the
-    window can be positioned. Must run before QApplication is created. Does
-    nothing if the user already chose a platform or XWayland is unavailable.
-
-    Returns:
-        bool: True if the platform was switched to xcb.
+    On a Wayland session, asks Qt to use XWayland (the xcb platform) so the window can
+    be positioned. Must run before QApplication is created. Does nothing if the user
+    already chose a platform or XWayland is unavailable. Returns True if it switched to
+    xcb.
     """
     if not sys.platform.startswith("linux"):
         return False
@@ -84,9 +100,6 @@ class _ButtonState:
         self._x11 = None
         self._x11_display = None
         self._win_user32 = None
-        # Windows reports the button truthfully during its move loop; X servers
-        # (XWayland especially) can report a stale state while the window
-        # manager holds the pointer, so there an idle timeout ends the drag.
         self.reliable = False
 
         if sys.platform == "win32":
@@ -174,8 +187,9 @@ class SnapPreview(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = self.rect().adjusted(6, 6, -6, -6)
-        painter.setBrush(QColor(0, 127, 212, 60))
-        painter.setPen(QPen(QColor(0, 127, 212, 200), 2))
+        accent = tokens(app_is_dark())["accent"]
+        painter.setBrush(qcolor(accent, 60))
+        painter.setPen(QPen(qcolor(accent, 200), 2))
         painter.drawRoundedRect(rect, 10, 10)
         painter.end()
 
@@ -196,7 +210,7 @@ class WindowSnapper(QObject):
         self._dragging = False
         self._zone: Optional[str] = None
         self._suppress_until = 0.0
-        self._restore_size = None  # size to return to when a snapped window is dragged off
+        self._restore_size = None
 
         self._poll = QTimer(self)
         self._poll.setInterval(40)
@@ -213,7 +227,6 @@ class WindowSnapper(QObject):
         if not enabled:
             self._end_drag(apply=False)
 
-    # ---- Drag tracking ---------------------------------------------------
 
     def eventFilter(self, obj, event) -> bool:
         if (
@@ -253,8 +266,6 @@ class WindowSnapper(QObject):
         self._last_pos = frame_pos
         self._last_move_time = now
 
-        # Only a move that carries the pointer along is a title-bar drag; that
-        # excludes restores, maximise/unmaximise and window-manager tiling.
         button = self._left_down()
         if not moved or button is False or not follows_pointer:
             return
@@ -292,7 +303,6 @@ class WindowSnapper(QObject):
         if apply and zone:
             self._apply(zone)
 
-    # ---- Zones -------------------------------------------------------------
 
     def _screen_at(self, point: QPoint):
         return QGuiApplication.screenAt(point) or self.window.screen()
@@ -357,7 +367,6 @@ class WindowSnapper(QObject):
         self._preview.show()
         self._preview.raise_()
 
-    # ---- Applying ----------------------------------------------------------
 
     def _apply(self, zone: str) -> None:
         win = self.window
@@ -375,7 +384,6 @@ class WindowSnapper(QObject):
         if win.isMaximized():
             win.showNormal()
 
-        # rect is where the whole frame should go; setGeometry places the client area.
         frame, inner = win.frameGeometry(), win.geometry()
         left = inner.left() - frame.left()
         top = inner.top() - frame.top()
@@ -389,7 +397,5 @@ class WindowSnapper(QObject):
         self._restore_size = None
         if size is None or self.window.isMaximized():
             return
-        # The window manager owns the position during the drag; only the size
-        # is ours to change.
         self._suppress_until = time.monotonic() + 0.2
         self.window.resize(size)

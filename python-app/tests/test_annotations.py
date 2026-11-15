@@ -15,6 +15,7 @@ class DummyAnnotationReader(AnnotationsMixin):
     def __init__(self):
         self.current_path = "/fake/path/doc.pdf"
         self.annotations = {}
+        self._map_to_unrotated = lambda rx, ry: (rx, ry)
         self.undo_stack = []
         self.redo_stack = []
         self.rendered_pages = set()
@@ -36,10 +37,13 @@ def reader():
     return DummyAnnotationReader()
 
 
-def test_get_annotation_path(reader):
+def test_get_annotation_path(reader, tmp_path, monkeypatch):
+    from riemann.core import annotation_store
+
+    monkeypatch.setattr(annotation_store, "_shared", annotation_store.AnnotationStore(str(tmp_path / "annotations")))
+    reader._anno_json_cache = None
     path = reader._get_annotation_path()
-    assert "riemann" in path
-    assert "annotations" in path
+    assert path.startswith(str(tmp_path / "annotations"))
     assert path.endswith(".json")
 
     reader.current_path = ""
@@ -71,17 +75,17 @@ def test_load_annotations_new_format(mock_open, mock_exists, reader):
     assert reader._anno_file_sig == [10, 20]
 
 
-@patch("builtins.open", new_callable=MagicMock)
-def test_save_annotations(mock_open, reader):
+def test_save_annotations(reader):
     reader.annotations = {"1": [{"type": "note", "text": "test"}]}
     reader._anno_file_sig = None
-    with patch("json.dump") as mock_json_dump, patch(
+    with patch(
+        "riemann.ui.reader.mixins.annotations.write_json_atomic"
+    ) as mock_write, patch(
         "riemann.ui.reader.mixins.annotations.store_in_pdf_enabled", return_value=False
     ):
         reader.save_annotations()
-        mock_json_dump.assert_called_once_with(
-            {"pages": reader.annotations, "pdf": None},
-            mock_open.return_value.__enter__.return_value,
+        mock_write.assert_called_once_with(
+            reader._get_annotation_path(), {"pages": reader.annotations, "pdf": None, "written": None}
         )
 
 
@@ -198,21 +202,18 @@ def test_get_comment_at_pos(reader):
                 "page": 0,
                 "author": "Alice",
                 "contents": "A note",
-                "rel_rect": (0.1, 0.2, 0.3, 0.4),  # x1=0.1, y1=0.2, x2=0.3, y2=0.4
+                "rel_rect": (0.1, 0.2, 0.3, 0.4),
             }
         ]
     }
 
-    # Hit inside bounding box (page size 1000x1000, point at 200, 300 -> rx=0.2, ry=0.3)
     hit = reader._get_comment_at_pos(0, QPoint(200, 300), page_w=1000, page_h=1000)
     assert hit is not None
     assert hit["author"] == "Alice"
 
-    # Miss far away (800, 800 -> rx=0.8, ry=0.8)
     miss = reader._get_comment_at_pos(0, QPoint(800, 800), page_w=1000, page_h=1000)
     assert miss is None
 
-    # Miss wrong page
     miss_page = reader._get_comment_at_pos(1, QPoint(200, 300), page_w=1000, page_h=1000)
     assert miss_page is None
 
@@ -230,7 +231,6 @@ def test_comment_view_dialog():
     assert txt_edit is not None
     assert txt_edit.toPlainText() == "Please revise this section."
 
-    # Test copy to clipboard
     with patch("PySide6.QtWidgets.QApplication.clipboard") as mock_clipboard:
         mock_cb_inst = MagicMock()
         mock_clipboard.return_value = mock_cb_inst

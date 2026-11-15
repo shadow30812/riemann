@@ -98,7 +98,8 @@
             if (!video) return;
 
             const port = window.RIEMANN_CAPTIONS_PORT || 8765;
-            this.ws = new WebSocket("ws://127.0.0.1:" + port);
+            const token = encodeURIComponent(window.RIEMANN_CAPTIONS_TOKEN || "");
+            this.ws = new WebSocket("ws://127.0.0.1:" + port + "/?token=" + token);
 
             this.ws.onmessage = (event) => {
                 if (event.data.trim()) {

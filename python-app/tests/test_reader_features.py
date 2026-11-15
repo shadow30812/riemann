@@ -25,7 +25,7 @@ def _line(text, y, x0=10, char_w=8, h=12, start_seg=0):
 
 @pytest.fixture
 def reader(qapp):
-    with patch("riemann.ui.reader.tab.QSettings"):
+    with patch("riemann.ui.reader.tab.app_settings"):
         tab = ReaderTab()
     tab.current_doc = MagicMock()
     tab.current_doc.page_count = 1
@@ -76,7 +76,7 @@ def test_shift_end_then_home_stays_on_the_same_line(reader):
     assert reader.current_selected_text == "Hello world"
     _press(reader, Qt.Key.Key_Home)
     assert reader.current_selected_text == ""
-    reader._sel_anchor = reader._sel_focus = 13  # inside "Second"
+    reader._sel_anchor = reader._sel_focus = 13
     _press(reader, Qt.Key.Key_Home)
     assert reader.current_selected_text == "Se"
 
@@ -98,7 +98,7 @@ def test_page_image_cache_evicts_oldest_over_budget():
     owner = ("tab", 1)
     cache.put((owner, 0, 1.0, 0), img)
     cache.put((owner, 1, 1.0, 0), img)
-    cache.get((owner, 0, 1.0, 0))  # page 0 becomes most recently used
+    cache.get((owner, 0, 1.0, 0))
     cache.put((owner, 2, 1.0, 0), img)
 
     assert cache.get((owner, 1, 1.0, 0)) is None
@@ -132,7 +132,7 @@ def test_overlays_leave_shared_pixmap_alone_when_idle(reader):
     reader.search_result = None
     reader.annotations = {}
     reader._render_overlays(0, pix, 1.0, 60, 80)
-    assert pix.cacheKey() == key  # no painter, so no copy of the page
+    assert pix.cacheKey() == key
 
     reader.search_result = (0, [(1.0, 20.0, 10.0, 5.0)])
     reader._render_overlays(0, pix, 1.0, 60, 80)
@@ -189,7 +189,7 @@ def test_read_comments_from_core_maps_rects_and_dates():
 
 
 def test_silent_scroll_moves_the_content_but_skips_the_scroll_handler(qapp):
-    with patch("riemann.ui.reader.tab.QSettings"):
+    with patch("riemann.ui.reader.tab.app_settings"):
         tab = ReaderTab()
     tab.resize(800, 600)
     tab.show()
@@ -206,7 +206,7 @@ def test_silent_scroll_moves_the_content_but_skips_the_scroll_handler(qapp):
     tab._set_scroll_value_silently(1200)
 
     assert tab.scroll.verticalScrollBar().value() == 1200
-    assert tab.scroll_content.pos().y() == -1200  # the pages really moved
+    assert tab.scroll_content.pos().y() == -1200
     assert seen_ignore == [True]
     assert getattr(tab, "_ignore_scroll", False) is False
     tab.deleteLater()

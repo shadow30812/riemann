@@ -44,8 +44,11 @@ if ($env:PYTHONPATH) {
     $env:PYTHONPATH = "$(Get-Location)\python-app"
 }
 
-$EXCLUDES = "--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow-import-to=cv2 --nofollow-import-to=pix2tex --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas --nofollow-import-to=nvidia --nofollow-import-to=fitz --nofollow-import-to=pymupdf"
+$EXCLUDES = "--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow-import-to=cv2 --nofollow-import-to=pix2tex --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas --nofollow-import-to=nvidia"
 $EXCLUDE_ARGS = $EXCLUDES.Split(" ")
+
+python scripts/fetch_pdfium.py win-x64
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 python -m nuitka `
     --onefile `
@@ -54,7 +57,10 @@ python -m nuitka `
     --include-package=riemann `
     --include-data-dir=python-app/riemann/assets=riemann/assets `
     --noinclude-data-files=riemann/assets/riemann_ai_engine/* `
-    --include-raw-dir=python-app/riemann/assets/riemann_ai_engine=riemann/assets/riemann_ai_engine `
+    --include-package=onnxruntime `
+    --include-package-data=onnxruntime `
+    --include-package=tokenizers `
+    --include-package=uvicorn `
     --include-data-file=libs/pdfium.dll=pdfium.dll `
     --include-windows-runtime-dlls=no `
     --windows-console-mode=disable `

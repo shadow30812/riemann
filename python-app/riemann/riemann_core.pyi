@@ -22,6 +22,10 @@ class RenderResult:
     data: bytes
     """The raw BGRA pixel data."""
 
+    scale: float
+    """The scale actually rendered at: the one requested, or less when the
+    render would exceed 64 megapixels."""
+
 class RiemannDocument:
     """
     A thread-safe wrapper around a loaded PDF document.
@@ -124,17 +128,22 @@ class RiemannDocument:
         """
         ...
 
-    def ocr_page(self, page_index: int, scale: float) -> str:
+    def ocr_page(self, page_index: int, scale: float, languages: str = "eng") -> str:
         """
         Performs Optical Character Recognition (OCR) on the page.
 
         Args:
             page_index: Zero-based index of the page.
             scale: Resolution multiplier (higher is better for accuracy).
+            languages: Tesseract languages joined by "+", such as "eng+deu".
 
         Returns:
             The text recognized by the OCR engine.
         """
+        ...
+
+    def ocr_pages(self, page_indices: List[int], scale: float, languages: str = "eng") -> List[str]:
+        """Reads several pages with one Tesseract process; one string per page, in order."""
         ...
 
     def search_page(
@@ -189,24 +198,6 @@ class RiemannDocument:
         Returns:
             A list of (depth, title, page_index) tuples; page_index is -1 when
             an entry has no destination inside the document.
-        """
-        ...
-
-    def create_markup_annotation(
-        self,
-        page_index: int,
-        rects: List[Tuple[float, float, float, float]],
-        subtype: str,
-        color: Tuple[int, int, int],
-    ) -> None:
-        """
-        Adds a markup annotation (highlight, underline, strikeout) to the page.
-
-        Args:
-            page_index: Zero-based index of the page.
-            rects: List of bounding boxes to annotate.
-            subtype: The annotation type ("highlight", "underline", "strikeout").
-            color: RGB color tuple (0-255).
         """
         ...
 

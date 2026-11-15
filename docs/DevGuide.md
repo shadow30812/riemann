@@ -78,7 +78,7 @@ Responsible for:
 * PDF rendering
 * text extraction, including per-character glyph boxes (`get_char_boxes`)
 * the document outline (`get_outline`)
-* OCR delegation
+* OCR delegation: `ocr_page` for one page; `ocr_pages` renders a list of pages under the PDFium lock, encodes them as PNG, and reads them all with one Tesseract run outside the lock (`recognize_pngs` in `rust-ocr-worker`, a list file in a private temporary folder; pages come back separated by form feeds). The reader's "Recognise text in pages…" entry in the Pages menu runs it eight pages at a time in `OcrPagesThread`, with progress and Cancel, and shows the text in a window with "Save as text…".
 * search indexing
 * page geometry
 * annotation embedding
@@ -107,40 +107,28 @@ This layer is isolated from the Qt widget hierarchy.
 
 ---
 
-## AI Sidecar
+## AI Engine
 
-AI inference is intentionally isolated into a separate FastAPI subsystem.
-
-Reasons:
-
-* dependency isolation
-* PyTorch compatibility stability
-* process separation
-* crash containment
-* simplified model lifecycle management
+Semantic search runs in a separate FastAPI process started by the app (`core/ai_server.py`, ONNX on onnxruntime), for process separation and crash containment. See section 11.
 
 ---
 
 # 2. Application Lifecycle & Main Window
 
-## `riemann/app.py`
+## `riemann/app.py` and `riemann/window/`
 
-This file is the primary orchestration layer of the application.
+`app.py` holds `run()` (Chromium flags, profiles, the theme, the tooltip skin, logging) and `RiemannWindow.__init__`. The window's behaviour is split into mixins in `window/`, combined as `RiemannWindow(DocumentsMixin, SessionMixin, SystemMixin, MenusMixin, PanesMixin, TabsMixin, ChromeMixin, FoldersMixin, QMainWindow)`:
 
-Core responsibilities:
+* `documents.py`: opening PDFs and other files, preview versus extended tabs, the signature dock.
+* `session.py`: saving and restoring tabs, crash recovery, the clean-exit flag.
+* `system.py`: System tabs (Settings, History, Bookmarks, Downloads, Library). `open_system_page(page, section)` opens each page at most once and focuses it if it is already open.
+* `menus.py`: the menu bar, the command palette (Ctrl+Shift+P), the mini player in the menu corner.
+* `panes.py`: split view and `open_url_beside`.
+* `tabs.py`: tab creation, closing, the closed-tab stack.
+* `chrome.py`: full screen and the auto-hiding bars.
+* `folders.py`: workspaces and the file explorer.
 
-* constructing the main window
-* initializing Chromium
-* configuring global profiles
-* split-view coordination
-* tab routing
-* session persistence
-* global shortcuts
-* single-instance handling
-* media cleanup
-* dialog orchestration
-
-The application entrypoint eventually routes into `RiemannWindow`.
+Helpers with no window state live beside them: `instance.py` (single-instance handoff), `desktop.py` (Linux desktop integration), `dialogs.py`, `common.py` (`get_resource_path`, `window_class()`). `app.py` re-exports the old names in `__all__`, so `from riemann.app import ...` keeps working.
 
 **Collapse Tabs.** `set_tabs_collapsed()` hides both tab bars (the main strip, or the column with vertical tabs, and the side pane's strip) and saves the state under `app/tabs_collapsed`. The View menu action, the `btn_collapse_tabs` button in the menu corner (icon `list-collapse`, `list-collapse-white` in dark mode) and Ctrl+Shift+B all route through it and are kept in sync with signals blocked. Fullscreen hides the tab bars on its own; on the way out, `_restore_tab_bars()` respects the collapsed state.
 
@@ -234,9 +222,16 @@ Fullscreen mode in `RiemannWindow` integrates auto-hiding controls to maximize r
 
 ---
 
-## Toolbar Overflow
+## Reader Toolbar Layouts
 
-The reader's buttons live in `ToolbarStrip` (`ui/reader/widgets.py`), a scroll area that never squeezes them. When the row is wider than the pane, `fit()` drops the icons from 20 to 16 px; whatever still does not fit scrolls with the mouse wheel, with the chevron buttons that appear at an edge hiding more buttons, or by resting the pointer within 36 px of that edge (a 16 ms timer, so it works over the buttons too).
+`ToolbarMixin._setup_toolbar_buttons` creates every reader button once. `ToolbarLayout` (`ui/reader/toolbar_layout.py`) decides where each one sits, from the layout chosen in Settings, Appearance, Reader toolbar (`reader/toolbar_layout`): Default, A (grouped menus), B (ribbon), C (side rail), D (floating pill) or Custom (`reader/toolbar_custom`, JSON of command to place).
+
+* Places: the top bar, a side rail, a ribbon row, a floating pill, a menu, or hidden. `COMMANDS` lists every command with its widgets, label, shortcut, group and fold priority. A button missing from `COMMANDS` shows nowhere.
+* `OverflowBox` folds the lowest-priority items into a "⋯" menu when the bar is too narrow, and unfolds them when there is room again.
+* Default is layout C plus the floating page controls in pure full screen (state 2). The rail can be hidden from its context menu and brought back from the bar's "⋯" menu.
+* Moving a layout reparents widgets into a hidden `parking` widget before the old containers are deleted, so no button is ever destroyed.
+* Menu entries mirror the real button (icon, checked, enabled) and click it, so behaviour stays in one place. The command palette lists folded and hidden buttons through their `riemannCommand` property.
+* Changing the setting emits `notifier().changed`; every open reader re-applies its layout.
 
 ---
 
@@ -258,7 +253,7 @@ Do not remove this logic unless replacing it with another shutdown-safe media st
 
 ## Settings Infrastructure & UI Scaling
 
-Settings are primarily persisted through `QSettings`.
+Settings are persisted through `QSettings`, always obtained from `core.settings.app_settings()` (the `"Riemann", "PDFReader"` store kept from the first releases). The same module holds `get_dialog_directory` / `save_last_directory`, which every file dialog uses, and list helpers (`string_list`, `set_string_list`). The `Favorites`, `BrowserSettings` and `FaviconCache` stores stay separate.
 
 Persistent categories include:
 
@@ -272,14 +267,16 @@ Persistent categories include:
 * `app/ui_scale`: UI Display Scaling percentage (50% to 250%)
 * `reader/open_in_preview_mode`: Default document opening mode (Extended vs Preview)
 
+The settings UI is the Settings System tab (`ui/system/settings_tab.py`), with sections for appearance, documents, browser, permissions, AI, privacy and about. Changes apply live; settings that need a restart say so inline.
+
 ### UI Display Scaling Integration
-Located in `SettingsDialog`:
+Located in the Settings tab, Appearance:
 * Configures `QT_SCALE_FACTOR` dynamically.
 * Integrates a wide `QSlider` (220px, 1% single step) and an interactive numeric `QSpinBox` synchronized bidirectionally.
 * Applies on restart, scaling all Qt widgets, fonts, and icons cleanly for high-DPI displays.
 
 ### Document Open Mode Setting & Tab Replacement Infrastructure
-`SettingsDialog` exposes a checkbox (`chk_preview_mode`) controlling `reader/open_in_preview_mode`:
+The Settings tab's Documents section has a checkbox controlling `reader/open_in_preview_mode`:
 * **Live Change Detection**: If the user toggles this setting when PDF documents are currently open in the main or side panes, `RiemannWindow` prompts the user with explicit action buttons:
   * **"Switch Open Documents"** (`AcceptRole`): executes in-place tab hot-swapping via `_switch_open_documents_mode(new_preview_mode)`.
   * **"Keep Current Layout"** (`RejectRole`): saves the setting for future documents while leaving active documents in their existing layout.
@@ -293,7 +290,7 @@ Located in `SettingsDialog`:
 
 ## Theme Palette
 
-`ui/palette.py` holds the colour tokens for both interface themes (`DARK`, `LIGHT`, read through `tokens(dark)`): canvas, surface, raised, border, text, muted, faint, accent and danger colours. The same values are written out in three places, which must change together:
+`ui/palette.py` holds the colour tokens for both interface themes (`DARK`, `LIGHT`, read through `tokens(dark)`): canvas, surface, raised, border, text, muted, faint, accent and danger colours, `system` (the teal of System tabs) and `private` (incognito address bars, Python only). Shared small stylesheets are functions there too: `toast_style`, `link_tip_style`, `incognito_url_style`. New stylesheets take their colours from these tokens; `tests/test_toolbar_layout.py` checks the reader's bars use no other colour. The same values are written out in three places, which must change together:
 
 * `ui/palette.py`, used by the PDF start page (`ReaderTab._style_home_page`), the Workspaces dashboard (`FolderHomeTab._apply_style`), the file tree and the browser toolbar.
 * `assets/theme/modern_dark.css` and `modern_light.css`, the window stylesheets. Both come from one template, so their selectors are identical and only colours and icon names differ.
@@ -314,26 +311,7 @@ Other pieces of the theming:
 
 ## `ui/reader/tab.py`
 
-`ReaderTab` is the central document-viewing component.
-
-It is intentionally thin in terms of direct business logic.
-
-Most major functionality is delegated to mixins.
-
-Responsibilities remaining inside `ReaderTab`:
-
-* UI assembly
-* toolbar creation
-* mode switching
-* scroll setup
-* shortcut registration
-* backend initialization
-* high-level event routing
-* page widget orchestration
-* middle-click autoscroll navigation
-* document reloading and external launcher integration
-
-The toolbar buttons live in a `QWidget` inside `self.toolbar_scroll`, a frameless `QScrollArea` with both scrollbars hidden. When the pane is narrower than the toolbar, the mouse wheel scrolls it sideways instead of Qt squeezing or clipping the buttons.
+`ReaderTab` is the central document-viewing component. `tab.py` holds only its state (`__init__`), the backend, shortcuts and a few event hooks; everything else is in `ui/reader/mixins/` (see Mixin Composition Strategy). The toolbar is built in `mixins/toolbar.py` and arranged by `ToolbarLayout` (see Reader Toolbar Layouts).
 
 ---
 
@@ -395,14 +373,18 @@ To eliminate unwanted viewport jumping when cycling tabs:
 
 ## Mixin Composition Strategy
 
-Reader functionality is divided into:
+Reader functionality is divided into mixins in `ui/reader/mixins/`:
 
-* `RenderingMixin`
-* `AnnotationsMixin`
-* `SearchMixin`
-* `AiMixin`
-* `MetadataMixin`
-* `SignaturesMixin`
+* `ToolbarMixin` (`toolbar.py`): `setup_ui`, the buttons, search bars, notes panel and citation card.
+* `NavigationMixin`: paging, zoom, back and forward history (Alt+Left, Alt+Right).
+* `SelectionMixin`, `InputMixin`: text selection, mouse, keyboard and wheel input.
+* `AppearanceMixin`: themes, the start page, toasts, full screen, presentation.
+* `DocumentMixin`: loading, reloading, saving copies, cleanup.
+* `PagesMixin`: delete, rotate, move, extract and insert pages (`core/page_edit.py`).
+* `ReadAloudMixin`, `FormsMixin`, `CitationsMixin`.
+* `RenderingMixin`, `AnnotationsMixin`, `SearchMixin`, `AiMixin`, `MetadataMixin`, `SignaturesMixin`.
+
+Mixins that override Qt event handlers come before `QWidget` in `ReaderTab`'s bases. Every mixin derives from `ReaderHostBase` (`mixins/host.py`): for type checkers it is the `ReaderHost` Protocol, which declares the state and widgets the mixins share; at run time it is `object`. A test checks that a fresh `ReaderTab` has every name `ReaderHost` declares, so add an attribute there when a second mixin starts using it.
 
 This architecture prevents the reader from becoming a monolithic God object.
 
@@ -599,12 +581,14 @@ Core responsibilities:
 
 Annotations live in two places:
 
-* **Riemann's JSON copy**, `~/.local/share/riemann/annotations/<sha256 of the path>.json`, written on every change: `{"pages": {page: [annotation, ...]}, "pdf": [size, mtime_ns]}`. Files from older versions (just the pages dict) still load. Every annotation has an `id`.
+* **Riemann's JSON copy**, in `<app data>/annotations/`, written on every change: `{"pages": {page: [annotation, ...]}, "pdf": [size, mtime_ns], "written": ...}`. `core/annotation_store.py` names each copy by the PDF's `/ID`, so it survives renames and moves; files without an `/ID` fall back to a hash of the path. Copies from older versions (`~/.local/share/riemann/annotations/<sha256 of the path>.json`) move there the first time their file opens. Every annotation has an `id`.
 * **The PDF itself** (`core/pdf_annotations.py`), about 1.2 s after the last change, on a worker thread, and synchronously when the tab closes. Each annotation becomes a standard PDF annotation: notes `/Text`, text labels `/FreeText` (with an appearance stream), markup `/Highlight`, `/Underline` or `/StrikeOut` with `/QuadPoints`, pen and highlighter strokes and stamps `/Ink`, rectangles `/Square`, ovals `/Circle`. Each is named `riemann:<id>` in `/NM` and carries the original dict as JSON in `/RiemannData`.
 
 The PDF is changed with an **incremental update**: pikepdf parses the file, Riemann's previous annotations are dropped from each page's `/Annots`, the new objects and changed page dictionaries are serialised, and an xref section (a classic table or an xref stream, matching the file) plus trailer are appended. The original bytes stay untouched, so existing signatures stay valid and the copy PDFium has open is unaffected. The append is skipped if the file changed size while being parsed. Encrypted files, files with signature fields (`/SigFlags`) and read-only files are not written; their annotations stay in the JSON copy.
 
-**Reading back**: on load, if the file's size and mtime differ from the ones recorded after Riemann's last write, another program changed it. If the file then holds Riemann annotations, they replace the JSON copy, taking `/Contents` and `/C` edits made elsewhere. If it holds none (for example a regenerated PDF), the JSON copy is written back into it.
+**Reading back**: on load, if the file's size and mtime differ from the ones recorded after Riemann's last write, another program changed it. If the file then holds Riemann annotations, they are merged with the JSON copy by annotation `id` (`merge_annotations`), taking `/Contents`, `/C` and position edits made elsewhere (`/RiemannRect` records where Riemann put each one). If it holds none (for example a regenerated PDF), the JSON copy is written back into it.
+
+**Growth**: every incremental save appends the changed pages. After `COMPACT_AFTER_UPDATES` (10) appended updates, a flush rewrites the file in full on a worker thread, unless it is signed.
 
 **Rendering**: Riemann draws its annotations itself, so the core hides `riemann:` annotations from PDFium's renderer (in memory only) and leaves them out of `get_comments()`, which lists other applications' comments.
 
@@ -645,7 +629,7 @@ Redraws are localized to the affected page whenever possible.
 
 ## Precision Text Selection Engine
 
-The text selection system (`tab.py`) was overhauled to handle LaTeX, math notations, scanned papers, and OCR output with high visual and clipboard accuracy:
+The text selection system (`mixins/selection.py`) was overhauled to handle LaTeX, math notations, scanned papers, and OCR output with high visual and clipboard accuracy:
 
 * **Glyph Boxes from PDFium**: `get_char_boxes()` in the core returns every character with its loose bounding box. `_runs_from_char_boxes()` splits them into runs on one line (at generated line breaks and vertical jumps) and gives generated spaces the gap up to the next glyph. Older core builds fall back to estimating widths inside each text segment from font advances.
 * **Caret Semantics**: a drag selects between caret positions, so a letter is included only once the pointer passes its middle, as in text editors.
@@ -720,7 +704,8 @@ Qt then converts these into viewport-space overlays.
 
 **Rendering.** Pages are rasterised off the UI thread by `PageRenderWorker` (`ui/reader/render_worker.py`):
 
-* The Rust core releases the GIL while PDFium renders. A global PDFium lock serialises every call into the library, including document loads and closes, because PDFium is not thread-safe.
+* The Rust core releases the GIL while PDFium renders. A PDFium lock per process serialises every call into the library, including document loads and closes, because PDFium is not thread-safe.
+* Each reader renders in a child process of its own (`core/render_process.py`), so a slow page in one tab doesn't hold up the others. When a document loads, the tab wraps it in a `PageRenderer`, which starts `python -m riemann.core.render_process` (in a frozen build, the executable with `--riemann-render-process`, checked in `build_entry.py` before Qt is imported). The child opens the same file with its own PDFium and answers render requests over stdin and stdout: a pickled header, then the raw pixels. The render worker, the sidebar and printing all get the `PageRenderer` in place of the document. Its `render_page` goes to the child once the child has the file open; every other attribute (text, links, forms, outline) is the main process's document. Until the child is ready, or if it fails to start or dies, pages render in-process as before, and the failure is logged once. The child imports no Qt and exits when its stdin closes. Page edits close it before rewriting the file, since on Windows an open file can't be replaced. `RIEMANN_RENDER_PROCESS=0` turns children off. Tests: `tests/test_render_process.py`.
 * `render_visible_pages()` queues jobs for the pages around the reading position. A page with nothing on screen first gets a cheap thumbnail at a quarter of the target resolution, then the full-resolution render. The worker takes jobs in order of distance from the current page.
 * Finished images land in `PAGE_CACHE`, a byte-budgeted LRU (384 MB) shared by all tabs and keyed by `(tab, document generation, page, render scale, theme)`. Rebuilding the virtual layout, scrolling back, or switching tabs re-displays cached pages instantly. Annotations and search highlights are composited onto a copy at display time, so `rendered_pages.remove(idx)` stays cheap.
 * The worker also fetches each page's links and form fields while it already holds the PDFium lock, so the UI thread never waits on that lock.
@@ -1023,16 +1008,19 @@ Doing so will immediately freeze:
 
 # 11. AI Infrastructure
 
-## AI Sidecar Philosophy
+## AI Engine Process
 
-The AI stack is intentionally isolated.
+Semantic search runs in a child process of the app (`core/ai_server.py`), so a crash or a slow embedding never touches the UI, and the process only exists for people who use AI search. It embeds with all-MiniLM-L6-v2 exported to ONNX, on onnxruntime with the model's own tokenizer: no PyTorch, no faiss, no PDF library. The model (about 90 MB) is downloaded on first use from Hugging Face at a fixed commit and checked against pinned SHA-256s (`MODEL_COMMIT`, `MODEL_FILES`); the embeddings match sentence-transformers to 1e-7.
 
-Reasons:
+---
 
-* Torch dependency containment
-* simplified crashes
-* smaller UI runtime
-* optional dependency loading
+## Semantic Search Engine
+
+`core/ai_engine.py` owns the one engine process the whole app shares. `ensure_started()` launches it on first use (`python -m riemann.core.ai_server` from a checkout, the frozen executable with `--riemann-ai-sidecar` in a build; `build_entry.py` checks that flag before Qt loads) with environment variables for the model folder (`RIEMANN_AI_MODELS`), the vector cache (`RIEMANN_AI_CACHE`) and two more: `RIEMANN_AI_PORT`, a free localhost port it picked, and `RIEMANN_AI_TOKEN`, a random secret. The sidecar refuses any request without that token (`X-Riemann-Token` header), so web pages and other local programs cannot use it to read PDFs. `stop()` runs at exit; closing a tab never stops it. Its log is `~/.cache/Riemann/ai_engine.log` (`%LOCALAPPDATA%\Riemann` on Windows).
+
+Reader tabs (`mixins/ai.py`) talk to it over HTTP: `POST /index` and `POST /search`, one request at a time per tab so a search never overtakes the indexing of its PDF. The server listens at once and answers 503 with a "loading ..." detail (download progress included) until the model is ready; the tab retries every second and shows the detail. `/index` goes first without text; unless the engine has cached vectors it answers `needs_text`, and the tab reads every page's text on a `PageTextThread` from its open document (password-protected files work) and sends it. A PDF is indexed when the AI search bar opens or on the first query, never on open. The sidecar keeps one index per PDF path (up to 16) and reuses it while the file's modification time is unchanged, so tabs showing different documents get their own results.
+
+`POST /search_library` searches every paper with vectors at once (the Library tab's "Search inside papers") and lists the others in `needs_text`; `ai_engine.search_library` reads those through the Rust core, indexes them and asks again, and reports papers it can't read as skipped. Embeddings are cached on disk under `RIEMANN_AI_CACHE`, keyed by path, size, modification time, chunking and model. Tests: `tests/test_ai_server.py` (offline; set `RIEMANN_TEST_AI_MODELS` to a folder holding the model to also run the real model and a real child process).
 
 ---
 
@@ -1167,28 +1155,15 @@ Supported conversions:
 * CSV → HTML
 * EPUB → HTML
 
+PDFs are read through the Rust core: PDF → Images renders each page at the chosen DPI, and text and HTML come from the same text extraction the reader uses (HTML places each text segment where it sits on the page). Images → PDF uses Pillow, one page per image at 72 dpi, flattening transparency onto white.
+
 ---
 
 ## Compression Strategy
 
-PDF compression works by:
+PDF compression uses pikepdf. Lossless mode removes unreferenced resources, packs objects into object streams and recompresses Flate streams. Lossy mode also re-encodes each image XObject once (pages may share one) as JPEG at the chosen quality, keeping the original wherever the JPEG would not be smaller. Stencil masks and images under 8 bits per channel are left alone, and a soft mask stays attached, so transparency survives. Tests: `tests/test_compression.py`.
 
-* traversing embedded images
-* recompressing images
-* replacing streams
-* deflating internal objects
-
-Lossless and lossy paths are both supported.
-
----
-
-## PyMuPDF Usage
-
-Several conversion features depend on PyMuPDF.
-
-The application intentionally treats this dependency as optional.
-
-Always preserve ImportError handling.
+PyMuPDF (AGPL-3.0) is not used anywhere in the app or the AI engine.
 
 ---
 
@@ -1537,13 +1512,15 @@ Avoid embedding large inference logic directly into Qt widgets.
 
 ## Adding New Persistent Settings
 
-Primary storage:
+Read and write through the shared store:
 
 ```python
-QSettings
+from riemann.core.settings import app_settings
+
+app_settings().value("reader/my_option", False, type=bool)
 ```
 
-Keep naming conventions consistent.
+Give the option a control in the Settings tab (`ui/system/settings_tab.py`), in the section it belongs to. Tests patch `app_settings` in the module that calls it.
 
 Use namespaced keys:
 
@@ -1586,20 +1563,33 @@ riemann/
 │   │   │   ├── icons/
 │   │   │   ├── theme/
 │   │   │   └── __tests__/
+│   │   │   └── fonts/
 │   │   ├── core/
 │   │   │   ├── managers.py
 │   │   │   ├── features.py
 │   │   │   ├── constants.py
 │   │   │   ├── dependencies.py
 │   │   │   ├── captions.py
-│   │   │   └── mini_player.py
+│   │   │   ├── mini_player.py
+│   │   │   ├── settings.py
+│   │   │   ├── storage.py
+│   │   │   ├── log.py
+│   │   │   ├── permissions.py
+│   │   │   ├── annotation_store.py
+│   │   │   ├── pdf_annotations.py
+│   │   │   ├── pdf_forms.py
+│   │   │   ├── page_edit.py
+│   │   │   ├── citations.py
+│   │   │   ├── bibliography.py
+│   │   │   └── ai_engine.py
+│   │   ├── window/
 │   │   ├── ui/
+│   │   │   ├── system/
 │   │   │   └── reader/
 │   │   │       └── mixins/
 │   └── tests/
 ├── rust-core/
 ├── rust-ocr-worker/
-├── riemann-ai/
 ├── benchmarks/
 │   └── results/
 └── scripts/
@@ -1607,12 +1597,12 @@ riemann/
 
 Subsystem overview:
 
-* `core/` — persistence, downloads, captions, link extraction, utilities
-* `ui/` — browser and reader UI systems
+* `core/` — persistence, settings, logging, site permissions, PDF writing (annotations, forms, page edits), citations, the AI engine client
+* `window/` — the main window's mixins and helpers
+* `ui/` — browser and reader UI systems, System tabs (`ui/system/`), tooltips, the command palette
 * `mixins/` — modular reader logic
 * `assets/` — browser-side enhancements and themes
 * `rust-core/` — native rendering backend
-* `riemann-ai/` — local inference sidecar
 * `benchmarks/` — performance scripts and their JSON results
 * `tests/` — unit and subsystem testing
 

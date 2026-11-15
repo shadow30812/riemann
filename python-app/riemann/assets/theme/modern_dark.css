@@ -1,5 +1,7 @@
 /* Riemann dark theme. Generated from one template with modern_light.css;
-   the colours match riemann/ui/palette.py. Keep the two files in step. */
+   the colours match riemann/ui/palette.py. Keep the two files in step.
+   QToolTip only styles tooltips from web pages; Riemann's own widgets use
+   riemann/ui/tooltip.py, whose colours these match. */
 
 /* =======================================================
    1. BASE
@@ -20,12 +22,13 @@ QWidget {
 }
 
 QToolTip {
-    background-color: #2A2C31;
-    color: #F2F3F5;
-    border: 1px solid #3D4047;
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 12px;
+    background-color: #2C2E34;
+    color: #ECEDEF;
+    border: 1px solid #43464E;
+    padding: 5px 9px;
+    font-family: "Inter", "Segoe UI", "Noto Sans", sans-serif;
+    font-size: 13px;
+    font-weight: normal;
 }
 
 QLabel {
@@ -505,4 +508,11 @@ QSplitter::handle {
 QSplitter::handle:hover,
 QSplitter::handle:pressed {
     background-color: rgba(107, 155, 255, 0.35);
+}
+
+/* Site permission prompt under the address bar (riemann/ui/browser.py PermissionBar) */
+QFrame#permissionBar {
+    background-color: #2A2C31;
+    border: none;
+    border-bottom: 1px solid #3D4047;
 }

@@ -8,6 +8,7 @@ from riemann.ui.reader.mixins.rendering import RenderingMixin
 class DummyRenderingReader(RenderingMixin):
     def __init__(self):
         self.current_doc = MagicMock()
+        self._render_worker = None
         self.current_page_index = 0
         self.continuous_scroll = False
         self.facing_mode = False

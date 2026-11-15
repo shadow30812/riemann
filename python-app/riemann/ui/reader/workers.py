@@ -1,5 +1,7 @@
 """
-Background Workers for the Reader Module.
+Background workers for the reader: the LaTeX OCR model download and install,
+model loading and inference, OCR of one page or many, and metadata
+extraction.
 """
 
 import hashlib
@@ -12,67 +14,111 @@ from typing import Any
 
 from PySide6.QtCore import QThread, Signal
 
-from ...core.dependencies import setup_and_get_venv
+from ...core import ai_engine
+from ...core.settings import AI_TAGS_KEY, OCR_LANGUAGES_KEY, app_settings, string_list
+from ...core.dependencies import LATEX_OCR_REQUIREMENTS, requirement, setup_and_get_venv
+from ...core.log import log
+
+
+class DownloadCancelled(Exception):
+    pass
 
 
 class ModelDownloader(QThread):
     """
-    Downloads and extracts the LaTeX OCR model pack dynamically into isolated execution containers.
+    Downloads the LaTeX OCR model pack, checks it against a pinned SHA-256 and
+    unpacks it into dest_folder.
+
+    The pack is added to sys.path afterwards, so anything in it runs as
+    Riemann; a file whose hash differs from expected_sha256 is deleted unread.
+    Archive members that would land outside dest_folder are refused. cancel()
+    stops the transfer at the next chunk.
     """
 
     progress = Signal(int)
     finished = Signal(bool)
 
-    def __init__(self, url: str, dest_folder: str) -> None:
-        """
-        Constructs the downloader thread targeting predefined external payload hosting instances.
+    CHUNK = 1 << 20
 
-        Args:
-            url (str): Remote address targeting packaged model binary instances.
-            dest_folder (str): Assured local folder layout for output stream routing mappings.
-        """
+    def __init__(self, url: str, dest_folder: str, expected_sha256: str) -> None:
         super().__init__()
         self.url = url
         self.dest_folder = dest_folder
+        self.expected_sha256 = expected_sha256.lower()
+        self.error = ""
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
 
     def run(self) -> None:
-        """
-        Implements primary asynchronous block invoking file transfers capturing metric data events routinely.
-        """
+        zip_path = os.path.join(self.dest_folder, "latex_ocr.zip.part")
         try:
             os.makedirs(self.dest_folder, exist_ok=True)
-            zip_path = os.path.join(self.dest_folder, "latex_ocr.zip")
-
-            def report(block_num: int, block_size: int, total_size: int) -> None:
-                """
-                Intercepts urllib status events translating mathematical offsets into percentage metrics safely.
-
-                Args:
-                    block_num (int): The number of blocks transferred so far.
-                    block_size (int): The size of each transferred block in bytes.
-                    total_size (int): The total expected size of the remote file.
-                """
-                if total_size > 0:
-                    percent = int((block_num * block_size * 100) / total_size)
-                    self.progress.emit(percent)
-
-            urllib.request.urlretrieve(self.url, zip_path, report)
+            digest = self._download(zip_path)
+            if digest != self.expected_sha256:
+                raise ValueError(
+                    "The downloaded model pack does not match the expected checksum "
+                    f"(got {digest[:12]}…, expected {self.expected_sha256[:12]}…)."
+                )
             self.progress.emit(99)
-
-            with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                zip_ref.extractall(self.dest_folder)
-
-            os.remove(zip_path)
+            safe_extract(zip_path, self.dest_folder)
             self.finished.emit(True)
-        except Exception as e:
-            print(f"Download/Extraction failed: {e}")
+        except DownloadCancelled:
+            self.error = "Download cancelled."
             self.finished.emit(False)
+        except Exception as e:
+            self.error = str(e)
+            self.finished.emit(False)
+        finally:
+            try:
+                os.remove(zip_path)
+            except OSError:
+                pass
+
+    def _download(self, zip_path: str) -> str:
+        sha = hashlib.sha256()
+        with urllib.request.urlopen(self.url, timeout=60) as response, open(zip_path, "wb") as out:
+            total = int(response.headers.get("Content-Length") or 0)
+            done = 0
+            while True:
+                if self._cancelled:
+                    raise DownloadCancelled()
+                chunk = response.read(self.CHUNK)
+                if not chunk:
+                    break
+                out.write(chunk)
+                sha.update(chunk)
+                done += len(chunk)
+                if total:
+                    self.progress.emit(min(98, done * 100 // total))
+        return sha.hexdigest()
+
+
+def safe_extract(zip_path: str, dest_folder: str) -> None:
+    """
+    Unpacks zip_path into dest_folder. Raises ValueError if a member's path would leave
+    dest_folder.
+    """
+    root = os.path.realpath(dest_folder)
+    with zipfile.ZipFile(zip_path) as archive:
+        for member in archive.infolist():
+            target = os.path.realpath(os.path.join(root, member.filename))
+            if target != root and not target.startswith(root + os.sep):
+                raise ValueError(f"Unsafe path in model pack: {member.filename}")
+        archive.extractall(root)
+
+
+def tag_request(text_chunk: str) -> dict:
+    """The /tag payload: the start of the text and the user's subject labels, if set."""
+    payload: dict = {"text_chunk": text_chunk[:1500]}
+    tags = string_list(AI_TAGS_KEY)
+    if tags:
+        payload["tags"] = tags
+    return payload
 
 
 class InstallerThread(QThread):
-    """
-    Runs pip installation instructions mapping standard external repository assets asynchronously reliably.
-    """
 
     finished_install = Signal()
     install_error = Signal(str)
@@ -87,9 +133,7 @@ class InstallerThread(QThread):
                 "-m",
                 "pip",
                 "install",
-                "pix2tex[gui]",
-                "torch",
-                "torchvision",
+                *(requirement(name) for name in LATEX_OCR_REQUIREMENTS),
             ]
             subprocess.check_call(cmd)
             self.finished_install.emit()
@@ -98,17 +142,11 @@ class InstallerThread(QThread):
 
 
 class LoaderThread(QThread):
-    """
-    Initializes heavyweight artificial intelligence modeling parameters retaining active instances isolated cleanly.
-    """
 
     finished_loading = Signal(object)
     error_occurred = Signal(str)
 
     def run(self) -> None:
-        """
-        Evaluates module importation routing, constructing inference frameworks safely avoiding main loop blocks.
-        """
         try:
             from pix2tex.cli import LatexOCR
 
@@ -120,30 +158,112 @@ class LoaderThread(QThread):
             self.error_occurred.emit(f"AI Initialization Failed:\n{str(e)}")
 
 
+def available_ocr_languages() -> list[str]:
+    """The languages the installed Tesseract can read ([] when it is missing)."""
+    try:
+        out = subprocess.run(
+            ["tesseract", "--list-langs"], capture_output=True, text=True, timeout=10
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return sorted(line.strip() for line in out.splitlines()[1:] if line.strip() and line.strip() != "osd")
+
+
+class OcrThread(QThread):
+    """
+    Recognises the text of one page with Tesseract (through the Rust core,
+    which releases the GIL), off the UI thread, in the languages chosen in
+    Settings (OCR_LANGUAGES_KEY, "eng" by default).
+    """
+
+    finished_ocr = Signal(int, str)
+    error_occurred = Signal(str)
+
+    def __init__(self, doc: Any, page_index: int, scale: float = 2.0, languages: str | None = None) -> None:
+        super().__init__()
+        self.doc = doc
+        self.page_index = page_index
+        self.scale = scale
+        self.languages = languages or str(app_settings().value(OCR_LANGUAGES_KEY, "eng") or "eng")
+
+    def run(self) -> None:
+        try:
+            text = self.doc.ocr_page(self.page_index, self.scale, self.languages)
+        except Exception as e:
+            self.error_occurred.emit(str(e) or type(e).__name__)
+            return
+        self.finished_ocr.emit(self.page_index, text)
+
+
+class OcrPagesThread(QThread):
+    """
+    Recognises the text of many pages, BATCH pages per Tesseract process
+    (RiemannDocument.ocr_pages), and reports progress after each batch. A
+    failure or requestInterruption() stops the run after the current batch;
+    finished_ocr then carries the pages read so far and the reason.
+    """
+
+    BATCH = 8
+
+    progress = Signal(int, int)
+    finished_ocr = Signal(list, str)
+
+    def __init__(self, doc: Any, pages: list[int], scale: float = 2.0, languages: str | None = None) -> None:
+        super().__init__()
+        self.doc = doc
+        self.pages = list(pages)
+        self.scale = scale
+        self.languages = languages or str(app_settings().value(OCR_LANGUAGES_KEY, "eng") or "eng")
+
+    def run(self) -> None:
+        results: list[tuple[int, str]] = []
+        problem = ""
+        for start in range(0, len(self.pages), self.BATCH):
+            if self.isInterruptionRequested():
+                problem = "Cancelled"
+                break
+            batch = self.pages[start : start + self.BATCH]
+            try:
+                texts = self.doc.ocr_pages(batch, self.scale, self.languages)
+            except Exception as e:
+                problem = str(e) or type(e).__name__
+                break
+            results.extend(zip(batch, texts))
+            self.progress.emit(len(results), len(self.pages))
+        self.finished_ocr.emit(results, problem)
+
+
+class PageTextThread(QThread):
+    """The text of every page of doc, for the AI engine; finished_text carries (path, pages)."""
+
+    finished_text = Signal(str, list)
+    error_occurred = Signal(str)
+
+    def __init__(self, doc: Any, path: str) -> None:
+        super().__init__()
+        self.doc = doc
+        self.path = path
+
+    def run(self) -> None:
+        try:
+            pages = [self.doc.get_page_text(i) for i in range(self.doc.page_count)]
+        except Exception as e:
+            self.error_occurred.emit(str(e) or type(e).__name__)
+            return
+        self.finished_text.emit(self.path, pages)
+
+
 class InferenceThread(QThread):
-    """
-    Runs the operational evaluation sequence mapping model predictions mapping onto image slices precisely.
-    """
 
     finished_inference = Signal(str)
     error_occurred = Signal(str)
 
     def __init__(self, model: Any, image: Any) -> None:
-        """
-        Allocates execution parameters preparing isolated environment instances cleanly.
-
-        Args:
-            model (Any): Complete execution object containing evaluated parameters required.
-            image (Any): Slice parameter retaining raw dimensional pixel sets.
-        """
         super().__init__()
         self.model = model
         self.image = image
 
     def run(self) -> None:
-        """
-        Invokes actual tensor mathematics fetching returned structural code text representations efficiently.
-        """
         try:
             code = self.model(self.image)
             self.finished_inference.emit(code)
@@ -152,29 +272,15 @@ class InferenceThread(QThread):
 
 
 class SignatureValidationWorker(QThread):
-    """
-    Delegates computationally intense deep cryptographic traversal mapping validating PDF PKCS data arrays seamlessly.
-    """
 
     finished_validation = Signal(str, str, list)
 
     def __init__(self, pdf_path: str, trusted_certs: list, parent=None):
-        """
-        Coordinates necessary reference parameters routing document paths retaining persistent memory scopes clearly.
-
-        Args:
-            pdf_path (str): Extracted full filepath tracking active user selections natively.
-            trusted_certs (list): Internal persistence records retaining authorized credentials persistently stored.
-            parent: Logical UI relationship bindings retained gracefully avoiding detached references actively.
-        """
         super().__init__(parent)
         self.pdf_path = pdf_path
         self.trusted_certs = trusted_certs or []
 
     def run(self):
-        """
-        Operates fundamental PyHanko validation passes routing outcomes returning detailed status groupings seamlessly.
-        """
         try:
             from asn1crypto import pem, x509
             from pyhanko.pdf_utils.reader import PdfFileReader
@@ -193,7 +299,7 @@ class SignatureValidationWorker(QThread):
                         _, _, der_bytes = pem.unarmor(cert_str.encode("utf-8"))
                         trust_roots.append(x509.Certificate.load(der_bytes))
                 except Exception:
-                    pass
+                    log.debug("run failed", exc_info=True)
 
             vc = ValidationContext(
                 extra_trust_roots=trust_roots,
@@ -334,28 +440,15 @@ class SignatureValidationWorker(QThread):
 
 
 class MetadataExtractionWorker(QThread):
-    """
-    Coordinates complex remote REST operations querying bibliographic networks asynchronously resolving identifiers effectively.
-    """
 
     finished_extraction = Signal(dict)
 
     def __init__(self, text_chunk: str, parent=None):
-        """
-        Coordinates parsing sequences fetching external web payloads properly formatting requests implicitly mapping inputs.
-
-        Args:
-            text_chunk (str): Arbitrary length snippet text block tracking document semantic beginnings clearly.
-            parent: Context relationship tracking retaining structural parent boundaries implicitly evaluated natively.
-        """
         super().__init__(parent)
         self.text_chunk = text_chunk
         self.headers = {"User-Agent": "RiemannReader/1.0"}
 
     def run(self) -> None:
-        """
-        Enacts sequential network searches evaluating academic signatures utilizing CrossRef algorithms seamlessly resolving queries.
-        """
         import requests
 
         metadata = {}
@@ -394,13 +487,13 @@ class MetadataExtractionWorker(QThread):
                             if bib_res.status_code == 200:
                                 metadata["bibtex"] = bib_res.text
                         except Exception:
-                            pass
+                            log.debug("run failed", exc_info=True)
 
                         self.finished_extraction.emit(metadata)
                         self.quit()
                         return
                 except Exception:
-                    pass
+                    log.debug("run failed", exc_info=True)
 
             arxiv_match = re.search(
                 r"arXiv:(\d{4}\.\d{4,5})", self.text_chunk, re.IGNORECASE
@@ -427,22 +520,25 @@ class MetadataExtractionWorker(QThread):
                         self.quit()
                         return
                 except Exception:
-                    pass
+                    log.debug("run failed", exc_info=True)
 
         lines = [line.strip() for line in self.text_chunk.split("\n") if line.strip()]
         if len(lines) >= 2:
             metadata["title"] = lines[0]
             metadata["authors"] = lines[1]
 
-        try:
-            tag_res = requests.post(
-                "http://127.0.0.1:8080/tag",
-                json={"text_chunk": self.text_chunk[:1500]},
-                timeout=2.0,
-            )
-            if tag_res.status_code == 200:
-                metadata["tags"] = tag_res.json().get("tags", [])
-        except Exception:
-            pass
+        engine = ai_engine.connection()
+        if engine is not None:
+            try:
+                tag_res = requests.post(
+                    f"http://127.0.0.1:{engine[0]}/tag",
+                    json=tag_request(self.text_chunk),
+                    headers={"X-Riemann-Token": engine[1]},
+                    timeout=2.0,
+                )
+                if tag_res.status_code == 200:
+                    metadata["tags"] = tag_res.json().get("tags", [])
+            except Exception:
+                log.debug("run failed", exc_info=True)
 
         self.finished_extraction.emit(metadata)

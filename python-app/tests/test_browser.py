@@ -1,3 +1,13 @@
+"""
+Notes:
+
+dispose: The tab owns its profile and creates it before its view, so Qt's child
+order would delete the profile first. Detach it and release it after the tab
+(and its page) are gone.
+"""
+
+import json
+import urllib.parse
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
@@ -5,7 +15,6 @@ import shiboken6
 from PySide6.QtCore import QCoreApplication, QEvent, QUrl
 from PySide6.QtGui import QFocusEvent
 from PySide6.QtWebEngineCore import (
-    QWebEngineDownloadRequest,
     QWebEnginePage,
     QWebEngineProfile,
     QWebEngineUrlRequestInfo,
@@ -68,9 +77,6 @@ class _WebEngineTracker:
                     devtools.close()
                     devtools.deleteLater()
                     _flush_deferred_deletes()
-                # The tab owns its profile and creates it before its view, so
-                # Qt's child order would delete the profile first. Detach it
-                # and release it after the tab (and its page) are gone.
                 if obj.profile.parent() is obj:
                     obj.profile.setParent(None)
                     self._profiles.append(obj.profile)
@@ -167,7 +173,7 @@ def test_webpage_createwindow_tab(qtbot, webengine):
 def test_webpage_createwindow_popup(qtbot, webengine):
     profile = webengine.profile()
     page = webengine.add(WebPage(profile))
-    new_page = page.createWindow(QWebEnginePage.WebWindowType.WebDialog)
+    page.createWindow(QWebEnginePage.WebWindowType.WebDialog)
     assert len(page._popups) == 1
 
     popup_view = webengine.add(page._popups[0])
@@ -187,22 +193,54 @@ def test_webpage_js_console(webengine):
 
 
 @patch("PySide6.QtCore.QSettings.setValue")
-def test_webpage_accept_navigation_request(mock_set_value, webengine):
+def test_homepage_saves_valid_links(mock_set_value, webengine):
+    from riemann.ui import browser
+
     profile = webengine.profile()
     page = webengine.add(WebPage(profile))
-    url = QUrl("riemann-save://test_payload")
-    result = page.acceptNavigationRequest(
-        url, QWebEnginePage.NavigationType.NavigationTypeTyped, True
-    )
+    links = '[{"name": "Docs", "url": "https://docs.example"}]'
+    url = QUrl("https://riemann-save.local/?data=" + urllib.parse.quote(links))
+    with patch.object(WebPage, "url", return_value=QUrl.fromLocalFile(browser.HOMEPAGE_PATH)):
+        result = page.acceptNavigationRequest(
+            url, QWebEnginePage.NavigationType.NavigationTypeOther, False
+        )
 
     assert result is False
-    mock_set_value.assert_called_once_with("homepage_links", "test_payload")
+    mock_set_value.assert_called_once_with("homepage_links", json.dumps(json.loads(links)))
+
+
+@pytest.mark.parametrize(
+    "page_url",
+    ["https://evil.example/", "https://evil.example/homepage.html", "file:///tmp/homepage.html"],
+)
+@patch("PySide6.QtCore.QSettings.setValue")
+def test_other_pages_cannot_save_homepage_links(mock_set_value, page_url, webengine):
+    profile = webengine.profile()
+    page = webengine.add(WebPage(profile))
+    with patch.object(WebPage, "url", return_value=QUrl(page_url)):
+        result = page.acceptNavigationRequest(
+            QUrl('riemann-save://[{"name":"x","url":"https://x"}]'),
+            QWebEnginePage.NavigationType.NavigationTypeTyped,
+            True,
+        )
+    assert result is False
+    mock_set_value.assert_not_called()
+
+
+def test_sanitize_homepage_links_rejects_script():
+    from riemann.ui.browser import sanitize_homepage_links
+
+    assert sanitize_homepage_links("[]);fetch('file:///etc/passwd');//") is None
+    assert sanitize_homepage_links('{"name": "x"}') is None
+    cleaned = json.loads(sanitize_homepage_links('[{"name": "ok", "url": "https://a"}, {"name": 1}, "x"]'))
+    assert cleaned == [{"name": "ok", "url": "https://a"}]
 
 
 def test_request_interceptor_block():
     interceptor = RequestInterceptor()
     info = MagicMock(spec=QWebEngineUrlRequestInfo)
-    info.requestUrl().toString.return_value = "https://doubleclick.net/ad"
+    info.requestUrl.return_value = QUrl("https://doubleclick.net/ad")
+    info.firstPartyUrl.return_value = QUrl("https://news.example/")
 
     interceptor.interceptRequest(info)
     info.block.assert_called_once_with(True)
@@ -211,7 +249,8 @@ def test_request_interceptor_block():
 def test_request_interceptor_whatsapp():
     interceptor = RequestInterceptor()
     info = MagicMock(spec=QWebEngineUrlRequestInfo)
-    info.requestUrl().toString.return_value = "https://web.whatsapp.com/"
+    info.requestUrl.return_value = QUrl("https://web.whatsapp.com/")
+    info.firstPartyUrl.return_value = QUrl("https://web.whatsapp.com/")
 
     interceptor.interceptRequest(info)
     info.setHttpHeader.assert_called_with(b"User-Agent", interceptor.spoofed_ua)
@@ -236,10 +275,14 @@ def test_browser_tab_incognito_init(mock_injector, qtbot, webengine):
 def test_browser_tab_focus_in(mock_injector, qtbot, webengine):
     tab = webengine.tab()
     qtbot.addWidget(tab)
+    tab.show()
+    QCoreApplication.processEvents()
     event = QFocusEvent(QEvent.Type.FocusIn)
-    with patch.object(tab.web, "setFocus") as mock_set_focus:
+    with patch.object(tab.web, "setFocus") as mock_set_focus, patch.object(tab, "hasFocus", return_value=True):
         tab.focusInEvent(event)
-        mock_set_focus.assert_called_once()
+        mock_set_focus.assert_not_called()
+        QCoreApplication.processEvents()
+        mock_set_focus.assert_called()
 
 
 @patch("riemann.ui.browser.ScriptInjector")
@@ -248,22 +291,105 @@ def test_browser_tab_homepage_load(mock_login, mock_injector, qtbot, webengine):
     tab = webengine.tab()
     qtbot.addWidget(tab)
     tab.web.page().runJavaScript = MagicMock()
-    with patch.object(tab.web, "url", return_value=QUrl("file:///homepage.html")):
+    from riemann.ui import browser
+
+    with patch.object(tab.web, "url", return_value=QUrl("https://evil.example/homepage.html")):
+        tab._on_homepage_load_finished(True)
+        tab.web.page().runJavaScript.assert_not_called()
+    with patch.object(tab.web, "url", return_value=QUrl.fromLocalFile(browser.HOMEPAGE_PATH)):
         tab._on_homepage_load_finished(True)
         tab.web.page().runJavaScript.assert_called_once()
 
 
+def _fake_permission(kind, origin="https://meet.example"):
+    from PySide6.QtWebEngineCore import QWebEnginePermission
+
+    perm = MagicMock()
+    perm.permissionType.return_value = getattr(QWebEnginePermission.PermissionType, kind)
+    perm.origin.return_value = QUrl(origin)
+    perm.isValid.return_value = True
+    return perm
+
+
 @patch("riemann.ui.browser.ScriptInjector")
-def test_browser_tab_feature_permission(mock_injector, qtbot, webengine):
+def test_permission_requests_follow_site_settings(mock_injector, qtbot, webengine, tmp_path):
+    from riemann.core.permissions import ALLOW, BLOCK, SitePermissions
+
     tab = webengine.tab()
     qtbot.addWidget(tab)
-    tab.web.page().setFeaturePermission = MagicMock()
+    store = SitePermissions(str(tmp_path / "perms.json"))
+    tab.site_permissions = store
+    tab.permission_bar.store = store
 
-    try:
-        feature = getattr(QWebEnginePage.Feature, "ClipboardReadWrite", None)
-        tab._on_feature_permission_requested(QUrl("https://test.com"), feature)
-    except AttributeError:
-        pass
+    store.set("https://meet.example", "camera", ALLOW)
+    store.set("https://meet.example", "microphone", ALLOW)
+    allowed = _fake_permission("MediaAudioVideoCapture")
+    tab._on_permission_requested(allowed)
+    allowed.grant.assert_called_once()
+
+    store.set("https://meet.example", "microphone", BLOCK)
+    denied = _fake_permission("MediaAudioVideoCapture")
+    tab._on_permission_requested(denied)
+    denied.deny.assert_called_once()
+    denied.grant.assert_not_called()
+
+    unknown = _fake_permission("Unsupported")
+    tab._on_permission_requested(unknown)
+    unknown.deny.assert_called_once()
+
+
+@patch("riemann.ui.browser.ScriptInjector")
+def test_clipboard_read_asks_and_remembers(mock_injector, qtbot, webengine, tmp_path):
+    from riemann.core.permissions import ALLOW, SitePermissions
+
+    tab = webengine.tab()
+    qtbot.addWidget(tab)
+    tab.show()
+    store = SitePermissions(str(tmp_path / "perms.json"))
+    tab.site_permissions = store
+    tab.permission_bar.store = store
+
+    first = _fake_permission("ClipboardReadWrite", "https://docs.example")
+    second = _fake_permission("Geolocation", "https://maps.example")
+    tab._on_permission_requested(first)
+    tab._on_permission_requested(second)
+    assert tab.permission_bar.isVisible()
+    assert "docs.example" in tab.permission_bar.label.text()
+    first.grant.assert_not_called()
+
+    tab.permission_bar.btn_allow.click()
+    first.grant.assert_called_once()
+    assert store.get("https://docs.example", "clipboard") == ALLOW
+    assert "maps.example" in tab.permission_bar.label.text()
+
+    tab.permission_bar.remember.setChecked(False)
+    tab.permission_bar.btn_block.click()
+    second.deny.assert_called_once()
+    assert store.get("https://maps.example", "location") == "ask"
+    assert not tab.permission_bar.isVisible()
+
+
+def test_content_settings_follow_the_site(qapp, tmp_path):
+    from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineSettings
+
+    from riemann.core.permissions import ALLOW, BLOCK, SitePermissions
+    from riemann.ui.browser import apply_content_settings
+
+    store = SitePermissions(str(tmp_path / "perms.json"))
+    store.set("https://video.example", "autoplay", BLOCK)
+    store.set("https://video.example", "popups", ALLOW)
+    profile = QWebEngineProfile()
+    page = QWebEnginePage(profile)
+    A = QWebEngineSettings.WebAttribute
+    apply_content_settings(page.settings(), store, QUrl("https://video.example/watch"))
+    assert page.settings().testAttribute(A.PlaybackRequiresUserGesture)
+    assert page.settings().testAttribute(A.JavascriptCanOpenWindows)
+    apply_content_settings(page.settings(), store, QUrl("https://news.example/"))
+    assert not page.settings().testAttribute(A.PlaybackRequiresUserGesture)
+    assert not page.settings().testAttribute(A.JavascriptCanOpenWindows)
+    assert not page.settings().testAttribute(A.AllowRunningInsecureContent)
+    del page
+    del profile
 
 
 @patch("riemann.ui.browser.ScriptInjector")
@@ -442,3 +568,30 @@ def test_ytdlp_settings_dialog_playlist_autodetection(qapp):
     dlg_pl = YtDlpSettingsDialog(None, is_playlist=True)
     assert dlg_pl.chk_playlist.isChecked()
 
+
+
+def test_local_pages_may_only_load_static_files_from_their_folder(tmp_path):
+    import os
+
+    from PySide6.QtCore import QUrl
+    from PySide6.QtWebEngineCore import QWebEngineUrlRequestInfo as Info
+
+    from riemann.ui.browser import HOMEPAGE_PATH, local_load_allowed
+
+    T = Info.ResourceType
+    page = QUrl.fromLocalFile(str(tmp_path / "site" / "page.html"))
+    own_css = QUrl.fromLocalFile(str(tmp_path / "site" / "assets" / "a.css"))
+    other = QUrl.fromLocalFile(str(tmp_path / "secret.txt"))
+    assert local_load_allowed(page, own_css, T.ResourceTypeStylesheet)
+    assert local_load_allowed(page, own_css, T.ResourceTypeScript)
+    assert not local_load_allowed(page, own_css, T.ResourceTypeXhr)
+    assert not local_load_allowed(page, other, T.ResourceTypeImage)
+    assert not local_load_allowed(page, other, T.ResourceTypeSubFrame)
+    assert local_load_allowed(page, other, T.ResourceTypeMainFrame)
+    assert not local_load_allowed(QUrl("https://evil.example/"), other, T.ResourceTypeImage)
+    assert local_load_allowed(page, QUrl("https://cdn.example/x.js"), T.ResourceTypeScript)
+
+    home = QUrl.fromLocalFile(HOMEPAGE_PATH)
+    font = QUrl.fromLocalFile(os.path.join(os.path.dirname(os.path.dirname(HOMEPAGE_PATH)), "fonts", "Inter-Variable.ttf"))
+    assert local_load_allowed(home, font, T.ResourceTypeFontResource)
+    assert not local_load_allowed(home, other, T.ResourceTypeXhr)

@@ -4,7 +4,10 @@ PyInstaller Specification for Riemann.
 
 This configuration file defines the build process for creating the standalone
 Riemann executable. It handles:
-1. Resource collection (riemann package, PySide6).
+1. Resource collection (riemann package, PySide6, and onnxruntime, tokenizers
+   and uvicorn's dynamically imported modules for the AI engine, which runs
+   as this executable with --riemann-ai-sidecar). The old packed AI
+   environment in assets/riemann_ai_engine is left out if it is still there.
 2. Binary dependency management (libpdfium).
 3. Exclusion of heavyweight machine learning libraries (torch, cv2) to keep
    the core executable lightweight.
@@ -41,6 +44,20 @@ def collect_resources():
     binaries += q_binaries
     hiddenimports += q_hidden
 
+    for package in ('onnxruntime', 'tokenizers'):
+        p_datas, p_binaries, p_hidden = collect_all(package)
+        datas += p_datas
+        binaries += p_binaries
+        hiddenimports += p_hidden
+    hiddenimports += [
+        'uvicorn.loops.auto',
+        'uvicorn.protocols.http.auto',
+        'uvicorn.protocols.websockets.auto',
+        'uvicorn.lifespan.on',
+        'riemann.core.ai_server',
+    ]
+    datas = [d for d in datas if 'riemann_ai_engine' not in d[0]]
+
     icon_path = os.path.join('python-app', 'riemann', 'assets', 'icons', 'icon.ico')
     png_path = os.path.join('python-app', 'riemann', 'assets', 'icons', 'Icon.png')
 
@@ -72,7 +89,7 @@ def get_pdfium_binary():
     if os.path.exists(pdfium_path):
         return (pdfium_path, ".")
     else:
-        print(f"WARNING: {pdfium_filename} not found in libs/ folder!")
+        print(f"WARNING: {pdfium_filename} not found in libs/; run python scripts/fetch_pdfium.py")
         return None
 
 # --- Build Analysis ---

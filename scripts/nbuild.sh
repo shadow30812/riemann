@@ -40,9 +40,7 @@ else
     exit 1
 fi
 
-LEECH="python-app/riemann/assets/riemann_ai_engine/env/lib/libgcc_s.so"
-rm -f $LEECH
-echo "Troublemaker binary file pointer out of way"
+python3 scripts/fetch_pdfium.py linux-x64
 
 log_info "[4/4] Compiling with Nuitka..."
 
@@ -105,9 +103,9 @@ echo "   Staged ${copied} missing Qt6 shared libraries into onefile root"
 
 EXCLUDES="--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow-import-to=cv2 --nofollow-import-to=pix2tex"
 EXCLUDES="$EXCLUDES --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas"
-EXCLUDES="$EXCLUDES --nofollow-import-to=nvidia --nofollow-import-to=fitz --nofollow-import-to=pymupdf" 
+EXCLUDES="$EXCLUDES --nofollow-import-to=nvidia"
 EXCLUDES="$EXCLUDES --nofollow-import-to=yt_dlp.extractor.lazy_extractors --nofollow-import-to=pygments"
-EXCLUDES="$EXCLUDES --nofollow-import-to=faster_whisper --nofollow-import-to=ctranslate2 --nofollow-import-to=huggingface_hub --nofollow-import-to=tokenizers"
+EXCLUDES="$EXCLUDES --nofollow-import-to=faster_whisper --nofollow-import-to=ctranslate2 --nofollow-import-to=huggingface_hub"
 EXCLUDES="$EXCLUDES --nofollow-import-to=riemann.assets --nofollow-import-to=faiss --nofollow-import-to=av --nofollow-import-to=sentence_transformers"
 
 UPX_PLUGIN=""
@@ -126,6 +124,11 @@ python3 -m nuitka \
     $UPX_PLUGIN \
     --include-package=riemann \
     --include-data-dir=python-app/riemann/assets=riemann/assets \
+    --noinclude-data-files=riemann/assets/riemann_ai_engine/* \
+    --include-package=onnxruntime \
+    --include-package-data=onnxruntime \
+    --include-package=tokenizers \
+    --include-package=uvicorn \
     --include-data-file=libs/libpdfium.so=libpdfium.so \
     --include-data-files=${QT_STAGING}/lib/*=./ \
     --output-dir=dist \

@@ -2,13 +2,46 @@
 
 The same values live in assets/theme/modern_*.css and assets/homepage/homepage.css;
 change all three together.
+
+"system" is the teal accent of System tabs (Settings, History, Downloads...),
+kept apart from the blue accent so those tabs read as part of Riemann, not
+documents or web pages. "private" is the purple of incognito address bars, which
+are always dark, so only DARK["private"] is used. "success" and "warning" (with
+"danger" and "accent") colour status banners such as the signature check; the
+light values keep 4.5:1 contrast under white text, the dark ones under
+accent_text. The CSS files use none of these three.
+
+toast_style, link_tip_style, incognito_url_style, banner_style and
+overlay_style are the small stylesheets several widgets share. overlay_style
+is for labels drawn over the page itself (the page-number popup), which sit on
+document content in either theme, so it always uses the dark tokens.
+
+CONTENT holds colours that belong to the document or the projector rather than
+the interface theme, so they don't change with it: the presentation stage and
+its black and white blanks, the laser pointer, the default pen and text ink,
+search hits, note markers, text selection, the read-aloud highlight, and the
+glow of a tab playing media. qcolor turns any of these values into a QColor
+with alpha.
+
+The interface font is Inter, bundled in assets/fonts (SIL Open Font License,
+Inter-OFL.txt) so every machine renders the same face. load_ui_font registers it
+once at startup; FONT_STACK keeps system fallbacks for anything Inter lacks.
 """
 
 import os
 import sys
 
 from PySide6.QtCore import QByteArray, QPointF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontDatabase,
+    QIcon,
+    QPainter,
+    QPen,
+    QPixmap,
+    QRadialGradient,
+)
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
@@ -27,6 +60,11 @@ DARK = {
     "accent_soft": "rgba(107, 155, 255, 0.14)",
     "danger": "#F07070",
     "danger_soft": "rgba(240, 112, 112, 0.12)",
+    "success": "#4CC38A",
+    "warning": "#E5A54B",
+    "system": "#4FD1C5",
+    "system_soft": "rgba(79, 209, 197, 0.12)",
+    "private": "#9B6BE0",
     "grid": "rgba(255, 255, 255, 0.028)",
     "glow": "rgba(107, 155, 255, 0.07)",
 }
@@ -46,11 +84,45 @@ LIGHT = {
     "accent_soft": "rgba(47, 111, 235, 0.10)",
     "danger": "#D33C3C",
     "danger_soft": "rgba(211, 60, 60, 0.08)",
+    "success": "#1A7F45",
+    "warning": "#A16207",
+    "system": "#0E8C7F",
+    "system_soft": "rgba(14, 140, 127, 0.10)",
+    "private": "#7A3FC9",
     "grid": "rgba(0, 0, 0, 0.035)",
     "glow": "rgba(47, 111, 235, 0.05)",
 }
 
+CONTENT = {
+    "stage": "#000000",
+    "paper": "#FFFFFF",
+    "ink": "#000000",
+    "pen": "#FF0000",
+    "laser": "#FF2828",
+    "search_hit": "#FFFF00",
+    "note": "#FFFF00",
+    "selection": LIGHT["accent"],
+    "spoken": DARK["system"],
+    "playing_from": "#FF4500",
+    "playing_to": "#8A2BE2",
+}
+
 FONT_STACK = "'Inter', 'Segoe UI', system-ui, sans-serif"
+
+
+def qcolor(value: str, alpha: int = 255) -> QColor:
+    """A QColor from a token value, with alpha 0-255."""
+    color = QColor(value)
+    color.setAlpha(alpha)
+    return color
+
+
+def app_is_dark() -> bool:
+    """Whether the running application's window colour is dark."""
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    return app is not None and app.palette().window().color().lightness() < 128
 
 
 def tokens(dark: bool) -> dict:
@@ -58,12 +130,83 @@ def tokens(dark: bool) -> dict:
     return DARK if dark else LIGHT
 
 
+def toast_style(t: dict) -> str:
+    return (
+        f"background: {t['raised']}; color: {t['text']}; border: 1px solid {t['border_strong']}; "
+        "padding: 10px; border-radius: 5px;"
+    )
+
+
+def link_tip_style(t: dict) -> str:
+    return (
+        f"background: {t['raised']}; color: {t['text']}; padding: 3px 7px; "
+        f"border: 1px solid {t['border_strong']}; border-radius: 3px; font-size: 11px;"
+    )
+
+
+def incognito_url_style() -> str:
+    t = DARK
+    return (
+        f"QLineEdit {{ border: 2px solid {t['private']}; background-color: {t['raised']}; "
+        f"color: {t['text']}; border-radius: 4px; padding: 4px; }}"
+    )
+
+
+def banner_style(t: dict, kind: str) -> str:
+    """kind is "accent", "success", "warning", "danger" or "neutral"."""
+    if kind == "neutral":
+        return f"background-color: {t['raised']}; color: {t['text']};"
+    return f"background-color: {t[kind]}; color: {t['accent_text']};"
+
+
+def overlay_style() -> str:
+    t = DARK
+    return (
+        f"background-color: {t['raised']}; color: {t['text']}; font-size: 13px; font-weight: bold; "
+        f"border-radius: 6px; padding: 5px 12px; border: 1px solid {t['border_strong']};"
+    )
+
+
+UI_FONT = "Inter"
+
+
+def asset_path(*parts: str) -> str:
+    """Absolute path of a file under riemann/assets, frozen or not."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, "riemann", "assets", *parts)
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, "assets", *parts)
+
+
 def icon_path(filename: str) -> str:
     """Absolute path of a file in assets/icons, frozen or not."""
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return os.path.join(sys._MEIPASS, "riemann", "assets", "icons", filename)
-    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, "assets", "icons", filename)
+    return asset_path("icons", filename)
+
+
+_ui_font_loaded: bool | None = None
+
+
+def load_ui_font() -> bool:
+    """
+    Registers the bundled Inter font with Qt; safe to call more than once.
+
+    Returns False when the file is missing or unreadable, in which case Qt falls
+    back along FONT_STACK.
+    """
+    global _ui_font_loaded
+    if _ui_font_loaded is None:
+        font_id = QFontDatabase.addApplicationFont(asset_path("fonts", "Inter-Variable.ttf"))
+        _ui_font_loaded = font_id != -1
+    return _ui_font_loaded
+
+
+def ui_font(pixel_size: float, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
+    """The interface font at a pixel size and weight."""
+    font = QFont(UI_FONT)
+    font.setFamilies([UI_FONT, "Segoe UI", "Noto Sans", "sans-serif"])
+    font.setPixelSize(max(1, round(pixel_size)))
+    font.setWeight(weight)
+    return font
 
 
 def tinted_pixmap(name: str, color: str, size: int, dpr: float = 2.0) -> QPixmap:

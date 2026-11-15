@@ -14,14 +14,8 @@ from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineScript
 
 def get_injection_script(filename: str) -> str:
     """
-    Safely resolves the path to an injection script, accounting for PyInstaller's
-    temporary MEIPASS directory, and returns its contents.
-
-    Args:
-        filename (str): The name of the JavaScript file to read.
-
-    Returns:
-        str: The raw text contents of the script, or an empty string on failure.
+    The contents of a script in assets (in the source tree or a PyInstaller bundle), or
+    an empty string if it can't be read.
     """
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         base_path = getattr(sys, "_MEIPASS")
@@ -46,12 +40,6 @@ class ScriptInjector:
     """
 
     def __init__(self, profile: QWebEngineProfile):
-        """
-        Initializes the ScriptInjector with a target profile.
-
-        Args:
-            profile (QWebEngineProfile): The web engine profile to receive injected scripts.
-        """
         self.profile = profile
 
     def inject_ad_skipper(self) -> None:
@@ -72,13 +60,7 @@ class ScriptInjector:
             self._insert_script("RiemannBackspace", js_code)
 
     def inject_smart_dark_mode(self, web_page, dark_mode: bool) -> None:
-        """
-        Injects or removes a smart dark mode CSS inversion script on a specific web page.
-
-        Args:
-            web_page: The QWebEnginePage instance to inject the script into.
-            dark_mode (bool): True to enable dark mode, False to disable it.
-        """
+        """Adds or removes the smart dark mode script on one page."""
         if "monkeytype.com" in web_page.url().toString():
             return
 
@@ -157,15 +139,6 @@ class ScriptInjector:
         injection_point=QWebEngineScript.InjectionPoint.DocumentCreation,
         world_id=QWebEngineScript.ScriptWorldId.ApplicationWorld,
     ):
-        """
-        Helper method to configure and insert a QWebEngineScript into the profile.
-
-        Args:
-            name (str): The unique identifier for the script.
-            source (str): The JavaScript source code.
-            injection_point: When the script should run based on Qt Injection Points.
-            world_id: The isolation world for the script execution.
-        """
         scripts = self.profile.scripts()
         for existing_script in scripts.toList():
             if existing_script.name() == name:

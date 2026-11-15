@@ -2,8 +2,16 @@
 Component: Theme tokens
 Purpose: Colours shared with the Qt home pages (riemann/ui/palette.py). The page
 starts in the theme named by ?theme= in its URL, and the host switches it later
-with window.setTheme().
+with window.setTheme(). Inter comes from the bundled assets/fonts copy, since a
+web page cannot see fonts registered with Qt.
 */
+@font-face {
+    font-family: 'Inter';
+    src: url('../fonts/Inter-Variable.ttf') format('truetype');
+    font-weight: 100 900;
+    font-display: swap;
+}
+
 :root,
 :root[data-theme="dark"] {
     --canvas: #1C1D20;

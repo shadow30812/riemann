@@ -28,7 +28,7 @@ jobs:
         with:
           path: |
             ~\AppData\Local\pip\Cache
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
@@ -47,16 +47,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\Nuitka\Nuitka\Cache
-          key: ${{ runner.os }}-nuitka-${{ hashFiles('**/requirements*.txt') }}
+          key: ${{ runner.os }}-nuitka-${{ hashFiles('pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-nuitka-
-
-      - name: Cache AI Sidecar
-        id: cache-ai
-        uses: actions/cache@v4
-        with:
-          path: python-app/riemann/assets/riemann_ai_engine
-          key: ${{ runner.os }}-ai-${{ hashFiles('riemann-ai/**') }}
 
       # =========================
       # ⚙️ LANGUAGE SETUP
@@ -81,41 +74,6 @@ jobs:
           pip --version
 
       # =========================
-      # 🧠 STAGE 1: AI SIDECAR
-      # =========================
-
-      - name: Install AI Dependencies
-        run: pip install -r riemann-ai/requirements.txt
-
-      - name: Compile AI Sidecar (Nuitka)
-        if: steps.cache-ai.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          $EXCLUDES = "--nofollow-import-to=torch --nofollow-import-to=transformers --nofollow-import-to=cv2 --nofollow-import-to=scipy --nofollow-import-to=pandas"
-          $EXCLUDE_ARGS = $EXCLUDES.Split(" ")
-
-          python -m nuitka `
-              --standalone `
-              --assume-yes-for-downloads `
-              --module-parameter=torch-disable-jit=yes `
-              --output-dir=dist_ai `
-              @EXCLUDE_ARGS `
-              riemann-ai/main.py
-
-          if ($LASTEXITCODE -ne 0) { 
-              Write-Host "FATAL ERROR: AI Engine Nuitka compilation failed." -ForegroundColor Red
-              exit $LASTEXITCODE 
-          }
-
-      - name: Position AI Engine into Assets
-        if: steps.cache-ai.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "python-app\riemann\assets\riemann_ai_engine"
-          Move-Item -Path "dist_ai\main.dist\*" -Destination "python-app\riemann\assets\riemann_ai_engine\" -Force
-          Remove-Item -Recurse -Force dist_ai -ErrorAction SilentlyContinue
-
-      # =========================
       # ⚙️ STAGE 2: MAIN APP
       # =========================
 
@@ -123,7 +81,7 @@ jobs:
         run: pip install pip-tools
 
       - name: Compile requirements (Windows)
-        run: pip-compile --resolver=backtracking --output-file requirements/wreqs.txt requirements/requirements.in
+        run: pip-compile --resolver=backtracking --extra bundled --output-file requirements/wreqs.txt pyproject.toml
 
       - name: Upload compiled requirements
         uses: actions/upload-artifact@v4
@@ -134,17 +92,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements/wreqs.txt
 
-      - name: Cache vcpkg dependencies
-        uses: actions/cache@v4
-        with:
-          path: C:\vcpkg\installed
-          key: ${{ runner.os }}-vcpkg-ocr-static-md
-
-      - name: Install OCR C++ Libraries (vcpkg)
-        shell: pwsh
-        run: |
-          vcpkg integrate install
-          vcpkg install leptonica tesseract --triplet x64-windows-static-md
+      - name: Fetch PDFium (pinned by SHA-256)
+        run: python scripts/fetch_pdfium.py win-x64
 
       - name: Build Rust Backend
         shell: bash
@@ -178,6 +127,8 @@ jobs:
           $env:QT_QPA_PLATFORM = "offscreen"
           python -c "import riemann.app; print('riemann.app imports OK')"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -c "import onnxruntime, tokenizers, fastapi, uvicorn; import riemann.core.ai_server; print('AI engine imports OK')"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # =========================
       # 🚀 STAGE 3: FINAL BUILD
@@ -190,9 +141,9 @@ jobs:
           
           $EXCLUDES="--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow-import-to=cv2 --nofollow-import-to=pix2tex"
           $EXCLUDES="$EXCLUDES --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas"
-          $EXCLUDES="$EXCLUDES --nofollow-import-to=nvidia --nofollow-import-to=fitz --nofollow-import-to=pymupdf" 
+          $EXCLUDES="$EXCLUDES --nofollow-import-to=nvidia" 
           $EXCLUDES="$EXCLUDES --nofollow-import-to=yt_dlp.extractor.lazy_extractors --nofollow-import-to=pygments"
-          $EXCLUDES="$EXCLUDES --nofollow-import-to=faster_whisper --nofollow-import-to=ctranslate2 --nofollow-import-to=huggingface_hub --nofollow-import-to=tokenizers"
+          $EXCLUDES="$EXCLUDES --nofollow-import-to=faster_whisper --nofollow-import-to=ctranslate2 --nofollow-import-to=huggingface_hub"
           
           $EXCLUDE_ARGS = $EXCLUDES.Split(" ")
 
@@ -203,8 +154,10 @@ jobs:
               --enable-plugin=pyside6 `
               --include-package=riemann `
               --include-data-dir=python-app/riemann/assets=riemann/assets `
-              --noinclude-data-files=riemann/assets/riemann_ai_engine/* `
-              --include-raw-dir=python-app/riemann/assets/riemann_ai_engine=riemann/assets/riemann_ai_engine `
+              --include-package=onnxruntime `
+              --include-package-data=onnxruntime `
+              --include-package=tokenizers `
+              --include-package=uvicorn `
               --include-data-file=libs/pdfium.dll=pdfium.dll `
               --windows-console-mode=attach `
               <# --windows-icon-from-ico=python-app/riemann/assets/icons/icon.ico #> `
@@ -240,6 +193,37 @@ jobs:
               $code = 1
           }
           Write-Host "Exit code: $code"
+          exit $code
+
+      - name: Smoke test the AI engine inside the exe
+        # Runs Riemann.exe as the AI engine (--riemann-ai-sidecar), waits for
+        # it to download and load the search model (pinned by SHA-256), and
+        # embeds one sentence, so a packaging miss (onnxruntime DLLs, uvicorn
+        # protocol modules) fails here instead of on a user's machine.
+        shell: pwsh
+        run: |
+          $env:RIEMANN_AI_PORT = "8765"
+          $env:RIEMANN_AI_TOKEN = "ci"
+          $env:RIEMANN_AI_MODELS = Join-Path $env:RUNNER_TEMP "riemann-model"
+          $p = Start-Process -FilePath "dist\Riemann.exe" -ArgumentList "--riemann-ai-sidecar" -PassThru
+          $headers = @{ "X-Riemann-Token" = "ci" }
+          $state = ""
+          for ($i = 0; $i -lt 300; $i++) {
+            Start-Sleep -Seconds 1
+            try {
+              $state = (Invoke-RestMethod -Uri "http://127.0.0.1:8765/status" -Headers $headers).status
+              if ($state -eq "ready" -or $state -eq "failed") { break }
+            } catch { }
+          }
+          Write-Host "AI engine status: $state"
+          $code = 1
+          if ($state -eq "ready") {
+            $body = '{"text_chunk": "gradient descent trains neural networks", "tags": ["Machine Learning", "Cooking"]}'
+            $tags = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8765/tag" -Headers $headers -ContentType "application/json" -Body $body
+            Write-Host "Tags: $($tags.tags)"
+            if ($tags.tags -contains "Machine Learning") { $code = 0 }
+          }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
           exit $code
 
       # =========================

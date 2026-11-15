@@ -1,3 +1,10 @@
+"""
+Notes:
+
+test_invalid_field_gets_a_cross: Turned clockwise, the page's low-y edge is
+shown on the left and x runs down.
+"""
+
 import io
 
 import pikepdf
@@ -81,7 +88,6 @@ def test_invalid_field_gets_a_cross(tmp_path):
     _signed_like(path, rotate=90)
     [result] = sa.status_appearances(path, {"Signature1": sa.INVALID})
     assert sa._CROSS.encode() in _layers_of(result["pdf"])[2]
-    # Turned clockwise, the page's low-y edge is shown on the left and x runs down.
     left, top, right, bottom = result["rect"]
     assert abs(left - 10 / 800) < 1e-9 and abs(right - 110 / 800) < 1e-9
     assert abs(top - 500 / 600) < 1e-9 and abs(bottom - 1) < 1e-9

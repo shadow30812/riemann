@@ -1,14 +1,36 @@
 """
 Background page rendering for the reader.
 
-PDF pages are rasterised on a worker thread (the Rust core releases the GIL
-while PDFium renders), so scrolling never waits on PDFium. Finished pages are
+PDF pages are rasterised on a worker thread, so scrolling never waits on
+PDFium. The worker renders through the tab's PageRenderer
+(core/render_process.py), which runs PDFium in a child process of its own, so
+a slow page in one tab never holds up another. Finished pages are
 kept in a process-wide LRU cache so that rebuilding the virtual layout or
 scrolling back over recent pages does not render them again.
+
+The Rust core renders at most 64 megapixels per page (MAX_PAGE_PIXELS) and
+reports the scale it used. page_image records any shortfall as the image's
+device pixel ratio (1.0 for a full render), which the reader multiplies into
+the pixmap's ratio so an oversized page is stretched to its slot instead of
+shown smaller. Stand-ins stretched to a page slot obey the same limit.
+
+page_image wraps the bytes the Rust core rendered into without copying them;
+PySide keeps the bytes object alive for as long as the QImage. Each page is
+therefore held once, not twice. Overlays are painted on a QPixmap while the
+QImage is still referenced, so Qt copies before drawing and the bytes are
+never written to.
+
+Notes:
+
+PageRenderWorker: (generation, page, render scale, theme, is_thumbnail, image,
+metadata) where metadata is (links, form widgets) the first time a page is
+seen.
+
+run: Links and form fields are fetched here too, so the UI thread never has to
+wait on the PDFium lock while this thread renders.
 """
 
-import ctypes
-import sys
+import atexit
 import threading
 import weakref
 from collections import OrderedDict
@@ -16,6 +38,8 @@ from typing import Dict, Hashable, Optional, Tuple
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
+
+from ...core import render_process
 
 
 # Rendered pages are always opaque (PDFium draws onto a white background), so
@@ -26,28 +50,19 @@ from PySide6.QtGui import QImage
 PAGE_IMAGE_FORMAT = QImage.Format.Format_RGB32
 
 
-def _return_page_buffers_to_os() -> None:
-    """
-    Makes glibc give freed page buffers back to the OS.
-
-    A page at Fit Width is about 10 MB. glibc serves blocks that large with
-    mmap, but after the first one is freed it raises its threshold and puts
-    later ones on the heap of whichever thread allocated them, where freed
-    memory mostly stays. Every tab has its own render thread, so with five
-    tabs open the process held about 1.9 GB instead of about 1.1 GB. Fixing the
-    threshold at 1 MB keeps page-sized blocks on mmap.
-    """
-    if not sys.platform.startswith("linux"):
-        return
-    try:
-        libc = ctypes.CDLL("libc.so.6")
-        M_MMAP_THRESHOLD = -3
-        libc.mallopt(M_MMAP_THRESHOLD, 1024 * 1024)
-    except (OSError, AttributeError):
-        pass  # not glibc (musl, for example)
+MAX_PAGE_PIXELS = 64_000_000
 
 
-_return_page_buffers_to_os()
+def page_image(res, requested_scale: float) -> QImage:
+    """A QImage of a render result, marked with how far short of requested_scale it fell."""
+    img = QImage(res.data, res.width, res.height, PAGE_IMAGE_FORMAT)
+    actual = getattr(res, "scale", requested_scale)
+    if requested_scale > 0 and actual < requested_scale * 0.999:
+        img.setDevicePixelRatio(actual / requested_scale)
+    return img
+
+
+render_process._return_page_buffers_to_os()
 
 
 class PageImageCache:
@@ -96,10 +111,21 @@ _LIVE_WORKERS: "weakref.WeakSet[PageRenderWorker]" = weakref.WeakSet()
 
 
 def stop_all_render_workers() -> None:
-    """Stops every render thread; called when the application is quitting."""
+    """
+    Stops every render thread. Runs on aboutToQuit and again at interpreter
+    exit, so scripts and tests that never start an event loop or quit the app
+    do not end with Qt aborting over a thread that is still running.
+    """
     for worker in list(_LIVE_WORKERS):
-        worker.stop()
-        worker.wait(2000)
+        try:
+            worker.stop()
+            worker.wait(2000)
+        except RuntimeError:
+            pass
+    render_process.close_all()
+
+
+atexit.register(stop_all_render_workers)
 
 # A job is keyed by (page index, is_thumbnail) and carries the render
 # parameters plus the generation of the document it was requested for.
@@ -115,8 +141,6 @@ class PageRenderWorker(QThread):
     almost immediately while scrolling fast.
     """
 
-    # (generation, page, render scale, theme, is_thumbnail, image, metadata)
-    # where metadata is (links, form widgets) the first time a page is seen.
     page_rendered = Signal(object, int, float, int, bool, QImage, object)
 
     def __init__(self, parent=None) -> None:
@@ -188,14 +212,10 @@ class PageRenderWorker(QThread):
             page_idx, thumbnail = key
             try:
                 res = doc.render_page(page_idx, render_scale, theme)
-                img = QImage(
-                    res.data, res.width, res.height, PAGE_IMAGE_FORMAT
-                ).copy()
+                img = page_image(res, render_scale)
             except Exception:
                 continue
 
-            # Links and form fields are fetched here too, so the UI thread never
-            # has to wait on the PDFium lock while this thread renders.
             meta = None
             if page_idx not in self._meta_sent:
                 self._meta_sent.add(page_idx)

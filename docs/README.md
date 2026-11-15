@@ -2,7 +2,7 @@
 
 Riemann is a desktop PDF reader and web browser in one window. PDFs, Markdown files and web pages open as tabs. Two tabs can sit side by side, so a paper and the page it came from share one screen. The interface is Python with PySide6 (Qt 6). Rendering, text extraction, search and annotation reading run in a Rust extension built on PDFium, Google's PDF engine.
 
-It runs on Linux and Windows. Version 5.2.1, MIT licensed.
+It runs on Linux and Windows. Version 6.1.0, MIT licensed.
 
 ![A paper in the reader on the left and its arXiv page in the browser on the right](images/split-view.png)
 
@@ -98,7 +98,7 @@ flowchart LR
     RW <--> C
     R <--> C
     RW & CW & R --> L --> P
-    R -. WebSocket .-> AI
+    R -. HTTP, per-run token .-> AI
 ```
 
 The parts that took the most work:
@@ -263,7 +263,7 @@ env -u LD_LIBRARY_PATH PYTHONPATH=python-app riemann/bin/python -m riemann
 
 `just run` does the same after rebuilding the extension. Pass files or folders on the command line to open them, and `--new-window` to start a separate instance instead of handing them to the one already running.
 
-Heavy features install on demand: Settings > "Manage External Dependencies" puts PyMuPDF, PyTorch, Pix2Tex, yt-dlp, Pygments, faster-whisper and a few others into a private virtual environment under the app's data directory. The AI search sidecar is a separate conda environment packed into `python-app/riemann/assets/riemann_ai_engine` by `riemann-ai/build_ai.sh`.
+Heavy features install on demand: Settings > "Manage External Dependencies" puts PyTorch, Pix2Tex, yt-dlp, Pygments, faster-whisper and a few others into a private virtual environment under the app's data directory. AI search runs in a child process of the app (`core/ai_server.py`, a small ONNX model on onnxruntime); the model, about 90 MB, is downloaded on first use and checked against a pinned SHA-256.
 
 ## Building a standalone executable
 
@@ -296,7 +296,6 @@ python-app/riemann/
 rust-core/            PyO3 extension wrapping PDFium (rendering, text, links, forms,
                       comments, signatures)
 rust-ocr-worker/      OCR used by the core
-riemann-ai/           local semantic-search sidecar (FastAPI, FAISS)
 benchmarks/           benchmark scripts, corpus list and results
 scripts/              build, packaging and test scripts
 docs/                 this file, the developer guide, the directory tree, screenshots

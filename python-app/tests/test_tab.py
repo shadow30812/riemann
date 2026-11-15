@@ -1,3 +1,12 @@
+"""
+Notes:
+
+reader_tab: No event loop runs under pytest, so flush the deletion explicitly;
+otherwise the tab's QWebEngineView outlives the default profile.
+"""
+
+from contextlib import contextmanager
+import os
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -9,7 +18,6 @@ from riemann.core.constants import ViewMode, ZoomMode
 from riemann.ui.reader.tab import ReaderTab
 from riemann.ui.reader.widgets import PageWidget
 
-sys.modules["riemann_core"] = MagicMock()
 
 
 @pytest.fixture(scope="session")
@@ -20,15 +28,28 @@ def qapp():
     yield app
 
 
+@contextmanager
+def patched_settings():
+    """Patches app_settings everywhere ReaderTab and its mixins create one."""
+    mock_settings = MagicMock()
+    with patch("riemann.ui.reader.tab.app_settings", mock_settings), patch(
+        "riemann.ui.reader.mixins.appearance.app_settings", mock_settings
+    ):
+        yield mock_settings
+
+
+def fake_setting(key, default=None, type=None):
+    """Every setting reads True except the notes panel, which would narrow the page."""
+    return False if key == "reader/notes_visible" else True
+
+
 @pytest.fixture
 def reader_tab(qapp):
-    with patch("riemann.ui.reader.tab.QSettings") as mock_settings:
-        mock_settings.return_value.value.return_value = True
+    with patched_settings() as mock_settings:
+        mock_settings.return_value.value.side_effect = fake_setting
         tab = ReaderTab()
         yield tab
         tab.deleteLater()
-        # No event loop runs under pytest, so flush the deletion explicitly;
-        # otherwise the tab's QWebEngineView outlives the default profile.
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
@@ -151,7 +172,7 @@ def test_zoom_step(reader_tab):
 
 
 def test_toggle_theme(reader_tab):
-    reader_tab.stack.setCurrentIndex(0)  # a document is showing, not the start page
+    reader_tab.stack.setCurrentIndex(0)
     initial_theme = reader_tab.theme_mode
     with (
         patch.object(reader_tab, "apply_theme") as mock_apply,
@@ -189,9 +210,9 @@ def test_on_page_input_return_invalid(reader_tab):
     assert reader_tab.txt_page.text() == "3"
 
 
-@patch("riemann.ui.reader.tab.QMessageBox.information")
-@patch("riemann.ui.reader.tab.QFileDialog.getSaveFileName")
-@patch("riemann.ui.reader.tab.shutil.copy2")
+@patch("riemann.ui.reader.mixins.document.QMessageBox.information")
+@patch("riemann.ui.reader.mixins.document.QFileDialog.getSaveFileName")
+@patch("riemann.ui.reader.mixins.document.shutil.copy2")
 def test_save_document(mock_copy, mock_get_save, mock_info, reader_tab):
     reader_tab.current_path = "/tmp/test.pdf"
     mock_get_save.return_value = ("/tmp/saved.pdf", "")
@@ -203,7 +224,7 @@ def test_save_document(mock_copy, mock_get_save, mock_info, reader_tab):
             mock_info.assert_called_once()
 
 
-@patch("riemann.ui.reader.tab.QMessageBox.warning")
+@patch("riemann.ui.reader.mixins.document.QMessageBox.warning")
 def test_save_document_no_doc(mock_warning, reader_tab):
     reader_tab.current_path = None
     reader_tab.save_document()
@@ -253,7 +274,7 @@ def test_tab_switch_focus_next_prev_child(reader_tab):
         patch.object(reader_tab, "prev_view") as mock_prev,
     ):
         result = reader_tab.focusNextPrevChild(True)
-        assert result is False or result is True  # normal Qt focus navigation result
+        assert result is False or result is True
         mock_next.assert_not_called()
         mock_prev.assert_not_called()
         assert reader_tab.current_page_index == 3
@@ -301,7 +322,6 @@ def test_comment_interaction_events(reader_tab):
     }
     reader_tab._get_comment_at_pos = MagicMock(return_value=dummy_comment)
 
-    # Hover event (MouseMove)
     move_event = MagicMock()
     move_event.type.return_value = QEvent.Type.MouseMove
     move_event.pos.return_value = QPoint(100, 100)
@@ -309,7 +329,6 @@ def test_comment_interaction_events(reader_tab):
     reader_tab.eventFilter(page_widget, move_event)
     page_widget.setCursor.assert_called_with(Qt.CursorShape.PointingHandCursor)
 
-    # Click event (MouseButtonRelease)
     release_event = MagicMock()
     release_event.type.return_value = QEvent.Type.MouseButtonRelease
     release_event.pos.return_value = QPoint(100, 100)
@@ -323,12 +342,12 @@ def test_comment_interaction_events(reader_tab):
 
 
 def test_home_page_follows_the_interface_theme(reader_tab):
-    assert reader_tab._home_dark is True  # QSettings is mocked to return True
+    assert reader_tab._home_dark is True
     reader_tab.apply_ui_theme(False)
     assert reader_tab._home_dark is False
-    assert "#FFFFFF" in reader_tab.home_page_widget.styleSheet()  # light card surface
+    assert "#FFFFFF" in reader_tab.home_page_widget.styleSheet()
     reader_tab.apply_ui_theme(True)
-    assert "#232428" in reader_tab.home_page_widget.styleSheet()  # dark card surface
+    assert "#232428" in reader_tab.home_page_widget.styleSheet()
 
 
 def test_tab_theme_toggle_switches_the_home_page_and_keeps_it(reader_tab):
@@ -340,15 +359,15 @@ def test_tab_theme_toggle_switches_the_home_page_and_keeps_it(reader_tab):
         patch.object(reader_tab, "window", return_value=window),
         patch.object(reader_tab, "show_toast"),
     ):
-        reader_tab.toggle_theme()  # N on the start page
+        reader_tab.toggle_theme()
         assert reader_tab._home_dark is False
         assert "#FFFFFF" in reader_tab.home_page_widget.styleSheet()
-        assert reader_tab.theme_mode == mode  # the PDF theme is left alone
+        assert reader_tab.theme_mode == mode
 
-        reader_tab._populate_home_recents()  # runs whenever the tab is shown again
+        reader_tab._populate_home_recents()
         assert reader_tab._home_dark is False
 
-        reader_tab.apply_ui_theme(True)  # Ctrl+D hands it back to the interface theme
+        reader_tab.apply_ui_theme(True)
         assert reader_tab._home_dark is True
         reader_tab._populate_home_recents()
         assert reader_tab._home_dark is True
@@ -373,7 +392,7 @@ def test_preview_banner_follows_the_interface_theme(qapp):
     from riemann.ui.palette import DARK, LIGHT
     from riemann.ui.reader.tab import PreviewReaderTab
 
-    with patch("riemann.ui.reader.tab.QSettings") as mock_settings:
+    with patched_settings() as mock_settings:
         mock_settings.return_value.value.return_value = True
         tab = PreviewReaderTab()
     try:
@@ -408,3 +427,119 @@ def test_zoom_step_starts_from_the_fit_scale():
     fake.manual_scale = 4.9
     ReaderTab.zoom_step(fake, 1.1)
     assert fake.manual_scale == 5.0
+
+
+def test_toolbar_icons_are_found(reader_tab):
+    for name in ("btn_zoom_in", "btn_zoom_out", "btn_search", "btn_print"):
+        button = getattr(reader_tab, name, None)
+        if button is not None:
+            assert not button.icon().isNull(), name
+
+
+CORPUS = os.path.join(os.path.dirname(__file__), "..", "..", "benchmarks", "corpus", "pdf17_spec.pdf")
+
+
+@pytest.mark.skipif(not os.path.exists(CORPUS), reason="benchmark corpus not downloaded")
+def test_back_and_forward_return_to_the_exact_spot(reader_tab, qapp):
+    import time
+
+    def pump(seconds, until=lambda: False):
+        end = time.time() + seconds
+        while time.time() < end and not until():
+            qapp.processEvents()
+            time.sleep(0.01)
+
+    reader_tab.resize(1000, 800)
+    reader_tab.show()
+    reader_tab.load_document(os.path.abspath(CORPUS))
+    pump(15, lambda: reader_tab.current_doc is not None)
+    reader_tab.jump_to_page(9)
+    bar = reader_tab.scroll.verticalScrollBar()
+    bar.setValue(bar.value() + 300)
+    reader_tab.update_view()
+    start = bar.value()
+    assert not reader_tab.btn_nav_back.isEnabled()
+
+    reader_tab.navigate_to(400)
+    reader_tab.navigate_to(600)
+    reader_tab.go_back()
+    assert reader_tab.current_page_index == 400
+    reader_tab.go_back()
+    assert (reader_tab.current_page_index, bar.value()) == (9, start)
+    assert reader_tab.btn_nav_forward.isEnabled()
+    reader_tab.go_forward()
+    assert reader_tab.current_page_index == 400
+    reader_tab.cleanup()
+
+
+ATTENTION = os.path.join(os.path.dirname(__file__), "..", "..", "benchmarks", "corpus", "attention.pdf")
+
+
+@pytest.mark.skipif(not os.path.exists(ATTENTION), reason="benchmark corpus not downloaded")
+def test_deleting_a_page_moves_annotations_with_it(reader_tab, qapp, tmp_path, monkeypatch):
+    import shutil
+    import time
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from riemann.core import annotation_store, pdf_annotations
+
+    monkeypatch.setattr(annotation_store, "_shared", annotation_store.AnnotationStore(str(tmp_path / "store")))
+    monkeypatch.setattr("riemann.ui.reader.mixins.pages.QMessageBox.question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+
+    def pump(seconds, until=lambda: False):
+        end = time.time() + seconds
+        while time.time() < end and not until():
+            qapp.processEvents()
+            time.sleep(0.01)
+
+    path = str(tmp_path / "paper.pdf")
+    shutil.copyfile(ATTENTION, path)
+    reader_tab.resize(1000, 800)
+    reader_tab.show()
+    reader_tab.load_document(path)
+    pump(15, lambda: reader_tab.current_doc is not None)
+    pump(1)
+    reader_tab.annotations = {"2": [{"id": "n1", "type": "note", "rel_pos": [0.5, 0.5], "text": "keep me", "color": "#ff0000"}]}
+    reader_tab.save_annotations()
+    reader_tab.flush_annotations_to_pdf()
+    reader_tab._store_annotations_in_pdf(blocking=True)
+
+    reader_tab.delete_pages([0])
+    pump(15, lambda: reader_tab.current_doc is not None and reader_tab.current_doc.page_count == 14)
+    assert reader_tab.current_doc.page_count == 14
+    assert list(reader_tab.annotations) == ["1"]
+    assert pdf_annotations.read_annotations(path)["1"][0]["text"] == "keep me"
+    reader_tab.cleanup()
+
+
+def test_form_entries_are_saved_into_the_pdf(reader_tab, qapp, tmp_path, monkeypatch):
+    import time
+
+    from PySide6.QtWidgets import QCheckBox, QLineEdit
+
+    from form_fixtures import make_form_pdf
+    from riemann.core import annotation_store
+    from riemann.core.pdf_forms import read_form_values
+
+    monkeypatch.setattr(annotation_store, "_shared", annotation_store.AnnotationStore(str(tmp_path / "store")))
+    monkeypatch.setattr("riemann.ui.reader.mixins.forms.store_in_pdf_enabled", lambda: True)
+
+    def pump(seconds, until=lambda: False):
+        end = time.time() + seconds
+        while time.time() < end and not until():
+            qapp.processEvents()
+            time.sleep(0.01)
+
+    path = make_form_pdf(str(tmp_path / "form.pdf"))
+    reader_tab.resize(1000, 900)
+    reader_tab.show()
+    reader_tab.load_document(path)
+    pump(15, lambda: reader_tab.current_doc is not None and reader_tab.form_widgets.get(0))
+    controls = reader_tab.form_widgets[0]
+    next(c for c in controls if isinstance(c, QLineEdit)).setText("Grace Hopper")
+    next(c for c in controls if isinstance(c, QCheckBox)).setChecked(True)
+    reader_tab.flush_forms_to_pdf()
+    assert read_form_values(path)["name"] == "Grace Hopper"
+    assert read_form_values(path)["agree"] is True
+    reader_tab.cleanup()

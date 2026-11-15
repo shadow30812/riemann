@@ -15,6 +15,15 @@ file open.
 
 Each annotation Riemann writes is named "riemann:<id>" (/NM) and carries the
 original dict as JSON under /RiemannData, so it round-trips losslessly.
+
+New objects are told apart from existing ones by an unreferenced probe object
+made before anything else: qpdf numbers new objects from the highest existing
+one, not from the trailer's /Size, which may be larger.
+
+Notes:
+
+write_annotations: Append only if nobody changed the file while it was being
+parsed.
 """
 
 import io
@@ -27,6 +36,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 NAME_PREFIX = "riemann:"
 DATA_KEY = "/RiemannData"
+RECT_KEY = "/RiemannRect"
 
 Box = Tuple[float, float, float, float]
 
@@ -108,13 +118,25 @@ def _inherited(page_obj, key: str):
     return None
 
 
-def _page_space(page) -> _PageSpace:
-    box = _inherited(page.obj, "/CropBox") or _inherited(page.obj, "/MediaBox")
+def _box(value) -> Optional[Box]:
     try:
-        x1, y1, x2, y2 = (float(v) for v in box)
-        crop = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+        x1, y1, x2, y2 = (float(v) for v in value)
     except Exception:
-        crop = (0.0, 0.0, 612.0, 792.0)
+        return None
+    return min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)
+
+
+def visible_box(crop: Optional[Box], media: Optional[Box]) -> Box:
+    """The crop box clipped to the media box, falling back as the Rust core does."""
+    if crop and media:
+        clipped = (max(crop[0], media[0]), max(crop[1], media[1]), min(crop[2], media[2]), min(crop[3], media[3]))
+        if clipped[0] < clipped[2] and clipped[1] < clipped[3]:
+            return clipped
+    return media or crop or (0.0, 0.0, 612.0, 792.0)
+
+
+def _page_space(page) -> _PageSpace:
+    crop = visible_box(_box(_inherited(page.obj, "/CropBox")), _box(_inherited(page.obj, "/MediaBox")))
     try:
         rotate = int(_inherited(page.obj, "/Rotate") or 0)
     except Exception:
@@ -259,6 +281,68 @@ def _is_riemann(annot) -> bool:
         return False
 
 
+def serialize_objects(objects: Dict[Tuple[int, int], Any]) -> List[Tuple[int, int, bytes]]:
+    """(number, generation, body) for each indirect object, ready for an incremental section."""
+    import pikepdf
+
+    serialized = []
+    for (num, gen), obj in sorted(objects.items()):
+        if isinstance(obj, pikepdf.Stream):
+            raw = obj.read_raw_bytes()
+            stream_dict = pikepdf.Dictionary({k: v for k, v in obj.stream_dict.items() if k != "/Length"})
+            stream_dict.Length = len(raw)
+            body = stream_dict.unparse(resolved=True) + b"\nstream\n" + raw + b"\nendstream"
+        else:
+            body = obj.unparse(resolved=True)
+        serialized.append((num, gen, body))
+    return serialized
+
+
+def collect_new_objects(objects: Dict[Tuple[int, int], Any], root, first_new: int) -> None:
+    """Adds root and every object reachable from it that was created after first_new."""
+    import pikepdf
+
+    containers = (pikepdf.Dictionary, pikepdf.Array, pikepdf.Stream)
+
+    def walk(obj):
+        if not isinstance(obj, containers):
+            return
+        if obj.is_indirect:
+            if obj.objgen in objects:
+                return
+            objects[obj.objgen] = obj
+        items = obj.values() if isinstance(obj, (pikepdf.Dictionary, pikepdf.Stream)) else obj
+        for child in items:
+            if isinstance(child, containers):
+                if child.is_indirect and child.objgen[0] < first_new:
+                    continue
+                walk(child)
+
+    walk(root)
+
+
+def incremental_save(path: str, original: bytes, pdf, objects, dest: Optional[str] = None) -> bool:
+    """
+    Appends the given objects of pdf (opened from original) to path as an
+    incremental update, or writes original plus that update to dest. Returns
+    False without writing when path changed since original was read.
+    """
+    trailer = {"/Size": str(int(pdf.trailer.get("/Size", 0))).encode()}
+    for key in ("/Root", "/Info", "/ID"):
+        if key in pdf.trailer:
+            trailer[key] = pdf.trailer[key].unparse()
+    section = _incremental_section(original, serialize_objects(objects), trailer)
+    if dest:
+        with open(dest, "wb") as f:
+            f.write(original + section)
+        return True
+    if file_signature(path) is None or os.path.getsize(path) != len(original):
+        return False
+    with open(path, "ab") as f:
+        f.write(section)
+    return True
+
+
 def _last_startxref(data: bytes) -> int:
     matches = list(re.finditer(rb"startxref\s+(\d+)", data[-4096:]))
     if not matches:
@@ -324,6 +408,64 @@ def file_signature(path: str) -> Optional[List[int]]:
         return None
 
 
+def _is_signed(pdf) -> bool:
+    acro = pdf.Root.get("/AcroForm")
+    try:
+        return acro is not None and bool(int(acro.get("/SigFlags", 0)) & 1)
+    except Exception:
+        return True
+
+
+def incremental_updates(path: str) -> int:
+    """How many times the file has been saved incrementally (end-of-file markers minus one)."""
+    try:
+        with open(path, "rb") as f:
+            return max(0, f.read().count(b"%%EOF") - 1)
+    except OSError:
+        return 0
+
+
+COMPACT_AFTER_UPDATES = 10
+
+
+def compact(path: str) -> bool:
+    """
+    Rewrites the PDF in full, dropping the superseded objects that incremental
+    saves leave behind. Skipped (False) for files Riemann may not change, such
+    as signed ones, and when the file cannot be replaced (on Windows, while
+    another program has it open). The original stays intact on any failure.
+    """
+    if not can_store_in(path):
+        return False
+    import tempfile
+
+    import pikepdf
+
+    folder = os.path.dirname(os.path.abspath(path))
+    fd, tmp = tempfile.mkstemp(prefix=".riemann-", suffix=".pdf", dir=folder)
+    os.close(fd)
+    try:
+        before = file_signature(path)
+        with pikepdf.open(path) as pdf:
+            pdf.save(tmp, object_stream_mode=pikepdf.ObjectStreamMode.generate)
+        if file_signature(path) != before:
+            raise OSError("file changed while compacting")
+        try:
+            import shutil
+
+            shutil.copymode(path, tmp)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return False
+
+
 def can_store_in(path: str) -> bool:
     """Whether annotations can be written into this PDF (writable, not encrypted or signed)."""
     if not path.lower().endswith(".pdf") or not os.access(path, os.W_OK):
@@ -368,6 +510,8 @@ def write_annotations(
             int(pid): annos for pid, annos in annotations.items() if annos and str(pid).isdigit()
         }
 
+        first_new = pdf.make_indirect(pikepdf.Dictionary()).objgen[0]
+
         changed_pages = []
         for idx in range(page_count):
             page = pdf.pages[idx]
@@ -389,6 +533,7 @@ def write_annotations(
                 anno.setdefault("id", new_annotation_id())
                 built = _build_annotation(pdf, page, space, anno, author)
                 if built is not None:
+                    built[pikepdf.Name(RECT_KEY)] = pikepdf.Array([float(v) for v in built.Rect])
                     kept.append(pdf.make_indirect(built))
             page.obj.Annots = pikepdf.Array(kept)
             changed_pages.append(page.obj)
@@ -412,7 +557,7 @@ def write_annotations(
             items = obj.values() if isinstance(obj, (pikepdf.Dictionary, pikepdf.Stream)) else obj
             for child in items:
                 if isinstance(child, (pikepdf.Dictionary, pikepdf.Array, pikepdf.Stream)):
-                    if child.is_indirect and child.objgen[0] < original_size:
+                    if child.is_indirect and child.objgen[0] < first_new:
                         continue
                     collect(child)
 
@@ -420,34 +565,27 @@ def write_annotations(
         for page_obj in changed_pages:
             objects[page_obj.objgen] = page_obj
             for annot in page_obj.Annots:
-                if annot.is_indirect and annot.objgen[0] >= original_size:
+                if annot.is_indirect and annot.objgen[0] >= first_new:
                     collect(annot)
 
-        serialized = []
-        for (num, gen), obj in sorted(objects.items()):
-            if isinstance(obj, pikepdf.Stream):
-                raw = obj.read_raw_bytes()
-                stream_dict = pikepdf.Dictionary(
-                    {k: v for k, v in obj.stream_dict.items() if k != "/Length"}
-                )
-                stream_dict.Length = len(raw)
-                body = stream_dict.unparse(resolved=True) + b"\nstream\n" + raw + b"\nendstream"
-            else:
-                body = obj.unparse(resolved=True)
-            serialized.append((num, gen, body))
+        serialized = serialize_objects(objects)
 
         trailer = {"/Size": str(original_size).encode()}
         for key in ("/Root", "/Info", "/ID"):
             if key in pdf.trailer:
                 trailer[key] = pdf.trailer[key].unparse()
+        signed = _is_signed(pdf)
 
     section = _incremental_section(original, serialized, trailer)
     if dest:
-        with open(dest, "wb") as f:
-            f.write(original + section)
+        if signed:
+            with open(dest, "wb") as f:
+                f.write(original + section)
+        else:
+            with pikepdf.open(io.BytesIO(original + section)) as updated:
+                updated.save(dest, object_stream_mode=pikepdf.ObjectStreamMode.generate)
         return True
 
-    # Append only if nobody changed the file while it was being parsed.
     if file_signature(path) is None or os.path.getsize(path) != len(original):
         return False
     with open(path, "ab") as f:
@@ -483,6 +621,7 @@ def read_annotations(path: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
                     continue
                 any_found = True
                 anno["id"] = name[len(NAME_PREFIX) :]
+                anno = _follow_move(anno, annot, page)
                 if anno.get("type") in ("note", "text", "markup") and "/Contents" in annot:
                     anno["text"] = str(annot.Contents)
                 color = _rgb_to_hex(annot.get("/C", []))
@@ -490,3 +629,100 @@ def read_annotations(path: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
                     anno["color"] = color
                 found.setdefault(str(idx), []).append(anno)
     return found if any_found else None
+
+
+def _shift(anno: Dict[str, Any], du: float, dv: float) -> None:
+    if "rel_pos" in anno:
+        u, v = anno["rel_pos"]
+        anno["rel_pos"] = [float(u) + du, float(v) + dv]
+    if "points" in anno:
+        anno["points"] = [[float(p[0]) + du, float(p[1]) + dv, *p[2:]] for p in anno["points"]]
+    if "rects" in anno:
+        anno["rects"] = [
+            [float(r[0]) + du, float(r[1]) + dv, float(r[2]) + du, float(r[3]) + dv] if len(r) == 4 else r
+            for r in anno["rects"]
+        ]
+
+
+def _follow_move(anno: Dict[str, Any], annot, page) -> Dict[str, Any]:
+    """
+    Updates an annotation's position when another app moved or resized it.
+
+    Riemann records the /Rect it wrote under /RiemannRect. A different /Rect
+    now means the annotation was moved: rectangles and ovals take the new
+    corners, everything else is shifted by how far the centre moved.
+    """
+    try:
+        old = [float(v) for v in annot[RECT_KEY]]
+        new = [float(v) for v in annot.Rect]
+    except Exception:
+        return anno
+    if len(old) != 4 or len(new) != 4 or max(abs(a - b) for a, b in zip(old, new)) < 0.5:
+        return anno
+    space = _page_space(page)
+    if anno.get("type") == "drawing" and anno.get("subtype") in ("rect", "oval"):
+        x1, y1, x2, y2 = min(new[0], new[2]), min(new[1], new[3]), max(new[0], new[2]), max(new[1], new[3])
+        corners = sorted([space.from_pdf(x1, y2), space.from_pdf(x2, y1)])
+        anno["points"] = [list(c) for c in corners]
+        return anno
+    u0, v0 = space.from_pdf((old[0] + old[2]) / 2, (old[1] + old[3]) / 2)
+    u1, v1 = space.from_pdf((new[0] + new[2]) / 2, (new[1] + new[3]) / 2)
+    _shift(anno, u1 - u0, v1 - v0)
+    return anno
+
+
+def as_read_back(anno: Dict[str, Any]) -> Dict[str, Any]:
+    """An annotation as read_annotations will return it after write_annotations stores it."""
+    a = json.loads(json.dumps(anno))
+    if a.get("type") in ("note", "text"):
+        a["text"] = str(a.get("text", "") or "")
+    if not isinstance(a.get("color"), (list, tuple)):
+        color = _rgb_to_hex(_hex_to_rgb(a.get("color")))
+        if color:
+            a["color"] = color
+    return a
+
+
+def written_form(pages: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+    """The read-back form of a whole snapshot, kept as the base for merge_annotations."""
+    return {str(pid): [as_read_back(a) for a in annos] for pid, annos in pages.items() if annos}
+
+
+def merge_annotations(local, stored, base) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Three-way merge of Riemann's annotations with the set read from the PDF.
+
+    base is what Riemann last wrote into the file (written_form). For each
+    annotation ID: one edited since base wins over the unchanged one, an edit
+    on both sides goes to the file's version, and a deletion on either side
+    sticks. Without a base (copies from older versions), the file's version
+    wins for shared IDs and both sides' other annotations are kept.
+    """
+
+    def by_id(pages):
+        out = {}
+        for pid, annos in (pages or {}).items():
+            for a in annos or []:
+                if isinstance(a, dict) and a.get("id"):
+                    out[str(a["id"])] = (str(pid), a)
+        return out
+
+    L, S = by_id(local), by_id(stored)
+    B = by_id(base) if base is not None else None
+    order = list(L) + [i for i in S if i not in L]
+    merged: Dict[str, List[Dict[str, Any]]] = {}
+    for i in order:
+        in_l, in_s = i in L, i in S
+        known = B is not None and i in B
+        if in_l and in_s:
+            pick = L[i] if known and S[i] == B[i] else S[i]
+        elif in_s:
+            if known:
+                continue
+            pick = S[i]
+        else:
+            if known:
+                continue
+            pick = L[i]
+        merged.setdefault(pick[0], []).append(pick[1])
+    return merged

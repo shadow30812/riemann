@@ -3,6 +3,23 @@ Reusable UI Components.
 
 This module provides custom Qt widgets used throughout the Riemann application,
 including a draggable tab system and a specialized annotation toolbar.
+
+Notes:
+
+__init__: The flags belong to the tab bar, so set them after replacing it.
+
+DraggableTabBar: Qt draws West-side tabs with rotated text. In vertical mode
+the tabs keep a fixed width and their labels and close buttons are laid out
+horizontally, like a browser's vertical tab strip.
+
+_paint_vertical: Labels are painted by hand: the style would centre them (and
+on West-side tabs, rotate them).
+
+insert_dragged_tab: The tab stays in its strip for the whole drag, so a drop
+back into the same strip is a move, and a drop elsewhere takes it out first.
+
+mouseMoveEvent: Pulled downwards out of a horizontal strip, or sideways out of
+a vertical one. End Qt's own in-strip move before the tab is taken out.
 """
 
 import os
@@ -51,6 +68,8 @@ from PySide6.QtWidgets import (
     QToolButton,
     QWidget,
 )
+
+from .palette import CONTENT, qcolor, tokens
 
 
 _BROWSERS = [
@@ -210,15 +229,8 @@ class DraggableTabWidget(QTabWidget):
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        """
-        Initializes the draggable tab widget.
-
-        Args:
-            parent (Optional[QWidget]): The parent widget, if any.
-        """
         super().__init__(parent)
         self.setAcceptDrops(True)
-        # The flags belong to the tab bar, so set them after replacing it.
         self.setTabBar(DraggableTabBar(self))
         self.setMovable(True)
         self.setElideMode(Qt.TextElideMode.ElideRight)
@@ -237,13 +249,7 @@ class DraggableTabWidget(QTabWidget):
         return self.tabPosition() == QTabWidget.TabPosition.West
 
     def dragEnterEvent(self, e: QDragEnterEvent) -> None:
-        """
-        Accepts drag events that contain text representing file paths
-        or internal Riemann tabs.
-
-        Args:
-            e (QDragEnterEvent): The drag enter event instance.
-        """
+        """Accepts file paths and Riemann tabs."""
         if e.mimeData().hasText() or e.mimeData().hasFormat(
             "application/x-riemann-tab"
         ):
@@ -253,11 +259,8 @@ class DraggableTabWidget(QTabWidget):
 
     def dropEvent(self, event: QDropEvent) -> None:
         """
-        Handles dropping either an internal tab (to switch split views)
-        or an external file path (to create a new document).
-
-        Args:
-            event (QDropEvent): The drop event containing the file path payload.
+        A dropped Riemann tab switches the split view; a dropped file path opens a new
+        document.
         """
         if event.mimeData().hasFormat("application/x-riemann-tab"):
             bar = self.tabBar()
@@ -303,20 +306,10 @@ class DraggableTabBar(QTabBar):
     VERTICAL_TAB_WIDTH = 220
 
     def __init__(self, parent=None):
-        """
-        Initializes the draggable tab bar component.
-
-        Args:
-            parent (Optional[QWidget]): The parent widget context, if any. Defaults to None.
-        """
         super().__init__(parent)
         self.setAcceptDrops(True)
         self._vertical = False
 
-    # ---- Vertical mode -------------------------------------------------
-    # Qt draws West-side tabs with rotated text. In vertical mode the tabs
-    # keep a fixed width and their labels and close buttons are laid out
-    # horizontally, like a browser's vertical tab strip.
 
     def set_vertical(self, vertical: bool) -> None:
         self._vertical = vertical
@@ -381,8 +374,6 @@ class DraggableTabBar(QTabBar):
             self.initStyleOption(opt, i)
             painter.drawControl(QStyle.ControlElement.CE_TabBarTabShape, opt)
 
-            # Labels are painted by hand: the style would centre them (and on
-            # West-side tabs, rotate them).
             rect = QRect(self.tabRect(i))
             btn = self._tab_close_button(i)
             reserved = (btn.width() + 14) if btn is not None and btn.isVisible() else 8
@@ -410,16 +401,7 @@ class DraggableTabBar(QTabBar):
         self._position_vertical_buttons()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        """
-        Handles mouse press events to initialize drag tracking.
-
-        Records the localized starting coordinates of a left-click, which is subsequently
-        used by `mouseMoveEvent` to determine whether the user has moved the mouse far
-        enough to trigger a tab drag operation.
-
-        Args:
-            event (QMouseEvent): The Qt mouse event containing interaction details.
-        """
+        """Remembers where a left-click started, so mouseMoveEvent can tell a drag from a click."""
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_start_pos = event.pos()
         super().mousePressEvent(event)
@@ -438,8 +420,6 @@ class DraggableTabBar(QTabBar):
         widget = cls._dragged_widget
         if widget is None:
             return False
-        # The tab stays in its strip for the whole drag, so a drop back into
-        # the same strip is a move, and a drop elsewhere takes it out first.
         current = tab_widget.indexOf(widget)
         if current != -1:
             target = max(0, min(index, tab_widget.count()))
@@ -463,17 +443,13 @@ class DraggableTabBar(QTabBar):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """
-        Reorders tabs within the strip (Qt's movable tabs) and tears a tab off
-        into a drag once it is pulled away from the strip.
-
-        Args:
-            event (QMouseEvent): The mouse move event triggering the check.
+        Reorders tabs within the strip (Qt's movable tabs) and tears a tab off into a
+        drag once it is pulled away from the strip.
         """
         super().mouseMoveEvent(event)
         if event.buttons() != Qt.MouseButton.LeftButton or not hasattr(self, "drag_start_pos"):
             return
 
-        # Pulled downwards out of a horizontal strip, or sideways out of a vertical one.
         pos = event.position().toPoint()
         if self._vertical:
             pulled = not (-40 <= pos.x() <= self.width() + 40)
@@ -491,7 +467,6 @@ class DraggableTabBar(QTabBar):
             return
         del self.drag_start_pos
 
-        # End Qt's own in-strip move before the tab is taken out.
         release = QMouseEvent(
             QEvent.Type.MouseButtonRelease,
             event.position(),
@@ -570,28 +545,38 @@ class DraggableTabBar(QTabBar):
         super().dropEvent(event)
 
     def paintEvent(self, event) -> None:
-        """Draws native tabs, then overlays a gradient on media-playing tabs."""
+        """
+        Draws native tabs, then overlays a gradient on media-playing tabs and the
+        teal tint and edge that mark System tabs.
+        """
         if self._vertical:
             self._paint_vertical()
         else:
             super().paintEvent(event)
         painter = QPainter(self)
+        system = QColor(tokens(bool(getattr(self.window(), "dark_mode", True)))["system"])
         for i in range(self.count()):
+            if self.tabData(i) == "system":
+                rect = self.tabRect(i)
+                tint = QColor(system)
+                tint.setAlpha(28)
+                painter.fillRect(rect, tint)
+                bar = rect.adjusted(6, 0, -6, 0)
+                bar.setHeight(2)
+                if self._vertical:
+                    bar = rect.adjusted(0, 6, 0, -6)
+                    bar.setWidth(3)
+                painter.fillRect(bar, system)
             if self.tabData(i) == "playing":
                 rect = self.tabRect(i)
                 gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
-                gradient.setColorAt(0, QColor(255, 69, 0, 50))
-                gradient.setColorAt(1, QColor(138, 43, 226, 50))
+                gradient.setColorAt(0, qcolor(CONTENT["playing_from"], 50))
+                gradient.setColorAt(1, qcolor(CONTENT["playing_to"], 50))
                 painter.fillRect(rect, gradient)
         painter.end()
 
     def contextMenuEvent(self, event):
-        """
-        Displays a context menu for tab manipulation, such as intelligent renaming logic.
-
-        Args:
-            event: The context menu event containing the cursor trigger location.
-        """
+        """The tab context menu, including rename."""
         tab_index = self.tabAt(event.pos())
         if tab_index < 0:
             return
@@ -635,15 +620,8 @@ class DraggableTabBar(QTabBar):
 
 class AnnotationToolbar(QWidget):
     """
-    A context-aware toolbar for PDF annotation tools.
-    Emits signals when tools are selected or properties change.
-
-    Attributes:
-        tool_changed (Signal): Emitted with tool ID string when selected.
-        color_changed (Signal): Emitted with hex color code string.
-        thickness_changed (Signal): Emitted with integer thickness.
-        undo_requested (Signal): Emitted when undo is clicked.
-        redo_requested (Signal): Emitted when redo is clicked.
+    Toolbar for the annotation tools. Emits tool_changed (a tool id), color_changed (a
+    hex colour) and thickness_changed (pixels).
     """
 
     tool_changed = Signal(str)
@@ -652,46 +630,10 @@ class AnnotationToolbar(QWidget):
     undo_requested = Signal()
     redo_requested = Signal()
 
-    STYLESHEET = """
-        QWidget { 
-            background-color: #e0e0e0; 
-            border-bottom: 1px solid #ccc; 
-            color: #000000; 
-        }
-        QToolButton { 
-            border: none; 
-            padding: 4px; 
-            border-radius: 4px; 
-            font-size: 16px; 
-            color: #000000;
-        }
-        QToolButton:hover { background-color: #d0d0d0; }
-        QToolButton:checked { background-color: #b0b0b0; border: 1px solid #888; }
-        QToolButton::menu-indicator { image: none; }
-        QMenu { 
-            background-color: #f0f0f0; 
-            color: #000000; 
-            border: 1px solid #888;
-        }
-        QMenu::item:selected { background-color: #d0d0d0; color: #000000; }
-        QSpinBox { 
-            background-color: #ffffff; 
-            color: #000000; 
-            selection-background-color: #50a0ff;
-            selection-color: #ffffff;
-        }
-    """
-
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        """
-        Initializes the annotation toolbar UI elements and layout configuration.
-
-        Args:
-            parent (Optional[QWidget]): The parent widget container.
-        """
         super().__init__(parent)
         self.setFixedHeight(45)
-        self.setStyleSheet(self.STYLESHEET)
+        self.update_theme(False)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 2, 5, 2)
@@ -801,15 +743,7 @@ class AnnotationToolbar(QWidget):
                 w.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def _get_icon(self, filename: str) -> QIcon:
-        """
-        Resolves the target SVG icon relative to the parent application's currently configured theme state.
-
-        Args:
-            filename (str): The original base name of the SVG asset.
-
-        Returns:
-            QIcon: A dynamically resolved Qt icon supporting themed contrast switches.
-        """
+        """The icon for filename in the window's current theme."""
         is_dark = False
         if self.parent() and hasattr(self.parent(), "theme_mode"):
             is_dark = self.parent().theme_mode != 0
@@ -834,27 +768,22 @@ class AnnotationToolbar(QWidget):
         return QIcon(path)
 
     def update_theme(self, is_dark: bool) -> None:
-        """Dynamically updates the toolbar's CSS to match the active theme."""
-        bg = "#2a2a2a" if is_dark else "#e0e0e0"
-        fg = "#ffffff" if is_dark else "#000000"
-        menu_bg = "#333333" if is_dark else "#f0f0f0"
-        border = "#555" if is_dark else "#ccc"
-        btn_hover = "#444" if is_dark else "#d0d0d0"
-        btn_checked = "#555" if is_dark else "#b0b0b0"
+        t = tokens(is_dark)
+        bg, fg, menu_bg, border = t["raised"], t["text"], t["surface"], t["border"]
+        btn_hover, btn_checked, outline = t["border"], t["accent_soft"], t["border_strong"]
 
         self.setStyleSheet(f"""
             QWidget {{ background-color: {bg}; border-bottom: 1px solid {border}; color: {fg}; }}
             QToolButton {{ border: none; padding: 4px; border-radius: 4px; font-size: 16px; color: {fg}; }}
             QToolButton:hover {{ background-color: {btn_hover}; }}
-            QToolButton:checked {{ background-color: {btn_checked}; border: 1px solid #888; }}
+            QToolButton:checked {{ background-color: {btn_checked}; border: 1px solid {t['accent']}; }}
             QToolButton::menu-indicator {{ image: none; }}
-            QMenu {{ background-color: {menu_bg}; color: {fg}; border: 1px solid #888; }}
+            QMenu {{ background-color: {menu_bg}; color: {fg}; border: 1px solid {outline}; }}
             QMenu::item:selected {{ background-color: {btn_hover}; color: {fg}; }}
-            QSpinBox {{ background-color: {menu_bg}; color: {fg}; selection-background-color: #50a0ff; selection-color: #ffffff; }}
+            QSpinBox {{ background-color: {menu_bg}; color: {fg}; selection-background-color: {t['accent']}; selection-color: {t['accent_text']}; }}
         """)
 
     def _update_icons(self) -> None:
-        """Refreshes all annotation icons dynamically when the theme changes."""
         is_dark = False
         current_parent = self.parent()
         
@@ -902,19 +831,6 @@ class AnnotationToolbar(QWidget):
         layout: QHBoxLayout,
         checked: bool = False,
     ) -> QToolButton:
-        """
-        Helper method to create and add a standard checkable tool button.
-
-        Args:
-            icon (str): The display text or symbol for the button.
-            tool_id (str): The internal identifier for the tool to emit.
-            tooltip (str): The tooltip text to display on hover.
-            layout (QHBoxLayout): The layout to add the constructed button to.
-            checked (bool): True if the button should be checked upon initialization.
-
-        Returns:
-            QToolButton: The configured tool button instance.
-        """
         btn = QToolButton()
         btn.setIcon(self._get_icon(icon))
         btn.setIconSize(QSize(20, 20))
@@ -929,28 +845,12 @@ class AnnotationToolbar(QWidget):
     def _add_menu_action(
         self, menu: QMenu, text: str, icon: str, tool_id: str, parent_btn: QToolButton
     ) -> None:
-        """
-        Helper method to add selectable actions to dropdown tool menus.
-
-        Args:
-            menu (QMenu): The drop-down menu to add the action to.
-            text (str): The display string for the menu option.
-            tool_id (str): The internal identifier for the specific tool.
-            parent_btn (QToolButton): The parent button that opened the menu.
-        """
         action = QAction(self._get_icon(icon), text, self)
         action.triggered.connect(lambda: self._set_menu_tool(parent_btn, tool_id, icon))
         menu.addAction(action)
 
     def _set_menu_tool(self, btn: QToolButton, tool_id: str, icon: str) -> None:
-        """
-        Updates the parent dropdown button to reflect the actively selected sub-tool.
-
-        Args:
-            btn (QToolButton): The dropdown button representing the tool category.
-            tool_id (str): The specific identifier to emit.
-            icon (str): The new icon to display on the main toolbar level.
-        """
+        """Shows the chosen sub-tool on its dropdown button and emits it."""
         btn.setIcon(self._get_icon(icon))
 
         if not btn.isChecked():
@@ -962,12 +862,6 @@ class AnnotationToolbar(QWidget):
         self.tool_changed.emit(tool_id)
 
     def _add_separator(self, layout: QHBoxLayout) -> None:
-        """
-        Adds a visual vertical line separator to the provided layout instance.
-
-        Args:
-            layout (QHBoxLayout): The layout receiving the separator line.
-        """
         line = QFrame()
         line.setFrameShape(QFrame.Shape.VLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)

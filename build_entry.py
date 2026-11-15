@@ -5,6 +5,11 @@ This script acts as the bootstrap loader for the Riemann application when
 packaged as a standalone executable. It imports the main run function
 from the application package and executes it.
 
+Started with --riemann-render-process (riemann.core.render_process.CHILD_FLAG)
+it becomes a page-render child, and with --riemann-ai-sidecar
+(riemann.core.ai_engine.SERVER_FLAG) the AI search engine. Neither loads Qt,
+so those checks come before the Qt setup below.
+
 The Windows build has no console, so a crash during startup used to vanish
 without a trace. Startup errors and native crashes are now written to
 crash.log in the app's data folder (%LOCALAPPDATA%\\Riemann on Windows,
@@ -35,6 +40,19 @@ try:
     faulthandler.enable(_crash_file)  # segfaults and aborts in Qt or the Rust core
 except OSError:
     _CRASH_LOG, _crash_file = None, None
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "--riemann-render-process":
+    from riemann.core.render_process import serve
+
+    serve()
+    sys.exit(0)
+
+if len(sys.argv) > 1 and sys.argv[1] == "--riemann-ai-sidecar":
+    from riemann.core.ai_server import main as serve_ai
+
+    serve_ai()
+    sys.exit(0)
 
 
 def _report_crash() -> None:

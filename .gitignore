@@ -26,11 +26,14 @@ node_modules/
 commands.txt
 *sandbox*
 *.log
-!test_results.log
 target.*
 models/
 logs/
 .state
-# Benchmark corpus (downloaded by benchmarks/fetch_corpus.py) and scratch state
 benchmarks/corpus/
 benchmarks/.state/
+libs/*.so
+libs/*.dll
+libs/*.dylib
+libs/*.part
+cmd.txt

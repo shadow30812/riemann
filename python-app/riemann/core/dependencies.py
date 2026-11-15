@@ -1,4 +1,21 @@
-"""Dependency hell"""
+"""
+Optional Python packages and the private virtual environment they live in.
+
+Heavy features (snip-to-LaTeX, live captions, video streaming) need packages
+that are not bundled with Riemann. They are installed on request into a venv in
+the app's local data folder. Installs use the exact versions in PINNED, the
+ones Riemann was tested with, so a compromised or broken future release on PyPI
+is never pulled in silently. yt-dlp is the exception: sites change often enough
+that an old yt-dlp stops working, so it gets a minimum version instead.
+
+Notes:
+
+_venv_site_paths: Interrogate site-packages only; NEVER inject standard library
+directories into sys.path.
+
+setup_and_get_venv: If the venv exists, ensure its Python major/minor matches
+the current interpreter.
+"""
 
 import importlib
 import json
@@ -20,6 +37,8 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
 )
+from .log import log
+from ..ui.palette import app_is_dark, tokens
 
 
 # Keeps subprocesses from flashing a console window in the Windows GUI build.
@@ -112,7 +131,6 @@ def _venv_site_paths(venv_dir: str, python_exe: str) -> list:
         except (OSError, ValueError):
             pass
 
-    # Interrogate site-packages only; NEVER inject standard library directories into sys.path
     out = subprocess.check_output(
         [
             python_exe,
@@ -137,8 +155,8 @@ def _venv_site_paths(venv_dir: str, python_exe: str) -> list:
 
 def setup_and_get_venv() -> str:
     """
-    Ensures a local virtual environment exists, dynamically interrogates it
-    for its exact path structure, and mounts them cleanly.
+    Creates (or, after a Python upgrade, recreates) the optional-packages venv in the
+    app data folder, adds its site-packages to sys.path, and returns its Python.
     """
     data_dir = QStandardPaths.writableLocation(
         QStandardPaths.StandardLocation.AppLocalDataLocation
@@ -152,7 +170,6 @@ def setup_and_get_venv() -> str:
         else os.path.join(venv_dir, "bin", "python")
     )
 
-    # If the venv exists, ensure its Python major/minor matches the current interpreter
     if os.path.exists(python_exe):
         try:
             ver = _venv_version(venv_dir, python_exe)
@@ -186,6 +203,27 @@ def setup_and_get_venv() -> str:
     return python_exe
 
 
+PINNED = {
+    "torch": "torch==2.14.0",
+    "torchvision": "torchvision==0.29.0",
+    "opencv-python-headless": "opencv-python-headless==5.0.0.93",
+    "pix2tex[gui]": "pix2tex[gui]==0.1.4",
+    "transformers": "transformers==5.16.1",
+    "scipy": "scipy==1.17.1",
+    "pandas": "pandas==3.0.5",
+    "yt-dlp": "yt-dlp>=2026.8.19",
+    "Pygments": "Pygments==2.21.0",
+    "faster-whisper": "faster-whisper==1.2.1",
+}
+
+LATEX_OCR_REQUIREMENTS = ["pix2tex[gui]", "torch", "torchvision"]
+
+
+def requirement(pip_name: str) -> str:
+    """The pinned pip requirement for a package name from the catalogue."""
+    return PINNED.get(pip_name, pip_name)
+
+
 class DependencyWorker(QThread):
     """Asynchronous worker to install or uninstall pip packages without freezing the UI."""
 
@@ -206,7 +244,7 @@ class DependencyWorker(QThread):
                     "-m",
                     "pip",
                     "install",
-                    self.pip_name,
+                    requirement(self.pip_name),
                 ]
                 if self.action == "install"
                 else [
@@ -265,10 +303,9 @@ class DependenciesDialog(QDialog):
         layout.addWidget(self.table)
 
         self.DEPENDENCIES = {
-            "PyMuPDF (Advanced PDF Tools)": "PyMuPDF",
             "PyTorch (AI Inference Engine)": "torch",
             "TorchVision (Image Tensors)": "torchvision",
-            "OpenCV (Image Processing)": "opencv-python",
+            "OpenCV (Image Processing)": "opencv-python-headless",
             "Pix2Tex (Snip-to-LaTeX OCR)": "pix2tex[gui]",
             "Transformers (HuggingFace)": "transformers",
             "SciPy (Math/DSP Engine)": "scipy",
@@ -289,9 +326,8 @@ class DependenciesDialog(QDialog):
 
             is_installed = self._check_pip_installed(pip_name)
             status_item = QTableWidgetItem("Installed" if is_installed else "Missing")
-            status_item.setForeground(
-                QColor("#3FB27F") if is_installed else QColor("#E06C6C")
-            )
+            t = tokens(app_is_dark())
+            status_item.setForeground(QColor(t["success"] if is_installed else t["danger"]))
             self.table.setItem(row, 1, status_item)
 
             btn = QPushButton("Uninstall" if is_installed else "Install")
@@ -355,7 +391,7 @@ class DependenciesDialog(QDialog):
 
             importlib.invalidate_caches()
         except Exception:
-            pass
+            log.debug("on_task_finished failed", exc_info=True)
 
         self.populate_table()
         action_verb = "installed" if action == "install" else "uninstalled"

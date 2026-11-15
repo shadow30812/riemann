@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import QColorDialog, QInputDialog, QMenu, QWidget
 from riemann.ui.components import AnnotationToolbar, DraggableTabBar, DraggableTabWidget

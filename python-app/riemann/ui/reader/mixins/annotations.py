@@ -2,16 +2,37 @@
 Annotations Mixin.
 
 Handles annotation tools (pen, note), undo/redo stacks, and file persistence.
+
+Annotations are saved twice: right away into Riemann's JSON copy (located by
+riemann.core.annotation_store) and, 1.2 s after the last change, into the PDF
+on a worker thread. The JSON also records the file signature and the
+annotations as last written into the PDF ("written"). When the PDF changes
+outside Riemann, or a write is refused because the file changed under it, the
+file's annotations are read back and merged with Riemann's by annotation ID
+against that record, so neither side's edits are lost. A file that has piled
+up many incremental saves is compacted when its tab closes.
+
+The worker threads that read and write PDFs are not daemon threads: Python
+kills daemon threads at exit even inside pikepdf or PDFium, which aborts the
+process and could cut an appended save short.
+
+Notes:
+
+_on_pdf_annotations_written: Riemann's own write is not a change "on disk" for
+the reload prompt. Signed, encrypted or read-only files keep their annotations
+in Riemann only; changing them would break signatures or fail.
+
+work: Pypdf is pure Python and held the GIL for about two seconds on the PDF
+spec, which starved the UI thread; the core does not. The tab was closed before
+parsing finished.
 """
 
-import hashlib
 import json
 import os
 import threading
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QObject, QSettings, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -24,8 +45,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ....core import pdf_annotations
+from ....core import annotation_store, pdf_annotations
+from ....core.storage import write_json_atomic
 from ..widgets import PageWidget
+from ....core.settings import app_settings
+from ...palette import app_is_dark, tokens
+from .host import ReaderHostBase
 
 
 class _CommentsBridge(QObject):
@@ -41,8 +66,14 @@ class _PdfStoreBridge(QObject):
     write_done = Signal(str, object, str)
 
 
+def compact_if_needed(path: str) -> None:
+    """Compacts a PDF that has collected many incremental annotation saves."""
+    if pdf_annotations.incremental_updates(path) >= pdf_annotations.COMPACT_AFTER_UPDATES:
+        pdf_annotations.compact(path)
+
+
 def store_in_pdf_enabled() -> bool:
-    return QSettings("Riemann", "PDFReader").value("annotations/store_in_pdf", True, type=bool)
+    return app_settings().value("annotations/store_in_pdf", True, type=bool)
 
 
 def _format_pdf_date(value: str) -> str:
@@ -214,7 +245,8 @@ class CommentViewDialog(QDialog):
         if date:
             info_text += f" • {date}"
         lbl_date = QLabel(info_text)
-        lbl_date.setStyleSheet("color: #888; font-size: 11px;")
+        t = tokens(app_is_dark())
+        lbl_date.setStyleSheet(f"color: {t['muted']}; font-size: 11px;")
         meta_layout.addWidget(lbl_date)
 
         hdr_layout.addLayout(meta_layout)
@@ -225,7 +257,7 @@ class CommentViewDialog(QDialog):
         txt_edit.setPlainText(comment.get("contents", ""))
         txt_edit.setReadOnly(True)
         txt_edit.setStyleSheet(
-            "font-size: 13px; line-height: 1.4; border: 1px solid #555; border-radius: 6px; padding: 6px;"
+            f"font-size: 13px; line-height: 1.4; border: 1px solid {t['border_strong']}; border-radius: 6px; padding: 6px;"
         )
         layout.addWidget(txt_edit)
 
@@ -242,27 +274,33 @@ class CommentViewDialog(QDialog):
         layout.addLayout(btn_box)
 
 
-class AnnotationsMixin:
+class AnnotationsMixin(ReaderHostBase):
     """
     Provides methods for managing user annotations on PDF documents.
     This mixin is intended to be integrated into the main reader component,
     managing state for active tools, persistence, and undo/redo stacks.
     """
+    _anno_file_sig = None
+    _anno_json_cache = None
+    _anno_written = None
+    _comments_bridge = None
+    _pdf_store_again = False
+    _pdf_store_blocked = False
+    _pdf_store_busy = False
+    _pdf_store_snapshot = None
+    _pdf_store_timer = None
+    _store_bridge = None
 
     def _get_annotation_path(self) -> str:
-        """
-        Generates a centralized system file path for storing the current PDF's annotations.
-
-        Returns:
-            str: The absolute path to the JSON annotation storage file, or an empty string
-                 if no document is currently loaded.
-        """
+        """Riemann's JSON copy of the current document's annotations ('' with no document)."""
         if not self.current_path:
             return ""
-        path_hash = hashlib.sha256(self.current_path.encode("utf-8")).hexdigest()
-        base_dir = Path.home() / ".local" / "share" / "riemann" / "annotations"
-        base_dir.mkdir(parents=True, exist_ok=True)
-        return str(base_dir / f"{path_hash}.json")
+        cached = self._anno_json_cache
+        if cached and cached[0] == self.current_path:
+            return cached[1]
+        path = annotation_store.shared().json_path(self.current_path)
+        self._anno_json_cache = (self.current_path, path)
+        return path
 
     def load_annotations(self) -> None:
         """
@@ -275,8 +313,9 @@ class AnnotationsMixin:
             return
         self.annotations = {}
         self._anno_file_sig = None
+        self._anno_written = None
         self._pdf_store_blocked = False
-        timer = getattr(self, "_pdf_store_timer", None)
+        timer = self._pdf_store_timer
         if timer is not None:
             timer.stop()
         p = self._get_annotation_path()
@@ -289,6 +328,7 @@ class AnnotationsMixin:
             if isinstance(data, dict) and "pages" in data:
                 self.annotations = data.get("pages") or {}
                 self._anno_file_sig = data.get("pdf")
+                self._anno_written = data.get("written")
             elif isinstance(data, dict):
                 self.annotations = data
         for annos in self.annotations.values():
@@ -299,7 +339,7 @@ class AnnotationsMixin:
             self._check_pdf_annotations_async(self.current_path)
 
     def _pdf_store_bridge(self) -> "_PdfStoreBridge":
-        bridge = getattr(self, "_store_bridge", None)
+        bridge = self._store_bridge
         if bridge is None:
             bridge = _PdfStoreBridge(self if isinstance(self, QObject) else None)
             bridge.read_done.connect(self._on_pdf_annotations_read)
@@ -324,31 +364,40 @@ class AnnotationsMixin:
             except RuntimeError:
                 pass
 
-        threading.Thread(target=work, name="riemann-anno-read", daemon=True).start()
+        threading.Thread(target=work, name="riemann-anno-read").start()
 
     def _on_pdf_annotations_read(self, path: str, stored, sig) -> None:
-        if path != getattr(self, "current_path", None):
+        if path != self.current_path:
             return
         if stored is not None:
-            # The file was changed outside Riemann: its copy is the newer one.
-            self.annotations = stored
+            before = self._annotation_snapshot()
+            merged = pdf_annotations.merge_annotations(before, stored, self._anno_written)
+            self.annotations = merged
             self._anno_file_sig = sig
+            self._anno_written = pdf_annotations.written_form(stored)
             self.undo_stack.clear()
             self.redo_stack.clear()
             self._write_annotation_json()
-            for pid in list(stored):
-                self.refresh_page_render(int(pid))
+            for pid in set(before) | set(merged) | set(stored):
+                if before.get(pid) != merged.get(pid):
+                    self.refresh_page_render(int(pid))
+            if pdf_annotations.written_form(merged) != self._anno_written:
+                self.save_annotations()
         elif any(self.annotations.values()):
-            # Annotations known only to Riemann (made before they were stored
-            # in files, or the file was regenerated): put them into the PDF.
             self.save_annotations()
 
     def _write_annotation_json(self) -> None:
         p = self._get_annotation_path()
         if not p:
             return
-        with open(p, "w") as f:
-            json.dump({"pages": self.annotations, "pdf": self._anno_file_sig}, f)
+        write_json_atomic(
+            p,
+            {
+                "pages": self.annotations,
+                "pdf": self._anno_file_sig,
+                "written": self._anno_written,
+            },
+        )
 
     def save_annotations(self) -> None:
         """
@@ -361,9 +410,9 @@ class AnnotationsMixin:
         if (
             self.current_path.lower().endswith(".pdf")
             and store_in_pdf_enabled()
-            and not getattr(self, "_pdf_store_blocked", False)
+            and not self._pdf_store_blocked
         ):
-            timer = getattr(self, "_pdf_store_timer", None)
+            timer = self._pdf_store_timer
             if timer is None:
                 timer = QTimer(self if isinstance(self, QObject) else None)
                 timer.setSingleShot(True)
@@ -380,10 +429,11 @@ class AnnotationsMixin:
         path = self.current_path
         if not path:
             return
-        if getattr(self, "_pdf_store_busy", False) and not blocking:
+        if self._pdf_store_busy and not blocking:
             self._pdf_store_again = True
             return
         snapshot = self._annotation_snapshot()
+        self._pdf_store_snapshot = snapshot
         bridge = self._pdf_store_bridge()
         try:
             self._pdf_store_mtime_before = os.path.getmtime(path)
@@ -415,45 +465,46 @@ class AnnotationsMixin:
         if blocking:
             work()
         else:
-            threading.Thread(target=work, name="riemann-anno-write", daemon=True).start()
+            threading.Thread(target=work, name="riemann-anno-write").start()
 
     def _on_pdf_annotations_written(self, path: str, sig, error: str) -> None:
         self._pdf_store_busy = False
-        if path != getattr(self, "current_path", None):
+        if path != self.current_path:
             return
         if sig is not None:
             self._anno_file_sig = sig
+            self._anno_written = pdf_annotations.written_form((self._pdf_store_snapshot or {}))
             self._write_annotation_json()
-            # Riemann's own write is not a change "on disk" for the reload prompt.
-            if getattr(self, "_loaded_mtime", None) == self._pdf_store_mtime_before:
+            if self._loaded_mtime == self._pdf_store_mtime_before:
                 try:
                     self._loaded_mtime = os.path.getmtime(path)
                 except OSError:
                     pass
         elif error == "blocked":
-            # Signed, encrypted or read-only files keep their annotations in
-            # Riemann only; changing them would break signatures or fail.
             self._pdf_store_blocked = True
-        elif error and error != "changed":
+        elif error == "changed":
+            self._check_pdf_annotations_async(path)
+        elif error:
             print(f"[Warning] Could not store annotations in {path}: {error}")
-        if getattr(self, "_pdf_store_again", False):
+        if self._pdf_store_again:
             self._pdf_store_again = False
             self._store_annotations_in_pdf()
 
     def flush_annotations_to_pdf(self) -> None:
-        """Writes pending annotation changes into the PDF before the tab closes."""
-        timer = getattr(self, "_pdf_store_timer", None)
+        """
+        Writes pending annotation changes into the PDF before the tab closes,
+        then compacts the file in the background if incremental saves have
+        piled up.
+        """
+        timer = self._pdf_store_timer
         if timer is not None and timer.isActive():
             timer.stop()
             self._store_annotations_in_pdf(blocking=True)
+        path = self.current_path
+        if path and path.lower().endswith(".pdf") and self._anno_written is not None:
+            threading.Thread(target=compact_if_needed, args=(path,), name="riemann-compact").start()
 
     def toggle_annotation_mode(self, checked: bool) -> None:
-        """
-        Toggles the visibility and operational state of the annotation toolbar and tools.
-
-        Args:
-            checked (bool): True to enable annotation mode and display the toolbar; False to disable.
-        """
         self.anno_toolbar.setVisible(checked)
         self.btn_annotate.setChecked(checked)
         if not checked:
@@ -464,12 +515,7 @@ class AnnotationsMixin:
             self.anno_toolbar.btn_nav.setChecked(True)
 
     def set_tool(self, tool_id: str) -> None:
-        """
-        Selects the active annotation tool and updates the UI cursor accordingly.
-
-        Args:
-            tool_id (str): The identifier of the tool to activate (e.g., 'nav', 'eraser').
-        """
+        """Selects an annotation tool ('nav', 'eraser', ...) and sets the cursor to match."""
         self.current_tool = tool_id
         if tool_id == "nav":
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -479,21 +525,10 @@ class AnnotationsMixin:
             self.setCursor(Qt.CursorShape.CrossCursor)
 
     def set_color(self, c: str) -> None:
-        """
-        Sets the active color for annotation drawing tools.
-
-        Args:
-            c (str): The hexadecimal color string.
-        """
         self.pen_color = c
 
     def set_thickness(self, v: int) -> None:
-        """
-        Sets the active line thickness for annotation drawing tools.
-
-        Args:
-            v (int): The thickness value in pixels.
-        """
+        """Sets the pen thickness, in pixels."""
         self.pen_thickness = v
 
     def undo_annotation(self) -> None:
@@ -527,22 +562,11 @@ class AnnotationsMixin:
         self.refresh_page_render(int(pid))
 
     def handle_annotation_click(self, label: PageWidget, event: QMouseEvent) -> bool:
-        """
-        Evaluates a mouse click event to determine if an existing interactive annotation (e.g., a note)
-        was targeted, and triggers its associated interface if so.
-
-        Args:
-            label (PageWidget): The page widget receiving the click.
-            event (QMouseEvent): The mouse event details.
-
-        Returns:
-            bool: True if an annotation was clicked and handled; False otherwise.
-        """
+        """Opens the annotation under the click, if there is one. Returns True if there was."""
         pid = str(label.property("pageIndex"))
         w, h = label.width(), label.height()
         rx, ry = event.pos().x() / w, event.pos().y() / h
-        if hasattr(self, "_map_to_unrotated"):
-            rx, ry = self._map_to_unrotated(rx, ry)
+        rx, ry = self._map_to_unrotated(rx, ry)
 
         for i, anno in enumerate(self.annotations.get(pid, [])):
             if anno.get("type") == "note":
@@ -553,14 +577,7 @@ class AnnotationsMixin:
         return False
 
     def show_annotation_popup(self, data: Dict, p_idx: int, idx: int) -> None:
-        """
-        Displays an input dialog to edit or delete an existing text annotation.
-
-        Args:
-            data (Dict): The dictionary containing the annotation data.
-            p_idx (int): The index of the page containing the annotation.
-            idx (int): The index of the annotation within the page's annotation list.
-        """
+        """Edits or deletes text annotation idx on page p_idx."""
         txt, ok = QInputDialog.getText(
             self, "Edit Note", "Text (Empty to delete):", text=data.get("text", "")
         )
@@ -575,15 +592,7 @@ class AnnotationsMixin:
     def create_new_annotation(
         self, p_idx: int, rx: float, ry: float, type: str = "note"
     ) -> None:
-        """
-        Prompts the user for input to create a new textual annotation at the specified relative coordinates.
-
-        Args:
-            p_idx (int): The index of the target page.
-            rx (float): The relative X coordinate (0.0 to 1.0).
-            ry (float): The relative Y coordinate (0.0 to 1.0).
-            type (str): The type classification of the annotation. Defaults to "note".
-        """
+        """Asks for the text of a new annotation at (rx, ry), relative to the page (0 to 1)."""
         txt, ok = QInputDialog.getText(self, "Add Note", "Text:")
         if ok and txt:
             self._add_anno_data(
@@ -597,13 +606,7 @@ class AnnotationsMixin:
             )
 
     def _add_anno_data(self, page_idx: int, data: Dict) -> None:
-        """
-        Internal helper to append new annotation data, update the undo stack, and serialize the state.
-
-        Args:
-            page_idx (int): The index of the target page.
-            data (Dict): The new annotation data payload.
-        """
+        """Appends an annotation, records it for undo and saves."""
         pid = str(page_idx)
         if pid not in self.annotations:
             self.annotations[pid] = []
@@ -615,23 +618,14 @@ class AnnotationsMixin:
         self.refresh_page_render(page_idx)
 
     def _handle_eraser_click(self, label: PageWidget, pos: Any, page_idx: int) -> None:
-        """
-        Processes an eraser tool click by calculating the distance to all annotations on the page
-        and deleting the closest one within an interaction threshold.
-
-        Args:
-            label (PageWidget): The target page widget.
-            pos (Any): The local coordinate position of the click event.
-            page_idx (int): The index of the target page.
-        """
+        """Deletes the annotation nearest the click, if it is within reach."""
         pid = str(page_idx)
         if pid not in self.annotations:
             return
 
         w, h = label.width(), label.height()
         rx, ry = pos.x() / w, pos.y() / h
-        if hasattr(self, "_map_to_unrotated"):
-            rx, ry = self._map_to_unrotated(rx, ry)
+        rx, ry = self._map_to_unrotated(rx, ry)
 
         best, min_dist = -1, 0.06
 
@@ -682,12 +676,6 @@ class AnnotationsMixin:
             self.refresh_page_render(page_idx)
 
     def refresh_page_render(self, p_idx: int) -> None:
-        """
-        Forces a page to be re-rendered to visually reflect annotation state changes.
-
-        Args:
-            p_idx (int): The index of the page to invalidate and re-render.
-        """
         if p_idx in self.rendered_pages:
             self.rendered_pages.remove(p_idx)
         self.render_visible_pages()
@@ -703,43 +691,40 @@ class AnnotationsMixin:
         756-page PDF spec and delayed the first page by as much.
         """
         self.external_comments = {}
-        bridge = getattr(self, "_comments_bridge", None)
+        bridge = self._comments_bridge
         if bridge is None:
             bridge = _CommentsBridge(self)
             bridge.loaded.connect(self._on_external_comments_loaded)
             self._comments_bridge = bridge
 
-        doc = getattr(self, "current_doc", None)
+        doc = self.current_doc
         use_core = doc is not None and hasattr(doc, "get_comments")
 
         def work():
-            # pypdf is pure Python and held the GIL for about two seconds on the
-            # PDF spec, which starved the UI thread; the core does not.
             result = read_comments_from_core(doc) if use_core else read_external_comments(path)
             try:
                 bridge.loaded.emit(path, result)
             except RuntimeError:
-                pass  # the tab was closed before parsing finished
+                pass
 
-        threading.Thread(target=work, name="riemann-comments", daemon=True).start()
+        threading.Thread(target=work, name="riemann-comments").start()
 
     def _on_external_comments_loaded(self, path: str, comments: dict) -> None:
-        if path == getattr(self, "current_path", None):
+        if path == self.current_path:
             self.external_comments = comments
 
     def _get_comment_at_pos(
         self, page_idx: int, pos: Any, page_w: int, page_h: int
     ) -> Optional[Dict[str, Any]]:
         """Finds any external comment clicked or hovered on at the given page position."""
-        if not hasattr(self, "external_comments") or not self.external_comments:
+        if not self.external_comments:
             return None
         comments = self.external_comments.get(page_idx, [])
         if not comments:
             return None
 
         rx, ry = pos.x() / max(1, page_w), pos.y() / max(1, page_h)
-        if hasattr(self, "_map_to_unrotated"):
-            rx, ry = self._map_to_unrotated(rx, ry)
+        rx, ry = self._map_to_unrotated(rx, ry)
 
         for c in comments:
             x1, y1, x2, y2 = c["rel_rect"]

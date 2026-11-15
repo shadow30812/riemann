@@ -9,6 +9,20 @@
 //! - Extracting text and searching within documents.
 //! - Managing annotations and form data.
 //! - Interfacing with the OCR worker for text recognition.
+//!
+//! Notes on the code below:
+//!
+//! - `collect_outline` caps the walk at 20,000 entries and depth 32, because
+//!   malformed files can loop their sibling or child chains.
+//! - `render_page` allocates the Python `bytes` result uninitialised and lets
+//!   PDFium draw straight into it with the GIL released. Nothing else can see
+//!   the object until it is returned, so that is safe, and it avoids copying
+//!   the image out of PDFium and again into Python, which cost more than the
+//!   render itself. Riemann's own annotations are hidden only in memory for the
+//!   render; the flag is never saved back to the file.
+//! - `ocr_pages` renders each page under the PDFium lock but runs Tesseract
+//!   outside it, once per call, so other documents keep rendering while a
+//!   batch is read.
 
 use once_cell::sync::OnceCell;
 use pdfium_render::prelude::*;
@@ -119,6 +133,11 @@ fn pdfium_guard() -> MutexGuard<'static, ()> {
 /// Acquires a document lock, recovering from poisoning.
 fn lock_doc(inner: &Mutex<DocumentWrapper>) -> MutexGuard<'_, DocumentWrapper> {
     inner.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Converts a page index from Python to PDFium's type, rejecting ones it can't hold.
+fn page_at(index: u32) -> PyResult<PdfPageIndex> {
+    PdfPageIndex::try_from(index).map_err(|_| value_err(format!("page index {index} is out of range")))
 }
 
 fn runtime_err(e: impl ToString) -> PyErr {
@@ -241,8 +260,6 @@ fn bookmark_page(bookmark: &PdfBookmark) -> i32 {
 
 /// Appends `first` and its following siblings (and their children) to `out`.
 fn collect_outline(first: Option<PdfBookmark>, depth: u32, out: &mut Vec<OutlineEntry>) {
-    // Malformed files can loop their sibling or child chains; the cap keeps
-    // the walk finite.
     let mut current = first;
     while let Some(bookmark) = current {
         if out.len() >= 20_000 || depth > 32 {
@@ -305,45 +322,56 @@ fn link_target(link: &PdfLink) -> Option<String> {
 
 /// Initializes and retrieves the static Pdfium instance.
 ///
-/// This function attempts to load the Pdfium shared library from the system
-/// path first. If that fails, it falls back to looking for a local binary
-/// in the current working directory.
+/// The library is looked up in this order: the directory named by
+/// `RIEMANN_PDFIUM_DIR`, the system library path, each of `extra_dirs` (the
+/// folders around this extension module) and the running executable's folder,
+/// each with and without `libs/`, then `./`, `libs/` and `../libs/` relative to
+/// the working directory.
 ///
-/// # Panics
-/// Panics if the library cannot be located or loaded.
-///
-/// # Returns
-/// A static reference to the initialized `Pdfium` instance.
-fn get_pdfium() -> &'static Pdfium {
-    &PDFIUM
-        .get_or_init(|| {
-            let bindings = Pdfium::bind_to_system_library()
-                .or_else(|_| {
-                    Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
+/// # Errors
+/// Returns a `RuntimeError` listing the places searched when the library cannot
+/// be loaded, instead of panicking: a panic reaches Python as
+/// `PanicException`, which `except Exception` does not catch.
+fn get_pdfium(extra_dirs: &[std::path::PathBuf]) -> PyResult<&'static Pdfium> {
+    PDFIUM
+        .get_or_try_init(|| {
+            let env_dir = std::env::var_os("RIEMANN_PDFIUM_DIR").map(std::path::PathBuf::from);
+            let mut search: Vec<std::path::PathBuf> = extra_dirs.to_vec();
+            if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
+                search.push(exe_dir);
+            }
+
+            let mut tried = Vec::new();
+            let mut try_dir = |dir: &std::path::Path| {
+                let path = Pdfium::pdfium_platform_library_name_at_path(dir);
+                tried.push(path.display().to_string());
+                Pdfium::bind_to_library(&path).ok()
+            };
+
+            let bindings = env_dir
+                .as_deref()
+                .and_then(&mut try_dir)
+                .or_else(|| Pdfium::bind_to_system_library().ok())
+                .or_else(|| {
+                    search
+                        .iter()
+                        .find_map(|d| try_dir(d).or_else(|| try_dir(&d.join("libs"))))
                 })
-                .or_else(|_| {
-                    Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("libs/"))
-                })
-                .or_else(|_| {
-                    Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("../libs/"))
-                })
-                .expect("CRITICAL: Could not load Pdfium library.");
-            PdfiumWrapper(Pdfium::new(bindings))
+                .or_else(|| ["./", "libs/", "../libs/"].iter().find_map(|d| try_dir(std::path::Path::new(d))));
+
+            match bindings {
+                Some(b) => Ok(PdfiumWrapper(Pdfium::new(b))),
+                None => Err(runtime_err(format!(
+                    "Could not load the PDFium library (searched the system library path and {})",
+                    tried.join(", ")
+                ))),
+            }
         })
-        .0
+        .map(|w| &w.0)
 }
 
-/// Generates a bitmap for a specific PDF page.
-///
-/// Configures the renderer to respect the target dimensions and rotate
-/// landscape pages automatically. It also enables annotation rendering.
-///
-/// # Arguments
-/// * `page` - Reference to the `PdfPage` to render.
-/// * `scale` - Scaling factor for the output bitmap (e.g., 2.0 for HiDPI).
-///
-/// # Returns
-/// A `PyResult` containing the generated `PdfBitmap`, or an error if rendering fails.
+/// Renders a page to a new bitmap at `scale`, with annotations, turning
+/// landscape pages as the page asks.
 fn generate_bitmap<'a>(page: &'a PdfPage<'a>, scale: f32) -> PyResult<PdfBitmap<'a>> {
     let width = (page.width().value * scale) as i32;
     let height = (page.height().value * scale) as i32;
@@ -423,7 +451,17 @@ struct RenderResult {
     /// The raw BGRA pixel data as a Python bytes object.
     #[pyo3(get)]
     data: Py<PyBytes>,
+    /// The scale actually rendered at: the one requested, or less when that
+    /// would exceed `MAX_RENDER_PIXELS`.
+    #[pyo3(get)]
+    scale: f32,
 }
+
+/// The most pixels one page render may have (64 MP, 256 MB). Large-format
+/// pages (posters, maps, drawings) at high zoom on HiDPI screens would
+/// otherwise need gigabytes: an A0 page at 10x is 3 GB, before Qt copies it.
+/// Bigger renders are made at the largest scale that fits and stretched.
+const MAX_RENDER_PIXELS: f64 = 64_000_000.0;
 
 /// A Python-compatible wrapper around a loaded PDF document.
 ///
@@ -441,49 +479,36 @@ struct RiemannDocument {
 
 #[pymethods]
 impl RiemannDocument {
-    /// Renders a specific page into a byte buffer.
-    ///
-    /// This method handles scaling and optional dark mode inversion. The GIL is
-    /// released while PDFium renders, so background render threads do not stall
-    /// the UI thread.
-    ///
-    /// # Arguments
-    /// * `py` - The Python GIL token.
-    /// * `page_index` - Zero-based index of the page to render.
-    /// * `scale` - Zoom level/scaling factor.
-    /// * `theme_mode` - Integer flag (0 for Light, 1 for Fast Dark, 2 for Smart Dark).
-    ///
-    /// # Returns
-    /// A `RenderResult` object containing the image data.
+    /// Renders a page to BGRA pixels. `theme_mode` is 0 (light), 1 (inverted)
+    /// or 2 (smart dark). The GIL is released while PDFium renders, so background
+    /// render threads do not stall the UI thread. The page size comes from the
+    /// document's page tree, so the page itself is only loaded once, for the render.
     fn render_page(
         &self,
         py: Python,
-        page_index: u16,
+        page_index: u32,
         scale: f32,
         theme_mode: u8,
     ) -> PyResult<RenderResult> {
         let inner = &self.inner;
 
-        // The page size comes from the document's page tree, so the page itself
-        // is only loaded once, for the render below.
-        let (width, height) = py.allow_threads(|| -> PyResult<(i32, i32)> {
+        let (page_w, page_h) = py.detach(|| -> PyResult<(f32, f32)> {
             let _guard = pdfium_guard();
             let doc_guard = lock_doc(inner);
-            let size = doc_guard.0.pages().page_size(page_index).map_err(value_err)?;
-            Ok((
-                (size.width().value * scale) as i32,
-                (size.height().value * scale) as i32,
-            ))
+            let size = doc_guard.0.pages().page_size(page_at(page_index)?).map_err(value_err)?;
+            Ok((size.width().value, size.height().value))
         })?;
+        let mut scale = scale;
+        let pixels = (page_w * scale) as f64 * (page_h * scale) as f64;
+        if pixels > MAX_RENDER_PIXELS {
+            scale *= (MAX_RENDER_PIXELS / pixels).sqrt() as f32;
+        }
+        let (width, height) = ((page_w * scale) as i32, (page_h * scale) as i32);
         if width <= 0 || height <= 0 {
             return Err(value_err(format!("page {page_index} renders to an empty image")));
         }
         let len = width as usize * height as usize * 4;
 
-        // Allocate the result uninitialised and let PDFium draw straight into it.
-        // Nothing else can see the object until it is returned, so it is safe to
-        // fill with the GIL released. This avoids copying the image out of
-        // PDFium and again into Python, which cost more than the render itself.
         let data: Py<PyBytes> = unsafe {
             let ptr = pyo3::ffi::PyBytes_FromStringAndSize(
                 std::ptr::null(),
@@ -492,32 +517,23 @@ impl RiemannDocument {
             if ptr.is_null() {
                 return Err(PyErr::fetch(py));
             }
-            Py::from_owned_ptr(py, ptr)
+            Bound::from_owned_ptr(py, ptr).cast_into_unchecked::<PyBytes>().unbind()
         };
         let addr = unsafe { pyo3::ffi::PyBytes_AsString(data.as_ptr()) } as usize;
 
-        py.allow_threads(move || -> PyResult<()> {
+        py.detach(move || -> PyResult<()> {
             let buffer = unsafe { std::slice::from_raw_parts_mut(addr as *mut u8, len) };
             {
                 let _guard = pdfium_guard();
                 let doc_guard = lock_doc(inner);
-                let mut page = doc_guard.0.pages().get(page_index).map_err(value_err)?;
-                // Only in memory: the flag is never saved back to the file.
+                let mut page = doc_guard.0.pages().get(page_at(page_index)?).map_err(value_err)?;
                 for mut annotation in page.annotations_mut().iter() {
                     if is_riemann_annotation(&annotation) && !annotation.is_hidden() {
                         let _ = annotation.set_is_hidden(true);
                     }
                 }
-                let mut bitmap = unsafe {
-                    PdfBitmap::from_bytes(
-                        width,
-                        height,
-                        PdfBitmapFormat::BGRA,
-                        &mut buffer[..],
-                        doc_guard.0.bindings(),
-                    )
-                }
-                .map_err(runtime_err)?;
+                let mut bitmap = PdfBitmap::from_bytes(width, height, PdfBitmapFormat::BGRA, &mut buffer[..])
+                    .map_err(runtime_err)?;
                 page.render_into_bitmap_with_config(&mut bitmap, &render_config(width, height))
                     .map_err(runtime_err)?;
             }
@@ -529,6 +545,7 @@ impl RiemannDocument {
             width: width as u32,
             height: height as u32,
             data,
+            scale,
         })
     }
 
@@ -536,38 +553,28 @@ impl RiemannDocument {
     /// count is cheap; validating them is left to the Python side.
     fn signature_count(&self, py: Python) -> usize {
         let inner = &self.inner;
-        py.allow_threads(|| {
+        py.detach(|| {
             let _guard = pdfium_guard();
             let doc_guard = lock_doc(inner);
             doc_guard.0.signatures().len() as usize
         })
     }
 
-    /// Returns the size of a page in PDF points as `(width, height)`.
-    ///
-    /// # Arguments
-    /// * `page_index` - Zero-based index of the page.
-    fn get_page_size(&self, py: Python, page_index: u16) -> PyResult<(f32, f32)> {
+    /// The size of a page in PDF points, as `(width, height)`.
+    fn get_page_size(&self, py: Python, page_index: u32) -> PyResult<(f32, f32)> {
         let inner = &self.inner;
-        py.allow_threads(|| {
+        py.detach(|| {
             let _guard = pdfium_guard();
             let doc_guard = lock_doc(inner);
-            let rect = doc_guard.0.pages().page_size(page_index).map_err(value_err)?;
+            let rect = doc_guard.0.pages().page_size(page_at(page_index)?).map_err(value_err)?;
             Ok((rect.width().value, rect.height().value))
         })
     }
 
-    /// Extracts all plain text from a specific page.
-    ///
-    /// # Arguments
-    /// * `page_index` - Zero-based index of the page.
-    ///
-    /// # Returns
-    /// A string containing the text of the page. Returns an empty string
-    /// if the page index is out of bounds or the page contains no text.
-    fn get_page_text(&self, py: Python, page_index: u16) -> PyResult<String> {
+    /// The plain text of a page; empty when the page has none.
+    fn get_page_text(&self, py: Python, page_index: u32) -> PyResult<String> {
         let inner = &self.inner;
-        py.allow_threads(|| {
+        py.detach(|| {
             let _guard = pdfium_guard();
             let doc_guard = lock_doc(inner);
             let pages = doc_guard.0.pages();
@@ -576,7 +583,7 @@ impl RiemannDocument {
                 return Ok(String::new());
             }
 
-            let page = pages.get(page_index).map_err(value_err)?;
+            let page = pages.get(page_at(page_index)?).map_err(value_err)?;
             let text_accessor = page
                 .text()
                 .map_err(|e| runtime_err(format!("Text Access Error: {}", e)))?;
@@ -589,24 +596,18 @@ impl RiemannDocument {
         })
     }
 
-    /// Performs Optical Character Recognition (OCR) on a page.
-    ///
-    /// Renders the page to a bitmap, converts the color channels from BGR to RGB
-    /// (required by Tesseract), and processes the image using the OCR engine.
-    ///
-    /// # Arguments
-    /// * `page_index` - Zero-based index of the page.
-    /// * `scale` - Scale factor for the image. Higher scales (2.0+) improve accuracy.
-    ///
-    /// # Returns
-    /// The recognized text string.
-    fn ocr_page(&self, py: Python, page_index: u16, scale: f32) -> PyResult<String> {
+    /// Reads one page with Tesseract. The page is rendered, its BGRA pixels are
+    /// swapped to the RGBA order the OCR worker encodes, and the result is OCRed.
+    /// A scale of 2.0 or more reads small text better. `languages` are Tesseract
+    /// names joined by `+`.
+    #[pyo3(signature = (page_index, scale, languages = "eng".to_string()))]
+    fn ocr_page(&self, py: Python, page_index: u32, scale: f32, languages: String) -> PyResult<String> {
         let inner = &self.inner;
-        py.allow_threads(|| {
-            let (buffer, width, height) = {
+        py.detach(|| {
+            let (mut buffer, width, height) = {
                 let _guard = pdfium_guard();
                 let doc_guard = lock_doc(inner);
-                let page = doc_guard.0.pages().get(page_index).map_err(value_err)?;
+                let page = doc_guard.0.pages().get(page_at(page_index)?).map_err(value_err)?;
                 let bitmap = generate_bitmap(&page, scale)?;
                 (
                     bitmap.as_raw_bytes(),
@@ -614,30 +615,60 @@ impl RiemannDocument {
                     bitmap.height() as u32,
                 )
             };
+            buffer.chunks_exact_mut(4).for_each(|pixel| pixel.swap(0, 2));
 
             let engine = OcrEngine::new();
             engine
-                .recognize_text(width, height, &buffer)
+                .recognize_text_in(width, height, &buffer, &languages)
                 .map_err(runtime_err)
         })
     }
 
-    /// Searches the page for a specific text term.
-    ///
-    /// # Arguments
-    /// * `page_index` - Zero-based index of the page.
-    /// * `term` - The string to search for.
-    ///
-    /// # Returns
-    /// A list of bounding boxes `(left, top, right, bottom)` for all occurrences.
+    /// Reads several pages with one Tesseract process and returns their text
+    /// in the order given.
+    #[pyo3(signature = (page_indices, scale, languages = "eng".to_string()))]
+    fn ocr_pages(
+        &self,
+        py: Python,
+        page_indices: Vec<u32>,
+        scale: f32,
+        languages: String,
+    ) -> PyResult<Vec<String>> {
+        let inner = &self.inner;
+        py.detach(|| {
+            let mut pngs = Vec::with_capacity(page_indices.len());
+            for &page_index in &page_indices {
+                let (mut buffer, width, height) = {
+                    let _guard = pdfium_guard();
+                    let doc_guard = lock_doc(inner);
+                    let page = doc_guard.0.pages().get(page_at(page_index)?).map_err(value_err)?;
+                    let bitmap = generate_bitmap(&page, scale)?;
+                    (
+                        bitmap.as_raw_bytes(),
+                        bitmap.width() as u32,
+                        bitmap.height() as u32,
+                    )
+                };
+                buffer.chunks_exact_mut(4).for_each(|pixel| pixel.swap(0, 2));
+                pngs.push(
+                    riemann_ocr_worker::encode_png(width, height, &buffer).map_err(runtime_err)?,
+                );
+            }
+            OcrEngine::new()
+                .recognize_pngs(&pngs, &languages)
+                .map_err(runtime_err)
+        })
+    }
+
+    /// Every occurrence of `term` on the page, as `(left, top, right, bottom)` boxes.
     fn search_page(
         &self,
         py: Python,
-        page_index: u16,
+        page_index: u32,
         term: String,
     ) -> PyResult<Vec<(f32, f32, f32, f32)>> {
         let inner = &self.inner;
-        py.allow_threads(|| {
+        py.detach(|| {
             let _guard = pdfium_guard();
             let doc_guard = lock_doc(inner);
             let pages = doc_guard.0.pages();
@@ -646,7 +677,7 @@ impl RiemannDocument {
                 return Ok(Vec::new());
             }
 
-            let page = pages.get(page_index).map_err(value_err)?;
+            let page = pages.get(page_at(page_index)?).map_err(value_err)?;
             let text_accessor = page.text().map_err(runtime_err)?;
             let search_options = PdfSearchOptions::new();
             let search = text_accessor
@@ -665,19 +696,10 @@ impl RiemannDocument {
         })
     }
 
-    /// Retrieves granular text segments and their positions from a page.
-    ///
-    /// Useful for features that need to know the exact location of specific words
-    /// or lines on the page.
-    ///
-    /// # Arguments
-    /// * `page_index` - Zero-based index of the page.
-    ///
-    /// # Returns
-    /// A list of `TextSegment` tuples containing text and bounding boxes.
-    fn get_text_segments(&self, py: Python, page_index: u16) -> PyResult<Vec<TextSegment>> {
+    /// The page's text in segments, each with its bounding box.
+    fn get_text_segments(&self, py: Python, page_index: u32) -> PyResult<Vec<TextSegment>> {
         let inner = &self.inner;
-        py.allow_threads(|| {
+        py.detach(|| {
             let _guard = pdfium_guard();
             let doc_guard = lock_doc(inner);
             let pages = doc_guard.0.pages();
@@ -686,7 +708,7 @@ impl RiemannDocument {
                 return Ok(Vec::new());
             }
 
-            let page = pages.get(page_index).map_err(value_err)?;
+            let page = pages.get(page_at(page_index)?).map_err(value_err)?;
             let text_accessor = page
                 .text()
                 .map_err(|e| runtime_err(format!("Text Access Error: {}", e)))?;
@@ -701,16 +723,13 @@ impl RiemannDocument {
         })
     }
 
-    /// Retrieves every character on a page with its loose bounding box (the
-    /// full advance width and font height PDFium reports), in content order.
-    /// Generated characters (synthesised spaces and line breaks) are included
-    /// so callers see the same text as `get_page_text`.
-    ///
-    /// # Arguments
-    /// * `page_index` - Zero-based index of the page.
-    fn get_char_boxes(&self, py: Python, page_index: u16) -> PyResult<Vec<CharBox>> {
+    /// Every character on a page with its loose bounding box (the full advance
+    /// width and font height PDFium reports), in content order. Generated
+    /// characters (synthesised spaces and line breaks) are included so callers
+    /// see the same text as `get_page_text`.
+    fn get_char_boxes(&self, py: Python, page_index: u32) -> PyResult<Vec<CharBox>> {
         let inner = &self.inner;
-        py.allow_threads(|| {
+        py.detach(|| {
             let _guard = pdfium_guard();
             let doc_guard = lock_doc(inner);
             let pages = doc_guard.0.pages();
@@ -719,7 +738,7 @@ impl RiemannDocument {
                 return Ok(Vec::new());
             }
 
-            let page = pages.get(page_index).map_err(value_err)?;
+            let page = pages.get(page_at(page_index)?).map_err(value_err)?;
             let text_accessor = page
                 .text()
                 .map_err(|e| runtime_err(format!("Text Access Error: {}", e)))?;
@@ -742,7 +761,7 @@ impl RiemannDocument {
     /// `(depth, title, page_index)` tuples. Empty when the file has none.
     fn get_outline(&self, py: Python) -> PyResult<Vec<OutlineEntry>> {
         let inner = &self.inner;
-        py.allow_threads(|| {
+        py.detach(|| {
             let _guard = pdfium_guard();
             let doc_guard = lock_doc(inner);
             let mut out = Vec::new();
@@ -751,118 +770,11 @@ impl RiemannDocument {
         })
     }
 
-    /// Adds a markup annotation (highlight, underline, or strikeout) to the page.
-    ///
-    /// This function calculates the union rectangle of all passed `rects` to set
-    /// the annotation's outer bounds, and then creates specific attachment points
-    /// for the individual highlighted areas.
-    ///
-    /// # Arguments
-    /// * `page_index` - Zero-based index of the page.
-    /// * `rects` - List of bounding boxes to annotate.
-    /// * `subtype` - Type of annotation: "underline", "strikeout", or "highlight".
-    /// * `color` - RGB color tuple `(r, g, b)`.
-    fn create_markup_annotation(
-        &self,
-        page_index: u16,
-        rects: Vec<(f32, f32, f32, f32)>,
-        subtype: String,
-        color: (u8, u8, u8),
-    ) -> PyResult<()> {
-        let _guard = pdfium_guard();
-        let mut doc_guard = lock_doc(&self.inner);
-        let pages = doc_guard.0.pages_mut();
-
-        let mut page = pages.get(page_index).map_err(value_err)?;
-
-        let pdf_color = PdfColor::new(color.0, color.1, color.2, 255);
-
-        let mut union_rect: Option<PdfRect> = None;
-        for (left, top, right, bottom) in &rects {
-            let u = PdfRect::new_from_values(*left, *bottom, *right, *top);
-            if let Some(r) = union_rect {
-                let ul = r.left().value.min(*left);
-                let ub = r.bottom().value.min(*bottom);
-                let ur = r.right().value.max(*right);
-                let ut = r.top().value.max(*top);
-                union_rect = Some(PdfRect::new_from_values(ul, ub, ur, ut));
-            } else {
-                union_rect = Some(u);
-            }
-        }
-
-        let apply_bounds = |annot: &mut dyn PdfPageAnnotationCommon| -> PyResult<()> {
-            if let Some(u) = union_rect {
-                annot.set_bounds(u).map_err(runtime_err)?;
-            }
-            Ok(())
-        };
-
-        match subtype.to_lowercase().as_str() {
-            "underline" => {
-                let mut annot = page
-                    .annotations_mut()
-                    .create_underline_annotation()
-                    .map_err(runtime_err)?;
-                annot.set_stroke_color(pdf_color).map_err(runtime_err)?;
-                for (left, top, right, bottom) in &rects {
-                    let rect = PdfRect::new_from_values(*left, *bottom, *right, *top);
-                    annot
-                        .attachment_points_mut()
-                        .create_attachment_point_at_end(PdfQuadPoints::from_rect(&rect))
-                        .map_err(runtime_err)?;
-                }
-                apply_bounds(&mut annot)?;
-            }
-            "strikeout" => {
-                let mut annot = page
-                    .annotations_mut()
-                    .create_strikeout_annotation()
-                    .map_err(runtime_err)?;
-                annot.set_stroke_color(pdf_color).map_err(runtime_err)?;
-                for (left, top, right, bottom) in &rects {
-                    let rect = PdfRect::new_from_values(*left, *bottom, *right, *top);
-                    annot
-                        .attachment_points_mut()
-                        .create_attachment_point_at_end(PdfQuadPoints::from_rect(&rect))
-                        .map_err(runtime_err)?;
-                }
-                apply_bounds(&mut annot)?;
-            }
-            _ => {
-                let mut annot = page
-                    .annotations_mut()
-                    .create_highlight_annotation()
-                    .map_err(runtime_err)?;
-                annot.set_stroke_color(pdf_color).map_err(runtime_err)?;
-                for (left, top, right, bottom) in &rects {
-                    let rect = PdfRect::new_from_values(*left, *bottom, *right, *top);
-                    annot
-                        .attachment_points_mut()
-                        .create_attachment_point_at_end(PdfQuadPoints::from_rect(&rect))
-                        .map_err(runtime_err)?;
-                }
-                apply_bounds(&mut annot)?;
-            }
-        };
-        page.flatten()
-            .map_err(|e| runtime_err(format!("Failed to flatten page: {}", e)))?;
-        Ok(())
-    }
-
-    /// Extracts interactive form field widgets from the page.
-    ///
-    /// Identifies text fields, checkboxes, and radio buttons, retrieving their
-    /// bounds, current values, and checked states.
-    ///
-    /// # Arguments
-    /// * `page_index` - Zero-based index of the page.
-    ///
-    /// # Returns
-    /// A list of `FormWidget` tuples.
-    fn get_form_widgets(&self, py: Python, page_index: u16) -> PyResult<Vec<FormWidget>> {
+    /// The page's text fields, checkboxes and radio buttons, with their bounds,
+    /// values and checked states.
+    fn get_form_widgets(&self, py: Python, page_index: u32) -> PyResult<Vec<FormWidget>> {
         let inner = &self.inner;
-        py.allow_threads(|| {
+        py.detach(|| {
             let _guard = pdfium_guard();
             let doc_guard = lock_doc(inner);
             let pages = doc_guard.0.pages();
@@ -871,7 +783,7 @@ impl RiemannDocument {
                 return Ok(Vec::new());
             }
 
-            let page = pages.get(page_index).map_err(value_err)?;
+            let page = pages.get(page_at(page_index)?).map_err(value_err)?;
             let frame = DisplayFrame::of(&page);
             let annotations = page.annotations();
             let mut widgets = Vec::new();
@@ -909,37 +821,30 @@ impl RiemannDocument {
     }
 
     /// Lists comments left on a page by other applications (Acrobat, Preview,
-    /// Okular): every annotation with text contents except links, form
-    /// widgets and popups.
+    /// Okular): every annotation with text contents except links, form widgets
+    /// and popups.
     ///
-    /// # Returns
-    /// `(crop_box, comments)`: the crop box as `(left, bottom, right, top)` and
-    /// a list of `(subtype, contents, author, date, (left, top, right, bottom))`.
+    /// Returns `(crop_box, comments)`: the visible page box (crop box clipped to
+    /// the media box, as `DisplayFrame` uses) as `(left, bottom, right, top)`,
+    /// and a list of `(subtype, contents, author, date, (left, top, right, bottom))`.
     /// Dates are the raw PDF date strings (`D:YYYYMMDDHHmmSS...`).
     fn get_comments(
         &self,
         py: Python,
-        page_index: u16,
+        page_index: u32,
     ) -> PyResult<((f32, f32, f32, f32), Vec<Comment>)> {
         let inner = &self.inner;
-        py.allow_threads(|| {
+        py.detach(|| {
             let _guard = pdfium_guard();
             let doc_guard = lock_doc(inner);
             let pages = doc_guard.0.pages();
             if (page_index as usize) >= (pages.len() as usize) {
                 return Ok(((0.0, 0.0, 0.0, 0.0), Vec::new()));
             }
-            let page = pages.get(page_index).map_err(value_err)?;
+            let page = pages.get(page_at(page_index)?).map_err(value_err)?;
 
-            let crop = match page.boundaries().crop() {
-                Ok(b) => (
-                    b.bounds.left().value,
-                    b.bounds.bottom().value,
-                    b.bounds.right().value,
-                    b.bounds.top().value,
-                ),
-                Err(_) => (0.0, 0.0, page.width().value, page.height().value),
-            };
+            let frame = DisplayFrame::of(&page);
+            let crop = (frame.left, frame.bottom, frame.right, frame.top);
 
             let mut comments = Vec::new();
             for annotation in page.annotations().iter() {
@@ -975,17 +880,13 @@ impl RiemannDocument {
         })
     }
 
-    /// Extracts clickable links and their bounding boxes.
-    ///
-    /// Internal links (explicit or named destinations, and GoTo actions) are
-    /// reported as `#page=N`, with `&top=Y` appended when the destination names
-    /// a vertical position in PDF user space. External links carry their URI.
-    ///
-    /// # Returns
-    /// A list of tuples `(target, (left, top, right, bottom))`.
-    fn get_links(&self, py: Python, page_index: u16) -> PyResult<Vec<Link>> {
+    /// The page's links as `(target, (left, top, right, bottom))`. Internal
+    /// links (explicit or named destinations, and GoTo actions) are reported as
+    /// `#page=N`, with `&top=Y` appended when the destination names a vertical
+    /// position in PDF user space. External links carry their URI.
+    fn get_links(&self, py: Python, page_index: u32) -> PyResult<Vec<Link>> {
         let inner = &self.inner;
-        py.allow_threads(|| {
+        py.detach(|| {
             let _guard = pdfium_guard();
             let doc_guard = lock_doc(inner);
             let pages = doc_guard.0.pages();
@@ -994,7 +895,7 @@ impl RiemannDocument {
                 return Ok(Vec::new());
             }
 
-            let page = pages.get(page_index).map_err(value_err)?;
+            let page = pages.get(page_at(page_index)?).map_err(value_err)?;
             let frame = DisplayFrame::of(&page);
             let mut links = Vec::new();
 
@@ -1021,23 +922,29 @@ struct PdfEngine;
 #[pymethods]
 impl PdfEngine {
     #[new]
-    fn new() -> Self {
+    fn new(py: Python) -> PyResult<Self> {
+        let mut dirs = Vec::new();
+        if let Ok(file) = py
+            .import("riemann_core")
+            .and_then(|m| m.getattr("__file__"))
+            .and_then(|f| f.extract::<std::path::PathBuf>())
+        {
+            dirs.extend(file.ancestors().skip(1).take(6).map(|d| d.to_path_buf()));
+        }
         let _guard = pdfium_guard();
-        get_pdfium();
-        PdfEngine
+        get_pdfium(&dirs)?;
+        Ok(PdfEngine)
     }
 
-    /// Loads a PDF document from the local file system.
+    /// Loads a PDF. The GIL is released while PDFium parses the file, so loading
+    /// a large document on a worker thread keeps the interface responsive.
     ///
-    /// The GIL is released while PDFium parses the file, so loading a large
-    /// document on a worker thread keeps the interface responsive.
-    ///
-    /// # Arguments
-    /// * `path` - The absolute or relative path to the PDF file.
-    /// * `password` - Password to the PDF file.
-    ///
-    /// # Returns
-    /// A `RiemannDocument` instance ready for rendering and interaction.
+    /// # Safety
+    /// pdfium-render ties the document's lifetime to the password, but the
+    /// password is only copied into a C string for the duration of
+    /// `FPDF_LoadCustomDocument` and never referenced afterwards. The document
+    /// is therefore extended to `'static` (as `Pdfium` itself is) instead of
+    /// leaking every password, as earlier versions did.
     #[pyo3(signature = (path, password=None))]
     fn load_document(
         &self,
@@ -1045,14 +952,16 @@ impl PdfEngine {
         path: &str,
         password: Option<String>,
     ) -> PyResult<RiemannDocument> {
+        if password.as_deref().is_some_and(|p| p.contains('\0')) {
+            return Err(value_err("password must not contain NUL characters"));
+        }
         let path = path.to_owned();
-        let (wrapper, page_count) = py.allow_threads(move || -> PyResult<(DocumentWrapper, usize)> {
-            let pwd_static: Option<&'static str> =
-                password.map(|p| Box::leak(p.into_boxed_str()) as &'static str);
+        let (wrapper, page_count) = py.detach(move || -> PyResult<(DocumentWrapper, usize)> {
             let _guard = pdfium_guard();
-            let doc = get_pdfium()
-                .load_pdf_from_file(&path, pwd_static)
+            let doc = get_pdfium(&[])?
+                .load_pdf_from_file(&path, password.as_deref())
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+            let doc: PdfDocument<'static> = unsafe { std::mem::transmute(doc) };
             let page_count = doc.pages().len() as usize;
             Ok((DocumentWrapper(ManuallyDrop::new(doc)), page_count))
         })?;

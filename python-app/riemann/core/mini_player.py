@@ -1,3 +1,15 @@
+"""
+Notes:
+
+find_active_browser picks, in order: the focused tab if it is a browser
+playing media; any browser tab in the app that is audible; the browser
+already being tracked (even after a tab switch); the current tab of the main
+pane; any browser tab at all.
+
+callback: If current browser has no media, allow switching to another browser
+on next poll.
+"""
+
 import os
 import sys
 
@@ -10,6 +22,8 @@ from PySide6.QtWidgets import (
     QSlider,
     QWidget,
 )
+from .log import log
+from ..ui.palette import tokens
 
 
 class MiniAudioPlayer(QWidget):
@@ -79,7 +93,7 @@ class MiniAudioPlayer(QWidget):
 
         self.time_label = QLabel("00:00 / 00:00")
         self.time_label.setStyleSheet(
-            "color: #888; font-size: 11px; font-weight: bold;"
+            f"color: {tokens(getattr(self.main_window, 'dark_mode', False))['muted']}; font-size: 11px; font-weight: bold;"
         )
 
         layout.addWidget(self.btn_play_pause)
@@ -128,7 +142,7 @@ class MiniAudioPlayer(QWidget):
             if not isValid(browser):
                 return False
         except Exception:
-            pass
+            log.debug("_is_browser_valid failed", exc_info=True)
         if not hasattr(browser, "web") or not browser.web:
             return False
         try:
@@ -149,7 +163,7 @@ class MiniAudioPlayer(QWidget):
                 if hasattr(top, "tabs_main") and top not in windows:
                     windows.append(top)
         except Exception:
-            pass
+            log.debug("_get_all_app_browsers failed", exc_info=True)
 
         for win in windows:
             for tab_widget in [getattr(win, "tabs_main", None), getattr(win, "tabs_side", None)]:
@@ -168,7 +182,6 @@ class MiniAudioPlayer(QWidget):
         """
         all_browsers = self._get_all_app_browsers()
 
-        # 1. If currently focused tab is a browser with media/audio, prioritize it
         for tabs in [self.main_window.tabs_main, self.main_window.tabs_side]:
             if tabs and tabs.isVisible() and tabs.hasFocus():
                 curr = tabs.currentWidget()
@@ -177,26 +190,22 @@ class MiniAudioPlayer(QWidget):
                         if curr.web.page().recentlyAudible() or not self._is_browser_valid(self.active_browser):
                             return curr
                     except Exception:
-                        pass
+                        log.debug("find_active_browser failed", exc_info=True)
 
-        # 2. Check if any browser tab in the app is actively audible (playing audio)
         for b in all_browsers:
             try:
                 if b.web.page().recentlyAudible():
                     return b
             except Exception:
-                pass
+                log.debug("find_active_browser failed", exc_info=True)
 
-        # 3. If currently tracking a valid browser, keep tracking it even if user switched tabs
         if self._is_browser_valid(self.active_browser) and self.active_browser in all_browsers:
             return self.active_browser
 
-        # 4. Fallback: check current tab of main tabs
         curr_main = self.main_window.tabs_main.currentWidget()
         if self._is_browser_valid(curr_main):
             return curr_main
 
-        # 5. Fallback: any browser tab in the app
         if all_browsers:
             return all_browsers[0]
 
@@ -217,22 +226,21 @@ class MiniAudioPlayer(QWidget):
                 self.main_window.menuBar().update()
 
     def poll_media_state(self):
-        is_dark = getattr(self.main_window, "dark_mode", False)
-        border_color = "white" if is_dark else "black"
+        t = tokens(getattr(self.main_window, "dark_mode", False))
 
         new_style = f"""
             QSlider::groove:horizontal {{
                 height: 4px;
-                background: rgba(136, 136, 136, 0.4);
+                background: {t['border_strong']};
                 border-radius: 2px;
             }}
             QSlider::sub-page:horizontal {{
-                background: #888;
+                background: {t['muted']};
                 border-radius: 2px;
             }}
             QSlider::handle:horizontal {{
-                background: #888;
-                border: 2px solid {border_color};
+                background: {t['muted']};
+                border: 2px solid {t['text']};
                 width: 10px;
                 margin: -5px 0; /* Expands the handle outside the thin groove */
                 border-radius: 7px; /* Makes it a perfect circle */
@@ -289,7 +297,6 @@ class MiniAudioPlayer(QWidget):
                     self.set_visibility(False)
             else:
                 self.set_visibility(False)
-                # If current browser has no media, allow switching to another browser on next poll
                 if result == "none":
                     self.active_browser = None
 

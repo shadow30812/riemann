@@ -1,12 +1,14 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from riemann.ui.palette import DARK, banner_style
 from riemann.ui.reader.mixins.signatures import SignaturesMixin
 
 
 class DummySignaturesReader(SignaturesMixin):
     def __init__(self):
         self.current_path = "/fake/doc.pdf"
+        self.theme_mode = 1
         self.current_signatures = []
         self.current_untrusted_pem = None
         self.current_doc = MagicMock()
@@ -36,7 +38,7 @@ def test_detect_signatures_found(mock_open, mock_pdf_reader, reader):
     mock_reader_instance = MagicMock()
     mock_reader_instance.embedded_signatures = ["sig1", "sig2"]
     mock_pdf_reader.return_value = mock_reader_instance
-    reader.current_doc = MagicMock(spec=["page_count"])  # an older core without signature_count
+    reader.current_doc = MagicMock(spec=["page_count"])
 
     reader._detect_signatures("/fake.pdf")
 
@@ -79,9 +81,7 @@ def test_on_signatures_validated_valid(reader):
     reader._on_signatures_validated("VALID", "All signatures valid.", mock_sigs)
 
     assert reader.current_signatures == mock_sigs
-    reader.signature_banner.setStyleSheet.assert_called_with(
-        "background-color: #2e7d32; color: white;"
-    )
+    reader.signature_banner.setStyleSheet.assert_called_with(banner_style(DARK, "success"))
     reader.signatures_detected.emit.assert_called_with(mock_sigs)
 
 

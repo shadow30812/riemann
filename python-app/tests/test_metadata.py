@@ -10,6 +10,9 @@ class DummyMetadataReader(MetadataMixin):
         self.current_path = "/fake/docs/doc.pdf"
         self.current_doc = MagicMock()
         self.document_metadata = {}
+        self._get_annotation_path = MagicMock()
+        self.notes_panel = None
+        self._update_tab_title = MagicMock()
         self.settings = MagicMock()
 
         self._window = MagicMock()
@@ -66,7 +69,6 @@ def test_rename_current_pdf(mock_exists, mock_rename, reader):
 
     mock_rename.assert_called_once_with("/fake/docs/doc.pdf", expected_new_path)
     assert reader.current_path == expected_new_path
-    reader.settings.setValue.assert_called_with("lastFile", expected_new_path)
     reader.window().library_manager.save_metadata.assert_called_with(
         expected_new_path, reader.document_metadata
     )
@@ -84,3 +86,40 @@ def test_copy_citation(mock_clipboard, reader):
         "@article{doe2024, title={Quantum}}"
     )
     assert "BibTeX copied" in reader.last_toast
+
+
+def test_rename_moves_annotations_and_retitles_tab(tmp_path, reader, monkeypatch):
+    from riemann.core import annotation_store
+
+    store = annotation_store.AnnotationStore(str(tmp_path / "store"))
+    monkeypatch.setattr(annotation_store, "_shared", store)
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    reader.current_path = str(pdf)
+    reader._anno_json_cache = None
+    before = store.json_path(str(pdf))
+    with open(before, "w") as f:
+        f.write('{"pages": {"0": [{"id": "a"}]}}')
+    reader._update_tab_title = MagicMock()
+    reader.document_metadata = {"title": "Deep\nLearning. ", "authors": "", "year": ""}
+
+    reader.rename_current_pdf()
+
+    new_name = "[UnknownYear] - UnknownAuthor - Deep Learning.pdf"
+    assert reader.current_path == str(tmp_path / new_name)
+    assert (tmp_path / new_name).exists()
+    assert store.json_path(reader.current_path) == before
+    reader._update_tab_title.assert_called_once_with(new_name)
+
+
+def test_rename_reports_existing_target(tmp_path, reader):
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    (tmp_path / "[2024] - Doe - T.pdf").write_bytes(b"")
+    reader.current_path = str(pdf)
+    reader.document_metadata = {"title": "T", "authors": "Doe", "year": "2024"}
+
+    reader.rename_current_pdf()
+
+    assert reader.current_path == str(pdf)
+    assert "already exists" in reader.last_toast

@@ -1,20 +1,31 @@
+"""
+Document conversion, compression and local caption generation.
+
+Conversions read PDFs through the Rust core (riemann_core, on PDFium): pages
+are rendered for PDF to images, and text comes from the same extraction the
+reader uses. Images become a PDF with Pillow, one page per image at 72 dpi
+(so a page is as many points as the image has pixels), with transparency
+flattened onto white. PDF compression uses pikepdf: lossless mode drops unused
+objects, packs objects into object streams and recompresses Flate streams;
+lossy mode also re-encodes each image XObject once as JPEG when that is
+smaller, leaving stencil masks, images under 8 bits per channel, and any
+soft mask (transparency) as they were. No AGPL code (PyMuPDF) is involved.
+"""
+
 import csv
+import html
 import os
 import subprocess
 import zipfile
 
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 from PySide6.QtCore import (
-    QBuffer,
-    QByteArray,
-    QIODevice,
-    QSettings,
     QStandardPaths,
     Qt,
     QThread,
     Signal,
 )
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -30,101 +41,80 @@ from PySide6.QtWidgets import (
     QSlider,
     QVBoxLayout,
 )
+from .log import log
+from .settings import app_settings, get_dialog_directory, save_last_directory
+from ..ui.palette import LIGHT
 
 
 class DocumentConverter:
-    """Handles format conversions using PyMuPDF and standard libraries."""
-
     @staticmethod
     def pdf_to_images(pdf_path: str, output_dir: str, dpi: int = 150) -> list[str]:
-        """Renders PDF pages to PNG images."""
-        try:
-            import fitz
-        except ImportError:
-            raise Exception(
-                "Conversion requires PyMuPDF (fitz), which is excluded from this build."
-            )
-
+        """Renders each page to a PNG at dpi; returns the files written."""
+        doc = _open_pdf(pdf_path)
         os.makedirs(output_dir, exist_ok=True)
-        saved_paths = []
         base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-
-        with fitz.open(pdf_path) as doc:
-            for page_num in range(len(doc)):
-                page = doc.load_page(page_num)
-                pix = page.get_pixmap(dpi=dpi)
-
-                filename = f"{base_name}_page_{page_num + 1}.png"
-                out_path = os.path.join(output_dir, filename)
-
-                pix.save(out_path)
-                saved_paths.append(out_path)
-
+        saved_paths = []
+        for page_num in range(doc.page_count):
+            res = doc.render_page(page_num, dpi / 72.0, 0)
+            image = QImage(res.data, res.width, res.height, res.width * 4, QImage.Format.Format_RGB32)
+            out_path = os.path.join(output_dir, f"{base_name}_page_{page_num + 1}.png")
+            if not image.save(out_path, "PNG"):
+                raise OSError(f"Could not write {out_path}")
+            saved_paths.append(out_path)
         return saved_paths
 
     @staticmethod
     def images_to_pdf(image_paths: list[str], output_path: str) -> None:
-        """Combines multiple images into a single PDF."""
-        try:
-            import fitz
-        except ImportError:
-            raise Exception(
-                "Conversion requires PyMuPDF (fitz), which is excluded from this build."
-            )
+        """One page per image, each page the image's size at 72 dpi."""
+        from PIL import Image
 
-        doc = fitz.open()
-        for img_path in image_paths:
-            img = fitz.open(img_path)
-            rect = img[0].rect
-            pdfbytes = img.convert_to_pdf()
-            img.close()
-
-            imgPDF = fitz.open("pdf", pdfbytes)
-            page = doc.new_page(width=rect.width, height=rect.height)
-            page.show_pdf_page(rect, imgPDF, 0)
-            imgPDF.close()
-
-        doc.save(output_path)
-        doc.close()
+        if not image_paths:
+            raise ValueError("No images to combine.")
+        pages = []
+        for path in image_paths:
+            with Image.open(path) as img:
+                if img.mode in ("RGBA", "LA", "P"):
+                    img = img.convert("RGBA")
+                    flat = Image.new("RGB", img.size, "white")
+                    flat.paste(img, mask=img.getchannel("A"))
+                    pages.append(flat)
+                else:
+                    pages.append(img.convert("RGB") if img.mode not in ("RGB", "L") else img.copy())
+        pages[0].save(output_path, "PDF", resolution=72.0, save_all=True, append_images=pages[1:])
 
     @staticmethod
     def pdf_to_text(pdf_path: str, output_path: str, as_markdown: bool = False) -> None:
-        """Extracts text from a PDF, optionally formatting as simple Markdown."""
-        try:
-            import fitz
-        except ImportError:
-            raise Exception(
-                "Conversion requires PyMuPDF (fitz), which is excluded from this build."
-            )
-
-        with fitz.open(pdf_path) as doc:
-            with open(output_path, "w", encoding="utf-8") as f:
+        doc = _open_pdf(pdf_path)
+        with open(output_path, "w", encoding="utf-8") as f:
+            if as_markdown:
+                f.write(f"# Extracted Content: {os.path.basename(pdf_path)}\n\n")
+            for page_num in range(doc.page_count):
+                f.write(doc.get_page_text(page_num))
                 if as_markdown:
-                    f.write(f"# Extracted Content: {os.path.basename(pdf_path)}\n\n")
-
-                for page in doc:
-                    text = page.get_text("text")
-                    f.write(text)
-                    if as_markdown:
-                        f.write("\n\n---\n\n")
+                    f.write("\n\n---\n\n")
 
     @staticmethod
     def pdf_to_html(pdf_path: str, output_path: str) -> None:
-        """Extracts text and layout to raw HTML."""
-        try:
-            import fitz
-        except ImportError:
-            raise Exception(
-                "Conversion requires PyMuPDF (fitz), which is excluded from this build."
-            )
-        with fitz.open(pdf_path) as doc:
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write("<html><body>\n")
-                for page in doc:
-                    html_content = page.get_text("html")
-                    f.write(html_content)
-                    f.write("<hr>\n")
-                f.write("</body></html>\n")
+        """Each page as a box of its size in points, with the text placed where it sits on the page."""
+        doc = _open_pdf(pdf_path)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write("<!DOCTYPE html>\n<html><head><meta charset='utf-8'><style>"
+                    f".page{{position:relative;margin:12px auto;border:1px solid {LIGHT['border_strong']};overflow:hidden}}"
+                    ".page span{position:absolute;white-space:pre;line-height:1}"
+                    "</style></head><body>\n")
+            for page_num in range(doc.page_count):
+                width, height = doc.get_page_size(page_num)
+                f.write(f"<div class='page' style='width:{width:.1f}pt;height:{height:.1f}pt'>\n")
+                for text, (left, top, right, bottom) in doc.get_text_segments(page_num):
+                    if not text.strip():
+                        continue
+                    size = max(1.0, top - bottom)
+                    f.write(
+                        f"<span style='left:{left:.1f}pt;top:{height - top:.1f}pt;font-size:{size:.1f}pt'>"
+                        f"{html.escape(text)}</span>\n"
+                    )
+                f.write("</div>\n")
+            f.write("</body></html>\n")
 
     @staticmethod
     def csv_to_html(csv_path: str) -> str:
@@ -139,7 +129,7 @@ class DocumentConverter:
                 html.append(
                     "<tr>"
                     + "".join(
-                        f"<th style='padding: 8px; background-color: #f2f2f2;'>{h}</th>"
+                        f"<th style='padding: 8px; background-color: {LIGHT['raised']};'>{h}</th>"
                         for h in headers
                     )
                     + "</tr>"
@@ -216,60 +206,81 @@ class DocumentCompressor:
     @staticmethod
     def compress_pdf(
         input_path: str, output_path: str, lossless: bool, quality: int = 50
-    ) -> None:
+    ) -> int:
         """
-        Compresses a PDF locally.
-        Lossless: Cleans up internal structures, deflates streams.
-        Custom: Re-encodes embedded images to JPEG at the specified quality.
+        Lossless: drops unused objects, packs objects into streams and
+        recompresses Flate streams. Otherwise also re-encodes embedded images as
+        JPEG at quality, each image once (pages can share one), keeping the
+        original wherever the JPEG would not be smaller. Returns the number of
+        images re-encoded.
         """
-        try:
-            import fitz
-        except ImportError:
-            raise Exception(
-                "Compression requires PyMuPDF (fitz), which is excluded from this build."
+        import pikepdf
+
+        replaced = 0
+        with pikepdf.open(input_path) as pdf:
+            if not lossless:
+                done = set()
+                for page in pdf.pages:
+                    for _name, obj in page.images.items():
+                        key = obj.objgen
+                        if key in done:
+                            continue
+                        done.add(key)
+                        if _reencode_image(pdf, obj, quality):
+                            replaced += 1
+            pdf.remove_unreferenced_resources()
+            pdf.save(
+                output_path,
+                compress_streams=True,
+                recompress_flate=True,
+                object_stream_mode=pikepdf.ObjectStreamMode.generate,
             )
-        doc = fitz.open(input_path)
+        return replaced
 
-        if not lossless:
-            for page in doc:
-                image_list = page.get_images(full=True)
-                for img_info in image_list:
-                    xref = img_info[0]
-                    base_image = doc.extract_image(xref)
 
-                    if base_image:
-                        img_bytes = base_image["image"]
-                        qimg = QImage.fromData(img_bytes)
+def _open_pdf(path: str):
+    import riemann_core
 
-                        if not qimg.isNull():
-                            if qimg.hasAlphaChannel():
-                                bg = QImage(qimg.size(), QImage.Format.Format_RGB32)
-                                bg.fill(Qt.GlobalColor.white)
-                                painter = QPainter(bg)
-                                painter.drawImage(0, 0, qimg)
-                                painter.end()
-                                qimg = bg
+    return riemann_core.PdfEngine().load_document(path, None)
 
-                            buffer = QByteArray()
-                            buffer_device = QBuffer(buffer)
-                            buffer_device.open(QIODevice.OpenModeFlag.WriteOnly)
-                            qimg.save(buffer_device, "JPEG", quality)
 
-                            new_bytes = bytes(buffer.data())
-                            original_size = doc.xref_length()
+def _reencode_image(pdf, obj, quality: int) -> bool:
+    """Replaces one image XObject with a JPEG if that is smaller. Its soft mask, if any, stays."""
+    import io
 
-                            if len(new_bytes) < original_size:
-                                page.replace_image(xref, stream=new_bytes)
-                                print(
-                                    f"Compressed image {xref}: {original_size // 1024}KB -> {len(new_bytes) // 1024}KB"
-                                )
-                            else:
-                                print(
-                                    f"Skipped image {xref}: New JPEG ({len(new_bytes) // 1024}KB) is larger than original ({original_size // 1024}KB)."
-                                )
+    import pikepdf
+    from PIL import Image
 
-        doc.save(output_path, garbage=4, deflate=True)
-        doc.close()
+    if obj.get("/ImageMask", False) or int(obj.get("/BitsPerComponent", 8)) < 8:
+        return False
+    try:
+        pil = pikepdf.PdfImage(obj).as_pil_image()
+    except Exception:
+        log.debug("Image %s not decodable; kept", obj.objgen, exc_info=True)
+        return False
+    if pil.mode not in ("RGB", "L"):
+        if "A" in pil.getbands() or pil.mode == "P":
+            pil = pil.convert("RGBA")
+            flat = Image.new("RGB", pil.size, "white")
+            flat.paste(pil, mask=pil.getchannel("A"))
+            pil = flat
+        else:
+            pil = pil.convert("RGB")
+    buf = io.BytesIO()
+    pil.save(buf, "JPEG", quality=quality)
+    data = buf.getvalue()
+    original = len(obj.read_raw_bytes())
+    if len(data) >= original:
+        log.info("Kept image %s: JPEG %d KB is not smaller than %d KB", obj.objgen, len(data) // 1024, original // 1024)
+        return False
+    obj.write(data, filter=pikepdf.Name.DCTDecode)
+    obj.ColorSpace = pikepdf.Name.DeviceGray if pil.mode == "L" else pikepdf.Name.DeviceRGB
+    obj.BitsPerComponent = 8
+    for key in ("/DecodeParms", "/Decode", "/Intent"):
+        if key in obj:
+            del obj[key]
+    log.info("Compressed image %s: %d KB -> %d KB", obj.objgen, original // 1024, len(data) // 1024)
+    return True
 
 
 class ConvertDialog(QDialog):
@@ -335,19 +346,10 @@ class ConvertDialog(QDialog):
         self.input_paths = []
 
     def _get_start_dir(self):
-        settings = QSettings("Riemann", "PDFReader")
-        return settings.value(
-            "app/last_dir",
-            QStandardPaths.writableLocation(
-                QStandardPaths.StandardLocation.DocumentsLocation
-            ),
-            type=str,
-        )
+        return get_dialog_directory(app_settings())
 
     def _save_start_dir(self, path):
-        if path:
-            directory = os.path.dirname(path) if os.path.isfile(path) else path
-            QSettings("Riemann", "PDFReader").setValue("app/last_dir", directory)
+        save_last_directory(app_settings(), path)
 
     def browse_input(self):
         start_dir = self._get_start_dir()
@@ -530,19 +532,10 @@ class CompressDialog(QDialog):
         self.lbl_val.setText(f"Quality: {val}%")
 
     def _get_start_dir(self):
-        settings = QSettings("Riemann", "PDFReader")
-        return settings.value(
-            "app/last_dir",
-            QStandardPaths.writableLocation(
-                QStandardPaths.StandardLocation.DocumentsLocation
-            ),
-            type=str,
-        )
+        return get_dialog_directory(app_settings())
 
     def _save_start_dir(self, path):
-        if path:
-            directory = os.path.dirname(path) if os.path.isfile(path) else path
-            QSettings("Riemann", "PDFReader").setValue("app/last_dir", directory)
+        save_last_directory(app_settings(), path)
 
     def browse_input(self):
         start_dir = self._get_start_dir()
@@ -709,7 +702,7 @@ class CaptionGeneratorWorker(QThread):
                 condition_on_previous_text=False,
             )
 
-            srt_path = os.path.splitext(self.video_path)[0] + ".srt"
+            srt_path = unused_path(os.path.splitext(self.video_path)[0] + ".srt")
 
             self.progress.emit("Writing subtitle file...")
             with open(srt_path, "w", encoding="utf-8") as f:
@@ -719,11 +712,11 @@ class CaptionGeneratorWorker(QThread):
                     f.write(f"{i}\n{start} --> {end}\n{segment.text.strip()}\n\n")
 
             self.progress.emit("Embedding subtitles into video container...")
-            output_path = os.path.splitext(self.video_path)[0] + "_captioned.mp4"
+            output_path = unused_path(os.path.splitext(self.video_path)[0] + "_captioned.mp4")
 
             cmd = [
                 "ffmpeg",
-                "-y",
+                "-n",
                 "-i",
                 self.video_path,
                 "-i",
@@ -739,7 +732,7 @@ class CaptionGeneratorWorker(QThread):
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True
             )
 
-            self.finished.emit(True, f"Successfully created:\n{output_path}")
+            self.finished.emit(True, f"Successfully created:\n{output_path}\n{srt_path}")
 
         except ImportError:
             self.finished.emit(False, "faster-whisper is not installed.")
@@ -751,15 +744,26 @@ class CaptionGeneratorWorker(QThread):
             self.finished.emit(False, f"An error occurred: {str(e)}")
 
 
+def unused_path(path: str) -> str:
+    """path, or "name (2).ext", "name (3).ext"... when it already exists."""
+    if not os.path.exists(path):
+        return path
+    stem, ext = os.path.splitext(path)
+    n = 2
+    while os.path.exists(f"{stem} ({n}){ext}"):
+        n += 1
+    return f"{stem} ({n}){ext}"
+
+
 def trigger_local_caption_generation(parent_window):
     """
     Opens a file dialog, respects app settings, and triggers the background captioning worker.
     """
-    app_settings = QSettings("Riemann", "PDFReader")
-    default_dir = app_settings.value("app/default_dir", "", type=str)
+    store = app_settings()
+    default_dir = store.value("app/default_dir", "", type=str)
 
     if not default_dir or not os.path.exists(default_dir):
-        default_dir = app_settings.value(
+        default_dir = store.value(
             "app/last_dir", "", type=str
         ) or QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.MoviesLocation
@@ -775,7 +779,7 @@ def trigger_local_caption_generation(parent_window):
     if not video_path:
         return
 
-    app_settings.setValue("app/last_dir", os.path.dirname(video_path))
+    store.setValue("app/last_dir", os.path.dirname(video_path))
 
     progress_dialog = QProgressDialog("Initializing...", None, 0, 0, parent_window)
     progress_dialog.setWindowTitle("Generating Captions")

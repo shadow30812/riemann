@@ -4,13 +4,20 @@ Sections and thumbnails sidebar for the PDF reader.
 A narrow rail switches between the document outline (bookmarks) and page
 thumbnails, like the side panel of browser PDF viewers. Thumbnails are
 rendered on a worker thread, only for the rows in view.
+
+Notes:
+
+_highlight_section: Outlines are not always in page order, so look at every
+entry; on ties the later (usually deeper) entry wins.
 """
 
+import atexit
 import queue
 import threading
+import weakref
 from typing import Any, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -65,9 +72,16 @@ class _Bridge(QObject):
 
 
 class _ThumbRenderer:
-    """One worker thread rendering requested pages, newest document first."""
+    """
+    One worker thread rendering requested pages, newest document first. It is
+    a daemon thread waiting on a queue, so every renderer is stopped and
+    joined at interpreter exit before it can be killed inside PDFium.
+    """
+
+    live: "weakref.WeakSet[_ThumbRenderer]" = weakref.WeakSet()
 
     def __init__(self, bridge: _Bridge):
+        _ThumbRenderer.live.add(self)
         self.bridge = bridge
         self.requests: "queue.Queue[Optional[tuple]]" = queue.Queue()
         self.generation = 0
@@ -83,6 +97,13 @@ class _ThumbRenderer:
         self.generation = -1
         if self.thread is not None:
             self.requests.put(None)
+
+    @classmethod
+    def stop_all(cls) -> None:
+        for renderer in list(cls.live):
+            renderer.stop()
+            if renderer.thread is not None:
+                renderer.thread.join(2)
 
     def _run(self) -> None:
         while True:
@@ -105,10 +126,18 @@ class _ThumbRenderer:
                 return
 
 
+atexit.register(_ThumbRenderer.stop_all)
+
+
 class PdfSidebarWidget(QWidget):
-    """Outline and thumbnail navigation shown at the left of a reader tab."""
+    """
+    Outline and thumbnail navigation shown at the left of a reader tab.
+    Thumbnails can be multi-selected; right-clicking them asks the reader for
+    its page-editing menu (pages_menu_requested).
+    """
 
     page_selected = Signal(int)
+    pages_menu_requested = Signal(QPoint)
 
     def __init__(self, parent=None, dark_mode: bool = False):
         super().__init__(parent)
@@ -201,6 +230,11 @@ class PdfSidebarWidget(QWidget):
         self.thumbs.setIconSize(QSize(THUMB_WIDTH, int(THUMB_WIDTH * 1.42)))
         self.thumbs.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.thumbs.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.thumbs.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.thumbs.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.thumbs.customContextMenuRequested.connect(
+            lambda pos: self.pages_menu_requested.emit(self.thumbs.viewport().mapToGlobal(pos))
+        )
         self.thumbs.itemClicked.connect(self._on_thumb_clicked)
         self.thumbs.verticalScrollBar().valueChanged.connect(lambda _: self._visible_timer.start())
         self.stack.addWidget(self.thumbs)
@@ -275,7 +309,7 @@ class PdfSidebarWidget(QWidget):
             except RuntimeError:
                 pass
 
-        threading.Thread(target=work, name="riemann-outline", daemon=True).start()
+        threading.Thread(target=work, name="riemann-outline").start()
         if self.isVisible() and self.mode == "thumbnails":
             self._visible_timer.start()
 
@@ -344,8 +378,6 @@ class PdfSidebarWidget(QWidget):
     def _highlight_section(self) -> None:
         """Selects the section that starts closest before (or on) the current page."""
         best, best_page = None, -1
-        # Outlines are not always in page order, so look at every entry; on
-        # ties the later (usually deeper) entry wins.
         for page, item in self._outline_pages:
             if best_page <= page <= self.current_page:
                 best, best_page = item, page

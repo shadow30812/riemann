@@ -13,6 +13,10 @@ keep the data and cache folders but start with empty settings, so no session is
 restored.
 
     env -u LD_LIBRARY_PATH riemann/bin/python benchmarks/bench_startup.py
+
+Notes:
+
+poll: Older versions had no stand-ins: any pixmap on screen was the real page.
 """
 
 import argparse
@@ -44,7 +48,6 @@ def child(doc):
             tab = self.tabs_main.currentWidget()
             widgets = getattr(tab, "page_widgets", {}) or {}
             w = widgets.get(getattr(tab, "current_page_index", 0))
-            # Older versions had no stand-ins: any pixmap on screen was the real page.
             sharp = w is not None and getattr(w, "has_full_page", not w.pixmap().isNull())
             if sharp:
                 marks["first_page_ms"] = (time.time() - t_start) * 1000

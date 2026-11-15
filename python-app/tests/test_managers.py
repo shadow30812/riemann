@@ -20,7 +20,7 @@ if not QApplication.instance():
 @pytest.fixture
 def mock_app_data(tmp_path):
     with patch(
-        "riemann.core.managers.QStandardPaths.writableLocation",
+        "riemann.core.storage.QStandardPaths.writableLocation",
         return_value=str(tmp_path),
     ):
         yield tmp_path
@@ -163,8 +163,6 @@ def test_ytdlp_download_manager_cumulative_playlist_progress(mock_app_data):
     mgr.format_time = MagicMock(return_value="10s")
     mgr._create_progress_bar = MagicMock(return_value=QProgressBar())
 
-    # Video 3 of 10 at 50% download progress:
-    # Completed fraction = (3 - 1) + 0.5 = 2.5 / 10 = 25%
     mgr.update_progress("mock_worker", {
         "status": "downloading",
         "playlist_index": 3,
@@ -177,8 +175,6 @@ def test_ytdlp_download_manager_cumulative_playlist_progress(mock_app_data):
     assert root_prog.value() == 25
     assert root_item.text(4) == "Video 3 of 10"
 
-    # Video 3 finished:
-    # Completed fraction = (3 - 1) + 1.0 = 3.0 / 10 = 30%
     mgr.update_progress("mock_worker", {
         "status": "finished",
         "playlist_index": 3,
@@ -223,3 +219,43 @@ def test_ytdlp_download_manager_single_video_progress(mock_app_data):
 
     assert root_prog.value() == 68
 
+
+
+def test_library_metadata_follows_a_moved_pdf(tmp_path, monkeypatch):
+    import hashlib
+    import shutil
+    import sqlite3
+
+    import pikepdf
+
+    from riemann.core import managers
+
+    monkeypatch.setattr(managers, "app_data_dir", lambda: str(tmp_path))
+    lib = managers.LibraryManager()
+    a = str(tmp_path / "a.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page()
+    pdf.save(a)
+
+    legacy = hashlib.sha256(a.encode()).hexdigest()
+    with sqlite3.connect(lib.db_path) as conn:
+        conn.execute("INSERT INTO metadata (file_hash, file_path, title) VALUES (?, ?, ?)", (legacy, a, "Old row"))
+    assert lib.get_metadata(a)["title"] == "Old row"
+
+    b = str(tmp_path / "moved.pdf")
+    shutil.move(a, b)
+    data = lib.get_metadata(b)
+    assert data["title"] == "Old row"
+    assert data["file_path"] == b
+    assert lib.search_library("Old")[0]["file_path"] == b
+
+
+def test_unused_path_never_overwrites(tmp_path):
+    from riemann.core.features import unused_path
+
+    target = tmp_path / "talk.srt"
+    assert unused_path(str(target)) == str(target)
+    target.write_text("x")
+    assert unused_path(str(target)) == str(tmp_path / "talk (2).srt")
+    (tmp_path / "talk (2).srt").write_text("y")
+    assert unused_path(str(target)) == str(tmp_path / "talk (3).srt")

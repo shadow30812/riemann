@@ -1,8 +1,15 @@
+"""
+Notes:
+
+_detect_signatures: PDFium reads the count straight from the AcroForm. pyhanko
+parsed the whole cross-reference table on the UI thread first, which froze the
+window for about 0.7 s on large files.
+"""
+
 import os
 import tempfile
 
 import certifi
-from PySide6.QtCore import QSettings, QStandardPaths
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import (
     QDialog,
@@ -22,31 +29,10 @@ from PySide6.QtWidgets import (
 
 from ..render_worker import PAGE_IMAGE_FORMAT
 from ..workers import SignatureValidationWorker
-
-
-def get_dialog_directory(settings: QSettings) -> str:
-    """Calculates the optimal starting directory for file dialogs."""
-    default_dir = settings.value("app/default_dir", "", type=str)
-    if default_dir and os.path.exists(default_dir):
-        return default_dir
-
-    last_dir = settings.value("app/last_dir", "", type=str)
-    if last_dir and os.path.exists(last_dir):
-        return last_dir
-
-    return QStandardPaths.writableLocation(
-        QStandardPaths.StandardLocation.DocumentsLocation
-    )
-
-
-def save_last_directory(settings: QSettings, file_path: str) -> None:
-    """Saves the directory of the provided file path to settings."""
-    if file_path:
-        directory = (
-            os.path.dirname(file_path) if os.path.isfile(file_path) else file_path
-        )
-        if os.path.exists(directory):
-            settings.setValue("app/last_dir", directory)
+from ....core.log import log
+from ....core.settings import app_settings, get_dialog_directory, save_last_directory
+from ...palette import banner_style, tokens
+from .host import ReaderHostBase
 
 
 class CertificateViewerDialog(QDialog):
@@ -55,13 +41,6 @@ class CertificateViewerDialog(QDialog):
     """
 
     def __init__(self, cert_details, parent=None):
-        """
-        Initializes the Certificate Viewer dialog.
-
-        Args:
-            cert_details (dict): A dictionary containing parsed certificate information mapping.
-            parent: The parent widget instance handling dialog context execution.
-        """
         super().__init__(parent)
         self.cert_details = cert_details
         self.setWindowTitle("Certificate Viewer")
@@ -108,7 +87,7 @@ class CertificateViewerDialog(QDialog):
         """
         Triggers a local filesystem saving routine outputting the certificate's PEM format string blocks.
         """
-        settings = QSettings("Riemann", "PDFReader")
+        settings = app_settings()
         start_dir = get_dialog_directory(settings)
 
         path, _ = QFileDialog.getSaveFileName(
@@ -130,25 +109,24 @@ class CertificateViewerDialog(QDialog):
                 )
 
 
-class SignaturesMixin:
-    """
-    Extends application interface providing capabilities validating, examining,
-    and rendering X.509 PKCS#7 signatures encoded natively into digital documents.
-    """
+class SignaturesMixin(ReaderHostBase):
+    current_signatures = None
+    signature_appearances = None
+    current_untrusted_pem = None
+    tree_signatures = None
+
+    _signature_banner_kind = "neutral"
+
+    def _style_signature_banner(self, kind: str) -> None:
+        self._signature_banner_kind = kind
+        self.signature_banner.setStyleSheet(banner_style(tokens(self.theme_mode != 0), kind))
+
 
     def _detect_signatures(self, path: str) -> None:
-        """
-        Conducts a rapid structural validation to ascertain cryptographic signature objects exist.
-
-        Args:
-            path (str): The document file system pathway query payload.
-        """
+        """Counts the signatures quickly and offers to verify them."""
         try:
-            doc = getattr(self, "current_doc", None)
+            doc = self.current_doc
             if doc is not None and hasattr(doc, "signature_count"):
-                # PDFium reads the count straight from the AcroForm. pyhanko
-                # parsed the whole cross-reference table on the UI thread
-                # first, which froze the window for about 0.7 s on large files.
                 count = doc.signature_count()
             else:
                 from pyhanko.pdf_utils.reader import PdfFileReader
@@ -163,9 +141,7 @@ class SignaturesMixin:
             self.lbl_sig_status.setText(
                 f"ℹ️ Document contains {count} signature(s)."
             )
-            self.signature_banner.setStyleSheet(
-                "background-color: #1976D2; color: white;"
-            )
+            self._style_signature_banner("accent")
 
             self.btn_trust_cert.setVisible(True)
             self.btn_trust_cert.setText("Verify Signatures")
@@ -173,7 +149,7 @@ class SignaturesMixin:
             try:
                 self.btn_trust_cert.clicked.disconnect()
             except Exception:
-                pass
+                log.debug("_detect_signatures failed", exc_info=True)
 
             self.btn_trust_cert.clicked.connect(
                 lambda: self._validate_signatures(self.current_path)
@@ -182,14 +158,9 @@ class SignaturesMixin:
             print(f"Fast signature detection failed: {e}")
 
     def _validate_signatures(self, path: str) -> None:
-        """
-        Launches an asynchronous worker executing thorough mathematical and trust chain verifications.
-
-        Args:
-            path (str): Local pathing mapping for the loaded document query container.
-        """
+        """Verifies the signatures and their trust chains on a worker thread."""
         self.lbl_sig_status.setText("⏳ Verifying signatures... Please wait.")
-        self.signature_banner.setStyleSheet("background-color: #424242; color: white;")
+        self._style_signature_banner("neutral")
         self.btn_trust_cert.setVisible(False)
 
         trusted_pems = self.settings.value("trusted_certs_pem", [], type=list)
@@ -216,12 +187,8 @@ class SignaturesMixin:
         self, status: str, message: str, signatures: list
     ) -> None:
         """
-        Asynchronous response parsing handler parsing structural arrays returned over Qt signaling buses.
-
-        Args:
-            status (str): Broad enum signaling verification success levels mapping integrity status.
-            message (str): Formalized UI messaging parameters displaying verification statuses globally.
-            signatures (list): Intact sequence lists encompassing decoded identity mapping payloads.
+        Shows the verification result. status is VALID, UNKNOWN_IDENTITY, INVALID, ERROR
+        or NONE.
         """
         self.current_signatures = signatures
         if status == "NONE":
@@ -235,13 +202,9 @@ class SignaturesMixin:
         self.current_untrusted_pem = None
 
         if status == "VALID":
-            self.signature_banner.setStyleSheet(
-                "background-color: #2e7d32; color: white;"
-            )
+            self._style_signature_banner("success")
         elif status == "UNKNOWN_IDENTITY":
-            self.signature_banner.setStyleSheet(
-                "background-color: #f57f17; color: white;"
-            )
+            self._style_signature_banner("warning")
             untrusted = next((s for s in signatures if not s["is_trusted"]), None)
             if untrusted:
                 self.current_untrusted_pem = untrusted.get("cert_pem")
@@ -250,21 +213,16 @@ class SignaturesMixin:
                 try:
                     self.btn_trust_cert.clicked.disconnect()
                 except Exception:
-                    pass
+                    log.debug("_on_signatures_validated failed", exc_info=True)
                 self.btn_trust_cert.clicked.connect(self.trust_current_certificate)
         elif status == "INVALID" or status == "ERROR":
-            self.signature_banner.setStyleSheet(
-                "background-color: #c62828; color: white;"
-            )
+            self._style_signature_banner("danger")
 
         self.signatures_detected.emit(signatures)
         self._apply_signature_overlays()
 
     def trust_current_certificate(self) -> None:
-        """
-        Appends actively evaluated signature PEM credentials securely onto trusted parameter memory contexts.
-        """
-        if getattr(self, "current_untrusted_pem", None) is None:
+        if self.current_untrusted_pem is None:
             return
 
         trusted_pems = self.settings.value("trusted_certs_pem", [], type=list)
@@ -274,14 +232,11 @@ class SignaturesMixin:
             self.settings.setValue("trusted_certs_pem", trusted_pems)
             self.show_toast("Certificate added to Trust Store.")
 
-        if getattr(self, "current_path", None):
+        if self.current_path:
             self._validate_signatures(self.current_path)
 
     def view_certificate(self) -> None:
-        """
-        Triggers explicit dialog configurations showing precise identity tracking specifics internally modeled.
-        """
-        if not getattr(self, "current_signatures", None):
+        if not self.current_signatures:
             self.show_toast("No signature data available.")
             return
 
@@ -305,12 +260,12 @@ class SignaturesMixin:
         of the "validity unknown" layer stored in the file.
         """
         by_page = {}
-        for sig in getattr(self, "current_signatures", None) or []:
+        for sig in self.current_signatures or []:
             for appearance in sig.get("appearances", []):
                 by_page.setdefault(appearance["page"], []).append(dict(appearance, images={}))
-        if by_page == {} and not getattr(self, "signature_appearances", None):
+        if by_page == {} and not self.signature_appearances:
             return
-        changed = set(by_page) | set(getattr(self, "signature_appearances", {}) or {})
+        changed = set(by_page) | set(self.signature_appearances or {})
         self.signature_appearances = by_page
         for page in changed:
             self.refresh_page_render(page)
@@ -343,13 +298,8 @@ class SignaturesMixin:
         return image
 
     def _populate_signatures_panel(self, signatures: list) -> None:
-        """
-        Constructs lateral tree representation objects linking abstract identity entities against validation statuses.
-
-        Args:
-            signatures (list): Dictionary groupings retaining status boolean parameters along identity names.
-        """
-        if not hasattr(self, "tree_signatures"):
+        """Lists each signer and their status in the side panel."""
+        if self.tree_signatures is None:
             print("Warning: tree_signatures widget not found in ReaderTab UI.")
             return
 
@@ -396,13 +346,6 @@ class SignaturesMixin:
                 self.execute_pyhanko_signing(cert_path, password)
 
     def execute_pyhanko_signing(self, cert_path: str, password: str) -> None:
-        """
-        Translates inputs routing through deep integration with PyHanko cryptographic libraries appending payloads efficiently.
-
-        Args:
-            cert_path (str): Locating pointer string retrieving raw certificate credential objects.
-            password (str): Extracted cleartext user input validating credential usage policies locally.
-        """
         try:
             from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
             from pyhanko.sign import signers
@@ -443,28 +386,15 @@ class SignaturesMixin:
             )
 
     def update_signature_banner(self, status: str, message: str) -> None:
-        """
-        Updates explicit banner attributes projecting global document validity levels logically interpreted previously.
-
-        Args:
-            status (str): Conditional identifier modifying specific structural stylesheet rules internally evaluated.
-            message (str): Literal textual feedback shown transparently communicating application findings openly.
-        """
         self.signature_banner.setVisible(True)
         self.lbl_sig_status.setText(message)
 
         if status == "VALID":
-            self.signature_banner.setStyleSheet(
-                "background-color: #2e7d32; color: white;"
-            )
+            self._style_signature_banner("success")
             self.btn_trust_cert.setVisible(False)
         elif status == "UNKNOWN_IDENTITY":
-            self.signature_banner.setStyleSheet(
-                "background-color: #f57f17; color: white;"
-            )
+            self._style_signature_banner("warning")
             self.btn_trust_cert.setVisible(True)
         elif status == "INVALID":
-            self.signature_banner.setStyleSheet(
-                "background-color: #c62828; color: white;"
-            )
+            self._style_signature_banner("danger")
             self.btn_trust_cert.setVisible(False)

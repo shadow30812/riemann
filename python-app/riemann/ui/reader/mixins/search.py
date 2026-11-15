@@ -7,14 +7,11 @@ Handles finding text within the PDF document.
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from ....core.constants import ViewMode
+from .host import ReaderHostBase
 
 
-class SearchMixin:
-    """
-    Provides comprehensive search capabilities for documents.
-    Supports searching both standard rasterized PDF views and reflowed HTML views,
-    including checking for matches inside textual annotations.
-    """
+class SearchMixin(ReaderHostBase):
+    """Search in the page view and the reflowed view, including the text of annotations."""
 
     def toggle_search_bar(self) -> None:
         """
@@ -56,11 +53,8 @@ class SearchMixin:
 
     def _find_text(self, direction: int) -> None:
         """
-        Executes the backend textual search logic across PDF pages and annotations.
-        Updates internal state, rebuilds layouts if necessary, and ensures the matching page is visible.
-
-        Args:
-            direction (int): 1 for a forward search, -1 for a backward search.
+        Finds the next (direction 1) or previous (-1) match in the pages and
+        annotations, and shows it.
         """
         if not self.current_doc:
             return
@@ -76,7 +70,7 @@ class SearchMixin:
             try:
                 text = self.current_doc.get_page_text(idx).lower()
                 anno_match = False
-                if hasattr(self, "annotations") and str(idx) in self.annotations:
+                if str(idx) in self.annotations:
                     for anno in self.annotations[str(idx)]:
                         if anno.get("type") in ("note", "text") and "text" in anno:
                             if term in anno["text"].lower():

@@ -4,51 +4,66 @@ build-backend = "maturin"
 
 [project]
 name = "riemann"
-version = "5.2.1"
+version = "6.1.0"
 description = "PDF reader and Web browser with integrated music mode"
 requires-python = ">=3.11"
 
-# Install via: pip install .
+# The one list of Python dependencies. Install via: pip install .
+# Optional features are installed on demand by the app at the versions in
+# core/dependencies.py PINNED; the "bundled" and "extra" groups below repeat
+# them (tests/test_dependencies.py checks the two agree). requirements/xreqs.txt
+# is a lock generated from this file (requirements/requirements.sh); the
+# Windows release compiles its own lock from it.
 dependencies = [
+    "asn1crypto==1.5.1",
+    "certifi==2026.7.22",
+    "fastapi==0.141.1",
+    "lxml==6.1.3",
     "Markdown==3.10.1",
-    "PySide6==6.10.1",
-    "bleach==6.3.0",
-    "ipython_pygments_lexers==1.1.1",
-    "jupyter_client==8.8.0",
-    "jupyter_core==5.9.1",
-    "jupyterlab_pygments==0.3.0",
-    "nest_asyncio==1.6.0",
+    "numpy==2.4.6",
+    "onnxruntime==1.29.0",
     "pikepdf==10.5.0",
-    "prompt_toolkit==3.0.52",
+    "Pillow==12.3.0",
+    "psutil==7.2.2",
+    "pydantic==2.13.5",
     "pyHanko==0.33.0",
-    "pydantic_core>=2.41.5",
+    "pyhanko-certvalidator==0.29.1",
     "pypdf==6.7.5",
-    "stack_data==0.6.3",
+    "PySide6==6.10.1",
+    "requests==2.34.2",
+    "tokenizers==0.23.2",
+    "uvicorn==0.52.4",
 ]
 
 [project.optional-dependencies]
 
-# Install via: pip install .[extra]
+# Shipped inside release builds. Install via: pip install .[bundled]
+bundled = [
+    "Pygments==2.21.0",
+    "yt-dlp>=2026.8.19",
+]
+
+# Heavy features (Snip-to-LaTeX, local captions). Install via: pip install .[extra]
 extra = [
-    "PyMuPDF==1.27.1",
-    "PyMuPDFb==1.23.22",
-    "pix2tex==0.1.4",
-    "torch",
-    "torchvision",
-    "transformers",
-    "opencv-python-headless", # (cv2)
-    "scipy",
-    "pandas"
+    "faster-whisper==1.2.1",
+    "opencv-python-headless==5.0.0.93",
+    "pandas==3.0.5",
+    "pix2tex[gui]==0.1.4",
+    "scipy==1.17.1",
+    "torch==2.14.0",
+    "torchvision==0.29.0",
+    "transformers==5.16.1",
 ]
 
 # Install via: pip install .[dev]
 dev = [
-    "Nuitka==4.0",
+    "httpx==0.28.1",
     "maturin==1.11.5",
+    "Nuitka==4.2",
+    "pip-tools==7.6.1",
     "pyinstaller==6.18.0",
+    "pytest==9.1.1",
     "pytest-qt==4.5.0",
-    "pip-chill==1.0.5",
-    "pipreqs==0.5.0"
 ]
 
 [tool.maturin]

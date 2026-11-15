@@ -52,16 +52,6 @@ else
     FAIL=1
 fi
 
-echo -e "\033[0;34mRunning riemann-ai backend tests...\033[0m"
-if cd riemann-ai && run_and_log "$PYTEST --forked"; then
-    echo -e "\033[0;32mriemann-ai tests passed!\033[0m\n"
-    cd ..
-else
-    echo -e "\033[0;31mriemann-ai tests failed!\033[0m"
-    FAIL=1
-    cd ..
-fi
-
 echo -e "\033[0;34mRunning python-app tests...\033[0m"
 if cd python-app && run_and_log "$PYTEST"; then
     echo -e "\033[0;32mpython-app tests passed!\033[0m\n"

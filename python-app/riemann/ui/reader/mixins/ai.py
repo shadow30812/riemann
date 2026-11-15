@@ -1,60 +1,106 @@
 """
 AI Mixin.
 
-Handles OCR (Tesseract) and Math Snipping (Pix2Tex) logic.
+Handles OCR (Tesseract), Math Snipping (Pix2Tex) and AI semantic search.
+
+OCR of the current page uses OcrThread; "Recognise text in pages…" in the
+Pages menu uses OcrPagesThread, which reads eight pages per Tesseract process,
+shows progress with a Cancel button, and opens the text in a window that can
+save it as a .txt file. A tab runs one OCR job at a time.
+
+Semantic search talks to the engine in riemann.core.ai_engine (the server is
+core/ai_server.py), shared by all tabs, over its HTTP API (/index, /search).
+Each tab sends its requests one at a time, so a search never overtakes the
+indexing of its document. While the engine starts, the connection is refused;
+while it downloads or loads its model, it answers 503 "loading ..."; either
+way the request is retried every second (for up to AI_CONNECT_ATTEMPTS and
+AI_LOADING_ATTEMPTS seconds), and the loading detail is shown as
+a toast when it changes. /index first goes without text; if the engine has no
+cached vectors it answers "needs_text", and the tab reads every page's text
+on a PageTextThread (from the open document, so password-protected files
+work) and sends it ahead of anything else queued. A document is indexed when
+the AI search bar opens or on the first search, not when it is opened, so the
+engine only starts for people who use it. A reply about a document other than
+the one the tab now shows is ignored.
+
+Snip-to-LaTeX needs a model pack from the project's GitHub releases. It is
+added to sys.path, so the download is checked against LATEX_PACK_SHA256 before
+it is unpacked, and the packages it needs are installed at pinned versions.
 """
 
-import atexit
 import io
 import json
 import os
-import subprocess
 import sys
-import threading
+import warnings
 from typing import Any
 
-import psutil
 from PIL import Image
 from PySide6.QtCore import QBuffer, QObject, QRect, Qt, QTimer, QUrl, Signal
-from PySide6.QtWebSockets import QWebSocket
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
     QInputDialog,
     QLabel,
     QMessageBox,
+    QPlainTextEdit,
     QProgressDialog,
+    QVBoxLayout,
 )
 
+from ....core import ai_engine
+from ....core.settings import get_dialog_directory, save_last_directory
 from ..widgets import PageWidget
-from ..workers import InferenceThread, InstallerThread, LoaderThread, ModelDownloader
+from ..workers import (
+    InferenceThread,
+    InstallerThread,
+    LoaderThread,
+    ModelDownloader,
+    OcrPagesThread,
+    OcrThread,
+    PageTextThread,
+)
+from .pages import format_page_ranges, parse_page_ranges
+from ...palette import toast_style, tokens
+from .host import ReaderHostBase
+
+AI_CONNECT_ATTEMPTS = 90
+AI_LOADING_ATTEMPTS = 1800
+_ORPHANED_THREADS: set = set()
+AI_INDEX_TIMEOUT_MS = 600_000
+AI_SEARCH_TIMEOUT_MS = 60_000
+LATEX_PACK_URL = "https://github.com/shadow30812/riemann/releases/download/v1.0/latex_ocr_modules.zip"
+LATEX_PACK_SHA256 = "b5ce63262da29e1532fc4809b3b0f9dce01a7b05e99c083a64bb9faff6252ac0"
 
 
 class AIEngineBridge(QObject):
-    """
-    Thread-safe bridge to pass data from background threads to the main UI thread.
-
-    Attributes:
-        toast_requested (Signal): Emits a string message for UI toast notifications.
-        search_results_ready (Signal): Emits a list of search result dictionaries.
-    """
+    """Carries toasts and search results from background threads to the UI thread."""
 
     toast_requested = Signal(str)
     search_results_ready = Signal(list)
 
 
-class AiMixin:
+class AiMixin(ReaderHostBase):
     """
     Provides methods for AI-assisted features including OCR and mathematical snipping.
     Intended to be mixed into the main reader application context.
     """
+    _ai_connect_attempts = 0
+    _ai_indexed_path = None
+    _ai_net = None
+    _ai_queue = None
+    ai_results = None
+    _ai_reply = None
+    _ocr_thread = None
+    _ocr_progress = None
+    _ai_text_thread = None
+    _ai_loading_shown = ""
+    _ai_loading_attempts = 0
 
     def toggle_snip_mode(self, checked: bool) -> None:
-        """
-        Toggles the rubber-band selection mode for mathematical formula OCR.
-
-        Args:
-            checked (bool): True to enable snipping mode, False to revert to standard navigation.
-        """
         self.is_snipping = checked
         self.btn_snip.setChecked(checked)
         if checked:
@@ -67,13 +113,7 @@ class AiMixin:
                 self.snip_band.hide()
 
     def process_snip(self, label: PageWidget, rect: QRect) -> None:
-        """
-        Captures an image segment from the page widget for LaTeX OCR processing.
-
-        Args:
-            label (PageWidget): The target page widget containing the rendered document.
-            rect (QRect): The geometric selection rectangle defining the snip boundary.
-        """
+        """Crops the selection from the page and sends it to LaTeX OCR."""
         pix = label.pixmap()
         if not pix:
             return
@@ -91,27 +131,115 @@ class AiMixin:
 
     def perform_ocr_current_page(self) -> None:
         """
-        Executes Tesseract OCR on the currently visible page and displays the extracted text.
+        Runs Tesseract OCR on the currently visible page in the background and
+        shows the extracted text, or why it failed.
         """
-        if not self.current_doc:
+        if not self.current_doc or self._ocr_busy():
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        thread = OcrThread(self.current_doc, self.current_page_index, 2.0)
+        thread.finished_ocr.connect(self._on_ocr_finished)
+        thread.error_occurred.connect(self._on_ocr_failed)
+        self._ocr_thread = thread
+        thread.start()
+
+    def _on_ocr_finished(self, page_index: int, text: str) -> None:
+        QApplication.restoreOverrideCursor()
+        if not text.strip():
+            self.show_toast(f"OCR found no text on page {page_index + 1}.")
+            return
+        QInputDialog.getMultiLineText(self, "OCR Result", f"Text of page {page_index + 1}:", text)
+
+    def _on_ocr_failed(self, message: str) -> None:
+        QApplication.restoreOverrideCursor()
+        QMessageBox.warning(self, "OCR Failed", message)
+
+    def _ocr_busy(self) -> bool:
+        running = self._ocr_thread
+        if running is not None and running.isRunning():
+            self.show_toast("OCR is already running in this tab.")
+            return True
+        return False
+
+    def perform_ocr_pages(self, pages: list) -> None:
+        if not self.current_doc or self._ocr_busy():
+            return
+        count = self.current_doc.page_count
+        text, ok = QInputDialog.getText(
+            self, "Recognise text", "Pages (for example 1-3, 5):", text=format_page_ranges(pages)
+        )
+        if not ok:
+            return
         try:
-            txt = self.current_doc.ocr_page(self.current_page_index, 2.0)
-            QApplication.restoreOverrideCursor()
-            QInputDialog.getMultiLineText(self, "OCR Result", "Text:", txt)
-        except Exception as e:
-            QApplication.restoreOverrideCursor()
-            print(f"OCR Error: {e}")
+            chosen = parse_page_ranges(text, count)
+        except ValueError as e:
+            QMessageBox.warning(self, "Recognise text", str(e))
+            return
+        if not chosen:
+            return
+        thread = OcrPagesThread(self.current_doc, chosen, 2.0)
+        dialog = QProgressDialog(f"Recognising text in {len(chosen)} pages…", "Cancel", 0, len(chosen), self)
+        dialog.setWindowTitle("Recognise text")
+        dialog.setMinimumDuration(0)
+        dialog.setValue(0)
+        dialog.canceled.connect(thread.requestInterruption)
+        thread.progress.connect(lambda done, total: dialog.setValue(done))
+        thread.finished_ocr.connect(lambda results, problem: self._on_ocr_pages_finished(dialog, results, problem))
+        self._ocr_thread = thread
+        self._ocr_progress = dialog
+        thread.start()
+
+    def _on_ocr_pages_finished(self, dialog: QProgressDialog, results: list, problem: str) -> None:
+        self._ocr_progress = None
+        dialog.blockSignals(True)
+        dialog.close()
+        dialog.deleteLater()
+        if problem and problem != "Cancelled":
+            QMessageBox.warning(self, "OCR Failed", problem)
+        if not results:
+            return
+        if not any(t.strip() for _, t in results):
+            self.show_toast("OCR found no text on those pages.")
+            return
+        self._show_ocr_text(results)
+
+    def _show_ocr_text(self, results: list) -> None:
+        text = "\n\n".join(f"--- Page {page + 1} ---\n{body.strip()}" for page, body in results) + "\n"
+        label = format_page_ranges([page for page, _ in results])
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Text of pages {label}")
+        dialog.resize(640, 560)
+        layout = QVBoxLayout(dialog)
+        view = QPlainTextEdit(dialog)
+        view.setReadOnly(True)
+        view.setPlainText(text)
+        layout.addWidget(view)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Close, dialog)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("Save as text…")
+        buttons.accepted.connect(lambda: self._save_ocr_text(text, label))
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._ocr_text_dialog = dialog
+        dialog.show()
+
+    def _save_ocr_text(self, text: str, label: str) -> None:
+        stem = os.path.splitext(os.path.basename(self.current_path or "document"))[0]
+        start = os.path.join(get_dialog_directory(self.settings), f"{stem} (text of pages {label}).txt")
+        dest, _ = QFileDialog.getSaveFileName(self, "Save recognised text", start, "Text Files (*.txt)")
+        if not dest:
+            return
+        save_last_directory(self.settings, dest)
+        try:
+            with open(dest, "w", encoding="utf-8") as f:
+                f.write(text)
+        except OSError as e:
+            QMessageBox.warning(self, "Save recognised text", str(e))
+            return
+        self.show_toast(f"Saved text to {os.path.basename(dest)}")
 
     def run_latex_inference(self, img: Image.Image) -> None:
-        """
-        Initiates the LaTeX OCR inference process on the provided image object.
-        Loads the necessary AI model if it is not already initialized.
-
-        Args:
-            img (Image.Image): The cropped image object containing the mathematical formula.
-        """
+        """Runs LaTeX OCR on img, loading the model first if needed."""
         self._setup_external_env()
         if self.latex_model:
             self._execute_inference(img)
@@ -129,12 +257,6 @@ class AiMixin:
         self.loader_thread.start()
 
     def _on_model_loaded(self, model: Any) -> None:
-        """
-        Callback handler invoked when the background AI model loader completes successfully.
-
-        Args:
-            model (Any): The instantiated OCR inference model.
-        """
         self.progress.close()
         self.latex_model = model
         if self._pending_snip_image:
@@ -142,13 +264,7 @@ class AiMixin:
             self._pending_snip_image = None
 
     def _on_model_error(self, msg: str) -> None:
-        """
-        Callback handler invoked when the background AI model loader encounters an error.
-        Triggers fallbacks such as downloading models or installing missing dependencies.
-
-        Args:
-            msg (str): The error message payload.
-        """
+        """The model failed to load: offers to download it or install what it needs."""
         self.progress.close()
         if "not found" in msg and getattr(sys, "frozen", False):
             if (
@@ -202,8 +318,9 @@ class AiMixin:
         """
         Initiates the background download and extraction of the external AI model pack.
         """
-        url = "https://github.com/shadow30812/riemann/releases/download/v1.0/latex_ocr_modules.zip"
-        self.downloader = ModelDownloader(url, self._get_external_module_dir())
+        self.downloader = ModelDownloader(
+            LATEX_PACK_URL, self._get_external_module_dir(), LATEX_PACK_SHA256
+        )
 
         self.dl_dialog = QProgressDialog(
             "Downloading AI Models...", "Cancel", 0, 100, self
@@ -213,32 +330,24 @@ class AiMixin:
 
         self.downloader.progress.connect(self.dl_dialog.setValue)
         self.downloader.finished.connect(self.on_download_finished)
+        self.dl_dialog.canceled.connect(self.downloader.cancel)
         self.dl_dialog.show()
         self.downloader.start()
 
     def on_download_finished(self, success: bool) -> None:
-        """
-        Callback handler invoked upon completion of the AI model pack download.
-
-        Args:
-            success (bool): True if the download and extraction succeeded, False otherwise.
-        """
         if success:
             QMessageBox.information(self, "Success", "Models installed successfully.")
             self._setup_external_env()
             if self._pending_snip_image:
                 self.run_latex_inference(self._pending_snip_image)
         else:
-            QMessageBox.critical(self, "Error", "Download failed.")
+            self.dl_dialog.close()
+            reason = getattr(self.downloader, "error", "") or "Download failed."
+            if reason != "Download cancelled.":
+                QMessageBox.critical(self, "Error", reason)
             self._pending_snip_image = None
 
     def _execute_inference(self, img: Image.Image) -> None:
-        """
-        Dispatches the inference task to a background worker thread to prevent UI blocking.
-
-        Args:
-            img (Image.Image): The target image object for OCR inference.
-        """
         self.progress = QProgressDialog("Processing...", "Cancel", 0, 0, self)
         self.progress.setWindowModality(Qt.WindowModality.WindowModal)
         self.progress.show()
@@ -249,34 +358,17 @@ class AiMixin:
         self.inference_thread.start()
 
     def _on_inference_finished(self, code: str) -> None:
-        """
-        Callback handler invoked when the inference thread completes successfully.
-
-        Args:
-            code (str): The resulting LaTeX string extracted from the image.
-        """
         self.progress.close()
         self.toggle_snip_mode(False)
         QInputDialog.getMultiLineText(self, "LaTeX Result", "Code:", code)
 
     def _on_inference_error(self, error_msg: str) -> None:
-        """
-        Callback handler invoked when the inference thread fails.
-
-        Args:
-            error_msg (str): The exception message describing the failure.
-        """
         self.progress.close()
         self.toggle_snip_mode(False)
         QMessageBox.critical(self, "Inference Error", error_msg)
 
     def _get_external_module_dir(self) -> str:
-        """
-        Resolves the cross-platform absolute path for the external AI modules directory.
-
-        Returns:
-            str: The target path string based on the operating system context.
-        """
+        """Where the LaTeX OCR model pack lives on this operating system."""
         base = (
             os.getenv("APPDATA")
             if os.name == "nt"
@@ -295,102 +387,13 @@ class AiMixin:
 
     def _start_ai_engine(self) -> None:
         """
-        Locates and initializes the external AI sidecar executable process lazily.
-        Ensures only a single instance of the AI engine process is spawned.
+        Starts the AI sidecar shared by all reader tabs unless it is already running.
         """
-        if not hasattr(self, "_ai_lock"):
-            self._ai_lock = threading.Lock()
-
-        if getattr(self, "ai_process", None) is not None:
-            if self.ai_process.poll() is not None:
-                print("AI Engine process died. Restarting...")
-                self.ai_process = None
-            else:
-                return
-
-        self.ai_port = 8080
-        self.ai_base_url = f"http://localhost:{self.ai_port}"
-
-        try:
-            if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-                base_path = sys._MEIPASS
-            else:
-                base_path = os.path.dirname(os.path.abspath(__file__))
-                base_path = os.path.abspath(os.path.join(base_path, "..", "..", ".."))
-
-            ai_dir = os.path.join(base_path, "assets", "riemann_ai_engine")
-
-            if sys.platform == "win32":
-                python_exe = os.path.join(ai_dir, "env", "python.exe")
-            else:
-                python_exe = os.path.join(ai_dir, "env", "bin", "python")
-
-            ai_script = os.path.join(ai_dir, "main.py")
-
-            # The Windows release compiles the sidecar with Nuitka instead of
-            # shipping a packed Python environment.
-            compiled = os.path.join(ai_dir, "main.exe" if sys.platform == "win32" else "main.bin")
-            if os.path.exists(compiled) and not os.path.exists(python_exe):
-                self.ai_process = subprocess.Popen(
-                    [compiled],
-                    cwd=ai_dir,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    close_fds=True,
-                    **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}),
-                )
-                atexit.register(self._kill_ai_engine)
-                return
-
-            if not os.path.exists(python_exe) or not os.path.exists(ai_script):
-                dev_script = os.path.join(
-                    base_path, "..", "..", "riemann-ai", "main.py"
-                )
-                if os.path.exists(dev_script):
-                    self.ai_process = subprocess.Popen(
-                        [sys.executable, dev_script],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        close_fds=True,
-                    )
-                    atexit.register(self._kill_ai_engine)
-                    return
-                else:
-                    print(f"AI Engine not found at {python_exe}")
-                    return
-
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-            log_path = os.path.join(base_path, "assets", "ai_engine_debug.log")
-            self.ai_log_file = open(log_path, "w")
-
-            self.ai_process = subprocess.Popen(
-                [python_exe, ai_script],
-                cwd=ai_dir,
-                startupinfo=startupinfo,
-                stdout=self.ai_log_file,
-                stderr=subprocess.STDOUT,
-                close_fds=True,
-            )
-            atexit.register(self._kill_ai_engine)
-
-        except Exception as e:
-            print(f"Failed to start AI Engine: {e}")
+        ai_engine.ensure_started()
 
     def show_toast(self, msg: str) -> None:
-        """
-        Displays a temporary UI toast notification to the user.
-
-        Args:
-            msg (str): The notification text to display.
-        """
         self.lbl_toast = QLabel(self)
-        self.lbl_toast.setStyleSheet(
-            "background: #333; color: white; padding: 10px; border-radius: 5px;"
-        )
+        self.lbl_toast.setStyleSheet(toast_style(tokens(self.theme_mode != 0)))
         self.lbl_toast.setText(msg)
         self.lbl_toast.adjustSize()
         self.lbl_toast.move(
@@ -401,76 +404,177 @@ class AiMixin:
 
     def index_pdf_for_ai(self) -> None:
         """
-        Signals the external AI engine over WebSocket to index the active PDF document.
+        Asks the AI engine to index the active PDF, starting the engine if needed.
         """
-        if not hasattr(self, "current_path") or not self.current_path:
+        path = self.current_path
+        if not path:
             return
-
-        self._start_ai_engine()
-        self._setup_websocket()
-
-        QTimer.singleShot(
-            2000,
-            lambda: self._ws_client.sendTextMessage(
-                json.dumps({"action": "index", "pdf_path": self.current_path})
-            ),
-        )
+        self._ai_indexed_path = path
+        self._ai_send("index", {"pdf_path": path}, path)
 
     def ai_search(self, query: str) -> None:
         """
-        Sends a semantic search query to the external AI engine over WebSocket.
+        Sends a semantic search query about the active PDF to the AI engine, indexing
+        the PDF first when it has not been indexed yet.
+        """
+        path = self.current_path
+        if not query.strip() or not path:
+            return
+        if self._ai_indexed_path != path:
+            self.index_pdf_for_ai()
+        self._ai_send("search", {"query": query, "top_k": 5, "pdf_path": path}, path)
 
-        Args:
-            query (str): The user's search text payload.
-        """
-        self._start_ai_engine()
-        self._setup_websocket()
-        self._ws_client.sendTextMessage(
-            json.dumps({"action": "search", "query": query, "top_k": 5})
-        )
+    def _ai_send(self, endpoint: str, payload: dict, path: str) -> None:
+        """Queues a request for the AI engine; requests are sent one at a time."""
+        if self._ai_queue is None:
+            self._ai_queue = []
+        self._ai_queue.append((endpoint, payload, path))
+        self._ai_pump()
 
-    def _setup_websocket(self) -> None:
+    def _ai_pump(self) -> None:
         """
-        Initializes the persistent WebSocket client connection to the external AI engine.
+        Sends the next queued request unless one is in flight, starting the
+        engine when needed. While the engine is still loading its model the
+        connection is refused, and the request is retried every second.
         """
-        if not hasattr(self, "_ws_client"):
-            self._ws_client = QWebSocket()
-            self._ws_client.textMessageReceived.connect(self._on_ws_message)
-            self._ws_client.open(QUrl("ws://localhost:8080/ws/ai"))
+        if self._ai_reply is not None or not self._ai_queue or self._ai_text_thread is not None:
+            return
+        conn = ai_engine.ensure_started()
+        if conn is None:
+            self._ai_queue = []
+            self.show_toast("AI Error: the engine could not be started.")
+            return
+        port, token = conn
+        endpoint, payload, _ = self._ai_queue[0]
 
-    def _on_ws_message(self, message: str) -> None:
-        """
-        Handles incoming messaging from the AI engine WebSocket connection.
-        Updates internal search result state or dispatches toast notifications.
+        if self._ai_net is None:
+            self._ai_net = QNetworkAccessManager(self if isinstance(self, QObject) else None)
+        request = QNetworkRequest(QUrl(f"http://127.0.0.1:{port}/{endpoint}"))
+        request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        request.setRawHeader(b"X-Riemann-Token", token.encode())
+        request.setTransferTimeout(AI_INDEX_TIMEOUT_MS if endpoint == "index" else AI_SEARCH_TIMEOUT_MS)
+        reply = self._ai_net.post(request, json.dumps(payload).encode())
+        self._ai_reply = reply
+        reply.finished.connect(lambda r=reply: self._on_ai_reply_finished(r))
 
-        Args:
-            message (str): The JSON payload received over the socket.
-        """
+    def _ai_retry_later(self) -> None:
+        if isinstance(self, QObject):
+            QTimer.singleShot(1000, self, self._ai_pump)
+        else:
+            QTimer.singleShot(1000, self._ai_pump)
+
+    def _on_ai_reply_finished(self, reply) -> None:
+        if reply is not self._ai_reply:
+            reply.deleteLater()
+            return
+        self._ai_reply = None
+        error = reply.error()
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        body = bytes(reply.readAll().data())
+        reply.deleteLater()
+
+        if status is None and error == QNetworkReply.NetworkError.ConnectionRefusedError:
+            attempts = self._ai_connect_attempts + 1
+            self._ai_connect_attempts = attempts
+            if attempts == 3:
+                self.show_toast("AI: starting the engine (the first start can take half a minute)...")
+            if attempts > AI_CONNECT_ATTEMPTS:
+                self._ai_connect_attempts = 0
+                self._ai_queue = []
+                self._ai_indexed_path = None
+                self.show_toast("AI Error: the engine did not start.")
+                return
+            self._ai_retry_later()
+            return
+
+        self._ai_connect_attempts = 0
+        if not self._ai_queue:
+            return
         try:
-            res = json.loads(message)
-            status = res.get("status")
-            if status == "progress":
-                self.show_toast(f"AI: {res.get('msg')}")
-            elif status == "success":
-                self.show_toast("AI Engine is ready! ✨")
-            elif status == "error":
-                self.show_toast(f"AI Error: {res.get('msg')}")
-            elif status == "results":
-                data = res.get("data", [])
-                if not data:
-                    self.show_toast("No semantic matches found.")
-                    return
-                self.ai_results = data
-                self.ai_result_idx = 0
-                self._render_ai_result()
-        except json.JSONDecodeError:
-            pass
+            data = json.loads(body) if body else None
+        except ValueError:
+            data = None
+        detail = data.get("detail") if isinstance(data, dict) else None
+        if status == 503 and isinstance(detail, str) and detail.startswith("loading"):
+            self._ai_loading_attempts += 1
+            if self._ai_loading_attempts > AI_LOADING_ATTEMPTS:
+                self._ai_loading_attempts = 0
+                self._ai_loading_shown = ""
+                self._ai_queue = []
+                self._ai_indexed_path = None
+                self.show_toast("AI Error: the search model did not finish loading.")
+                return
+            if detail != self._ai_loading_shown:
+                self._ai_loading_shown = detail
+                self.show_toast(f"AI: {detail[len('loading'):].lstrip(': ') or 'loading the search model'}...")
+            self._ai_retry_later()
+            return
+        self._ai_loading_shown = ""
+        self._ai_loading_attempts = 0
+        endpoint, _, path = self._ai_queue.pop(0)
+        if status is None:
+            data = {"detail": reply.errorString()}
+            status = 0
+        self._on_ai_reply(endpoint, path, int(status), data)
+        self._ai_pump()
+
+    def _on_ai_reply(self, endpoint: str, path: str, status: int, data: Any) -> None:
+        """
+        Handles a finished AI engine request (endpoint "index" or "search"): shows
+        indexing progress, errors, or the search results. status is the HTTP status, 0
+        when the request failed. Replies about a document other than the one this tab
+        now shows are ignored.
+        """
+        if path != self.current_path:
+            return
+        if status != 200:
+            detail = data.get("detail") if isinstance(data, dict) else None
+            if endpoint == "index" or status == 400:
+                self._ai_indexed_path = None
+            self.show_toast(f"AI Error: {detail or f'HTTP {status}'}")
+            return
+        if endpoint == "index":
+            if isinstance(data, dict) and data.get("status") == "needs_text":
+                self._ai_read_pages(path)
+                return
+            self.show_toast("AI Engine is ready! ✨")
+            return
+        if not data:
+            self.show_toast("No semantic matches found.")
+            return
+        self.ai_results = data
+        self.ai_result_idx = 0
+        self._render_ai_result()
+
+    def _ai_read_pages(self, path: str) -> None:
+        """Extracts the document's text off the UI thread, then sends it to /index ahead of anything queued."""
+        if self.current_doc is None:
+            return
+        thread = PageTextThread(self.current_doc, path)
+        thread.finished_text.connect(self._on_ai_pages_read)
+        thread.error_occurred.connect(self._on_ai_pages_failed)
+        self._ai_text_thread = thread
+        self.show_toast("AI: reading the document...")
+        thread.start()
+
+    def _on_ai_pages_read(self, path: str, pages: list) -> None:
+        self._ai_text_thread = None
+        if self._ai_queue is None:
+            self._ai_queue = []
+        self._ai_queue.insert(0, ("index", {"pdf_path": path, "pages": pages}, path))
+        self._ai_pump()
+
+    def _on_ai_pages_failed(self, message: str) -> None:
+        self._ai_text_thread = None
+        self._ai_indexed_path = None
+        self._ai_queue = []
+        self.show_toast(f"AI Error: {message}")
 
     def ai_find_next(self) -> None:
         """
         Advances the focus cycle to the next sequential AI search result and triggers a re-render.
         """
-        if hasattr(self, "ai_results") and self.ai_results:
+        if self.ai_results:
             self.ai_result_idx = (self.ai_result_idx + 1) % len(self.ai_results)
             self._render_ai_result()
 
@@ -478,7 +582,7 @@ class AiMixin:
         """
         Reverts the focus cycle to the previous sequential AI search result and triggers a re-render.
         """
-        if hasattr(self, "ai_results") and self.ai_results:
+        if self.ai_results:
             self.ai_result_idx = (self.ai_result_idx - 1) % len(self.ai_results)
             self._render_ai_result()
 
@@ -505,7 +609,7 @@ class AiMixin:
 
         self.rebuild_layout()
         self.update_view()
-        self.ensure_visible(page_idx)
+        self.navigate_to(page_idx)
 
         score_pct = int(match["score"] * 100)
         self.show_toast(
@@ -514,42 +618,51 @@ class AiMixin:
 
     def _kill_ai_engine(self) -> None:
         """
-        Safely terminates the child AI engine subprocess and cleans up WebSockets
-        during application teardown or when the parent tab is closed.
+        Cancels this tab's AI requests when the tab goes away. The engine
+        itself is shared by all tabs and stops when the app exits. An OCR run
+        still in progress is kept alive until it ends, since destroying a
+        running QThread aborts the app.
         """
-        if hasattr(self, "_ws_client") and self._ws_client.isValid():
-            self._ws_client.close()
-            self._ws_client.deleteLater()
-
-        process = getattr(self, "ai_process", None)
-        if process:
+        ocr = self._ocr_thread
+        self._ocr_thread = None
+        if ocr is not None and ocr.isRunning():
+            ocr.requestInterruption()
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                for name in ("finished_ocr", "error_occurred", "progress"):
+                    try:
+                        getattr(ocr, name).disconnect()
+                    except (AttributeError, RuntimeError, TypeError):
+                        pass
+            _ORPHANED_THREADS.add(ocr)
+            ocr.finished.connect(lambda t=ocr: _ORPHANED_THREADS.discard(t))
+            if isinstance(ocr, OcrThread):
+                QApplication.restoreOverrideCursor()
+        text = self._ai_text_thread
+        self._ai_text_thread = None
+        if text is not None and text.isRunning():
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                for signal in (text.finished_text, text.error_occurred):
+                    try:
+                        signal.disconnect()
+                    except (RuntimeError, TypeError):
+                        pass
+            _ORPHANED_THREADS.add(text)
+            text.finished.connect(lambda t=text: _ORPHANED_THREADS.discard(t))
+        progress = self._ocr_progress
+        self._ocr_progress = None
+        if progress is not None:
+            progress.blockSignals(True)
+            progress.close()
+        self._ai_queue = []
+        reply = self._ai_reply
+        self._ai_reply = None
+        if reply is not None:
             try:
-                parent = psutil.Process(process.pid)
-                children = parent.children(recursive=True)
-
-                for child in children:
-                    child.terminate()
-
-                parent.terminate()
-                gone, alive = psutil.wait_procs(children + [parent], timeout=2.0)
-                for p in alive:
-                    p.kill()
-
-            except psutil.NoSuchProcess:
-                pass
-            except Exception as e:
-                print(f"Error killing AI tree: {e}")
-
-            self.ai_process = None
-
-        if (
-            hasattr(self, "ai_log_file")
-            and self.ai_log_file
-            and not self.ai_log_file.closed
-        ):
-            try:
-                self.ai_log_file.close()
-            except Exception:
+                reply.abort()
+                reply.deleteLater()
+            except RuntimeError:
                 pass
 
     def toggle_ai_search_bar(self) -> None:
@@ -562,8 +675,10 @@ class AiMixin:
         self.btn_ai_search.setChecked(is_visible)
 
         if is_visible:
-            if hasattr(self, "search_bar") and self.search_bar.isVisible():
+            if self.search_bar.isVisible():
                 self.toggle_search_bar()
 
             self.txt_ai_search.setFocus()
             self.txt_ai_search.selectAll()
+            if self._ai_indexed_path != self.current_path:
+                self.index_pdf_for_ai()

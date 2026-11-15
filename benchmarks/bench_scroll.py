@@ -15,6 +15,11 @@ with the current one:
         --label before
 
 Uses Qt's offscreen platform by default (device pixel ratio 1).
+
+Notes:
+
+page_state: Older versions had no stand-ins: any pixmap on screen was the real
+page.
 """
 
 import argparse
@@ -47,6 +52,12 @@ use_checkout(ARGS.app_path, ARGS.core_path)
 from PySide6.QtWidgets import QApplication, QMainWindow  # noqa: E402
 
 app = QApplication(sys.argv)
+try:
+    from riemann.ui.tooltip import TooltipSkin
+
+    TooltipSkin.install(app)
+except ImportError:
+    pass
 
 
 class Pump:
@@ -74,7 +85,6 @@ def page_state(tab):
     w = tab.page_widgets.get(tab._get_closest_page(centre))
     if w is None or w.pixmap() is None or w.pixmap().isNull():
         return "blank"
-    # Older versions had no stand-ins: any pixmap on screen was the real page.
     return "sharp" if getattr(w, "has_full_page", True) else "standin"
 
 
@@ -105,7 +115,7 @@ def run_once(doc_path, speed):
         if tab.current_doc is not None and tab.page_widgets and page_state(tab) == "sharp":
             first_sharp_ms = (time.perf_counter() - t_open) * 1000
             break
-    pump.for_seconds(1.0)  # let the initial layout and neighbour renders settle
+    pump.for_seconds(1.0)
 
     vbar = tab.scroll.verticalScrollBar()
     step = speed * TICK_S
@@ -184,4 +194,4 @@ def main():
 if __name__ == "__main__":
     main()
     sys.stdout.flush()
-    os._exit(0)  # skip Qt's teardown of leftover worker threads in older checkouts
+    os._exit(0)

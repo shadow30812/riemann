@@ -1,6 +1,27 @@
-from PySide6.QtCore import QByteArray, QObject, QThread, Signal, Slot
+"""
+Local WebSocket server for live captions.
+
+The caption overlay injected into a web page streams the page's audio here;
+WhisperWorker transcribes it on its own thread and the text goes back to the
+same socket. The server listens on a random localhost port and only accepts
+clients that present this run's token (?token=...), which is handed to the
+overlay together with the port. Without it any web page or local program could
+connect and keep Whisper busy.
+
+The Whisper thread is stopped on aboutToQuit and, as a fallback, at interpreter
+exit; Qt aborts the process if a QThread is destroyed while still running.
+"""
+
+import atexit
+import hmac
+import secrets
+import weakref
+
+import shiboken6
+
+from PySide6.QtCore import QByteArray, QObject, QThread, QUrlQuery, Signal, Slot
 from PySide6.QtNetwork import QHostAddress
-from PySide6.QtWebSockets import QWebSocket, QWebSocketServer
+from PySide6.QtWebSockets import QWebSocket, QWebSocketProtocol, QWebSocketServer
 from PySide6.QtWidgets import QApplication
 
 
@@ -44,6 +65,7 @@ class CaptionsServer(QObject):
             "Riemann Captions Engine", QWebSocketServer.SslMode.NonSecureMode, self
         )
         self.clients = []
+        self.token = secrets.token_urlsafe(16)
 
         self.worker_thread = QThread()
         self.worker = WhisperWorker()
@@ -56,6 +78,8 @@ class CaptionsServer(QObject):
         app = QApplication.instance()
         if app:
             app.aboutToQuit.connect(self.stop)
+        ref = weakref.ref(self)
+        atexit.register(lambda: ref() is not None and ref().stop())
 
         if self.server.listen(QHostAddress.SpecialAddress.LocalHost):
             self.port = self.server.serverPort()
@@ -65,9 +89,19 @@ class CaptionsServer(QObject):
             print("[ERROR] Failed to start native PySide6 WebSocket Server.")
             self.port = None
 
+    def _token_ok(self, client: QWebSocket) -> bool:
+        query = QUrlQuery(client.requestUrl())
+        return hmac.compare_digest(query.queryItemValue("token").encode(), self.token.encode())
+
     @Slot()
     def on_new_connection(self):
         client = self.server.nextPendingConnection()
+        if client is None:
+            return
+        if not self._token_ok(client):
+            client.close(QWebSocketProtocol.CloseCode.CloseCodePolicyViolated, "token required")
+            client.deleteLater()
+            return
         self.clients.append(client)
         client.binaryMessageReceived.connect(
             lambda data, c=client: self.on_binary_message(data, c)
@@ -80,7 +114,8 @@ class CaptionsServer(QObject):
     def on_disconnected(self, client: QWebSocket):
         if client in self.clients:
             self.clients.remove(client)
-        client.deleteLater()
+        if shiboken6.isValid(client):
+            client.deleteLater()
 
     @Slot(str, object)
     def send_transcription(self, text: str, client: QWebSocket):
@@ -88,7 +123,10 @@ class CaptionsServer(QObject):
             client.sendTextMessage(text)
 
     def stop(self):
-        self.server.close()
-        # The worker lives in worker_thread; that is the thread to shut down.
-        self.worker_thread.quit()
-        self.worker_thread.wait()
+        """Closes the socket and stops the Whisper thread; safe to call twice."""
+        try:
+            self.server.close()
+            self.worker_thread.quit()
+            self.worker_thread.wait()
+        except RuntimeError:
+            pass

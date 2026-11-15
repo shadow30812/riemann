@@ -1,3 +1,10 @@
+"""
+Notes:
+
+__init__: Set by the per-tab theme toggle (N); None follows the interface
+theme.
+"""
+
 import os
 import sys
 
@@ -33,7 +40,6 @@ from .palette import FONT_STACK, GridCanvas, path_row, short_folder, tinted_icon
 
 
 def _get_icon_path(filename):
-    """Helper to dynamically resolve icon paths for the dashboard."""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         return os.path.join(sys._MEIPASS, "riemann", "assets", "icons", filename)
     else:
@@ -235,7 +241,6 @@ class FolderHomeTab(QWidget):
     def __init__(self, parent=None, dark_mode=True):
         super().__init__(parent)
         self.dark_mode = dark_mode
-        # Set by the per-tab theme toggle (N); None follows the interface theme.
         self._dark_override = None
         self.setup_ui()
 

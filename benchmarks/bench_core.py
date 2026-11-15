@@ -101,7 +101,7 @@ def bench_engine(engine, path, name, scales, page_limit, repeats):
     doc = engine.open(path)
     count = engine.page_count(doc)
     pages = sample_pages(count, page_limit)
-    engine.render(doc, pages[0], 1.0)  # warm-up, not counted
+    engine.render(doc, pages[0], 1.0)
 
     out["render"] = {}
     for scale in scales:

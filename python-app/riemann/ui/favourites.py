@@ -6,20 +6,10 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QListWidget,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
 )
-
-
-def get_dialog_directory(settings: QSettings) -> str:
-    default_dir = settings.value("app/default_dir", "", type=str)
-    if default_dir and os.path.exists(default_dir):
-        return default_dir
-    last_dir = settings.value("app/last_dir", "", type=str)
-    if last_dir and os.path.exists(last_dir):
-        return last_dir
-    return os.path.expanduser("~")
+from ..core.settings import app_settings, get_dialog_directory
 
 
 class ManageFavoritesDialog(QDialog):
@@ -61,8 +51,8 @@ class ManageFavoritesDialog(QDialog):
                 self.list_widget.addItem(f)
 
     def _add_folder(self):
-        app_settings = QSettings("Riemann", "PDFReader")
-        start_dir = get_dialog_directory(app_settings)
+        store = app_settings()
+        start_dir = get_dialog_directory(store)
         path = QFileDialog.getExistingDirectory(
             self, "Select Folder to Favorite", start_dir
         )

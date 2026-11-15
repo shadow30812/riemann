@@ -14,7 +14,12 @@ import sqlite3
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QStandardPaths, Qt, QUrl
+from PySide6.QtCore import Qt, QUrl
+
+from .annotation_store import pdf_identifier
+from .settings import DEFAULT_POPULAR_SITES, POPULAR_SITES_KEY, string_list
+from .storage import app_data_dir, write_json_atomic
+from .log import log
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWebEngineCore import QWebEngineDownloadRequest
 from PySide6.QtWidgets import (
@@ -36,6 +41,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..ui.palette import app_is_dark, tokens
+
 
 class LibraryManager:
     """
@@ -47,9 +54,7 @@ class LibraryManager:
         """
         Initializes the library manager and ensures the persistent database exists.
         """
-        base = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.AppDataLocation
-        )
+        base = app_data_dir()
         self.db_path = os.path.join(base, "riemann_library.db")
         self._init_db()
 
@@ -72,42 +77,44 @@ class LibraryManager:
 
     def get_file_hash(self, file_path: str) -> str:
         """
-        Generates a SHA-256 hash for a given file path.
-
-        Args:
-            file_path (str): The absolute path to the file.
-
-        Returns:
-            str: The hexadecimal SHA-256 hash representing the file path.
+        The library key for a file: "id-<hex>" from a PDF's permanent /ID, which
+        survives moves and renames, else a SHA-256 of the path (the only key
+        versions up to 5.2 used).
         """
+        ident = pdf_identifier(file_path) if file_path.lower().endswith(".pdf") else None
+        if ident:
+            return f"id-{ident}"
         return hashlib.sha256(file_path.encode("utf-8")).hexdigest()
 
     def get_metadata(self, file_path: str) -> Dict[str, Any]:
         """
-        Retrieves metadata associated with a specific file path from the database.
-
-        Args:
-            file_path (str): The absolute path to the file.
-
-        Returns:
-            Dict[str, Any]: A dictionary containing the file's metadata, or an empty dictionary if not found.
+        The stored metadata for a file, or {} when there is none. A row saved
+        under the old path key is moved to the file's /ID key on first read, and
+        a row found by /ID after the file moved gets the new path.
         """
         file_hash = self.get_file_hash(file_path)
+        legacy = hashlib.sha256(file_path.encode("utf-8")).hexdigest()
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             cur.execute("SELECT * FROM metadata WHERE file_hash = ?", (file_hash,))
             row = cur.fetchone()
-            return dict(row) if row else {}
+            if row is None and file_hash != legacy:
+                cur.execute("SELECT * FROM metadata WHERE file_hash = ?", (legacy,))
+                row = cur.fetchone()
+                if row is not None:
+                    conn.execute("UPDATE metadata SET file_hash = ? WHERE file_hash = ?", (file_hash, legacy))
+            if row is None:
+                return {}
+            data = dict(row)
+            data["file_hash"] = file_hash
+            if data.get("file_path") != file_path:
+                conn.execute("UPDATE metadata SET file_path = ? WHERE file_hash = ?", (file_path, file_hash))
+                data["file_path"] = file_path
+            return data
 
     def save_metadata(self, file_path: str, data: Dict[str, Any]) -> None:
-        """
-        Saves or updates metadata for a specific file path in the database.
-
-        Args:
-            file_path (str): The absolute path to the file.
-            data (Dict[str, Any]): The metadata payload to persist. Expected keys include 'title', 'authors', 'year', 'doi', and 'arxiv_id'.
-        """
+        """Stores metadata for file_path; keys include title, authors, year, doi and arxiv_id."""
         file_hash = self.get_file_hash(file_path)
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
@@ -134,16 +141,7 @@ class LibraryManager:
             )
 
     def search_library(self, query: str) -> List[Dict[str, Any]]:
-        """
-        Executes a SQL search across the library metadata based on a query string.
-        Supports specific field filters such as 'author:' and 'year:'.
-
-        Args:
-            query (str): The search query provided by the user.
-
-        Returns:
-            List[Dict[str, Any]]: A list of dictionaries representing matching database records.
-        """
+        """Searches the library metadata. Supports author: and year: filters."""
         import re
 
         author_match = re.search(r'author:\s*"?([^"\s]+)"?', query, re.IGNORECASE)
@@ -190,9 +188,7 @@ class BookmarksManager:
         """
         Initializes the manager, determines the storage path, and loads existing bookmarks from disk.
         """
-        base = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.AppDataLocation
-        )
+        base = app_data_dir()
         self.path = os.path.join(base, "bookmarks.json")
         self.bookmarks: List[Dict[str, str]] = []
         self.load()
@@ -213,43 +209,21 @@ class BookmarksManager:
         Saves the current list of bookmarks to the JSON persistence file. Silently ignores file system errors.
         """
         try:
-            with open(self.path, "w", encoding="utf-8") as f:
-                json.dump(self.bookmarks, f, indent=2)
+            write_json_atomic(self.path, self.bookmarks, indent=2)
         except OSError:
             pass
 
     def add(self, title: str, url: str) -> None:
-        """
-        Adds a new bookmark if the URL does not already exist in the bookmarks list.
-
-        Args:
-            title (str): The display title of the bookmark.
-            url (str): The target URL.
-        """
+        """Adds a bookmark unless the URL is already bookmarked."""
         if not any(b["url"] == url for b in self.bookmarks):
             self.bookmarks.append({"title": title, "url": url})
             self.save()
 
     def remove(self, url: str) -> None:
-        """
-        Removes a bookmark by matching its URL.
-
-        Args:
-            url (str): The URL to remove from the bookmarks list.
-        """
         self.bookmarks = [b for b in self.bookmarks if b["url"] != url]
         self.save()
 
     def is_bookmarked(self, url: str) -> bool:
-        """
-        Checks if a specified URL is currently bookmarked.
-
-        Args:
-            url (str): The URL to check.
-
-        Returns:
-            bool: True if the URL exists in the bookmarks, False otherwise.
-        """
         return any(b["url"] == url for b in self.bookmarks)
 
 
@@ -263,31 +237,12 @@ class HistoryManager:
 
     def __init__(self) -> None:
         """
-        Initializes the manager, defines popular default sites, and loads history from disk.
+        Initializes the manager, reads the autocomplete sites from settings, and loads history from disk.
         """
-        base = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.AppDataLocation
-        )
+        base = app_data_dir()
         self.path = os.path.join(base, "history.json")
         self.history: Dict[str, List[Dict[str, str]]] = {"pdf": [], "web": [], "folder": []}
-        self.popular_sites: List[str] = [
-            "music.youtube.com",
-            "whatsapp.com",
-            "google.com",
-            "monkeytype.com",
-            "erp.iitkgp.ac.in",
-            "gmail.com",
-            "mail.google.com",
-            "youtube.com",
-            "keep.google.com",
-            "linkedin.com",
-            "github.com",
-            "pplx.ai",
-            "reddit.com",
-            "wikipedia.org",
-            "chatgpt.com",
-            "gemini.google.com",
-        ]
+        self.popular_sites: List[str] = string_list(POPULAR_SITES_KEY, DEFAULT_POPULAR_SITES)
         self.load()
 
     def load(self) -> None:
@@ -322,19 +277,14 @@ class HistoryManager:
         Saves current history state to the JSON persistence file. Silently ignores file system errors.
         """
         try:
-            with open(self.path, "w", encoding="utf-8") as f:
-                json.dump(self.history, f, indent=2)
+            write_json_atomic(self.path, self.history, indent=2)
         except OSError:
             pass
 
     def add(self, item: str, item_type: str = "web") -> None:
         """
-        Adds an item to history with the current time, moving it to the top of
-        its category, and enforces the size limit.
-
-        Args:
-            item (str): The URL or file path.
-            item_type (str): The category: 'pdf', 'web' or 'folder'. Defaults to 'web'.
+        Adds item (a URL or file path) to the top of its category ('pdf', 'web' or
+        'folder') with the current time, and trims the category to its size limit.
         """
         entries = [e for e in self.history.setdefault(item_type, []) if e["path"] != item]
         entries.insert(0, {"path": item, "timestamp": datetime.now().isoformat(timespec="minutes")})
@@ -342,12 +292,7 @@ class HistoryManager:
         self.save()
 
     def get_model_data(self) -> List[str]:
-        """
-        Combines historical web paths and popular default sites for autocomplete suggestions.
-
-        Returns:
-            List[str]: A combined list of unique historical URLs and predefined popular sites.
-        """
+        """Web history plus the default popular sites, for address-bar completion."""
         combined = self.get_list("web")
         for site in self.popular_sites:
             if site not in combined:
@@ -355,12 +300,7 @@ class HistoryManager:
         return combined
 
     def get_list(self, item_type: str) -> List[str]:
-        """
-        Retrieves the paths or URLs of a category, newest first.
-
-        Args:
-            item_type (str): The history category: 'pdf', 'web' or 'folder'.
-        """
+        """The paths or URLs of a category ('pdf', 'web' or 'folder'), newest first."""
         return [e["path"] for e in self.history.get(item_type, [])]
 
     def get_entries(self, item_type: str) -> List[Dict[str, str]]:
@@ -380,20 +320,12 @@ class DownloadManager(QDialog):
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        """
-        Initializes the Download Manager UI components and loads persistent history.
-
-        Args:
-            parent (Optional[QWidget]): The parent widget (usually the main window).
-        """
         super().__init__(parent)
         self.setWindowTitle("Downloads")
         self.resize(700, 400)
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowCloseButtonHint)
 
-        base = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.AppDataLocation
-        )
+        base = app_data_dir()
         self._persist_path = os.path.join(base, "downloads.json")
 
         layout = QVBoxLayout(self)
@@ -420,12 +352,6 @@ class DownloadManager(QDialog):
         self._load_persistent_entries()
 
     def add_download(self, download_item: QWebEngineDownloadRequest) -> None:
-        """
-        Registers a new active download request, creates its UI row, and binds signal handlers.
-
-        Args:
-            download_item (QWebEngineDownloadRequest): The QtWebEngine download request.
-        """
         row = self.table.rowCount()
         self.table.insertRow(row)
 
@@ -483,14 +409,6 @@ class DownloadManager(QDialog):
         item: QWebEngineDownloadRequest,
         state: QWebEngineDownloadRequest.DownloadState,
     ) -> None:
-        """
-        Updates the table row based on the current state of the download request.
-
-        Args:
-            row (int): The table row index corresponding to the download.
-            item (QWebEngineDownloadRequest): The active download request object.
-            state (QWebEngineDownloadRequest.DownloadState): The current state of the download.
-        """
         if row >= self.table.rowCount():
             return
 
@@ -543,13 +461,7 @@ class DownloadManager(QDialog):
         self._persist_entries()
 
     def _set_open_button(self, row: int, full_path: str) -> None:
-        """
-        Replaces the pause/cancel control buttons with an 'Open' button upon download completion.
-
-        Args:
-            row (int): The table row index.
-            full_path (str): The absolute file system path to the downloaded file.
-        """
+        """Replaces the pause and cancel buttons of a finished download with Open."""
         container = QWidget()
         h_layout = QHBoxLayout(container)
         h_layout.setContentsMargins(2, 2, 2, 2)
@@ -571,17 +483,6 @@ class DownloadManager(QDialog):
     def _make_state_slot(
         self, row: int, item: QWebEngineDownloadRequest
     ) -> Callable[[Any], None]:
-        """
-        Creates a closure to safely handle state change signals for a specific table row.
-
-        Args:
-            row (int): The associated table row index.
-            item (QWebEngineDownloadRequest): The download request object.
-
-        Returns:
-            Callable[[Any], None]: The generated slot function.
-        """
-
         def _slot(state: QWebEngineDownloadRequest.DownloadState) -> None:
             try:
                 self.update_status(row, item, state)
@@ -589,24 +490,13 @@ class DownloadManager(QDialog):
                 try:
                     item.stateChanged.disconnect(_slot)
                 except Exception:
-                    pass
+                    log.debug("_slot failed", exc_info=True)
 
         return _slot
 
     def _make_finished_slot(
         self, row: int, item: QWebEngineDownloadRequest
     ) -> Callable[[], None]:
-        """
-        Creates a closure to safely handle completion signals for a specific table row.
-
-        Args:
-            row (int): The associated table row index.
-            item (QWebEngineDownloadRequest): The download request object.
-
-        Returns:
-            Callable[[], None]: The generated slot function.
-        """
-
         def _slot() -> None:
             try:
                 self.on_finished(row, item)
@@ -614,22 +504,15 @@ class DownloadManager(QDialog):
                 try:
                     item.finished.disconnect(_slot)
                 except Exception:
-                    pass
+                    log.debug("_slot failed", exc_info=True)
 
         return _slot
 
     def on_finished(self, row: int, item: QWebEngineDownloadRequest) -> None:
-        """
-        Handles the final state update when a download finishes execution.
-
-        Args:
-            row (int): The table row index.
-            item (QWebEngineDownloadRequest): The completed download request object.
-        """
         try:
             self.update_status(row, item, item.state())
         except Exception:
-            pass
+            log.debug("on_finished failed", exc_info=True)
 
     def _load_persistent_entries(self) -> None:
         """
@@ -679,24 +562,18 @@ class DownloadManager(QDialog):
             )
 
         try:
-            with open(self._persist_path, "w", encoding="utf-8") as f:
-                json.dump(out, f, indent=2)
+            write_json_atomic(self._persist_path, out, indent=2)
         except OSError:
             pass
 
     def closeEvent(self, event: Any) -> None:
-        """
-        Cleans up Qt signal connections and guarantees the current state is saved before closing the dialog.
-
-        Args:
-            event (Any): The window close event generated by the system.
-        """
+        """Disconnects the download signals and saves the list."""
         for d in list(self.downloads):
             try:
                 d["item"].stateChanged.disconnect(d.get("state_slot"))
                 d["item"].finished.disconnect(d.get("finished_slot"))
             except Exception:
-                pass
+                log.debug("closeEvent failed", exc_info=True)
 
         self._persist_entries()
         super().closeEvent(event)
@@ -713,12 +590,8 @@ class PasswordDialog(QDialog):
 
     def __init__(self, parent=None, error_msg: Optional[str] = None):
         """
-        Initializes the PasswordDialog.
-
-        Args:
-            parent: The parent widget (usually the ReaderTab).
-            error_msg: An optional string to display as a red error label above
-                       the input field (e.g., "Incorrect password. Please try again.").
+        error_msg, if given, is shown in red above the field (after a wrong password,
+        for example).
         """
         super().__init__(parent)
         self.setWindowTitle("Unlock Secure PDF")
@@ -743,7 +616,7 @@ class PasswordDialog(QDialog):
         if error_msg:
             self.lbl_error = QLabel(error_msg)
             self.lbl_error.setStyleSheet(
-                "color: #EF4444; font-weight: bold; font-size: 13px;"
+                f"color: {tokens(app_is_dark())['danger']}; font-weight: bold; font-size: 13px;"
             )
             layout.addWidget(self.lbl_error)
 
@@ -759,52 +632,8 @@ class PasswordDialog(QDialog):
         self.button_box.rejected.connect(self.reject)
         layout.addWidget(self.button_box)
 
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1E1E22;
-                color: #E0E0E0;
-            }
-            QLabel {
-                font-size: 14px;
-                color: #D4D4D8;
-            }
-            QLineEdit {
-                padding: 10px;
-                font-size: 14px;
-                background-color: #27272A;
-                color: #FFFFFF;
-                border: 1px solid #3F3F46;
-                border-radius: 6px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #3B82F6; /* Subtle blue glow on focus */
-                background-color: #303036;
-            }
-            QPushButton {
-                padding: 8px 16px;
-                background-color: #3F3F46;
-                color: white;
-                border-radius: 4px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #52525B;
-            }
-            QPushButton[text="OK"] {
-                background-color: #2563EB; /* Distinct primary action color */
-            }
-            QPushButton[text="OK"]:hover {
-                background-color: #1D4ED8;
-            }
-        """)
 
     def get_password(self) -> str:
-        """
-        Retrieves the password currently entered in the dialog's text field.
-
-        Returns:
-            The raw string value from the password input field.
-        """
         return self.txt_password.text()
 
 
@@ -882,10 +711,12 @@ class YtDlpDownloadManager(QDialog):
         pb = QProgressBar()
         pb.setValue(0)
         pb.setFixedHeight(height)
-        pb.setStyleSheet("""
-            QProgressBar { border: 1px solid #555; border-radius: 3px; text-align: center; color: white; font-size: 10px; }
-            QProgressBar::chunk { background-color: #ff4500; }
-        """)
+        t = tokens(app_is_dark())
+        pb.setStyleSheet(
+            f"QProgressBar {{ border: 1px solid {t['border_strong']}; border-radius: 3px; text-align: center;"
+            f" color: {t['text']}; font-size: 10px; }}"
+            f"QProgressBar::chunk {{ background-color: {t['accent']}; }}"
+        )
         return pb
 
     def add_download(

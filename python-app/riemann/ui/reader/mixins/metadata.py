@@ -10,14 +10,26 @@ import re
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from ....core import annotation_store
+from ..notes import notes_path_for
 from ..workers import MetadataExtractionWorker
+from .host import ReaderHostBase
 
 
-class MetadataMixin:
+def _filename_part(value, limit: int) -> str:
+    """Makes text safe in a file name on Linux and Windows, cut to limit characters."""
+    text = re.sub(r"\s+", " ", str(value or ""))
+    text = re.sub(r'[\\/*?:"<>|\x00-\x1f\x7f]', "", text).strip()
+    return text[:limit].rstrip(" .")
+
+
+class MetadataMixin(ReaderHostBase):
     """
     Provides methods for background metadata extraction and document management operations.
     Expected to be mixed into a class providing document context (e.g., ReaderTab).
     """
+    document_metadata = None
+    metadata_worker = None
 
     def extract_document_metadata(self) -> None:
         """
@@ -28,7 +40,7 @@ class MetadataMixin:
         if not self.current_path or not self.current_doc:
             return
 
-        if hasattr(self, "metadata_worker") and self.metadata_worker.isRunning():
+        if self.metadata_worker is not None and self.metadata_worker.isRunning():
             return
 
         self.document_metadata = {}
@@ -57,13 +69,7 @@ class MetadataMixin:
             print(f"Failed to start metadata extraction: {e}")
 
     def _on_metadata_extracted(self, data: dict) -> None:
-        """
-        Callback handler executed when the background metadata extraction worker completes successfully.
-        Saves the extracted data to the library database and triggers a title update.
-
-        Args:
-            data (dict): The dictionary containing the extracted document metadata.
-        """
+        """Saves extracted metadata to the library and updates the title."""
         if not data:
             return
 
@@ -85,48 +91,61 @@ class MetadataMixin:
     def rename_current_pdf(self) -> None:
         """
         Renames the active PDF file on the filesystem using the extracted document metadata.
-        Constructs a sanitized filename and updates the internal path state and library database upon success.
+        Constructs a sanitized filename and moves the path state, Riemann's annotation
+        copy and the library record along with the file.
         """
         if not self.current_path or not self.document_metadata:
             return
 
-        year = self.document_metadata.get("year", "UnknownYear")
-        authors = self.document_metadata.get("authors", "UnknownAuthor").split(",")[0]
-        title = self.document_metadata.get("title", "UnknownTitle")
-
-        safe_title = re.sub(r'[\\/*?:"<>|]', "", title)[:50]
-        safe_author = re.sub(r'[\\/*?:"<>|]', "", authors)[:20]
+        year = _filename_part(self.document_metadata.get("year"), 4) or "UnknownYear"
+        authors = str(self.document_metadata.get("authors") or "").split(",")[0]
+        safe_author = _filename_part(authors, 20) or "UnknownAuthor"
+        safe_title = _filename_part(self.document_metadata.get("title"), 50) or "UnknownTitle"
 
         new_filename = f"[{year}] - {safe_author} - {safe_title}.pdf"
         new_path = os.path.join(os.path.dirname(self.current_path), new_filename)
 
-        if new_path != self.current_path and not os.path.exists(new_path):
-            try:
-                os.rename(self.current_path, new_path)
+        if new_path == self.current_path:
+            return
+        if os.path.exists(new_path):
+            self.show_toast(f"Not renamed: {new_filename} already exists.")
+            return
 
-                old_path = self.current_path
-                self.current_path = new_path
-                self.settings.setValue("lastFile", new_path)
+        old_path = self.current_path
+        self._get_annotation_path()
+        try:
+            os.rename(old_path, new_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Rename Failed", f"Could not rename file:\n{e}")
+            return
 
-                if hasattr(self.window(), "library_manager"):
-                    self.window().library_manager.save_metadata(
-                        new_path, self.document_metadata
-                    )
+        self.current_path = new_path
+        notes = self.notes_panel
+        if notes is not None:
+            notes.save()
+            old_notes = notes_path_for(old_path)
+            if os.path.exists(old_notes):
+                try:
+                    os.replace(old_notes, notes_path_for(new_path))
+                except OSError as e:
+                    print(f"[Warning] Could not move notes for {new_path}: {e}")
+            notes.path = notes_path_for(new_path)
+        annotation_store.shared().moved(old_path, new_path)
+        self._anno_json_cache = None
 
-                self.show_toast(f"Renamed to: {new_filename}")
-                self._update_tab_title_with_metadata()
+        if hasattr(self.window(), "library_manager"):
+            self.window().library_manager.save_metadata(new_path, self.document_metadata)
 
-            except Exception as e:
-                QMessageBox.critical(
-                    self, "Rename Failed", f"Could not rename file:\n{e}"
-                )
+        self._update_tab_title(new_filename)
+        self.show_toast(f"Renamed to: {new_filename}")
+        self._update_tab_title_with_metadata()
 
     def copy_citation(self) -> None:
         """
         Extracts the BibTeX citation format from the document metadata and copies it to the system clipboard.
         Displays a UI toast notification indicating success or failure.
         """
-        bibtex = getattr(self, "document_metadata", {}).get("bibtex")
+        bibtex = (self.document_metadata or {}).get("bibtex")
         if bibtex:
             QApplication.clipboard().setText(bibtex)
             self.show_toast("BibTeX copied to clipboard! 📋")

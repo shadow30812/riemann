@@ -17,6 +17,7 @@ class DummySearchReader(SearchMixin):
         self.current_doc = MagicMock()
         self.continuous_scroll = False
         self.rendered_pages = set([0])
+        self.annotations = {}
 
         self.search_bar = MagicMock()
         self.btn_search = MagicMock()

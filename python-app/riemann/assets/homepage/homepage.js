@@ -60,8 +60,8 @@ function showShortcutModal(links, editIndex = -1) {
     modal.innerHTML = `
         <div class="modal">
             <h3>${isEdit ? 'Edit' : 'Add'} Website Shortcut</h3>
-            <input id="siteName" placeholder="Website Name" value="${existingName}" />
-            <input id="siteUrl" placeholder="URL (e.g., https://example.com)" value="${existingUrl}" />
+            <input id="siteName" placeholder="Website Name" />
+            <input id="siteUrl" placeholder="URL (e.g., https://example.com)" />
             <div class="modal-actions">
                 <button id="cancelBtn" class="btn btn-secondary">Cancel</button>
                 <button id="saveBtn" class="btn btn-primary">Save</button>
@@ -74,6 +74,8 @@ function showShortcutModal(links, editIndex = -1) {
     document.body.appendChild(modal);
 
     const nameInput = document.getElementById('siteName');
+    nameInput.value = existingName;
+    document.getElementById('siteUrl').value = existingUrl;
     nameInput.focus();
 
     document.getElementById('cancelBtn').onclick = () => modal.remove();
@@ -105,6 +107,20 @@ function showShortcutModal(links, editIndex = -1) {
  *
  * @param {Array<Object>} links - Array of link objects to render into the grid interface.
  */
+/**
+ * Returns an http(s) URL for a saved link. Anything else (javascript:, file:,
+ * data:) would run or read with the homepage's local-file privileges, so it is
+ * treated as a host name.
+ *
+ * @param {string} url - The saved link URL.
+ * @returns {string} A URL safe to use as a link target.
+ */
+function safeHref(url) {
+    const text = String(url ?? '').trim();
+    if (/^https?:\/\//i.test(text)) return text;
+    return 'https://' + text.replace(/^[a-z][a-z0-9+.-]*:\/*/i, '');
+}
+
 function renderGrid(links) {
     const grid = document.getElementById('linksGrid');
     grid.innerHTML = '';
@@ -112,20 +128,32 @@ function renderGrid(links) {
     links.forEach((link, index) => {
         const a = document.createElement('a');
         a.className = 'card';
-        a.href = link.url;
+        a.href = safeHref(link.url);
 
         let hostname = "";
         try {
-            hostname = new URL(link.url).hostname;
+            hostname = new URL(a.href).hostname;
         } catch (e) {
-            hostname = link.url;
+            hostname = "";
         }
 
-        const iconHtml = hostname
-            ? `<img src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(link.url)}&sz=64" class="icon-img" alt="icon" onerror="window.handleIconError(this, '${hostname}')">`
-            : `<div class="icon">🌐</div>`;
-
-        a.innerHTML = `${iconHtml}<div class="title">${link.name}</div>`;
+        if (hostname) {
+            const img = document.createElement('img');
+            img.src = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(link.url)}&sz=64`;
+            img.className = 'icon-img';
+            img.alt = 'icon';
+            img.onerror = () => window.handleIconError(img, hostname);
+            a.appendChild(img);
+        } else {
+            const icon = document.createElement('div');
+            icon.className = 'icon';
+            icon.textContent = '🌐';
+            a.appendChild(icon);
+        }
+        const title = document.createElement('div');
+        title.className = 'title';
+        title.textContent = String(link.name ?? '');
+        a.appendChild(title);
 
         a.oncontextmenu = (e) => {
             e.preventDefault();

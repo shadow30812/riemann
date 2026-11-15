@@ -6,6 +6,11 @@ supported (Anthropic, OpenAI, Google, OpenRouter and a local Ollama server);
 each one's model list is fetched from the provider, so new models show up
 without an update. Answers cite pages as [p. N], which link back into the
 document.
+
+Notes:
+
+showEvent: The panel exists from startup; ask the provider for models only once
+someone opens it, not on every launch.
 """
 
 import html
@@ -40,6 +45,8 @@ from PySide6.QtWidgets import (
 )
 
 from .palette import tinted_icon, tokens
+from ..core.log import log
+from ..core.settings import app_settings
 
 
 @dataclass(frozen=True)
@@ -79,7 +86,7 @@ SYSTEM_PROMPT = (
 
 
 def _settings() -> QSettings:
-    return QSettings("Riemann", "PDFReader")
+    return app_settings()
 
 
 def keys_file() -> str:
@@ -209,7 +216,7 @@ def _request(url: str, headers: Dict[str, str], body: Optional[dict] = None, tim
             err = payload.get("error", payload)
             detail = err.get("message") if isinstance(err, dict) else str(err)
         except Exception:
-            pass
+            log.debug("_request failed", exc_info=True)
         raise ProviderError(f"{e.code} {e.reason}" + (f": {detail}" if detail else "")) from None
     except urllib.error.URLError as e:
         raise ProviderError(f"Could not connect: {e.reason}") from None
@@ -624,8 +631,6 @@ class AiSidecarPanel(QWidget):
             self._load_models()
 
     def showEvent(self, event) -> None:
-        # The panel exists from startup; ask the provider for models only once
-        # someone opens it, not on every launch.
         super().showEvent(event)
         self._load_models()
 
