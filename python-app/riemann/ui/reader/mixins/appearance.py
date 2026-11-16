@@ -15,12 +15,10 @@ screen.
 """
 
 import os
-import sys
 from typing import Optional
 from PySide6.QtCore import (
     QSize,
     Qt,
-    QTimer,
 )
 from PySide6.QtGui import (
     QColor,
@@ -40,19 +38,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from ..widgets import DropZoneLabel
+from ...toast import Toast
 from ...palette import (
     FONT_STACK,
     GridCanvas,
     link_tip_style,
     path_row,
+    scrollbar_style,
     short_folder,
     tinted_pixmap,
     toast_style,
     tokens,
 )
 from ..notes import notes_path_for as _notes_for
-from ....core.settings import app_settings
+from ....core.settings import DARK_MODE_KEY, NOTES_VISIBLE_KEY, app_settings
 from .host import ReaderHostBase
+from ....core.assets import icon_path
 
 
 class AppearanceMixin(ReaderHostBase):
@@ -75,6 +76,12 @@ class AppearanceMixin(ReaderHostBase):
         self.scroll_content.setStyleSheet(
             f"#scrollContent {{ background-color: {t['canvas']}; }}"
         )
+        self.scroll.setStyleSheet(
+            f"QScrollArea {{ background: {t['canvas']}; border: none; }}"
+            + scrollbar_style(t)
+            + f"QScrollBar:vertical, QScrollBar:horizontal {{ background: {t['canvas']}; }}"
+        )
+        self.sidebar_nav.update_theme(is_dark)
 
         fg = t["text"]
         checked_bg = t["accent_soft"]
@@ -86,25 +93,7 @@ class AppearanceMixin(ReaderHostBase):
         input_bg = t["canvas"]
         input_border = t["border_strong"]
 
-        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            base_p = getattr(sys, "_MEIPASS")
-            arrow_path = os.path.join(
-                base_p,
-                "riemann",
-                "assets",
-                "icons",
-                "chevron-down-white.svg" if is_dark else "chevron-down.svg",
-            )
-        else:
-            base_p = os.path.dirname(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            )
-            arrow_path = os.path.join(
-                base_p,
-                "assets",
-                "icons",
-                "chevron-down-white.svg" if is_dark else "chevron-down.svg",
-            )
+        arrow_path = icon_path("chevron-down.svg", is_dark)
 
         arrow_url = arrow_path.replace("\\", "/")
 
@@ -122,6 +111,8 @@ class AppearanceMixin(ReaderHostBase):
             QFrame#toolbarRail {{ border-left: 1px solid {input_border}; }}
             QFrame#toolbarPill {{ border: 1px solid {input_border}; border-radius: 22px; }}
             QWidget#toolbarRibbon {{ border-top: 1px solid {input_border}; }}
+            QLineEdit {{ background-color: {input_bg}; color: {fg}; border: 1px solid {input_border}; border-radius: 6px; padding: 4px; }}
+            QLineEdit:focus {{ border: 1px solid {checked_border}; }}
             QComboBox {{ background-color: {input_bg}; color: {sb_fg}; border: 1px solid {input_border}; border-radius: 4px; padding: 4px; }}
             QComboBox::drop-down {{ border: none; width: 24px; }}
             QComboBox::down-arrow {{ image: url("{arrow_url}"); width: 16px; height: 16px; }}
@@ -176,12 +167,7 @@ class AppearanceMixin(ReaderHostBase):
         self.apply_theme()
         self.sidebar_nav.set_theme_mode(self.theme_mode)
 
-        if self._rebuild_debounce_timer is None:
-            self._rebuild_debounce_timer = QTimer(self)
-            self._rebuild_debounce_timer.setSingleShot(True)
-            self._rebuild_debounce_timer.setInterval(200)
-            self._rebuild_debounce_timer.timeout.connect(self._do_rebuild_and_render)
-        self._rebuild_debounce_timer.start()
+        self._schedule_rebuild()
 
         mode_names = ["Light Mode", "Fast Dark Mode", "Smart Dark Mode"]
         self.show_toast(f"Theme set to: {mode_names[self.theme_mode]}")
@@ -224,7 +210,7 @@ class AppearanceMixin(ReaderHostBase):
         """Builds the start page shown in an empty reader tab: a drop target, a path
         field, a browse button and the recent documents list."""
         self._home_dark = app_settings().value(
-            "darkMode", False, type=bool
+            DARK_MODE_KEY, False, type=bool
         )
         self._home_dark_override: Optional[bool] = None
         self.home_page_widget = GridCanvas(self._home_dark)
@@ -400,8 +386,11 @@ class AppearanceMixin(ReaderHostBase):
             self._populate_home_recents()
 
     def apply_ui_theme(self, dark: bool) -> None:
-        """Called by the main window when the interface theme changes."""
-        self.sidebar_nav.update_theme(dark)
+        """
+        Called by the main window when the interface theme (Ctrl+D) changes. The
+        toolbar, side rail, sections sidebar and scroll bars follow the page
+        theme (N) instead; see apply_theme.
+        """
         self.notes_panel.apply_theme(dark)
         self.citation_card.apply_theme(dark)
         self._home_dark_override = None
@@ -430,7 +419,7 @@ class AppearanceMixin(ReaderHostBase):
             self.show_toast("File no longer exists at this location.")
 
     def toggle_reader_fullscreen(self) -> None:
-        from ...app import RiemannWindow
+        from ....app import RiemannWindow
 
         if self.window() and isinstance(self.window(), RiemannWindow):
             self.window().toggle_reader_fullscreen()
@@ -443,15 +432,9 @@ class AppearanceMixin(ReaderHostBase):
             self.toolbar_layout.set_fullscreen(state == 2)
 
     def show_toast(self, msg: str) -> None:
-        self.lbl_toast = QLabel(self)
-        self.lbl_toast.setStyleSheet(toast_style(tokens(self.theme_mode != 0)))
-        self.lbl_toast.setText(msg)
-        self.lbl_toast.adjustSize()
-        self.lbl_toast.move(
-            (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
-        )
-        self.lbl_toast.show()
-        QTimer.singleShot(4000, self.lbl_toast.hide)
+        if self.lbl_toast is None:
+            self.lbl_toast = Toast(self)
+        self.lbl_toast.show_message(msg, toast_style(tokens(self.theme_mode != 0)), 4000)
 
     def start_presentation(self) -> None:
         """Shows the document full screen, one page at a time, from the current page."""
@@ -476,7 +459,7 @@ class AppearanceMixin(ReaderHostBase):
             panel.save()
             panel.hide()
         self.btn_notes.setChecked(show)
-        self.settings.setValue("reader/notes_visible", show)
+        self.settings.setValue(NOTES_VISIBLE_KEY, show)
 
     def _open_link_in_browser(self, url: str) -> None:
         window = self.window()

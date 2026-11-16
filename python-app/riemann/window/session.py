@@ -32,7 +32,7 @@ from ..core.log import log
 from PySide6.QtWidgets import QMainWindow
 from ..ui.system import PAGES as SYSTEM_PAGES
 from .common import window_class
-from ..core.settings import app_settings
+from ..core.settings import CLEAN_EXIT_KEY, app_settings
 
 
 class SessionMixin:
@@ -82,7 +82,7 @@ class SessionMixin:
                     self.settings.setValue("session/main_active_idx", -1)
                     self.settings.setValue("session/side_active_idx", -1)
                     self.settings.setValue("session/active_folder", "")
-                    self.settings.setValue("session/clean_exit", False)
+                    self.settings.setValue(CLEAN_EXIT_KEY, False)
                     self.settings.sync()
 
                     if not self.external_files:
@@ -466,7 +466,7 @@ class SessionMixin:
 
         if not windows_to_save and not cls._recently_closed_windows:
             if clean_exit:
-                settings.setValue("session/clean_exit", True)
+                settings.setValue(CLEAN_EXIT_KEY, True)
                 settings.sync()
             return
 
@@ -496,5 +496,5 @@ class SessionMixin:
             settings.setValue("window/geometry", first_win["geometry"])
             settings.setValue("window/state", first_win["state"])
             if clean_exit:
-                settings.setValue("session/clean_exit", True)
+                settings.setValue(CLEAN_EXIT_KEY, True)
             settings.sync()

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 from ..ui.explorer import FolderHomeTab
-from .common import get_resource_path
+from ..core.assets import icon_path
 from ..core.settings import get_dialog_directory, save_last_directory
 
 
@@ -113,7 +113,5 @@ class FoldersMixin:
             target_widget = self.tabs_main
 
         tab = FolderHomeTab(self, self.dark_mode)
-        icon_path = get_resource_path(os.path.join("assets", "icons", "folder.png"))
-
-        idx = target_widget.addTab(tab, QIcon(icon_path), "Workspaces")
+        idx = target_widget.addTab(tab, QIcon(icon_path("folder.png")), "Workspaces")
         target_widget.setCurrentIndex(idx)

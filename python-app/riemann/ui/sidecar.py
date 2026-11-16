@@ -47,6 +47,13 @@ from PySide6.QtWidgets import (
 from .palette import tinted_icon, tokens
 from ..core.log import log
 from ..core.settings import app_settings
+from ..core.endpoints import (
+    ANTHROPIC_API,
+    GEMINI_API,
+    OLLAMA_DEFAULT_URL,
+    OPENAI_API,
+    OPENROUTER_API,
+)
 
 
 @dataclass(frozen=True)
@@ -74,7 +81,6 @@ PROVIDERS: Dict[str, Provider] = {
     )
 }
 
-OLLAMA_DEFAULT_URL = "http://localhost:11434"
 CONTEXT_CHARS = 150_000
 
 SYSTEM_PROMPT = (
@@ -241,16 +247,16 @@ _OPENAI_SKIP = ("audio", "realtime", "transcribe", "tts", "image", "embedding", 
 def list_models(provider: str, key: str) -> List[str]:
     """Asks the provider which chat models this key can use, newest names first."""
     if provider == "anthropic":
-        with _request("https://api.anthropic.com/v1/models?limit=100", _headers(provider, key)) as r:
+        with _request(f"{ANTHROPIC_API}/models?limit=100", _headers(provider, key)) as r:
             return [m["id"] for m in json.load(r).get("data", [])]
     if provider == "openai":
-        with _request("https://api.openai.com/v1/models", _headers(provider, key)) as r:
+        with _request(f"{OPENAI_API}/models", _headers(provider, key)) as r:
             ids = [m["id"] for m in json.load(r).get("data", [])]
         chat = [i for i in ids if re.match(r"^(gpt-|o\d|chatgpt)", i) and not any(s in i for s in _OPENAI_SKIP)]
         return sorted(chat, reverse=True)
     if provider == "google":
         with _request(
-            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", _headers(provider, key)
+            f"{GEMINI_API}/models?pageSize=1000", _headers(provider, key)
         ) as r:
             models = json.load(r).get("models", [])
         names = [
@@ -260,7 +266,7 @@ def list_models(provider: str, key: str) -> List[str]:
         ]
         return sorted(names, reverse=True)
     if provider == "openrouter":
-        with _request("https://openrouter.ai/api/v1/models", {}) as r:
+        with _request(f"{OPENROUTER_API}/models", {}) as r:
             return [m["id"] for m in json.load(r).get("data", [])]
     if provider == "ollama":
         with _request(f"{ollama_url()}/api/tags", {}, timeout=5) as r:
@@ -288,7 +294,7 @@ def stream_chat(
     """Sends the conversation and yields the reply as it arrives."""
     if provider == "anthropic":
         body = {"model": model, "max_tokens": 4096, "system": system, "messages": messages, "stream": True}
-        with _request("https://api.anthropic.com/v1/messages", _headers(provider, key), body, timeout=120) as r:
+        with _request(f"{ANTHROPIC_API}/messages", _headers(provider, key), body, timeout=120) as r:
             for event in _sse_events(r):
                 if event.get("type") == "content_block_delta":
                     yield event.get("delta", {}).get("text", "")
@@ -297,7 +303,7 @@ def stream_chat(
         return
 
     if provider in ("openai", "openrouter"):
-        base = "https://api.openai.com/v1" if provider == "openai" else "https://openrouter.ai/api/v1"
+        base = OPENAI_API if provider == "openai" else OPENROUTER_API
         body = {"model": model, "messages": [{"role": "system", "content": system}] + messages, "stream": True}
         with _request(f"{base}/chat/completions", _headers(provider, key), body, timeout=120) as r:
             for event in _sse_events(r):
@@ -313,7 +319,7 @@ def stream_chat(
                 for m in messages
             ],
         }
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
+        url = f"{GEMINI_API}/models/{model}:streamGenerateContent?alt=sse"
         with _request(url, _headers(provider, key), body, timeout=120) as r:
             for event in _sse_events(r):
                 for cand in event.get("candidates", []):

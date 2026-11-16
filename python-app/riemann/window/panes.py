@@ -16,7 +16,6 @@ _apply_vertical_tabs: Only the main pane gets the vertical strip: the split-
 view pane is usually narrow and keeps its compact horizontal tabs.
 """
 
-import os
 from typing import Optional
 import shiboken6
 from PySide6.QtCore import (
@@ -30,7 +29,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from ..ui.palette import tokens
-from .common import get_resource_path
+from ..core.assets import icon_path
+from ..core.settings import TABS_COLLAPSED_KEY, VERTICAL_TABS_KEY
 
 
 class PanesMixin:
@@ -131,24 +131,18 @@ class PanesMixin:
         """Syncs the split/vertical-tab toolbar buttons with the current layout."""
         if not hasattr(self, "btn_split_view"):
             return
-        suffix = "-white" if getattr(self, "dark_mode", False) else ""
+        dark = getattr(self, "dark_mode", False)
         for btn, name in (
             (self.btn_split_view, "columns-2"),
             (self.btn_vertical_tabs, "panel-left"),
             (self.btn_collapse_tabs, "list-collapse"),
         ):
-            path = get_resource_path(
-                os.path.join("assets", "icons", f"{name}{suffix}.svg")
-            )
-            btn.setIcon(QIcon(path))
+            btn.setIcon(QIcon(icon_path(f"{name}.svg", dark)))
         for btn, name in (
             (self.btn_toggle_folder, "folder"),
             (self.btn_ai_sidecar, "sparkles"),
         ):
-            path = get_resource_path(
-                os.path.join("assets", "icons", f"{name}{suffix}.svg")
-            )
-            btn.setIcon(QIcon(path))
+            btn.setIcon(QIcon(icon_path(f"{name}.svg", dark)))
         self.btn_toggle_folder.setChecked(self.explorer_panel.isVisible())
         self.btn_ai_sidecar.setChecked(self.sidecar_panel.isVisible())
         self.btn_split_view.setChecked(self._split_view_active())
@@ -276,7 +270,7 @@ class PanesMixin:
     def set_vertical_tabs(self, vertical: bool) -> None:
         """Switches the tab strip between the top edge and a vertical left column."""
         vertical = bool(vertical)
-        self.settings.setValue("app/vertical_tabs", vertical)
+        self.settings.setValue(VERTICAL_TABS_KEY, vertical)
         self._apply_vertical_tabs(vertical)
         for control in (
             getattr(self, "action_vertical_tabs", None),
@@ -301,7 +295,7 @@ class PanesMixin:
         """
         collapsed = bool(collapsed)
         self._tabs_collapsed = collapsed
-        self.settings.setValue("app/tabs_collapsed", collapsed)
+        self.settings.setValue(TABS_COLLAPSED_KEY, collapsed)
         if getattr(self, "_fullscreen_state", 0) == 0:
             self._restore_tab_bars()
         for control in (

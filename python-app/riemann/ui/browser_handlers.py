@@ -3,13 +3,28 @@ Browser scripts and injection handlers.
 
 This module provides utilities for injecting custom JavaScript into
 QWebEngine profiles to modify web page behavior and appearance.
+
+WhatsApp Web refuses browsers it doesn't recognise, so Riemann presents a
+regular Chrome there, twice: RequestInterceptor sends WHATSAPP_HEADER_UA as
+the User-Agent header and inject_whatsapp_ua makes navigator.userAgent return
+WHATSAPP_NAVIGATOR_UA. The two have always differed (Linux Chrome 144 against
+Windows Chrome 124); they are kept as they were until someone checks which
+WhatsApp accepts.
 """
 
 import base64
-import os
-import sys
+import json
 
 from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineScript
+from ..core.assets import asset_path
+
+WHATSAPP_HOST = "whatsapp.com"
+WHATSAPP_HEADER_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.7559.59 Safari/537.36"
+)
+WHATSAPP_NAVIGATOR_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
 
 
 def get_injection_script(filename: str) -> str:
@@ -17,14 +32,7 @@ def get_injection_script(filename: str) -> str:
     The contents of a script in assets (in the source tree or a PyInstaller bundle), or
     an empty string if it can't be read.
     """
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        base_path = getattr(sys, "_MEIPASS")
-        script_path = os.path.join(
-            base_path, "riemann", "assets", "injections", filename
-        )
-    else:
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        script_path = os.path.join(base_path, "assets", "injections", filename)
+    script_path = asset_path("injections", filename)
 
     try:
         with open(script_path, "r", encoding="utf-8") as f:
@@ -90,14 +98,7 @@ class ScriptInjector:
         if not js_code:
             return
 
-        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            base_path = getattr(sys, "_MEIPASS")
-            font_path = os.path.join(
-                base_path, "riemann", "assets", "fonts", "NotoColorEmoji.ttf"
-            )
-        else:
-            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            font_path = os.path.join(base_path, "assets", "fonts", "NotoColorEmoji.ttf")
+        font_path = asset_path("fonts", "NotoColorEmoji.ttf")
 
         try:
             with open(font_path, "rb") as f:
@@ -118,12 +119,12 @@ class ScriptInjector:
 
     def inject_whatsapp_ua(self) -> None:
         """Injects a modern Chrome User-Agent strictly for WhatsApp to bypass block screens."""
-        js_code = """
-        if (window.location.hostname.includes('whatsapp.com')) {
-            Object.defineProperty(navigator, 'userAgent', {
-                get: function () { return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"; }
-            });
-        }
+        js_code = f"""
+        if (window.location.hostname.includes({json.dumps(WHATSAPP_HOST)})) {{
+            Object.defineProperty(navigator, 'userAgent', {{
+                get: function () {{ return {json.dumps(WHATSAPP_NAVIGATOR_UA)}; }}
+            }});
+        }}
         """
         self._insert_script(
             "RiemannWhatsAppUA",

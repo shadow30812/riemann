@@ -18,6 +18,10 @@ from ...core import ai_engine
 from ...core.settings import AI_TAGS_KEY, OCR_LANGUAGES_KEY, app_settings, string_list
 from ...core.dependencies import LATEX_OCR_REQUIREMENTS, requirement, setup_and_get_venv
 from ...core.log import log
+from ...core.endpoints import CROSSREF_WORKS, OPENALEX_WORKS, USER_AGENT, loopback_url
+
+
+METADATA_TIMEOUT = (3.0, 5.0)
 
 
 class DownloadCancelled(Exception):
@@ -446,7 +450,7 @@ class MetadataExtractionWorker(QThread):
     def __init__(self, text_chunk: str, parent=None):
         super().__init__(parent)
         self.text_chunk = text_chunk
-        self.headers = {"User-Agent": "RiemannReader/1.0"}
+        self.headers = {"User-Agent": USER_AGENT}
 
     def run(self) -> None:
         import requests
@@ -462,9 +466,9 @@ class MetadataExtractionWorker(QThread):
                 metadata["doi"] = doi
                 try:
                     res = session.get(
-                        f"https://api.crossref.org/works/{doi}",
+                        f"{CROSSREF_WORKS}/{doi}",
                         headers=self.headers,
-                        timeout=(3.0, 5.0),
+                        timeout=METADATA_TIMEOUT,
                     )
                     if res.status_code == 200:
                         data = res.json().get("message", {})
@@ -477,12 +481,12 @@ class MetadataExtractionWorker(QThread):
 
                         try:
                             bib_res = session.get(
-                                f"https://api.crossref.org/works/{doi}",
+                                f"{CROSSREF_WORKS}/{doi}",
                                 headers={
                                     "Accept": "application/x-bibtex",
-                                    "User-Agent": "RiemannReader/1.0",
+                                    "User-Agent": USER_AGENT,
                                 },
-                                timeout=(3.0, 5.0),
+                                timeout=METADATA_TIMEOUT,
                             )
                             if bib_res.status_code == 200:
                                 metadata["bibtex"] = bib_res.text
@@ -503,9 +507,9 @@ class MetadataExtractionWorker(QThread):
                 metadata["arxiv_id"] = arxiv_id
                 try:
                     res = session.get(
-                        f"https://api.openalex.org/works/arxiv:{arxiv_id}",
+                        f"{OPENALEX_WORKS}/arxiv:{arxiv_id}",
                         headers=self.headers,
-                        timeout=(3.0, 5.0),
+                        timeout=METADATA_TIMEOUT,
                     )
                     if res.status_code == 200:
                         data = res.json()
@@ -531,7 +535,7 @@ class MetadataExtractionWorker(QThread):
         if engine is not None:
             try:
                 tag_res = requests.post(
-                    f"http://127.0.0.1:{engine[0]}/tag",
+                    loopback_url(engine[0], "tag"),
                     json=tag_request(self.text_chunk),
                     headers={"X-Riemann-Token": engine[1]},
                     timeout=2.0,

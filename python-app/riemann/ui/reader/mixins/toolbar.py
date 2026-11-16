@@ -5,8 +5,6 @@ Part of ReaderTab (riemann/ui/reader/tab.py). ReaderTab lists this mixin before
 QWidget, so its Qt event handlers override QWidget's.
 """
 
-import os
-import sys
 from PySide6.QtCore import (
     QEasingCurve,
     QPoint,
@@ -37,6 +35,8 @@ from ..sidebar import PdfSidebarWidget
 from ..toolbar_layout import ToolbarLayout
 from ..notes import NotesPanel
 from .host import ReaderHostBase
+from ....core.assets import icon_path
+from ....core.settings import SIDEBAR_VISIBLE_KEY
 
 
 class ToolbarMixin(ReaderHostBase):
@@ -418,7 +418,7 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_toggle_sidebar.setChecked(visible)
 
     def _remember_sidebar_state(self) -> None:
-        self.settings.setValue("reader/sidebar_visible", self.sidebar_nav.isVisible())
+        self.settings.setValue(SIDEBAR_VISIBLE_KEY, self.sidebar_nav.isVisible())
         self.settings.setValue("reader/sidebar_mode", self.sidebar_nav.mode)
 
     def _update_page_input_width(self, text: str = "") -> None:
@@ -541,28 +541,10 @@ class ToolbarMixin(ReaderHostBase):
 
     def _get_icon(self, filename: str) -> QIcon:
         is_dark = self.theme_mode != 0
-        if (
-            is_dark
-            and filename.endswith(".svg")
-            and not filename.endswith("-white.svg")
-        ):
-            filename = filename.replace(".svg", "-white.svg")
-
-        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            base_path = getattr(sys, "_MEIPASS")
-            path = os.path.join(base_path, "riemann", "assets", "icons", filename)
-        else:
-            base_path = os.path.dirname(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            )
-            path = os.path.join(base_path, "assets", "icons", filename)
-
-        if not os.path.exists(path) and "-white.svg" in filename:
-            path = path.replace("-white.svg", ".svg")
-
-        return QIcon(path)
+        return QIcon(icon_path(filename, is_dark))
 
     def _update_icons(self) -> None:
+        self.btn_toggle_sidebar.setIcon(self._get_icon("panel-left.svg"))
         self.btn_save.setIcon(self._get_icon("save.svg"))
         self.btn_rename.setIcon(self._get_icon("rename.svg"))
         self.btn_export.setIcon(self._get_icon("file-output.svg"))

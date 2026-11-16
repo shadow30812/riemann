@@ -19,7 +19,6 @@ from PySide6.QtCore import (
     QPoint,
     QRect,
     Qt,
-    QTimer,
     QUrl,
 )
 from PySide6.QtGui import (
@@ -35,7 +34,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QRubberBand,
 )
-from ....core.constants import ViewMode, ZoomMode
+from ....core.constants import ViewMode, ZoomMode, clamp_zoom
 from ..widgets import PageWidget
 from .host import ReaderHostBase
 
@@ -711,19 +710,11 @@ class InputMixin(ReaderHostBase):
         if event.type() == QEvent.Type.NativeGesture:
             if event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
                 delta = event.value()
-                self.manual_scale = max(
-                    0.1, min(self.manual_scale * (1.0 + delta), 5.0)
-                )
+                self.manual_scale = clamp_zoom(self.manual_scale * (1.0 + delta))
                 self.zoom_mode = ZoomMode.MANUAL
                 self.apply_visual_zoom()
 
-                if self._zoom_debounce_timer is None:
-                    self._zoom_debounce_timer = QTimer(self)
-                    self._zoom_debounce_timer.setSingleShot(True)
-                    self._zoom_debounce_timer.setInterval(250)
-                    self._zoom_debounce_timer.timeout.connect(self.on_zoom_finished)
-
-                self._zoom_debounce_timer.start()
+                self._schedule_zoom_finished()
                 return True
         return super().event(event)
 

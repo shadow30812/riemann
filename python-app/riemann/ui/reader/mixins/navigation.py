@@ -31,9 +31,10 @@ from PySide6.QtWidgets import (
     QScroller,
     QScrollerProperties,
 )
-from ....core.constants import ViewMode, ZoomMode
+from ....core.constants import FALLBACK_PAGE_SIZE, MAX_ZOOM, ViewMode, ZoomMode, clamp_zoom
 from ....core.log import log
 from .host import ReaderHostBase
+from ....core.settings import AUTOSCROLL_SPEED_KEY, DEFAULT_AUTOSCROLL_SPEED
 
 
 NAV_HISTORY_LIMIT = 100
@@ -46,6 +47,9 @@ class NavigationMixin(ReaderHostBase):
     autoscroll_dir = 1
     _rebuild_debounce_timer = None
     _zoom_debounce_timer = None
+    REBUILD_DEBOUNCE_MS = 200
+    ZOOM_DEBOUNCE_MS = 250
+    PAGE_INDICATOR_MS = 1200
 
     def _setup_scroller(self) -> None:
         QScroller.grabGesture(
@@ -75,7 +79,7 @@ class NavigationMixin(ReaderHostBase):
             return self.current_page_index
 
         scale = self.calculate_scale()
-        base_h = self._cached_base_size[1] if self._cached_base_size else 842
+        base_h = self._cached_base_size[1] if self._cached_base_size else FALLBACK_PAGE_SIZE[1]
         ph = int(base_h * scale) + self.scroll_layout.spacing()
         threshold_y = value + (self.scroll.viewport().height() / 2)
 
@@ -95,8 +99,7 @@ class NavigationMixin(ReaderHostBase):
         closest = self._get_closest_page(value)
         if closest != self.current_page_index:
             self.current_page_index = closest
-            if self.current_doc:
-                self.txt_page.setText(str(closest + 1))
+            self.txt_page.setText(str(closest + 1))
 
         if not self.scroll_timer.isActive():
             self.scroll_timer.start()
@@ -131,7 +134,7 @@ class NavigationMixin(ReaderHostBase):
         self.page_indicator_popup.show()
         self.page_indicator_popup.raise_()
 
-        self._page_indicator_timer.start(1200)
+        self._page_indicator_timer.start(self.PAGE_INDICATOR_MS)
 
     def _start_page_indicator_fade(self) -> None:
         """Gradually fades out the page indicator over 800ms."""
@@ -153,7 +156,9 @@ class NavigationMixin(ReaderHostBase):
         self.on_scroll_changed(self.scroll.verticalScrollBar().value())
 
     def on_scroll_changed(self, value: int) -> None:
-        """Updates the current page as the view scrolls."""
+        """Updates the current page as the view scrolls; scrolls that arrive after the document closed are ignored."""
+        if not self.current_doc:
+            return
         closest = self._get_closest_page(value)
 
         if closest != self.current_page_index:
@@ -266,36 +271,39 @@ class NavigationMixin(ReaderHostBase):
         self.stack.setCurrentIndex(1 if self.view_mode == ViewMode.REFLOW else 0)
         self.btn_reflow.setChecked(self.view_mode == ViewMode.REFLOW)
 
+        self._schedule_rebuild()
+
+    def _schedule_rebuild(self) -> None:
+        """Rebuilds the page layout once view changes stop arriving for REBUILD_DEBOUNCE_MS."""
         if self._rebuild_debounce_timer is None:
             self._rebuild_debounce_timer = QTimer(self)
             self._rebuild_debounce_timer.setSingleShot(True)
-            self._rebuild_debounce_timer.setInterval(200)
+            self._rebuild_debounce_timer.setInterval(self.REBUILD_DEBOUNCE_MS)
             self._rebuild_debounce_timer.timeout.connect(self._do_rebuild_and_render)
         self._rebuild_debounce_timer.start()
+
+    def _schedule_zoom_finished(self) -> None:
+        """Re-renders at the new zoom once zoom steps stop arriving for ZOOM_DEBOUNCE_MS."""
+        if self._zoom_debounce_timer is None:
+            self._zoom_debounce_timer = QTimer(self)
+            self._zoom_debounce_timer.setSingleShot(True)
+            self._zoom_debounce_timer.setInterval(self.ZOOM_DEBOUNCE_MS)
+            self._zoom_debounce_timer.timeout.connect(self.on_zoom_finished)
+        self._zoom_debounce_timer.start()
 
     def toggle_facing_mode(self) -> None:
         self.facing_mode = not self.facing_mode
         self.settings.setValue("facingMode", self.facing_mode)
         self.btn_facing.setChecked(self.facing_mode)
 
-        if self._rebuild_debounce_timer is None:
-            self._rebuild_debounce_timer = QTimer(self)
-            self._rebuild_debounce_timer.setSingleShot(True)
-            self._rebuild_debounce_timer.setInterval(200)
-            self._rebuild_debounce_timer.timeout.connect(self._do_rebuild_and_render)
-        self._rebuild_debounce_timer.start()
+        self._schedule_rebuild()
 
     def toggle_scroll_mode(self) -> None:
         self.continuous_scroll = not self.continuous_scroll
         self.settings.setValue("continuousScrollMode", self.continuous_scroll)
         self.btn_scroll_mode.setChecked(self.continuous_scroll)
 
-        if self._rebuild_debounce_timer is None:
-            self._rebuild_debounce_timer = QTimer(self)
-            self._rebuild_debounce_timer.setSingleShot(True)
-            self._rebuild_debounce_timer.setInterval(200)
-            self._rebuild_debounce_timer.timeout.connect(self._do_rebuild_and_render)
-        self._rebuild_debounce_timer.start()
+        self._schedule_rebuild()
 
     def scroll_page(self, direction: int) -> None:
         bar = self.scroll.verticalScrollBar()
@@ -315,7 +323,7 @@ class NavigationMixin(ReaderHostBase):
             return
 
         scale = self.calculate_scale()
-        base_h = self._cached_base_size[1] if self._cached_base_size else 842
+        base_h = self._cached_base_size[1] if self._cached_base_size else FALLBACK_PAGE_SIZE[1]
         spacing = (
             self.scroll_layout.spacing()
             if self.scroll_layout
@@ -394,7 +402,7 @@ class NavigationMixin(ReaderHostBase):
                 return float(self.current_doc.get_page_size(idx)[1])
             except Exception:
                 log.debug("_page_height_pts failed", exc_info=True)
-        return float(self._cached_base_size[1]) if self._cached_base_size else 842.0
+        return float(self._cached_base_size[1] if self._cached_base_size else FALLBACK_PAGE_SIZE[1])
 
     def on_page_input_return(self) -> None:
         if not self.current_doc:
@@ -432,9 +440,7 @@ class NavigationMixin(ReaderHostBase):
                     if "%" in text
                     else float(text.strip())
                 )
-                self.manual_scale = max(
-                    0.1, min(val / 100.0 if val > 5.0 else val, 5.0)
-                )
+                self.manual_scale = clamp_zoom(val / 100.0 if val > MAX_ZOOM else val)
                 self.zoom_mode = ZoomMode.MANUAL
             except ValueError:
                 pass
@@ -469,12 +475,7 @@ class NavigationMixin(ReaderHostBase):
         self.txt_page.setText(str(target_page + 1))
         self._update_zoom_combo_text()
 
-        if self._zoom_debounce_timer is None:
-            self._zoom_debounce_timer = QTimer(self)
-            self._zoom_debounce_timer.setSingleShot(True)
-            self._zoom_debounce_timer.setInterval(250)
-            self._zoom_debounce_timer.timeout.connect(self.on_zoom_finished)
-        self._zoom_debounce_timer.start()
+        self._schedule_zoom_finished()
 
     def _update_zoom_combo_text(self) -> None:
         """Helper to update the UI combobox with the current scale."""
@@ -501,7 +502,7 @@ class NavigationMixin(ReaderHostBase):
             lbl.setFixedSize(w, h)
 
     def zoom_step(self, factor: float) -> None:
-        self.manual_scale = max(0.1, min(self.calculate_scale() * factor, 5.0))
+        self.manual_scale = clamp_zoom(self.calculate_scale() * factor)
         self.zoom_mode = ZoomMode.MANUAL
         self.on_zoom_changed_internal()
 
@@ -564,7 +565,7 @@ class NavigationMixin(ReaderHostBase):
     def _do_autoscroll(self) -> None:
         """Executes the incremental auto-scroll tick."""
         vbar = self.scroll.verticalScrollBar()
-        speed = self.settings.value("app/autoscroll_speed", 5, type=int)
+        speed = self.settings.value(AUTOSCROLL_SPEED_KEY, DEFAULT_AUTOSCROLL_SPEED, type=int)
         new_val = vbar.value() + (speed * self.autoscroll_dir)
 
         if new_val >= vbar.maximum() and self.autoscroll_dir == 1:

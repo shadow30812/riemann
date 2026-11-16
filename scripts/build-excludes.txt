@@ -1,0 +1,36 @@
+# Python modules the packaged app must not compile in. nbuild.sh, nbuild.ps1,
+# the release workflow and Riemann.spec all read this file; one module per
+# line, comments start with #.
+#
+# Installed on demand at runtime (core/dependencies.py), or not used at all:
+torch
+torchvision
+cv2
+pix2tex
+transformers
+scipy
+pandas
+nvidia
+faster_whisper
+ctranslate2
+huggingface_hub
+faiss
+av
+sentence_transformers
+yt_dlp.extractor.lazy_extractors
+pygments
+riemann.assets
+# Tool subpackages of onnxruntime and tokenizers. They pull in sympy, mpmath,
+# IPython and jedi, about 1,200 extra modules; one sympy file alone took 915 s
+# to compile.
+onnxruntime.tools
+onnxruntime.transformers
+onnxruntime.quantization
+onnxruntime.datasets
+tokenizers.tools
+sympy
+mpmath
+IPython
+jedi
+matplotlib
+pytest

@@ -543,3 +543,98 @@ def test_form_entries_are_saved_into_the_pdf(reader_tab, qapp, tmp_path, monkeyp
     assert read_form_values(path)["name"] == "Grace Hopper"
     assert read_form_values(path)["agree"] is True
     reader_tab.cleanup()
+
+
+def test_new_toast_replaces_the_one_on_screen(reader_tab):
+    from PySide6.QtWidgets import QLabel
+
+    reader_tab.show_toast("first")
+    reader_tab.show_toast("second")
+    shown = [
+        label.text()
+        for label in reader_tab.findChildren(QLabel)
+        if label.text() in ("first", "second") and not label.isHidden()
+    ]
+    assert shown == ["second"]
+
+
+def _icon_is_light(icon) -> bool:
+    image = icon.pixmap(20, 20).toImage()
+    lightness = [
+        image.pixelColor(x, y).lightness()
+        for x in range(image.width())
+        for y in range(image.height())
+        if image.pixelColor(x, y).alpha() > 128
+    ]
+    return sum(lightness) / len(lightness) > 128
+
+
+def test_reader_chrome_follows_the_page_theme_not_the_app_theme(reader_tab):
+    from PySide6.QtWidgets import QToolButton
+    from riemann.ui.palette import DARK
+
+    reader_tab.theme_mode = 1
+    reader_tab.apply_theme()
+    reader_tab.apply_ui_theme(False)
+
+    assert reader_tab.sidebar_nav.dark_mode is True
+    assert DARK["canvas"] in reader_tab.scroll.styleSheet()
+    assert "QScrollBar" in reader_tab.sidebar_nav.styleSheet()
+    flyouts = reader_tab.toolbar_layout.rail.findChildren(QToolButton, "railFlyout")
+    assert flyouts and all(_icon_is_light(b.icon()) for b in flyouts)
+
+
+def test_page_number_box_is_outlined_in_both_page_themes(reader_tab):
+    for mode in (0, 1):
+        reader_tab.theme_mode = mode
+        reader_tab.apply_theme()
+        sheet = reader_tab.toolbar.styleSheet()
+        assert "QLineEdit {" in sheet and "border: 1px solid" in sheet.split("QLineEdit {", 1)[1].split("}")[0]
+
+
+def test_full_screen_button_reaches_the_window(reader_tab):
+    from PySide6.QtWidgets import QWidget
+
+    class Window(QWidget):
+        calls = 0
+
+        def toggle_reader_fullscreen(self):
+            Window.calls += 1
+
+    window = Window()
+    with patch("riemann.app.RiemannWindow", Window), patch.object(reader_tab, "window", return_value=window):
+        reader_tab.btn_fullscreen.click()
+    assert Window.calls == 1
+
+
+def test_scroll_arriving_after_the_document_closed_is_ignored(reader_tab):
+    reader_tab.current_doc = None
+    reader_tab._virtual_enabled = True
+    reader_tab._ignore_scroll = False
+    reader_tab.real_scroll_handler()
+
+
+def test_sidebar_button_follows_the_page_theme(reader_tab):
+    reader_tab.theme_mode = 1
+    reader_tab.apply_theme()
+    assert _icon_is_light(reader_tab.btn_toggle_sidebar.icon())
+    reader_tab.theme_mode = 0
+    reader_tab.apply_theme()
+    assert not _icon_is_light(reader_tab.btn_toggle_sidebar.icon())
+
+
+def test_every_toolbar_icon_follows_the_page_theme(reader_tab):
+    from PySide6.QtWidgets import QAbstractButton
+
+    reader_tab.theme_mode = 1
+    reader_tab.apply_theme()
+    containers = [reader_tab.toolbar, reader_tab.toolbar_layout.parking]
+    if reader_tab.toolbar_layout.rail is not None:
+        containers.append(reader_tab.toolbar_layout.rail)
+    dark_icons = sorted(
+        b.toolTip() or b.objectName()
+        for c in containers
+        for b in c.findChildren(QAbstractButton)
+        if not b.icon().isNull() and not _icon_is_light(b.icon())
+    )
+    assert dark_icons == []

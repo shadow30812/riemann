@@ -37,7 +37,7 @@ from ..ui.browser import BrowserTab, PreviewTextTab
 from ..ui.palette import tinted_icon, tokens
 from ..ui.reader.tab import PreviewReaderTab, ReaderTab
 from ..core.log import log
-from .common import get_resource_path
+from ..core.assets import icon_path
 from ..core.settings import get_dialog_directory, save_last_directory
 
 
@@ -203,7 +203,6 @@ class DocumentsMixin:
         sig_idx = self.tabs_side.indexOf(self.tree_signatures)
         if signatures and not dismissed:
             self.tree_signatures.clear()
-            suffix = "-white" if self.dark_mode else ""
 
             for sig in signatures:
                 item = QTreeWidgetItem(self.tree_signatures)
@@ -217,16 +216,10 @@ class DocumentsMixin:
                 else:
                     icon_name = "circle-slash"
 
-                icon_path = get_resource_path(
-                    os.path.join("assets", "icons", f"{icon_name}{suffix}.svg")
-                )
-                item.setIcon(0, QIcon(icon_path))
+                item.setIcon(0, QIcon(icon_path(f"{icon_name}.svg", self.dark_mode)))
                 item.setText(1, sig.get("field_name", "Unknown"))
 
-                pen_path = get_resource_path(
-                    os.path.join("assets", "icons", f"pen-line{suffix}.svg")
-                )
-                item.setIcon(1, QIcon(pen_path))
+                item.setIcon(1, QIcon(icon_path("pen-line.svg", self.dark_mode)))
 
                 child_cert = QTreeWidgetItem(item)
                 child_cert.setText(0, f"Cert Hash: {sig.get('cert_hash', '')[:15]}...")
@@ -346,7 +339,7 @@ class DocumentsMixin:
                 self._preview_icon()
                 if preview
                 else QIcon(
-                    get_resource_path(os.path.join("assets", "icons", "pdf.png"))
+                    icon_path("pdf.png")
                 )
             )
         else:
@@ -432,8 +425,7 @@ class DocumentsMixin:
         browser = BrowserTab(url, profile=use_profile, dark_mode=self.dark_mode)
         browser.completer.setModel(self.history_model)
 
-        icon_path = get_resource_path(os.path.join("assets", "icons", "browser.png"))
-        default_icon = QIcon(icon_path)
+        default_icon = QIcon(icon_path("browser.png"))
 
         current_idx = target_widget.currentIndex()
         insert_idx = current_idx + 1 if current_idx != -1 else target_widget.count()
@@ -454,17 +446,20 @@ class DocumentsMixin:
         if path:
             self._open_document(path, self.tabs_main, restore_state=restore_state)
         else:
-            reader = self._create_reader(self._preview_mode_enabled())
-
-            icon_path = get_resource_path(os.path.join("assets", "icons", "pdf.png"))
-            pdf_icon = QIcon(icon_path)
+            preview = self._preview_mode_enabled()
+            reader = self._create_reader(preview)
+            icon = (
+                self._preview_icon()
+                if preview
+                else QIcon(icon_path("pdf.png"))
+            )
 
             current_idx = self.tabs_main.currentIndex()
             insert_idx = (
                 current_idx + 1 if current_idx != -1 else self.tabs_main.count()
             )
 
-            self.tabs_main.insertTab(insert_idx, reader, pdf_icon, "New Tab")
+            self.tabs_main.insertTab(insert_idx, reader, icon, "New Tab")
             self._update_tab_tooltip(self.tabs_main, insert_idx)
             self.tabs_main.setCurrentWidget(reader)
 

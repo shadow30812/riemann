@@ -49,6 +49,8 @@ import threading
 import weakref
 from typing import Any, Optional
 
+from .assets import PACKAGE_DIR, is_frozen
+
 log = logging.getLogger("riemann")
 
 CHILD_FLAG = "--riemann-render-process"
@@ -149,16 +151,16 @@ class RenderedPage:
 
 def child_command() -> list:
     """How to start a render child from this interpreter or frozen executable."""
-    if getattr(sys, "frozen", False) or "__compiled__" in globals():
+    if is_frozen():
         return [sys.executable, CHILD_FLAG]
     return [sys.executable, "-m", "riemann.core.render_process"]
 
 
 def _child_env() -> dict:
     env = dict(os.environ)
-    if not getattr(sys, "frozen", False):
+    if not is_frozen():
         paths = [p for p in sys.path if p and os.path.isdir(p)]
-        package_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        package_root = os.path.dirname(PACKAGE_DIR)
         env["PYTHONPATH"] = os.pathsep.join([package_root] + paths)
     env["PYTHONUNBUFFERED"] = "1"
     return env

@@ -233,13 +233,25 @@ window.initHomepage = function (userName, savedLinks) {
     renderGrid(window.currentLinks);
 };
 
+/**
+ * The web search for q. Riemann sends its search engine setting as
+ * window.searchTemplate ({query} marks where the words go) once the page loads.
+ *
+ * @param {string} q - The words to search for.
+ * @returns {string} The search URL.
+ */
+function searchUrlFor(q) {
+    const template = window.searchTemplate || 'https://www.google.com/search?q={query}';
+    return template.replace('{query}', encodeURIComponent(q));
+}
+
 document.getElementById('searchInput').addEventListener('keypress', function (e) {
     if (e.key === 'Enter') {
         const q = this.value.trim();
         if (q.startsWith('http') || (q.includes('.') && !q.includes(' '))) {
             window.location.href = q.startsWith('http') ? q : 'https://' + q;
         } else {
-            window.location.href = 'https://www.google.com/search?q=' + encodeURIComponent(q);
+            window.location.href = searchUrlFor(q);
         }
     }
 });

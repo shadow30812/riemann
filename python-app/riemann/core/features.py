@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 from .log import log
 from .settings import app_settings, get_dialog_directory, save_last_directory
 from ..ui.palette import LIGHT
+from .settings import DEFAULT_DIR_KEY, LAST_DIR_KEY
 
 
 class DocumentConverter:
@@ -760,11 +761,11 @@ def trigger_local_caption_generation(parent_window):
     Opens a file dialog, respects app settings, and triggers the background captioning worker.
     """
     store = app_settings()
-    default_dir = store.value("app/default_dir", "", type=str)
+    default_dir = store.value(DEFAULT_DIR_KEY, "", type=str)
 
     if not default_dir or not os.path.exists(default_dir):
         default_dir = store.value(
-            "app/last_dir", "", type=str
+            LAST_DIR_KEY, "", type=str
         ) or QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.MoviesLocation
         )
@@ -779,7 +780,7 @@ def trigger_local_caption_generation(parent_window):
     if not video_path:
         return
 
-    store.setValue("app/last_dir", os.path.dirname(video_path))
+    store.setValue(LAST_DIR_KEY, os.path.dirname(video_path))
 
     progress_dialog = QProgressDialog("Initializing...", None, 0, 0, parent_window)
     progress_dialog.setWindowTitle("Generating Captions")

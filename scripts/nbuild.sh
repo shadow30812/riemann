@@ -101,12 +101,7 @@ for f in "${PYSIDE6_QT_LIB}"/libQt6FFmpegStub*; do
 done
 echo "   Staged ${copied} missing Qt6 shared libraries into onefile root"
 
-EXCLUDES="--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow-import-to=cv2 --nofollow-import-to=pix2tex"
-EXCLUDES="$EXCLUDES --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas"
-EXCLUDES="$EXCLUDES --nofollow-import-to=nvidia"
-EXCLUDES="$EXCLUDES --nofollow-import-to=yt_dlp.extractor.lazy_extractors --nofollow-import-to=pygments"
-EXCLUDES="$EXCLUDES --nofollow-import-to=faster_whisper --nofollow-import-to=ctranslate2 --nofollow-import-to=huggingface_hub"
-EXCLUDES="$EXCLUDES --nofollow-import-to=riemann.assets --nofollow-import-to=faiss --nofollow-import-to=av --nofollow-import-to=sentence_transformers"
+EXCLUDES=$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' -e 's/^[[:space:]]*/--nofollow-import-to=/' scripts/build-excludes.txt | tr '\n' ' ')
 
 UPX_PLUGIN=""
 if command -v upx &> /dev/null; then
@@ -124,9 +119,11 @@ python3 -m nuitka \
     $UPX_PLUGIN \
     --include-package=riemann \
     --include-data-dir=python-app/riemann/assets=riemann/assets \
-    --noinclude-data-files=riemann/assets/riemann_ai_engine/* \
+    --noinclude-data-files='riemann/assets/riemann_ai_engine/*' \
     --include-package=onnxruntime \
     --include-package-data=onnxruntime \
+    --noinclude-data-files='onnxruntime/datasets/*' \
+    --noinclude-data-files='onnxruntime/tools/*' \
     --include-package=tokenizers \
     --include-package=uvicorn \
     --include-data-file=libs/libpdfium.so=libpdfium.so \

@@ -32,7 +32,6 @@ _probe_base_page_size: Exact sizes come straight from the core when available;
 the low-resolution render is the fallback for older builds.
 """
 
-import os
 import sys
 import urllib.parse
 from typing import Dict, Optional, Tuple
@@ -49,13 +48,15 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QCheckBox, QHBoxLayout, QLineEdit, QWidget
 
-from ....core.constants import ViewMode, ZoomMode
+from ....core.constants import FALLBACK_PAGE_SIZE, ViewMode, ZoomMode
 from ..render_worker import MAX_PAGE_PIXELS, PAGE_CACHE, page_image
 from ..utils import generate_markdown_html, generate_reflow_html
 from ..widgets import PageWidget
 from ....core.log import log
 from ...palette import CONTENT, qcolor, tokens
 from .host import ReaderHostBase
+from ....core.assets import asset_path
+from ....core.settings import LAST_PAGE_KEY, LAST_SCROLL_KEY
 
 # Thumbnails are rendered at this fraction of the target resolution and shown
 # (upscaled) until the full-resolution page arrives.
@@ -157,7 +158,7 @@ class RenderingMixin(ReaderHostBase):
 
         if not self._cached_base_size:
             self._probe_base_page_size()
-        _, base_h = self._cached_base_size or (595, 842)
+        _, base_h = self._cached_base_size or FALLBACK_PAGE_SIZE
 
         scale = self.calculate_scale()
         page_height = int(base_h * scale) + self.scroll_layout.spacing()
@@ -785,9 +786,9 @@ class RenderingMixin(ReaderHostBase):
             if self.current_doc:
                 self.txt_page.setText(str(self.current_page_index + 1))
                 self.lbl_total.setText(f"/ {self.current_doc.page_count}")
-            self.settings.setValue("lastPage", self.current_page_index)
+            self.settings.setValue(LAST_PAGE_KEY, self.current_page_index)
             self.settings.setValue(
-                "lastScrollY", self.scroll.verticalScrollBar().value()
+                LAST_SCROLL_KEY, self.scroll.verticalScrollBar().value()
             )
         else:
             if self.web:
@@ -806,23 +807,7 @@ class RenderingMixin(ReaderHostBase):
                         text = f.read()
                     full_html = generate_markdown_html(text, self.theme_mode != 0)
 
-                    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-                        base_path = getattr(sys, "_MEIPASS")
-                        font_path = os.path.join(
-                            base_path,
-                            "riemann",
-                            "assets",
-                            "fonts",
-                            "NotoColorEmoji.ttf",
-                        )
-
-                    else:
-                        base_path = os.path.dirname(
-                            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                        )
-                        font_path = os.path.join(
-                            base_path, "assets", "fonts", "NotoColorEmoji.ttf"
-                        )
+                    font_path = asset_path("fonts", "NotoColorEmoji.ttf")
 
                     font_uri = "file:///" + urllib.parse.quote(
                         font_path.replace("\\", "/")
@@ -876,17 +861,17 @@ class RenderingMixin(ReaderHostBase):
                     max_h = max(max_h, h)
 
             self._cached_base_size = (
-                (max_w, max_h) if max_w > 0 and max_h > 0 else (595, 842)
+                (max_w, max_h) if max_w > 0 and max_h > 0 else FALLBACK_PAGE_SIZE
             )
         except Exception:
-            self._cached_base_size = (595, 842)
+            self._cached_base_size = FALLBACK_PAGE_SIZE
 
     def _get_target_page_size(self) -> Tuple[int, int]:
         """The page size in logical pixels at the current scale."""
         if not self._cached_base_size:
             self._probe_base_page_size()
         if not self._cached_base_size:
-            return (int(595 * self.manual_scale), int(842 * self.manual_scale))
+            return (int(FALLBACK_PAGE_SIZE[0] * self.manual_scale), int(FALLBACK_PAGE_SIZE[1] * self.manual_scale))
         bw, bh = self._cached_base_size
         s = self.calculate_scale()
         return (int(bw * s), int(bh * s))
@@ -939,7 +924,7 @@ class RenderingMixin(ReaderHostBase):
 
         idx = self.current_page_index
         scale = self._last_applied_scale or self.calculate_scale()
-        base_h = self._cached_base_size[1] if self._cached_base_size else 842
+        base_h = self._cached_base_size[1] if self._cached_base_size else FALLBACK_PAGE_SIZE[1]
         ph = int(base_h * scale) + self.scroll_layout.spacing()
         row = idx // 2 if self.facing_mode else idx
         frac = (y - row * ph) / ph if ph > 0 else 0.0
@@ -963,7 +948,7 @@ class RenderingMixin(ReaderHostBase):
 
         new_scale = self.calculate_scale()
         self._last_applied_scale = new_scale
-        base_h = self._cached_base_size[1] if self._cached_base_size else 842
+        base_h = self._cached_base_size[1] if self._cached_base_size else FALLBACK_PAGE_SIZE[1]
         spacing = self.scroll_layout.spacing()
         new_ph = int(base_h * new_scale) + spacing
         is_facing = self.facing_mode

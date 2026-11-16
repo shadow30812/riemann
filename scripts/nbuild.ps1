@@ -44,8 +44,10 @@ if ($env:PYTHONPATH) {
     $env:PYTHONPATH = "$(Get-Location)\python-app"
 }
 
-$EXCLUDES = "--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow-import-to=cv2 --nofollow-import-to=pix2tex --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas --nofollow-import-to=nvidia"
-$EXCLUDE_ARGS = $EXCLUDES.Split(" ")
+$EXCLUDE_ARGS = Get-Content scripts/build-excludes.txt |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -and -not $_.StartsWith('#') } |
+    ForEach-Object { "--nofollow-import-to=$_" }
 
 python scripts/fetch_pdfium.py win-x64
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -59,6 +61,8 @@ python -m nuitka `
     --noinclude-data-files=riemann/assets/riemann_ai_engine/* `
     --include-package=onnxruntime `
     --include-package-data=onnxruntime `
+    --noinclude-data-files=onnxruntime/datasets/* `
+    --noinclude-data-files=onnxruntime/tools/* `
     --include-package=tokenizers `
     --include-package=uvicorn `
     --include-data-file=libs/pdfium.dll=pdfium.dll `

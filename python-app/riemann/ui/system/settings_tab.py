@@ -34,9 +34,17 @@ from ...core.dependencies import DependenciesDialog
 from ...core.log import log_folder
 from ...core.settings import (
     AI_TAGS_KEY,
+    AUTOSCROLL_SPEED_KEY,
+    DEFAULT_AUTOSCROLL_SPEED,
+    DEFAULT_DIR_KEY,
     DEFAULT_POPULAR_SITES,
+    DEFAULT_UI_SCALE,
+    HOMEPAGE_NAME_KEY,
     OCR_LANGUAGES_KEY,
     POPULAR_SITES_KEY,
+    SEARCH_URL_KEY,
+    UI_SCALE_KEY,
+    VERTICAL_TABS_KEY,
     app_settings,
     set_string_list,
     string_list,
@@ -45,6 +53,7 @@ from ...core.window_snap import is_wayland_session, snapping_default
 from .base import SectionedSystemTab, card, row_container, setting_row
 from ..reader.mixins.read_aloud import NO_ENGINE, READ_RATE_KEY, READ_VOICE_KEY, make_speech
 from .widgets import PermissionsEditor, StringListEditor, ToolbarLayoutEditor, VoicePicker
+from ...core.endpoints import DEFAULT_SEARCH_URL
 
 
 def app_version() -> str:
@@ -84,19 +93,31 @@ class SettingsTab(SectionedSystemTab):
         c = card(layout, "Look")
         self.cb_dark = self._check(getattr(win, "dark_mode", False), self._set_dark)
         setting_row(c, "Dark mode", self.cb_dark)
-        self.cb_vertical_tabs = self._check(self._bool("app/vertical_tabs", False), self._set_vertical_tabs)
+        self.cb_vertical_tabs = self._check(self._bool(VERTICAL_TABS_KEY, False), self._set_vertical_tabs)
         setting_row(c, "Vertical tabs", self.cb_vertical_tabs, "Tabs in a column on the left, like a browser's side bar.")
         self.cb_floating_fs = self._check(
             self._bool("app/floating_fs_btn", True), lambda v: self._set_value("app/floating_fs_btn", v)
         )
         setting_row(c, "Floating full-screen button", self.cb_floating_fs)
-        self.txt_custom_name = QLineEdit(self.settings.value("homepage/custom_name", "", type=str))
+        self.txt_custom_name = QLineEdit(self.settings.value(HOMEPAGE_NAME_KEY, "", type=str))
         self.txt_custom_name.setPlaceholderText("Your account name")
         self.txt_custom_name.setMinimumWidth(220)
         self.txt_custom_name.editingFinished.connect(
-            lambda: self._set_value("homepage/custom_name", self.txt_custom_name.text().strip())
+            lambda: self._set_value(HOMEPAGE_NAME_KEY, self.txt_custom_name.text().strip())
         )
         setting_row(c, "Name on the start page", self.txt_custom_name)
+        self.txt_search_url = QLineEdit(self.settings.value(SEARCH_URL_KEY, DEFAULT_SEARCH_URL, type=str))
+        self.txt_search_url.setPlaceholderText(DEFAULT_SEARCH_URL)
+        self.txt_search_url.setMinimumWidth(320)
+        self.txt_search_url.editingFinished.connect(
+            lambda: self._set_value(SEARCH_URL_KEY, self.txt_search_url.text().strip() or DEFAULT_SEARCH_URL)
+        )
+        setting_row(
+            c,
+            "Search engine",
+            self.txt_search_url,
+            "Used by the address bar, the start page and \"Search the web\". {query} marks where the words go.",
+        )
 
         c = card(layout, "Reader toolbar", "Where the PDF reader's buttons go. Changes apply to open documents at once.")
         self.toolbar_editor = ToolbarLayoutEditor()
@@ -112,7 +133,7 @@ class SettingsTab(SectionedSystemTab):
         self.spin_scale = QSpinBox()
         self.spin_scale.setRange(50, 250)
         self.spin_scale.setSuffix("%")
-        current = self.settings.value("app/ui_scale", 100, type=int)
+        current = self.settings.value(UI_SCALE_KEY, DEFAULT_UI_SCALE, type=int)
         self.slider_scale.setValue(current)
         self.spin_scale.setValue(current)
         self.slider_scale.valueChanged.connect(self.spin_scale.setValue)
@@ -161,11 +182,11 @@ class SettingsTab(SectionedSystemTab):
         folder = row_container()
         row = QHBoxLayout(folder)
         row.setContentsMargins(0, 0, 0, 0)
-        self.txt_default_dir = QLineEdit(self.settings.value("app/default_dir", "", type=str))
+        self.txt_default_dir = QLineEdit(self.settings.value(DEFAULT_DIR_KEY, "", type=str))
         self.txt_default_dir.setPlaceholderText("The last folder used")
         self.txt_default_dir.setMinimumWidth(260)
         self.txt_default_dir.editingFinished.connect(
-            lambda: self._set_value("app/default_dir", self.txt_default_dir.text().strip())
+            lambda: self._set_value(DEFAULT_DIR_KEY, self.txt_default_dir.text().strip())
         )
         browse = QPushButton("Browse")
         browse.clicked.connect(self._browse_default_dir)
@@ -177,8 +198,8 @@ class SettingsTab(SectionedSystemTab):
         self.spin_autoscroll = QSpinBox()
         self.spin_autoscroll.setRange(1, 100)
         self.spin_autoscroll.setSuffix(" px/tick")
-        self.spin_autoscroll.setValue(self.settings.value("app/autoscroll_speed", 5, type=int))
-        self.spin_autoscroll.valueChanged.connect(lambda v: self._set_value("app/autoscroll_speed", v))
+        self.spin_autoscroll.setValue(self.settings.value(AUTOSCROLL_SPEED_KEY, DEFAULT_AUTOSCROLL_SPEED, type=int))
+        self.spin_autoscroll.valueChanged.connect(lambda v: self._set_value(AUTOSCROLL_SPEED_KEY, v))
         setting_row(c, "Auto-scroll speed", self.spin_autoscroll)
 
         c = card(layout, "Read aloud")
@@ -356,10 +377,10 @@ class SettingsTab(SectionedSystemTab):
         if hasattr(win, "set_vertical_tabs"):
             win.set_vertical_tabs(bool(checked))
         else:
-            self._set_value("app/vertical_tabs", bool(checked))
+            self._set_value(VERTICAL_TABS_KEY, bool(checked))
 
     def _set_scale(self, value: int) -> None:
-        self._set_value("app/ui_scale", int(value))
+        self._set_value(UI_SCALE_KEY, int(value))
         self.scale_note.setVisible(True)
 
     def _set_snapping(self, checked: bool) -> None:
@@ -408,7 +429,7 @@ class SettingsTab(SectionedSystemTab):
         folder = QFileDialog.getExistingDirectory(self, "Folder for file dialogs", start)
         if folder:
             self.txt_default_dir.setText(folder)
-            self._set_value("app/default_dir", folder)
+            self._set_value(DEFAULT_DIR_KEY, folder)
 
     def _set_popular_sites(self, values: list) -> None:
         set_string_list(POPULAR_SITES_KEY, values)

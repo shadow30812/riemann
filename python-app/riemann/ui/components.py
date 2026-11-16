@@ -18,6 +18,11 @@ on West-side tabs, rotate them).
 insert_dragged_tab: The tab stays in its strip for the whole drag, so a drop
 back into the same strip is a move, and a drop elsewhere takes it out first.
 
+set_vertical_tabs: The bar must know it is vertical before the position
+changes, because QTabBar measures the tabs then and keeps those sizes until
+something else makes it measure again (switching tabs did, which is why the
+widths used to correct themselves on the next click).
+
 mouseMoveEvent: Pulled downwards out of a horizontal strip, or sideways out of
 a vertical one. End Qt's own in-strip move before the tab is taken out.
 """
@@ -25,7 +30,6 @@ a vertical one. End Qt's own in-strip move before the tab is taken out.
 import os
 import shutil
 import subprocess
-import sys
 from typing import Optional
 
 import shiboken6
@@ -70,6 +74,7 @@ from PySide6.QtWidgets import (
 )
 
 from .palette import CONTENT, qcolor, tokens
+from ..core.assets import icon_path
 
 
 _BROWSERS = [
@@ -238,12 +243,14 @@ class DraggableTabWidget(QTabWidget):
 
     def set_vertical_tabs(self, vertical: bool) -> None:
         """Moves the tab strip to the left edge (vertical) or back to the top."""
-        self.setTabPosition(
-            QTabWidget.TabPosition.West if vertical else QTabWidget.TabPosition.North
-        )
         bar = self.tabBar()
         if isinstance(bar, DraggableTabBar):
             bar.set_vertical(vertical)
+        self.setTabPosition(
+            QTabWidget.TabPosition.West if vertical else QTabWidget.TabPosition.North
+        )
+        if isinstance(bar, DraggableTabBar):
+            bar.relayout()
 
     def is_vertical_tabs(self) -> bool:
         return self.tabPosition() == QTabWidget.TabPosition.West
@@ -313,6 +320,11 @@ class DraggableTabBar(QTabBar):
 
     def set_vertical(self, vertical: bool) -> None:
         self._vertical = vertical
+        self.relayout()
+
+    def relayout(self) -> None:
+        """Makes QTabBar measure every tab again; it keeps sizes from before the switch otherwise."""
+        self.setElideMode(self.elideMode())
         self.updateGeometry()
         self.update()
 
@@ -748,24 +760,7 @@ class AnnotationToolbar(QWidget):
         if self.parent() and hasattr(self.parent(), "theme_mode"):
             is_dark = self.parent().theme_mode != 0
 
-        if (
-            is_dark
-            and filename.endswith(".svg")
-            and not filename.endswith("-white.svg")
-        ):
-            filename = filename.replace(".svg", "-white.svg")
-
-        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            base_path = getattr(sys, "_MEIPASS")
-            path = os.path.join(base_path, "riemann", "assets", "icons", filename)
-        else:
-            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            path = os.path.join(base_path, "assets", "icons", filename)
-
-        if not os.path.exists(path) and "-white.svg" in filename:
-            path = path.replace("-white.svg", ".svg")
-
-        return QIcon(path)
+        return QIcon(icon_path(filename, is_dark))
 
     def update_theme(self, is_dark: bool) -> None:
         t = tokens(is_dark)

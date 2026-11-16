@@ -139,13 +139,10 @@ jobs:
         run: |
           $env:PYTHONPATH = "$(Get-Location)\python-app"
           
-          $EXCLUDES="--nofollow-import-to=torch --nofollow-import-to=torchvision --nofollow-import-to=cv2 --nofollow-import-to=pix2tex"
-          $EXCLUDES="$EXCLUDES --nofollow-import-to=transformers --nofollow-import-to=scipy --nofollow-import-to=pandas"
-          $EXCLUDES="$EXCLUDES --nofollow-import-to=nvidia" 
-          $EXCLUDES="$EXCLUDES --nofollow-import-to=yt_dlp.extractor.lazy_extractors --nofollow-import-to=pygments"
-          $EXCLUDES="$EXCLUDES --nofollow-import-to=faster_whisper --nofollow-import-to=ctranslate2 --nofollow-import-to=huggingface_hub"
-          
-          $EXCLUDE_ARGS = $EXCLUDES.Split(" ")
+          $EXCLUDE_ARGS = Get-Content scripts/build-excludes.txt |
+              ForEach-Object { $_.Trim() } |
+              Where-Object { $_ -and -not $_.StartsWith('#') } |
+              ForEach-Object { "--nofollow-import-to=$_" }
 
           python -m nuitka `
               --onefile `
@@ -156,6 +153,8 @@ jobs:
               --include-data-dir=python-app/riemann/assets=riemann/assets `
               --include-package=onnxruntime `
               --include-package-data=onnxruntime `
+              --noinclude-data-files=onnxruntime/datasets/* `
+              --noinclude-data-files=onnxruntime/tools/* `
               --include-package=tokenizers `
               --include-package=uvicorn `
               --include-data-file=libs/pdfium.dll=pdfium.dll `

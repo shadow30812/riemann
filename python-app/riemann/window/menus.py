@@ -16,7 +16,6 @@ import time
 from typing import Optional
 import psutil
 from PySide6.QtCore import (
-    QSettings,
     QSize,
     Qt,
     QTimer,
@@ -44,6 +43,7 @@ from ..ui.favourites import ManageFavoritesDialog
 from ..ui.reader.tab import ReaderTab
 from ..ui.command_palette import CommandPalette
 from ..ui.palette import tokens
+from ..core.settings import FAVOURITE_FOLDERS_KEY, favourites_settings
 
 
 class MenusMixin:
@@ -390,7 +390,7 @@ class MenusMixin:
 
     def _populate_fav_file_menu(self):
         self.fav_file_menu.clear()
-        favs = QSettings("Riemann", "Favorites").value("folders", [], type=list)
+        favs = favourites_settings().value(FAVOURITE_FOLDERS_KEY, [], type=list)
         if not favs:
             self.fav_file_menu.addAction("No favorites yet").setEnabled(False)
             return
@@ -402,7 +402,7 @@ class MenusMixin:
 
     def _populate_fav_folder_menu(self):
         self.fav_folder_menu.clear()
-        favs = QSettings("Riemann", "Favorites").value("folders", [], type=list)
+        favs = favourites_settings().value(FAVOURITE_FOLDERS_KEY, [], type=list)
         if not favs:
             self.fav_folder_menu.addAction("No favorites yet").setEnabled(False)
             return

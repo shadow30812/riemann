@@ -46,6 +46,8 @@ just test
 just test-rust
 ```
 
+Modules the packaged builds leave out are listed once, in `scripts/build-excludes.txt`; `nbuild.sh`, `nbuild.ps1`, the release workflow and `Riemann.spec` all read it.
+
 `just clean` deletes build output inside the project folders only. Never widen its paths. `.github/workflows/tests.yml` runs the same tests on GitHub for every push and pull request.
 
 Single Python test file:
@@ -70,7 +72,12 @@ env -u LD_LIBRARY_PATH QT_QPA_PLATFORM=offscreen ./riemann/bin/python -m pytest 
 - No comments inside function or method bodies. Explanations go in the module docstring (or file header comment) at the top of the file. Docstrings on functions and classes only where the name and signature don't already say it. The same holds for Rust (`//!` module docs, `///` item docs) and JavaScript.
 - Match the surrounding code. Don't write filler docstrings.
 - Use palette tokens from `ui/palette.py`, never hard-coded colours. Colours that belong to the document rather than the theme (laser, pen, search hits, the presentation stage) are in its `CONTENT` table. `tests/test_palette.py` fails on any colour literal outside `palette.py` and `tooltip.py`.
-- Read and write settings through `core.settings.app_settings()` (the `"Riemann", "PDFReader"` store), and start file dialogs with `get_dialog_directory` / `save_last_directory` from the same module. The `Favorites`, `BrowserSettings` and `FaviconCache` stores are separate on purpose.
+- Inside a reader, the toolbar, side rail, sections sidebar, scroll bars and search bars follow the page theme (`theme_mode`, the N key) through `apply_theme`; only the start page, notes panel and citation card follow the interface theme (Ctrl+D, `apply_ui_theme`). Scroll bars styled apart from the app use `scrollbar_style` from `ui/palette.py`.
+- Short status messages go through `ui/toast.py` (`Toast`), one per window, reader or browser tab, so a new message replaces the old one.
+- Find bundled files with `core.assets` (`asset_path`, `icon_path(name, dark)`), and ask `is_frozen()` whether this is a built executable. Nothing else checks `sys.frozen`, `sys._MEIPASS` or `__compiled__`; `tests/test_assets.py` fails if something does.
+- Service addresses (metadata APIs, AI providers, citation links) live in `core/endpoints.py`. Local services use its `LOOPBACK` and `loopback_url`; the search engine is a setting (`core.settings.search_url`).
+- Code loaded from a CDN carries a version and an SRI hash (see `KATEX_FILES` in `ui/reader/utils.py`).
+- Read and write settings through `core.settings.app_settings()` (the `"Riemann", "PDFReader"` store), and start file dialogs with `get_dialog_directory` / `save_last_directory` from the same module. The `Favorites`, `BrowserSettings` and `FaviconCache` stores are separate on purpose; open them with `favourites_settings()`, `browser_settings()` and `favicon_cache()`. A key that more than one module reads or writes is a named constant in `core/settings.py` (its string never changes: installs have it stored); `tests/test_settings_keys.py` checks this.
 
 ### Data safety
 
@@ -99,6 +106,7 @@ env -u LD_LIBRARY_PATH QT_QPA_PLATFORM=offscreen ./riemann/bin/python -m pytest 
 
 ### Testing
 
+- `conftest.py` gives each test session its own `HOME` and XDG folders, removed at exit.
 - pytest-qt is not installed here; `conftest.py` supplies a fallback `qtbot` whose `addWidget` stops the widget's timers at teardown. Pass every window a test creates to `qtbot.addWidget`, or its timers keep running into later tests.
 - Every bug fix gets a test that fails without the fix. Prefer tests on behaviour (files on disk, real sockets, real PDFs in `benchmarks/corpus/`) over mocks of `open` or `json.dump`.
 - Any script that launches Riemann must set `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and `HOME` to throwaway folders, plus `QT_QPA_PLATFORM=offscreen`. Never touch the real `~/.config/Riemann` or `~/.local/share/Riemann`.

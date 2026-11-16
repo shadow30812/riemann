@@ -50,9 +50,17 @@ from ..render_worker import PAGE_CACHE, PageRenderWorker
 from ....core.render_process import PageRenderer
 from ..utils import generate_markdown_html
 from ....core.log import log
-from ....core.settings import get_dialog_directory, save_last_directory
+from ....core.settings import (
+    LAST_PAGE_KEY,
+    LAST_SCROLL_KEY,
+    NOTES_VISIBLE_KEY,
+    SIDEBAR_VISIBLE_KEY,
+    get_dialog_directory,
+    save_last_directory,
+)
 from ...palette import tokens
 from .host import ReaderHostBase
+from ....core.assets import asset_path
 
 
 class DocumentLoadWorker(QThread):
@@ -127,7 +135,7 @@ class DocumentMixin(ReaderHostBase):
         self.reset_navigation_history()
         self._forms_blocked = False
         self._reference_cache = {}
-        if self.notes_panel.isVisible() or self.settings.value("reader/notes_visible", False, type=bool):
+        if self.notes_panel.isVisible() or self.settings.value(NOTES_VISIBLE_KEY, False, type=bool):
             self.notes_panel.load(self.current_path)
             self.notes_panel.show()
             self.btn_notes.setChecked(True)
@@ -154,7 +162,7 @@ class DocumentMixin(ReaderHostBase):
             self.toolbar.show()
             self.sidebar_nav.load_document(path, self.page_renderer, self.theme_mode)
             self._set_sidebar_visible(
-                self.settings.value("reader/sidebar_visible", False, type=bool)
+                self.settings.value(SIDEBAR_VISIBLE_KEY, False, type=bool)
             )
         self.stack.setCurrentIndex(0)
         self.view_mode = ViewMode.IMAGE
@@ -175,8 +183,8 @@ class DocumentMixin(ReaderHostBase):
             self.rebuild_layout()
             self.jump_to_page(self.current_page_index)
         elif restore_state:
-            saved_page = self.settings.value("lastPage", 0, type=int)
-            saved_scroll = self.settings.value("lastScrollY", 0, type=int)
+            saved_page = self.settings.value(LAST_PAGE_KEY, 0, type=int)
+            saved_scroll = self.settings.value(LAST_SCROLL_KEY, 0, type=int)
             self.current_page_index = min(saved_page, self.current_doc.page_count - 1)
             self.rebuild_layout()
             self.update_view()
@@ -344,18 +352,7 @@ class DocumentMixin(ReaderHostBase):
                 text = f.read()
             full_html = generate_markdown_html(text, self.theme_mode != 0)
 
-            if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-                base_path = getattr(sys, "_MEIPASS")
-                font_path = os.path.join(
-                    base_path, "riemann", "assets", "fonts", "NotoColorEmoji.ttf"
-                )
-            else:
-                base_path = os.path.dirname(
-                    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                )
-                font_path = os.path.join(
-                    base_path, "assets", "fonts", "NotoColorEmoji.ttf"
-                )
+            font_path = asset_path("fonts", "NotoColorEmoji.ttf")
 
             font_uri = "file:///" + urllib.parse.quote(font_path.replace("\\", "/"))
 

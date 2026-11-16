@@ -44,7 +44,6 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QInputDialog,
-    QLabel,
     QMessageBox,
     QPlainTextEdit,
     QProgressDialog,
@@ -64,8 +63,9 @@ from ..workers import (
     PageTextThread,
 )
 from .pages import format_page_ranges, parse_page_ranges
-from ...palette import toast_style, tokens
 from .host import ReaderHostBase
+from ....core.assets import is_frozen
+from ....core.endpoints import loopback_url
 
 AI_CONNECT_ATTEMPTS = 90
 AI_LOADING_ATTEMPTS = 1800
@@ -266,7 +266,7 @@ class AiMixin(ReaderHostBase):
     def _on_model_error(self, msg: str) -> None:
         """The model failed to load: offers to download it or install what it needs."""
         self.progress.close()
-        if "not found" in msg and getattr(sys, "frozen", False):
+        if "not found" in msg and is_frozen():
             if (
                 QMessageBox.question(
                     self,
@@ -380,7 +380,7 @@ class AiMixin(ReaderHostBase):
         """
         Appends the external module directory to the system path if running inside a frozen environment.
         """
-        if getattr(sys, "frozen", False):
+        if is_frozen():
             d = self._get_external_module_dir()
             if os.path.exists(d) and d not in sys.path:
                 sys.path.append(d)
@@ -390,17 +390,6 @@ class AiMixin(ReaderHostBase):
         Starts the AI sidecar shared by all reader tabs unless it is already running.
         """
         ai_engine.ensure_started()
-
-    def show_toast(self, msg: str) -> None:
-        self.lbl_toast = QLabel(self)
-        self.lbl_toast.setStyleSheet(toast_style(tokens(self.theme_mode != 0)))
-        self.lbl_toast.setText(msg)
-        self.lbl_toast.adjustSize()
-        self.lbl_toast.move(
-            (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
-        )
-        self.lbl_toast.show()
-        QTimer.singleShot(4000, self.lbl_toast.hide)
 
     def index_pdf_for_ai(self) -> None:
         """
@@ -449,7 +438,7 @@ class AiMixin(ReaderHostBase):
 
         if self._ai_net is None:
             self._ai_net = QNetworkAccessManager(self if isinstance(self, QObject) else None)
-        request = QNetworkRequest(QUrl(f"http://127.0.0.1:{port}/{endpoint}"))
+        request = QNetworkRequest(QUrl(loopback_url(port, endpoint)))
         request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
         request.setRawHeader(b"X-Riemann-Token", token.encode())
         request.setTransferTimeout(AI_INDEX_TIMEOUT_MS if endpoint == "index" else AI_SEARCH_TIMEOUT_MS)

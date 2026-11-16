@@ -32,6 +32,8 @@ import time
 from typing import List, Optional, Tuple
 
 from .log import log
+from .assets import PACKAGE_DIR, is_frozen
+from .endpoints import LOOPBACK, loopback_url
 
 _process: Optional[subprocess.Popen] = None
 _port: Optional[int] = None
@@ -51,7 +53,7 @@ def _log_path() -> str:
 
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
+        s.bind((LOOPBACK, 0))
         return s.getsockname()[1]
 
 
@@ -60,9 +62,9 @@ SERVER_FLAG = "--riemann-ai-sidecar"
 
 def _command() -> Tuple[List[str], str]:
     """The command that starts the engine, and its working directory."""
-    if getattr(sys, "frozen", False) or "__compiled__" in globals():
+    if is_frozen():
         return [sys.executable, SERVER_FLAG], os.path.dirname(sys.executable)
-    package_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    package_root = os.path.dirname(PACKAGE_DIR)
     return [sys.executable, "-m", "riemann.core.ai_server"], package_root
 
 
@@ -98,7 +100,7 @@ def ensure_started() -> Optional[Tuple[int, str]]:
         RIEMANN_AI_CACHE=os.path.join(os.path.dirname(_log_path()), "ai-index"),
         RIEMANN_AI_MODELS=os.path.join(os.path.dirname(_log_path()), "models", "all-MiniLM-L6-v2-onnx"),
     )
-    if not (getattr(sys, "frozen", False) or "__compiled__" in globals()):
+    if not is_frozen():
         env["PYTHONPATH"] = os.pathsep.join([cwd] + [p for p in sys.path if p and os.path.isdir(p)])
     try:
         if _log_file is None or _log_file.closed:
@@ -179,7 +181,7 @@ def _post(port: int, token: str, endpoint: str, payload: dict, timeout: float, p
     while True:
         try:
             response = requests.post(
-                f"http://127.0.0.1:{port}/{endpoint}",
+                loopback_url(port, endpoint),
                 json=payload,
                 headers={"X-Riemann-Token": token},
                 timeout=timeout,

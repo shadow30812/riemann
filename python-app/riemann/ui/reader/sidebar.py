@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..palette import tinted_icon, tokens
+from ..palette import scrollbar_style, tinted_icon, tokens
 from .render_worker import PAGE_IMAGE_FORMAT
 
 THUMB_WIDTH = 132
@@ -258,6 +258,7 @@ class PdfSidebarWidget(QWidget):
             f"QListWidget::item {{ border: 2px solid transparent; border-radius: 6px; padding: 4px; color: {t['muted']}; }}"
             f"QListWidget::item:selected {{ border-color: {t['accent']}; background: {t['accent_soft']}; color: {t['text']}; }}"
             f"QLabel {{ color: {t['faint']}; padding: 24px 12px; }}"
+            + scrollbar_style(t)
         )
         self.btn_thumbs.setIcon(tinted_icon("image", t["text"], 18))
         self.btn_outline.setIcon(tinted_icon("list-tree", t["text"], 18))

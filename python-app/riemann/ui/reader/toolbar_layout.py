@@ -26,6 +26,12 @@ back when there is room again. The page number and the sidebar button never
 fold. Menu entries mirror the buttons when the menu opens (icon, checked,
 enabled) and click the real button when chosen.
 
+In full screen the pill fades out after PILL_IDLE_MS without input and stops
+catching clicks; moving the mouse, a key or the wheel brings it back. Mouse
+moves over the page reach no widget of the reader, so the cursor position is
+polled while in full screen. Outside full screen the pill stays visible: in
+layout D it holds controls the top bar no longer has.
+
 Layout changes from Settings reach every open reader through notifier().
 The rail can be hidden from its context menu (RAIL_HIDDEN_KEY); its buttons
 then go to the menus.
@@ -337,13 +343,14 @@ class _Watcher(QObject):
             self.layout.sync_visibility()
         elif kind == QEvent.Type.Resize:
             self.layout.place_pill()
-        elif kind == QEvent.Type.MouseMove:
+        elif kind in (QEvent.Type.MouseMove, QEvent.Type.KeyPress, QEvent.Type.ShortcutOverride, QEvent.Type.Wheel):
             self.layout.wake_pill()
         return False
 
 
 class ToolbarLayout:
     PILL_IDLE_MS = 2500
+    CURSOR_POLL_MS = 150
 
     def __init__(self, tab) -> None:
         self.tab = tab
@@ -362,10 +369,16 @@ class ToolbarLayout:
         self._pill_timer = QTimer(tab)
         self._pill_timer.setSingleShot(True)
         self._pill_timer.timeout.connect(self._fade_pill)
+        self._cursor_poll = QTimer(tab)
+        self._cursor_poll.setInterval(self.CURSOR_POLL_MS)
+        self._cursor_poll.timeout.connect(self._poll_cursor)
+        self._last_cursor = QPoint()
         self.watcher = _Watcher(self)
         tab.toolbar.installEventFilter(self.watcher)
         tab.stack.installEventFilter(self.watcher)
+        tab.scroll.installEventFilter(self.watcher)
         tab.scroll.viewport().installEventFilter(self.watcher)
+        tab.scroll.verticalScrollBar().valueChanged.connect(lambda _: self.wake_pill())
         for key in BY_KEY:
             for widget in self.widgets(key):
                 widget.setProperty("riemannCommand", key)
@@ -384,6 +397,12 @@ class ToolbarLayout:
                 self.apply()
             else:
                 self.sync_visibility()
+        if on:
+            self._last_cursor = QCursor.pos()
+            self._cursor_poll.start()
+        else:
+            self._cursor_poll.stop()
+            self.wake_pill()
 
     def effective_places(self) -> Dict[str, str]:
         places = dict(self.spec["places"])
@@ -650,6 +669,7 @@ class ToolbarLayout:
         pill.setGraphicsEffect(self._pill_effect)
         self._pill_anim = QPropertyAnimation(self._pill_effect, b"opacity", pill)
         self._pill_anim.setDuration(400)
+        self._pill_anim.finished.connect(self._on_pill_faded)
         self.pill = pill
         pill.adjustSize()
 
@@ -682,27 +702,54 @@ class ToolbarLayout:
         pill.move(max(0, x), max(0, y))
         pill.raise_()
 
+    def pill_shown(self) -> bool:
+        """Whether the pill can be seen and clicked (it is faded out while idle in full screen)."""
+        return (
+            self.pill is not None
+            and self.pill.isVisible()
+            and self._pill_effect is not None
+            and self._pill_effect.opacity() > 0.99
+            and not self.pill.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        )
+
     def wake_pill(self) -> None:
-        if self.pill is None or not self.pill.isVisible() or self._pill_effect is None:
+        if self.pill is None or not shiboken6.isValid(self.pill) or self._pill_effect is None:
             return
         self._pill_anim.stop()
         self._pill_effect.setOpacity(1.0)
-        self._pill_timer.start(self.PILL_IDLE_MS)
+        self.pill.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        if self.fullscreen and self.pill.isVisible():
+            self._pill_timer.start(self.PILL_IDLE_MS)
+        else:
+            self._pill_timer.stop()
+
+    def _poll_cursor(self) -> None:
+        pos = QCursor.pos()
+        if pos != self._last_cursor:
+            self._last_cursor = pos
+            self.wake_pill()
 
     def _fade_pill(self) -> None:
         pill = self.pill
-        if pill is None or not shiboken6.isValid(pill) or self._pill_anim is None:
+        if pill is None or not shiboken6.isValid(pill) or self._pill_anim is None or not self.fullscreen:
             return
         if pill.underMouse() or any(w.hasFocus() for w in pill.findChildren(QWidget)):
             self._pill_timer.start(self.PILL_IDLE_MS)
             return
         self._pill_anim.stop()
         self._pill_anim.setStartValue(self._pill_effect.opacity())
-        self._pill_anim.setEndValue(0.25)
+        self._pill_anim.setEndValue(0.0)
         self._pill_anim.start()
+
+    def _on_pill_faded(self) -> None:
+        if self.pill is not None and shiboken6.isValid(self.pill) and self._pill_effect.opacity() < 0.01:
+            self.pill.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
     def restyle(self) -> None:
         sheet = self.tab.toolbar.styleSheet()
         for frame in (self.rail, self.pill):
             if frame is not None:
                 frame.setStyleSheet(sheet)
+        if self.rail is not None:
+            for button in self.rail.findChildren(QToolButton, "railFlyout"):
+                button.setIcon(self.tab._get_icon(GROUP_ICONS[button.property("riemannGroup")]))

@@ -20,9 +20,9 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+from .endpoints import OPENALEX_WORKS, USER_AGENT, arxiv_url, doi_url
 
-OPENALEX = "https://api.openalex.org/works"
-USER_AGENT = "Riemann PDF reader (https://github.com/shadow30812/riemann)"
+OPENALEX = OPENALEX_WORKS
 
 ENTRY_START = re.compile(r"^\s*(\[\d{1,4}\]|\d{1,4}\.\s|\(\d{1,4}\))")
 ARXIV = re.compile(r"(?:arXiv:|arxiv\.org/abs/)\s*(\d{4}\.\d{4,5})(?:v\d+)?", re.I)
@@ -111,7 +111,7 @@ def _summary(work: Dict[str, Any]) -> Dict[str, Any]:
         "year": work.get("publication_year"),
         "authors": [a for a in authors if a],
         "cited_by": int(work.get("cited_by_count") or 0),
-        "doi": str(ids.get("doi") or work.get("doi") or "").replace("https://doi.org/", ""),
+        "doi": str(ids.get("doi") or work.get("doi") or "").replace(doi_url(""), ""),
         "arxiv": arxiv,
         "open_access_url": oa,
         "openalex": work.get("id", ""),
@@ -186,9 +186,9 @@ def lookup(reference: str, session: Optional[requests.Session] = None, timeout: 
 
 def best_link(info: Dict[str, Any]) -> str:
     if info.get("arxiv"):
-        return f"https://arxiv.org/abs/{info['arxiv']}"
+        return arxiv_url(info["arxiv"])
     if info.get("open_access_url"):
         return info["open_access_url"]
     if info.get("doi"):
-        return f"https://doi.org/{info['doi']}"
+        return doi_url(info["doi"])
     return str(info.get("openalex") or "")

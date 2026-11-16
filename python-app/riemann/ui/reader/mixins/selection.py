@@ -22,7 +22,6 @@ characters: a letter is only included once the pointer passes its middle, as in
 text editors.
 """
 
-import urllib.parse
 from typing import List, Optional, Tuple
 from PySide6.QtCore import (
     QPoint,
@@ -37,6 +36,7 @@ from PySide6.QtGui import (
 from PySide6.QtWebEngineCore import QWebEnginePage
 from ....core.constants import ViewMode
 from .host import ReaderHostBase
+from ....core.settings import search_url
 
 
 class SelectionMixin(ReaderHostBase):
@@ -696,9 +696,8 @@ class SelectionMixin(ReaderHostBase):
         return selected_rects, "".join(selected_chars)
 
     def _search_web_for_selected_text(self, text: str) -> None:
-        """Searches Google for text in a new browser tab."""
-        query = urllib.parse.quote_plus(text.strip())
-        url_string = f"https://www.google.com/search?q={query}"
+        """Searches the web for text in a new browser tab."""
+        url_string = search_url(text)
 
         if hasattr(self.window(), "new_browser_tab"):
             self.window().new_browser_tab(url_string)

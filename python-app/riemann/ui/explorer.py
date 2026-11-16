@@ -6,12 +6,10 @@ theme.
 """
 
 import os
-import sys
 
 from PySide6.QtCore import (
     QDir,
     QModelIndex,
-    QSettings,
     QSize,
     QSortFilterProxyModel,
     Qt,
@@ -37,14 +35,9 @@ from PySide6.QtWidgets import (
 )
 
 from .palette import FONT_STACK, GridCanvas, path_row, short_folder, tinted_icon, tinted_pixmap, tokens
+from ..core.settings import FAVOURITE_FOLDERS_KEY, favourites_settings
+from ..core.assets import icon_path
 
-
-def _get_icon_path(filename):
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return os.path.join(sys._MEIPASS, "riemann", "assets", "icons", filename)
-    else:
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        return os.path.join(base, "assets", "icons", filename)
 
 
 class FileIconProxyModel(QSortFilterProxyModel):
@@ -58,20 +51,10 @@ class FileIconProxyModel(QSortFilterProxyModel):
         self.invalidate()
 
     def _get_icon(self, name):
-        suffix = "-white.svg" if self.dark_mode else ".svg"
-        key = name + suffix
-        if key in self._cache:
-            return self._cache[key]
-
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        icon_path = os.path.join(base_path, "assets", "icons", f"{name}{suffix}")
-
-        if not os.path.exists(icon_path):
-            icon_path = os.path.join(base_path, "assets", "icons", f"{name}.svg")
-
-        icon = QIcon(icon_path)
-        self._cache[key] = icon
-        return icon
+        key = (name, self.dark_mode)
+        if key not in self._cache:
+            self._cache[key] = QIcon(icon_path(f"{name}.svg", self.dark_mode))
+        return self._cache[key]
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
         if role == Qt.ItemDataRole.DecorationRole and index.column() == 0:
@@ -227,11 +210,11 @@ class FileExplorerPanel(QWidget):
         elif action == act_preview:
             self.file_single_clicked.emit(path)
         elif action == add_fav:
-            settings = QSettings("Riemann", "Favorites")
-            favs = settings.value("folders", [], type=list)
+            settings = favourites_settings()
+            favs = settings.value(FAVOURITE_FOLDERS_KEY, [], type=list)
             if path not in favs:
                 favs.append(path)
-                settings.setValue("folders", favs)
+                settings.setValue(FAVOURITE_FOLDERS_KEY, favs)
                 QMessageBox.information(self, "Favorites", "Folder added to favorites.")
 
 
@@ -412,7 +395,7 @@ class FolderHomeTab(QWidget):
         t = tokens(self.dark_mode)
         fav_icon = tinted_icon("folder", t["accent"], 34)
         row_icon = tinted_pixmap("folder", t["muted"], 18)
-        favs = QSettings("Riemann", "Favorites").value("folders", [], type=list)
+        favs = favourites_settings().value(FAVOURITE_FOLDERS_KEY, [], type=list)
         for f in favs:
             if os.path.exists(f):
                 item = QListWidgetItem(fav_icon, os.path.basename(f.rstrip(os.sep)) or f)

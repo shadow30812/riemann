@@ -15,6 +15,7 @@ import json
 import re
 import unicodedata
 from typing import Any, Dict, List
+from .endpoints import arxiv_url
 
 STOPWORDS = {"a", "an", "the", "on", "of", "in", "for", "and", "to", "with", "towards", "toward"}
 
@@ -93,7 +94,7 @@ def to_bibtex(entries: List[Dict[str, Any]]) -> str:
         if doi:
             fields.append(("doi", _bib_escape(doi)))
         if arxiv:
-            fields += [("eprint", arxiv), ("archivePrefix", "arXiv"), ("url", f"https://arxiv.org/abs/{arxiv}")]
+            fields += [("eprint", arxiv), ("archivePrefix", "arXiv"), ("url", arxiv_url(arxiv))]
         path = str(entry.get("file_path") or "").strip()
         if path:
             fields.append(("file", _bib_escape(path)))
@@ -120,7 +121,7 @@ def to_csl_json(entries: List[Dict[str, Any]]) -> str:
         if entry.get("doi"):
             item["DOI"] = str(entry["doi"]).strip()
         if arxiv:
-            item["URL"] = f"https://arxiv.org/abs/{arxiv}"
+            item["URL"] = arxiv_url(arxiv)
             item["number"] = f"arXiv:{arxiv}"
         items.append(item)
     return json.dumps(items, indent=2, ensure_ascii=False) + "\n"

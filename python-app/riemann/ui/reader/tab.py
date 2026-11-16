@@ -195,7 +195,7 @@ class ReaderTab(
 
         self._page_indicator_timer = QTimer(self)
         self._page_indicator_timer.setSingleShot(True)
-        self._page_indicator_timer.setInterval(1200)
+        self._page_indicator_timer.setInterval(self.PAGE_INDICATOR_MS)
         self._page_indicator_timer.timeout.connect(self._start_page_indicator_fade)
 
         self._init_shortcuts()

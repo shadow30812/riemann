@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 from .log import log
+from .assets import is_frozen
 from ..ui.palette import app_is_dark, tokens
 
 
@@ -47,7 +48,7 @@ _NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" e
 
 def _is_frozen() -> bool:
     """True in a Nuitka or PyInstaller build, where sys.executable is Riemann itself."""
-    return bool(getattr(sys, "frozen", False)) or "__compiled__" in globals()
+    return is_frozen()
 
 
 def _find_base_python() -> str:

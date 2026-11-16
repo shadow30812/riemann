@@ -1,4 +1,5 @@
 import importlib
+import os
 import pkgutil
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
@@ -6,11 +7,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PySide6.QtCore import QUrl, Signal
 from PySide6.QtGui import QCloseEvent
-from PySide6.QtWidgets import QMessageBox, QWidget
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 from riemann.app import (
     LibrarySearchDialog,
     RiemannWindow,
-    get_resource_path,
+    asset_path,
 )
 from riemann.ui.browser import BrowserTab
 
@@ -169,10 +170,10 @@ def isolated_app_environment(qtbot):
 
 
 
-def test_get_resource_path():
-    path = get_resource_path("assets/icons/icon.ico")
-    assert "assets" in path
-    assert "icon.ico" in path
+def test_asset_path():
+    path = asset_path("icons", "icon.ico")
+    assert path.endswith(os.path.join("assets", "icons", "icon.ico"))
+    assert os.path.isfile(path)
 
 
 def test_riemann_window_init_normal(qtbot):
@@ -937,3 +938,46 @@ def test_links_open_beside_in_the_split_pane(qtbot):
     window.open_url_beside("https://arxiv.org/abs/1706.03762")
     assert not window.tabs_side.isHidden()
     assert window.tabs_side.count() == 1
+
+
+def test_metrics_label_grows_to_fit_its_text(qtbot):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    window.resize(1400, 900)
+    window.show()
+    QApplication.processEvents()
+    with patch("riemann.window.chrome.time.strftime", return_value="Wednesday 09:42:40 AM " * 4):
+        window._update_global_metrics()
+    QApplication.processEvents()
+    label = window.metrics_label
+    assert label.width() >= label.sizeHint().width()
+    corner = window.menu_corner_widget
+    assert corner.width() >= corner.sizeHint().width()
+    assert corner.geometry().right() < window.menuBar().width()
+
+
+def test_window_toast_replaces_the_one_on_screen(qtbot):
+    from PySide6.QtWidgets import QLabel
+
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    window.show_toast("first")
+    window.show_toast("second")
+    shown = [
+        label.text()
+        for label in window.findChildren(QLabel)
+        if label.text() in ("first", "second") and not label.isHidden()
+    ]
+    assert shown == ["second"]
+
+
+def test_empty_tab_in_preview_mode_shows_the_preview_eye(qtbot):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    window.settings.setValue("reader/open_in_preview_mode", True)
+    window.new_pdf_tab()
+    idx = window.tabs_main.currentIndex()
+    assert window.tabs_main.widget(idx).is_preview
+    shown = window.tabs_main.tabIcon(idx).pixmap(16, 16).toImage()
+    eye = window._preview_icon().pixmap(16, 16).toImage()
+    assert shown == eye

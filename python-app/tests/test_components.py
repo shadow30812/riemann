@@ -175,3 +175,21 @@ def test_drop_into_other_strip_takes_tab_out_of_source(qtbot):
     assert [source.tabText(i) for i in range(source.count())] == ["B"]
     assert target.indexOf(page) == 0
     DraggableTabBar._dragged_source = None
+
+
+def test_switching_to_vertical_tabs_and_back_measures_the_tabs_again(qtbot):
+    tabs = DraggableTabWidget()
+    qtbot.addWidget(tabs)
+    for title in ("New Tab", "attention.pdf"):
+        tabs.addTab(QWidget(), title)
+    tabs.resize(900, 600)
+    tabs.show()
+    bar = tabs.tabBar()
+    horizontal = [bar.tabRect(i).size() for i in range(bar.count())]
+
+    tabs.set_vertical_tabs(True)
+    assert all(bar.tabRect(i).width() == DraggableTabBar.VERTICAL_TAB_WIDTH for i in range(bar.count()))
+    assert bar.width() >= DraggableTabBar.VERTICAL_TAB_WIDTH
+
+    tabs.set_vertical_tabs(False)
+    assert [bar.tabRect(i).size() for i in range(bar.count())] == horizontal

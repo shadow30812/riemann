@@ -6,11 +6,10 @@ the window's attributes freely, as they did when they lived in one class.
 """
 
 import os
-import sys
 import time
 import psutil
 from PySide6.QtCore import (
-    QTimer,
+    Qt,
     QUrl,
 )
 from PySide6.QtGui import (
@@ -21,17 +20,18 @@ from PySide6.QtWebEngineCore import (
     QWebEnginePage,
     QWebEngineSettings,
 )
-from PySide6.QtWidgets import (
-    QLabel,
-)
 from ..ui.browser import BrowserTab
 from ..ui import tooltip
 from ..ui.palette import toast_style, tokens
+from ..ui.toast import Toast
 from ..core.log import log
-from .common import get_resource_path
+from ..core.assets import asset_path, icon_path
+from ..core.settings import DARK_MODE_KEY
 
 
 class ChromeMixin:
+    lbl_toast = None
+
     def _reveal_controls(self, show: bool):
         """Shows or hides the menu bar, tab bars and toolbars."""
         state = getattr(self, "_fullscreen_state", 0)
@@ -113,15 +113,9 @@ class ChromeMixin:
         self.refresh_signature_panel()
 
     def show_toast(self, msg: str) -> None:
-        self.lbl_toast = QLabel(self)
-        self.lbl_toast.setStyleSheet(toast_style(tokens(getattr(self, "dark_mode", False))))
-        self.lbl_toast.setText(msg)
-        self.lbl_toast.adjustSize()
-        self.lbl_toast.move(
-            (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
-        )
-        self.lbl_toast.show()
-        QTimer.singleShot(4000, self.lbl_toast.hide)
+        if self.lbl_toast is None:
+            self.lbl_toast = Toast(self)
+        self.lbl_toast.show_message(msg, toast_style(tokens(getattr(self, "dark_mode", False))), 4000)
 
     def exit_fullscreen(self) -> None:
         """Helper to fully exit any fullscreen reading states."""
@@ -189,7 +183,7 @@ class ChromeMixin:
         Toggles the global UI dark mode without altering the content of the active tabs.
         """
         self.dark_mode = not self.dark_mode
-        self.settings.setValue("darkMode", self.dark_mode)
+        self.settings.setValue(DARK_MODE_KEY, self.dark_mode)
         self.enforce_global_stylesheet()
         self._update_floating_btn_style()
         self._style_menu_corner()
@@ -280,14 +274,8 @@ class ChromeMixin:
             else "modern_light.css"
         )
 
-        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            base_p = getattr(sys, "_MEIPASS")
-            css_path = os.path.join(base_p, "riemann", "assets", "theme", css_file)
-            theme_dir = os.path.join(base_p, "riemann", "assets", "theme")
-        else:
-            base_p = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            css_path = os.path.join(base_p, "assets", "theme", css_file)
-            theme_dir = os.path.join(base_p, "assets", "theme")
+        theme_dir = asset_path("theme")
+        css_path = os.path.join(theme_dir, css_file)
 
         if os.path.exists(css_path):
             with open(css_path, "r", encoding="utf-8") as f:
@@ -304,16 +292,7 @@ class ChromeMixin:
 
     def _get_icon_img_tag(self, icon_base: str) -> str:
         """Generates an HTML img tag pointing to the correct local SVG based on dark mode."""
-        suffix = "-white" if getattr(self, "dark_mode", False) else ""
-        icon_name = f"{icon_base}{suffix}.svg"
-
-        path = get_resource_path(os.path.join("assets", "icons", icon_name))
-        if not os.path.exists(path) and suffix:
-            path = get_resource_path(
-                os.path.join("assets", "icons", f"{icon_base}.svg")
-            )
-
-        path = path.replace(os.sep, "/")
+        path = icon_path(f"{icon_base}.svg", getattr(self, "dark_mode", False)).replace(os.sep, "/")
         return f'<img src="file:///{path}" width="14" height="14" style="vertical-align: middle;">'
 
     def _update_global_metrics(self) -> None:
@@ -371,7 +350,7 @@ class ChromeMixin:
                         bat_icon = "battery"
 
                     bat_str = (
-                        f"{self._get_icon_img_tag(bat_icon)} {battery.percent:.2f}%"
+                        f"{self._get_icon_img_tag(bat_icon)} {battery.percent:.0f}%"
                     )
             except Exception:
                 log.debug("_update_global_metrics failed", exc_info=True)
@@ -380,6 +359,11 @@ class ChromeMixin:
         self.metrics_label.setText(
             f" <b>{clock_str}</b> &nbsp;|&nbsp; Mem: {mem_str} &nbsp;|&nbsp; Uptime: {uptime_str} &nbsp;|&nbsp; {net_str} &nbsp;|&nbsp; {bat_str} "
         )
+        needed = self.metrics_label.sizeHint().width()
+        if needed > self.metrics_label.minimumWidth():
+            self.metrics_label.setMinimumWidth(needed)
+            self.menu_corner_widget.adjustSize()
+            self.menuBar().setCornerWidget(self.menu_corner_widget, Qt.Corner.TopRightCorner)
 
     def _update_floating_btn_style(self) -> None:
         """Applies dynamic theme styling to the floating fullscreen button."""
@@ -395,17 +379,7 @@ class ChromeMixin:
         icons = {0: "panel-top.svg", 1: "maximize.svg", 2: "minimize.svg"}
         icon_name = icons.get(state, "maximize.svg")
 
-        suffix = "-white" if getattr(self, "dark_mode", False) else ""
-        if suffix and not icon_name.endswith(f"{suffix}.svg"):
-            icon_name = icon_name.replace(".svg", f"{suffix}.svg")
-
-        path = get_resource_path(os.path.join("assets", "icons", icon_name))
-        if not os.path.exists(path) and suffix:
-            path = get_resource_path(
-                os.path.join("assets", "icons", icon_name.replace(suffix, ""))
-            )
-
-        self.floating_fs_btn.setIcon(QIcon(path))
+        self.floating_fs_btn.setIcon(QIcon(icon_path(icon_name, getattr(self, "dark_mode", False))))
 
     def _broadcast_fullscreen_icon(self, state: int) -> None:
         """Helper to safely sync the fullscreen icon across all open tabs simultaneously."""

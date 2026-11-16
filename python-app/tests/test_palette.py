@@ -41,7 +41,7 @@ def test_folder_home_lists_favourites_and_recents_and_switches_theme(qapp, tmp_p
     window = MagicMock()
     window.dark_mode = True
     window.history_manager.get_list.return_value = [str(recent), str(fav)]
-    with patch("riemann.ui.explorer.QSettings") as settings:
+    with patch("riemann.ui.explorer.favourites_settings") as settings:
         settings.return_value.value.return_value = [str(fav)]
         tab = FolderHomeTab(None, dark_mode=True)
         with patch.object(tab, "window", return_value=window):
@@ -62,7 +62,7 @@ def test_folder_home_tab_theme_toggle_survives_being_shown_again(qapp):
     window = MagicMock()
     window.dark_mode = True
     window.history_manager.get_list.return_value = []
-    with patch("riemann.ui.explorer.QSettings") as settings:
+    with patch("riemann.ui.explorer.favourites_settings") as settings:
         settings.return_value.value.return_value = []
         tab = FolderHomeTab(None, dark_mode=True)
         with patch.object(tab, "window", return_value=window):

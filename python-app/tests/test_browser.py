@@ -589,9 +589,56 @@ def test_local_pages_may_only_load_static_files_from_their_folder(tmp_path):
     assert not local_load_allowed(page, other, T.ResourceTypeSubFrame)
     assert local_load_allowed(page, other, T.ResourceTypeMainFrame)
     assert not local_load_allowed(QUrl("https://evil.example/"), other, T.ResourceTypeImage)
-    assert local_load_allowed(page, QUrl("https://cdn.example/x.js"), T.ResourceTypeScript)
+    assert not local_load_allowed(page, QUrl("https://cdn.example/x.js"), T.ResourceTypeScript)
+    assert not local_load_allowed(page, QUrl("https://cdn.example/x.png"), T.ResourceTypeImage)
+    assert local_load_allowed(page, QUrl("https://example.com/"), T.ResourceTypeMainFrame)
+    assert local_load_allowed(QUrl("https://site.example/"), QUrl("https://cdn.example/x.js"), T.ResourceTypeScript)
 
     home = QUrl.fromLocalFile(HOMEPAGE_PATH)
     font = QUrl.fromLocalFile(os.path.join(os.path.dirname(os.path.dirname(HOMEPAGE_PATH)), "fonts", "Inter-Variable.ttf"))
     assert local_load_allowed(home, font, T.ResourceTypeFontResource)
     assert not local_load_allowed(home, other, T.ResourceTypeXhr)
+    icon = QUrl("https://www.google.com/s2/favicons?domain=example.com&sz=64")
+    assert local_load_allowed(home, icon, T.ResourceTypeImage)
+    assert not local_load_allowed(home, QUrl("https://evil.example/collect"), T.ResourceTypeXhr)
+    assert not local_load_allowed(home, QUrl("https://evil.example/x.js"), T.ResourceTypeScript)
+
+
+def test_tabs_on_one_profile_share_an_interceptor_that_outlives_them(webengine):
+    from riemann.ui.browser import RequestInterceptor
+
+    profile = webengine.profile()
+    first = webengine.tab(start_url="about:blank", profile=profile)
+    second = webengine.tab(start_url="about:blank", profile=profile)
+    assert first.request_interceptor is second.request_interceptor
+
+    second.close()
+    second.deleteLater()
+    _flush_deferred_deletes()
+    interceptor = profile.findChild(RequestInterceptor)
+    assert interceptor is not None and shiboken6.isValid(interceptor)
+    assert interceptor is first.request_interceptor
+
+
+def test_address_bar_search_encodes_the_query(webengine):
+    tab = webengine.tab(start_url="about:blank", profile=webengine.profile())
+    loaded = []
+    with patch.object(tab.web, "load", side_effect=loaded.append):
+        tab.txt_url.setText("fish & chips #recipes")
+        tab.navigate_to_url()
+    url = loaded[0]
+    assert url.fragment() == ""
+    assert url.toString(QUrl.ComponentFormattingOption.FullyEncoded) == "https://www.google.com/search?q=fish+%26+chips+%23recipes"
+
+
+def test_whatsapp_user_agent_script_is_valid_javascript(webengine):
+    from PySide6.QtQml import QJSEngine
+
+    from riemann.ui.browser_handlers import WHATSAPP_NAVIGATOR_UA, ScriptInjector
+
+    profile = webengine.profile()
+    ScriptInjector(profile).inject_whatsapp_ua()
+    source = next(s.sourceCode() for s in profile.scripts().toList() if s.name() == "RiemannWhatsAppUA")
+    assert WHATSAPP_NAVIGATOR_UA in source
+    result = QJSEngine().evaluate(f"(function () {{ {source} }})")
+    assert not result.isError(), result.toString()

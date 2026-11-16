@@ -15,6 +15,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from ..core.assets import icon_path, is_frozen
+
 
 def install_linux_integration():
     """
@@ -24,11 +26,7 @@ def install_linux_integration():
     if not sys.platform.startswith("linux"):
         return
 
-    is_packaged = (
-        getattr(sys, "frozen", False)
-        or "__compiled__" in globals()
-        or bool(os.environ.get("NUITKA_ONEFILE_BINARY"))
-    )
+    is_packaged = is_frozen() or bool(os.environ.get("NUITKA_ONEFILE_BINARY"))
     if not is_packaged:
         return
 
@@ -41,8 +39,7 @@ def install_linux_integration():
         apps_dir.mkdir(parents=True, exist_ok=True)
         icons_dir.mkdir(parents=True, exist_ok=True)
 
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        internal_icon_path = os.path.join(base_path, "assets", "icons", "Icon.png")
+        internal_icon_path = icon_path("Icon.png")
 
         if not os.path.exists(internal_icon_path):
             print(f"Warning: Could not find internal icon at {internal_icon_path}")

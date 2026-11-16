@@ -35,6 +35,7 @@ if "plecs" in _ld_path and "_RIEMANN_SANITIZED" not in os.environ:
     except OSError:
         pass
 
+from .core.assets import bundle_dir
 from .core.dependencies import setup_and_get_venv
 
 # os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "9222")
@@ -47,9 +48,8 @@ try:
 except Exception as e:
     print(f"[Riemann Warning] Failed to mount local virtual environment: {e}")
 
-if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-    bundle_dir = getattr(sys, "_MEIPASS")
-    os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = bundle_dir
+if bundle_dir():
+    os.environ["PDFIUM_DYNAMIC_LIB_PATH"] = bundle_dir()
 
 import importlib
 import time
@@ -114,7 +114,7 @@ from .ui.tooltip import TooltipSkin
 from .core.log import log
 from .core.log import setup as setup_logging
 from .window.chrome import ChromeMixin
-from .window.common import get_resource_path
+from .core.assets import asset_path, icon_path
 from .window.desktop import install_linux_integration
 from .window.dialogs import LibrarySearchDialog
 from .window.documents import DocumentsMixin
@@ -131,7 +131,15 @@ from .window.panes import PanesMixin
 from .window.session import SessionMixin
 from .window.system import SystemMixin
 from .window.tabs import TabsMixin
-from .core.settings import app_settings
+from .core.settings import (
+    CLEAN_EXIT_KEY,
+    DARK_MODE_KEY,
+    DEFAULT_UI_SCALE,
+    TABS_COLLAPSED_KEY,
+    UI_SCALE_KEY,
+    VERTICAL_TABS_KEY,
+    app_settings,
+)
 
 
 __all__ = [
@@ -139,7 +147,7 @@ __all__ = [
     "RiemannWindow",
     "decode_ipc_message",
     "encode_ipc_paths",
-    "get_resource_path",
+    "asset_path",
     "hand_off_to_running_instance",
     "listen_for_instances",
     "run",
@@ -210,11 +218,11 @@ class RiemannWindow(
 
         self.resize(1200, 900)
         self.settings = app_settings()
-        self.dark_mode: bool = self.settings.value("darkMode", False, type=bool)
+        self.dark_mode: bool = self.settings.value(DARK_MODE_KEY, False, type=bool)
         self._was_unclean_exit: bool = not self.settings.value(
-            "session/clean_exit", True, type=bool
+            CLEAN_EXIT_KEY, True, type=bool
         )
-        self.settings.setValue("session/clean_exit", False)
+        self.settings.setValue(CLEAN_EXIT_KEY, False)
         self.settings.sync()
 
         self.download_manager_dialog = DownloadManager(self)
@@ -311,10 +319,10 @@ class RiemannWindow(
 
         self.library_manager = LibraryManager()
         self._apply_vertical_tabs(
-            self.settings.value("app/vertical_tabs", False, type=bool)
+            self.settings.value(VERTICAL_TABS_KEY, False, type=bool)
         )
         self._tabs_collapsed = self.settings.value(
-            "app/tabs_collapsed", False, type=bool
+            TABS_COLLAPSED_KEY, False, type=bool
         )
         self._restore_tab_bars()
 
@@ -502,7 +510,7 @@ def run() -> None:
     install_linux_integration()
 
     init_settings = app_settings()
-    ui_scale = init_settings.value("app/ui_scale", 100, type=int)
+    ui_scale = init_settings.value(UI_SCALE_KEY, DEFAULT_UI_SCALE, type=int)
     if ui_scale and ui_scale != 100:
         os.environ["QT_SCALE_FACTOR"] = f"{ui_scale / 100.0:.2f}"
 
@@ -544,9 +552,9 @@ def run() -> None:
     if not listen_for_instances(server, server_name):
         log.warning("Single-instance socket unavailable: %s", server.errorString())
 
-    icon_path = get_resource_path(os.path.join("assets", "icons", "Icon.png"))
-    if os.path.exists(icon_path):
-        app.setWindowIcon(QIcon(icon_path))
+    app_icon = icon_path("Icon.png")
+    if os.path.exists(app_icon):
+        app.setWindowIcon(QIcon(app_icon))
 
     window = RiemannWindow(external_files=files_to_open + folders_to_open)
 

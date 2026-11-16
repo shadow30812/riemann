@@ -1,6 +1,5 @@
 import os
 
-from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -9,7 +8,12 @@ from PySide6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
 )
-from ..core.settings import app_settings, get_dialog_directory
+from ..core.settings import (
+    FAVOURITE_FOLDERS_KEY,
+    app_settings,
+    favourites_settings,
+    get_dialog_directory,
+)
 
 
 class ManageFavoritesDialog(QDialog):
@@ -17,7 +21,7 @@ class ManageFavoritesDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Manage Favorites")
         self.resize(500, 400)
-        self.settings = QSettings("Riemann", "Favorites")
+        self.settings = favourites_settings()
 
         layout = QVBoxLayout(self)
 
@@ -45,7 +49,7 @@ class ManageFavoritesDialog(QDialog):
 
     def _load_favorites(self):
         self.list_widget.clear()
-        favs = self.settings.value("folders", [], type=list)
+        favs = self.settings.value(FAVOURITE_FOLDERS_KEY, [], type=list)
         for f in favs:
             if os.path.exists(f):
                 self.list_widget.addItem(f)
@@ -57,10 +61,10 @@ class ManageFavoritesDialog(QDialog):
             self, "Select Folder to Favorite", start_dir
         )
         if path:
-            favs = self.settings.value("folders", [], type=list)
+            favs = self.settings.value(FAVOURITE_FOLDERS_KEY, [], type=list)
             if path not in favs:
                 favs.append(path)
-                self.settings.setValue("folders", favs)
+                self.settings.setValue(FAVOURITE_FOLDERS_KEY, favs)
                 self._load_favorites()
 
     def _remove_folder(self):
@@ -68,8 +72,8 @@ class ManageFavoritesDialog(QDialog):
         if not item:
             return
         path = item.text()
-        favs = self.settings.value("folders", [], type=list)
+        favs = self.settings.value(FAVOURITE_FOLDERS_KEY, [], type=list)
         if path in favs:
             favs.remove(path)
-            self.settings.setValue("folders", favs)
+            self.settings.setValue(FAVOURITE_FOLDERS_KEY, favs)
             self._load_favorites()

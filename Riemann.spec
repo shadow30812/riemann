@@ -9,8 +9,10 @@ Riemann executable. It handles:
    as this executable with --riemann-ai-sidecar). The old packed AI
    environment in assets/riemann_ai_engine is left out if it is still there.
 2. Binary dependency management (libpdfium).
-3. Exclusion of heavyweight machine learning libraries (torch, cv2) to keep
-   the core executable lightweight.
+3. Exclusion of the modules listed in scripts/build-excludes.txt, the list
+   the Nuitka builds use too: on-demand and unused libraries (torch, cv2),
+   and onnxruntime's and tokenizers' tool subpackages, which pull in sympy
+   and IPython.
 """
 
 import sys
@@ -18,6 +20,13 @@ import os
 from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
+
+with open(os.path.join('scripts', 'build-excludes.txt'), encoding='utf-8') as f:
+    BUILD_EXCLUDES = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
+
+
+def _excluded(module):
+    return any(module == name or module.startswith(name + '.') for name in BUILD_EXCLUDES)
 
 # --- Configuration & Resource Collection ---
 
@@ -57,6 +66,7 @@ def collect_resources():
         'riemann.core.ai_server',
     ]
     datas = [d for d in datas if 'riemann_ai_engine' not in d[0]]
+    hiddenimports = [h for h in hiddenimports if not _excluded(h)]
 
     icon_path = os.path.join('python-app', 'riemann', 'assets', 'icons', 'icon.ico')
     png_path = os.path.join('python-app', 'riemann', 'assets', 'icons', 'Icon.png')
@@ -109,7 +119,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['torch', 'torchvision', 'pix2tex', 'cv2'],
+    excludes=BUILD_EXCLUDES,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

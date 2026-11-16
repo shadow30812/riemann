@@ -10,8 +10,6 @@ callback: If current browser has no media, allow switching to another browser
 on next poll.
 """
 
-import os
-import sys
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon
@@ -24,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 from .log import log
 from ..ui.palette import tokens
+from .assets import icon_path
 
 
 class MiniAudioPlayer(QWidget):
@@ -53,23 +52,7 @@ class MiniAudioPlayer(QWidget):
         Automatically appends '-white' to the filename if dark mode is active.
         """
         is_dark = getattr(self.main_window, "dark_mode", False)
-        suffix = "-white" if is_dark else ""
-        base_name = icon_name.replace(".svg", "")
-
-        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            base_path = getattr(sys, "_MEIPASS")
-            path = os.path.join(
-                base_path, "riemann", "assets", "icons", f"{base_name}{suffix}.svg"
-            )
-        else:
-            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            path = os.path.join(
-                base_path, "assets", "icons", f"{base_name}{suffix}.svg"
-            )
-
-        if not os.path.exists(path) and suffix:
-            path = path.replace(f"{suffix}.svg", ".svg")
-
+        path = icon_path(icon_name if icon_name.endswith(".svg") else f"{icon_name}.svg", is_dark)
         return QIcon(path)
 
     def setup_ui(self):

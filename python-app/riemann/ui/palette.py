@@ -11,8 +11,9 @@ are always dark, so only DARK["private"] is used. "success" and "warning" (with
 light values keep 4.5:1 contrast under white text, the dark ones under
 accent_text. The CSS files use none of these three.
 
-toast_style, link_tip_style, incognito_url_style, banner_style and
-overlay_style are the small stylesheets several widgets share. overlay_style
+toast_style, link_tip_style, incognito_url_style, banner_style,
+overlay_style and scrollbar_style are the small stylesheets several widgets
+share. overlay_style
 is for labels drawn over the page itself (the page-number popup), which sit on
 document content in either theme, so it always uses the dark tokens.
 
@@ -29,7 +30,6 @@ once at startup; FONT_STACK keeps system fallbacks for anything Inter lacks.
 """
 
 import os
-import sys
 
 from PySide6.QtCore import QByteArray, QPointF, Qt
 from PySide6.QtGui import (
@@ -44,6 +44,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+
+from ..core.assets import asset_path, icon_path
 
 DARK = {
     "canvas": "#1C1D20",
@@ -130,6 +132,19 @@ def tokens(dark: bool) -> dict:
     return DARK if dark else LIGHT
 
 
+def scrollbar_style(t: dict) -> str:
+    """The QSS themes' scroll bars in t's colours, for widgets themed apart from the app."""
+    return (
+        "QScrollBar:vertical { border: none; background: transparent; width: 16px; margin: 0px; }"
+        "QScrollBar:horizontal { border: none; background: transparent; height: 16px; margin: 0px; }"
+        f"QScrollBar::handle:vertical {{ background: {t['border_strong']}; min-height: 24px; border-radius: 5px; margin: 2px; }}"
+        f"QScrollBar::handle:horizontal {{ background: {t['border_strong']}; min-width: 24px; border-radius: 5px; margin: 2px; }}"
+        f"QScrollBar::handle:hover {{ background: {t['faint']}; }}"
+        "QScrollBar::add-line, QScrollBar::sub-line { width: 0px; height: 0px; }"
+        "QScrollBar::add-page, QScrollBar::sub-page { background: none; }"
+    )
+
+
 def toast_style(t: dict) -> str:
     return (
         f"background: {t['raised']}; color: {t['text']}; border: 1px solid {t['border_strong']}; "
@@ -168,19 +183,6 @@ def overlay_style() -> str:
 
 
 UI_FONT = "Inter"
-
-
-def asset_path(*parts: str) -> str:
-    """Absolute path of a file under riemann/assets, frozen or not."""
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return os.path.join(sys._MEIPASS, "riemann", "assets", *parts)
-    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, "assets", *parts)
-
-
-def icon_path(filename: str) -> str:
-    """Absolute path of a file in assets/icons, frozen or not."""
-    return asset_path("icons", filename)
 
 
 _ui_font_loaded: bool | None = None

@@ -57,6 +57,7 @@ from typing import Any, AsyncGenerator, Optional
 import numpy as np
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, model_validator
+from .endpoints import HUGGINGFACE, LOOPBACK
 
 MODEL_NAME = "all-MiniLM-L6-v2-onnx"
 MODEL_REPO = "sentence-transformers/all-MiniLM-L6-v2"
@@ -145,7 +146,7 @@ def ensure_model(model_dir: str) -> None:
         if os.path.exists(dest) and _sha256(dest) == digest:
             continue
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        url = f"https://huggingface.co/{MODEL_REPO}/resolve/{MODEL_COMMIT}/{name}"
+        url = f"{HUGGINGFACE}/{MODEL_REPO}/resolve/{MODEL_COMMIT}/{name}"
         tmp = dest + ".part"
         h = hashlib.sha256()
         with urllib.request.urlopen(url, timeout=120) as resp, open(tmp, "wb") as f:
@@ -455,7 +456,7 @@ def main() -> None:
     import uvicorn
 
     port = int(os.environ.get("RIEMANN_AI_PORT", "8080"))
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+    uvicorn.run(app, host=LOOPBACK, port=port, log_level="info")
 
 
 if __name__ == "__main__":

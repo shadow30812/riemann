@@ -18,8 +18,14 @@ saved page cannot even load its own stylesheet, but that setting also lets the
 page fetch() or frame any file on disk. RequestInterceptor narrows it with
 local_load_allowed: a local page may load scripts, styles, images, fonts and
 media from its own folder and below, and nothing else from disk. The start page
-may load anything under riemann/assets. LocalContentCanAccessRemoteUrls is off,
-so a local page cannot send what it reads to a server with fetch() either.
+may load anything under riemann/assets. Remote URLs are filtered the same
+way rather than with LocalContentCanAccessRemoteUrls, which, when off, also
+stopped the start page showing its site icons: a local page may navigate to a
+remote page, the start page may load remote images (the icons), and nothing
+else, so a local page cannot send what it reads to a server with fetch().
+Each profile owns one RequestInterceptor, shared by its tabs: the profile only
+keeps a weak pointer, so an interceptor owned by a tab vanished when that tab
+closed and left every other tab on the profile unfiltered.
 Clipboard access goes through the site permissions in riemann.core.permissions
 instead of JavascriptCanAccessClipboard, which granted it to every page.
 
@@ -46,6 +52,7 @@ import time
 import urllib.parse
 from html import escape as html_escape
 from typing import Any, Optional
+from ..core.assets import asset_path, icon_path
 
 _deno_dir = os.path.expanduser("~/.deno/bin")
 if os.path.isdir(_deno_dir) and _deno_dir not in os.environ.get("PATH", ""):
@@ -58,7 +65,6 @@ from PySide6.QtCore import (
     QEvent,
     QIODevice,
     QObject,
-    QSettings,
     QSize,
     Qt,
     QThread,
@@ -112,15 +118,24 @@ from PySide6.QtWidgets import (
 
 from ..core import permissions
 from ..core.captions_server import CaptionsServer
-from .browser_handlers import ScriptInjector
+from .browser_handlers import WHATSAPP_HEADER_UA, WHATSAPP_HOST, ScriptInjector
 from .palette import incognito_url_style, link_tip_style, toast_style, tokens
+from .toast import Toast
 from ..core.log import log
-from ..core.settings import app_settings, get_dialog_directory, save_last_directory
-
-
-HOMEPAGE_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "homepage", "homepage.html")
+from ..core.settings import (
+    DARK_MODE_KEY,
+    HOMEPAGE_NAME_KEY,
+    app_settings,
+    browser_settings,
+    favicon_cache,
+    get_dialog_directory,
+    save_last_directory,
+    search_template,
+    search_url,
 )
+
+
+HOMEPAGE_PATH = os.path.abspath(asset_path("homepage", "homepage.html"))
 
 
 def is_local_homepage(url: QUrl) -> bool:
@@ -132,6 +147,11 @@ def is_local_homepage(url: QUrl) -> bool:
 
 ASSETS_DIR = os.path.dirname(os.path.dirname(HOMEPAGE_PATH))
 
+_REMOTE_SCHEMES = {"http", "https", "ws", "wss", "ftp"}
+_ICON_TYPES = {
+    QWebEngineUrlRequestInfo.ResourceType.ResourceTypeImage,
+    QWebEngineUrlRequestInfo.ResourceType.ResourceTypeFavicon,
+}
 _STATIC_TYPES = {
     QWebEngineUrlRequestInfo.ResourceType.ResourceTypeStylesheet,
     QWebEngineUrlRequestInfo.ResourceType.ResourceTypeScript,
@@ -149,10 +169,12 @@ def _inside(path: str, folder: str) -> bool:
 
 
 def local_load_allowed(first_party: QUrl, request: QUrl, resource_type) -> bool:
-    """Whether a page may load request, a file: URL; other schemes always pass."""
-    if not request.isLocalFile():
-        return True
+    """Whether a page may load request. Only local pages and file: requests are restricted."""
     if resource_type == QWebEngineUrlRequestInfo.ResourceType.ResourceTypeMainFrame:
+        return True
+    if first_party.isLocalFile() and request.scheme().lower() in _REMOTE_SCHEMES:
+        return is_local_homepage(first_party) and resource_type in _ICON_TYPES
+    if not request.isLocalFile():
         return True
     if not first_party.isLocalFile():
         return False
@@ -178,16 +200,6 @@ def sanitize_homepage_links(payload: Any) -> Optional[str]:
         if isinstance(item, dict) and isinstance(item.get("name"), str) and isinstance(item.get("url"), str)
     ]
     return json.dumps(links)
-
-
-def get_resource_path(relative_path: str) -> str:
-    """Absolute path of a resource, in the source tree or a PyInstaller bundle."""
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        base_path = getattr(sys, "_MEIPASS")
-    else:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-
-    return os.path.join(base_path, relative_path)
 
 
 class YtDlpStreamWorker(QThread):
@@ -697,6 +709,20 @@ class PermissionBar(QFrame):
         self.hide()
 
 
+BLOCKED_DOMAINS = (
+    "doubleclick.net",
+    "googleadservices.com",
+    "googlesyndication.com",
+    "adservice.google.com",
+    "pagead2.googlesyndication.com",
+    "tpc.googlesyndication.com",
+    "youtube.com/ptracking",
+    "youtube.com/pagead",
+    "google-analytics.com",
+    "dmxleo.com",
+)
+
+
 class RequestInterceptor(QWebEngineUrlRequestInterceptor):
     """
     Handles AdBlocking by intercepting network requests to known advertising
@@ -706,19 +732,8 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
-        self.blocked_domains = [
-            "doubleclick.net",
-            "googleadservices.com",
-            "googlesyndication.com",
-            "adservice.google.com",
-            "pagead2.googlesyndication.com",
-            "tpc.googlesyndication.com",
-            "youtube.com/ptracking",
-            "youtube.com/pagead",
-            "google-analytics.com",
-            "dmxleo.com",
-        ]
-        self.spoofed_ua = b"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.7559.59 Safari/537.36"
+        self.blocked_domains = list(BLOCKED_DOMAINS)
+        self.spoofed_ua = WHATSAPP_HEADER_UA.encode()
 
     def interceptRequest(self, info: QWebEngineUrlRequestInfo) -> None:
         """Blocks requests to listed domains and adjusts headers where a site needs it."""
@@ -741,7 +756,7 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
             settings.setValue("browser/ads_blocked", current_blocks + 1)
             return
 
-        if "whatsapp.com" in url:
+        if WHATSAPP_HOST in url:
             info.setHttpHeader(b"User-Agent", self.spoofed_ua)
 
 
@@ -774,7 +789,7 @@ def _os_display_name() -> str:
 class BrowserTab(QWidget):
     def __init__(
         self,
-        start_url: str = "https://www.google.com",
+        start_url: str = "",
         parent: Optional[QWidget] = None,
         profile: Optional[QWebEngineProfile] = None,
         dark_mode: bool = False,
@@ -797,7 +812,9 @@ class BrowserTab(QWidget):
         self._audio_timer.setSingleShot(True)
         self._audio_timer.timeout.connect(self._clear_audio_state)
 
-        self.request_interceptor = RequestInterceptor(self)
+        self.request_interceptor = self.profile.findChild(RequestInterceptor)
+        if self.request_interceptor is None:
+            self.request_interceptor = RequestInterceptor(self.profile)
         self.profile.setUrlRequestInterceptor(self.request_interceptor)
         self.profile.downloadRequested.connect(self._handle_download)
 
@@ -820,9 +837,7 @@ class BrowserTab(QWidget):
         self.btn_back = QPushButton()
         self.btn_back.setIcon(
             QIcon(
-                get_resource_path(
-                    os.path.join("..", "assets", "icons", "chevron-left.svg")
-                )
+                icon_path("chevron-left.svg")
             )
         )
         self.btn_back.setIconSize(icon_size)
@@ -831,9 +846,7 @@ class BrowserTab(QWidget):
         self.btn_fwd = QPushButton()
         self.btn_fwd.setIcon(
             QIcon(
-                get_resource_path(
-                    os.path.join("..", "assets", "icons", "chevron-right.svg")
-                )
+                icon_path("chevron-right.svg")
             )
         )
         self.btn_fwd.setIconSize(icon_size)
@@ -842,9 +855,7 @@ class BrowserTab(QWidget):
         self.btn_reload = QPushButton()
         self.btn_reload.setIcon(
             QIcon(
-                get_resource_path(
-                    os.path.join("..", "assets", "icons", "rotate-cw.svg")
-                )
+                icon_path("rotate-cw.svg")
             )
         )
         self.btn_reload.setIconSize(icon_size)
@@ -861,7 +872,7 @@ class BrowserTab(QWidget):
         self.txt_url.setCompleter(self.completer)
 
         self.action_security = self.txt_url.addAction(
-            QIcon(get_resource_path(os.path.join("..", "assets", "icons", "file.svg"))),
+            QIcon(icon_path("file.svg")),
             QLineEdit.ActionPosition.LeadingPosition,
         )
 
@@ -869,9 +880,7 @@ class BrowserTab(QWidget):
             self.btn_incognito_icon = QPushButton()
             self.btn_incognito_icon.setIcon(
                 QIcon(
-                    get_resource_path(
-                        os.path.join("..", "assets", "icons", "incognito.svg")
-                    )
+                    icon_path("incognito.svg")
                 )
             )
             self.btn_incognito_icon.setIconSize(icon_size)
@@ -885,14 +894,7 @@ class BrowserTab(QWidget):
         self.btn_theme_toggle = QPushButton()
         self.btn_theme_toggle.setIcon(
             QIcon(
-                get_resource_path(
-                    os.path.join(
-                        "..",
-                        "assets",
-                        "icons",
-                        "sun.svg" if getattr(self, "dark_mode", False) else "moon.svg",
-                    )
-                )
+                icon_path("sun.svg" if getattr(self, "dark_mode", False) else "moon.svg")
             )
         )
         self.btn_theme_toggle.setIconSize(icon_size)
@@ -903,7 +905,7 @@ class BrowserTab(QWidget):
         self.btn_bookmark = QPushButton()
         self.btn_bookmark.setIcon(
             QIcon(
-                get_resource_path(os.path.join("..", "assets", "icons", "bookmark.svg"))
+                icon_path("bookmark.svg")
             )
         )
         self.btn_bookmark.setIconSize(icon_size)
@@ -916,9 +918,7 @@ class BrowserTab(QWidget):
         self.btn_captions = QPushButton()
         self.btn_captions.setIcon(
             QIcon(
-                get_resource_path(
-                    os.path.join("..", "assets", "icons", "captions-off.svg")
-                )
+                icon_path("captions-off.svg")
             )
         )
         self.btn_captions.setIconSize(icon_size)
@@ -931,9 +931,7 @@ class BrowserTab(QWidget):
         self.btn_mute = QPushButton()
         self.btn_mute.setIcon(
             QIcon(
-                get_resource_path(
-                    os.path.join("..", "assets", "icons", "volume-on.svg")
-                )
+                icon_path("volume-on.svg")
             )
         )
         self.btn_mute.setIconSize(icon_size)
@@ -944,7 +942,7 @@ class BrowserTab(QWidget):
 
         self.btn_music = QPushButton()
         self.btn_music.setIcon(
-            QIcon(get_resource_path(os.path.join("..", "assets", "icons", "music.svg")))
+            QIcon(icon_path("music.svg"))
         )
         self.btn_music.setIconSize(icon_size)
         self.btn_music.setFixedWidth(30)
@@ -954,7 +952,7 @@ class BrowserTab(QWidget):
 
         self.btn_video_speed = QPushButton()
         self.btn_video_speed.setIcon(
-            QIcon(get_resource_path(os.path.join("..", "assets", "icons", "gauge.svg")))
+            QIcon(icon_path("gauge.svg"))
         )
         self.btn_video_speed.setIconSize(icon_size)
         self.btn_video_speed.setFixedWidth(30)
@@ -965,7 +963,7 @@ class BrowserTab(QWidget):
         self.btn_stream = QPushButton()
         self.btn_stream.setIcon(
             QIcon(
-                get_resource_path(os.path.join("..", "assets", "icons", "airplay.svg"))
+                icon_path("airplay.svg")
             )
         )
         self.btn_stream.setIconSize(icon_size)
@@ -976,7 +974,7 @@ class BrowserTab(QWidget):
         self.btn_download = QPushButton()
         self.btn_download.setIcon(
             QIcon(
-                get_resource_path(os.path.join("..", "assets", "icons", "download.svg"))
+                icon_path("download.svg")
             )
         )
         self.btn_download.setIconSize(icon_size)
@@ -987,7 +985,7 @@ class BrowserTab(QWidget):
         self.btn_print_pdf = QPushButton()
         self.btn_print_pdf.setIcon(
             QIcon(
-                get_resource_path(os.path.join("..", "assets", "icons", "printer.svg"))
+                icon_path("printer.svg")
             )
         )
         self.btn_print_pdf.setIconSize(icon_size)
@@ -1082,9 +1080,8 @@ class BrowserTab(QWidget):
         """ % tokens(self.dark_mode)["accent"])
         layout.insertWidget(0, self.progress)
 
-        self.lbl_toast = QLabel(self)
+        self.lbl_toast = Toast(self)
         self.lbl_toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_toast.hide()
 
         if self.incognito:
             self.txt_url.setPlaceholderText("Incognito Mode")
@@ -1102,7 +1099,7 @@ class BrowserTab(QWidget):
             QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard, False
         )
         page.settings().setAttribute(
-            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True
         )
         page.settings().setAttribute(
             QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True
@@ -1235,7 +1232,7 @@ class BrowserTab(QWidget):
         if self.window() and hasattr(self.window(), "history_model"):
             self.completer.setModel(self.window().history_model)
 
-        if start_url == "https://www.google.com" or not start_url:
+        if not start_url:
             homepage_path = HOMEPAGE_PATH
 
             if os.path.exists(homepage_path):
@@ -1243,7 +1240,8 @@ class BrowserTab(QWidget):
                 home_url.setQuery("theme=" + ("dark" if self.dark_mode else "light"))
                 self.web.load(home_url)
             else:
-                self.web.load(QUrl("https://www.google.com"))
+                engine = urllib.parse.urlsplit(search_template())
+                self.web.load(QUrl(f"{engine.scheme}://{engine.netloc}"))
         else:
             self.web.load(QUrl(start_url))
 
@@ -1281,13 +1279,13 @@ class BrowserTab(QWidget):
         """Sends system data to the local start page once it has loaded."""
         if ok and is_local_homepage(self.web.url()):
             settings = app_settings()
-            name = settings.value("homepage/custom_name", "", type=str)
+            name = settings.value(HOMEPAGE_NAME_KEY, "", type=str)
 
             if not name:
                 name = _os_display_name()
 
             links = sanitize_homepage_links(settings.value("homepage_links", "")) or "null"
-            fav_settings = QSettings("Riemann", "FaviconCache")
+            fav_settings = favicon_cache()
             cached_icons = {}
             for key in fav_settings.allKeys():
                 cached_icons[key] = fav_settings.value(key, "", type=str)
@@ -1296,7 +1294,8 @@ class BrowserTab(QWidget):
             theme = "dark" if self.dark_mode else "light"
             js_code = (
                 f"window.setTheme && window.setTheme('{theme}'); "
-                f"window.cachedIcons = {icons_json}; window.initHomepage({json.dumps(name)}, {links});"
+                f"window.cachedIcons = {icons_json}; window.searchTemplate = {json.dumps(search_template())}; "
+                f"window.initHomepage({json.dumps(name)}, {links});"
             )
             self.web.page().runJavaScript(js_code)
 
@@ -1415,7 +1414,7 @@ class BrowserTab(QWidget):
         """
         self.dark_mode = not self.dark_mode
         if hasattr(self.window(), "settings"):
-            self.window().settings.setValue("darkMode", self.dark_mode)
+            self.window().settings.setValue(DARK_MODE_KEY, self.dark_mode)
         if hasattr(self.window(), "dark_mode"):
             self.window().dark_mode = self.dark_mode
 
@@ -1497,7 +1496,7 @@ class BrowserTab(QWidget):
         domain = self.web.url().host()
 
         if domain:
-            QSettings("Riemann", "BrowserSettings").setValue(
+            browser_settings().setValue(
                 f"zoom/{domain}", new_factor
             )
 
@@ -1520,7 +1519,7 @@ class BrowserTab(QWidget):
         domain = self.web.url().host()
 
         if domain:
-            QSettings("Riemann", "BrowserSettings").setValue(f"zoom/{domain}", 1.0)
+            browser_settings().setValue(f"zoom/{domain}", 1.0)
 
     def toggle_search(self) -> None:
         """
@@ -1549,7 +1548,7 @@ class BrowserTab(QWidget):
         url = QUrl(
             text
             if text.startswith("http") or ("." in text and " " not in text)
-            else f"https://www.google.com/search?q={text}"
+            else search_url(text)
         )
         if not url.scheme():
             url.setScheme("https")
@@ -1558,19 +1557,10 @@ class BrowserTab(QWidget):
     def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)
         if self.lbl_toast.isVisible():
-            self.lbl_toast.move(
-                (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
-            )
+            self.lbl_toast.reposition()
 
     def show_toast(self, message: str) -> None:
-        self.lbl_toast.setText(message)
-        self.lbl_toast.adjustSize()
-        self.lbl_toast.move(
-            (self.width() - self.lbl_toast.width()) // 2, self.height() - 80
-        )
-        self.lbl_toast.show()
-        self.lbl_toast.raise_()
-        QTimer.singleShot(3000, self.lbl_toast.hide)
+        self.lbl_toast.show_message(message, self.lbl_toast.styleSheet())
 
     def _update_url_bar(self, url: QUrl) -> None:
         s_url = url.toString()
@@ -1578,7 +1568,7 @@ class BrowserTab(QWidget):
         domain = url.host()
         if domain:
             saved_zoom = float(
-                QSettings("Riemann", "BrowserSettings").value(f"zoom/{domain}", 1.0)
+                browser_settings().value(f"zoom/{domain}", 1.0)
             )
             self.web.setZoomFactor(saved_zoom)
             self.btn_zoom.setText(f"{int(saved_zoom * 100)}%")
@@ -1663,12 +1653,7 @@ class BrowserTab(QWidget):
 
     def get_captions_script(self) -> str:
         try:
-            candidate_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "..",
-                "assets",
-                "caption_engine.js",
-            )
+            candidate_path = asset_path("caption_engine.js")
             with open(candidate_path, "r", encoding="utf-8") as f:
                 return f.read()
         except Exception as e:
@@ -1689,10 +1674,7 @@ class BrowserTab(QWidget):
         """Shows the site's favicon on the tab."""
 
         parent = self.parent()
-        icon_path = get_resource_path(
-            os.path.join("..", "assets", "icons", "browser.png")
-        )
-        page_icon = QIcon(icon_path)
+        page_icon = QIcon(icon_path("browser.png"))
         while parent:
             if isinstance(parent, QTabWidget):
                 idx = parent.indexOf(self)
@@ -1717,17 +1699,12 @@ class BrowserTab(QWidget):
                     b64_data = base64.b64encode(byte_array.data()).decode("utf-8")
                     data_uri = f"data:image/png;base64,{b64_data}"
 
-                    fav_settings = QSettings("Riemann", "FaviconCache")
+                    fav_settings = favicon_cache()
                     fav_settings.setValue(host, data_uri)
 
     def get_audio_script(self) -> str:
         try:
-            candidate_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "..",
-                "assets",
-                "audio_engine.js",
-            )
+            candidate_path = asset_path("audio_engine.js")
 
             if not os.path.exists(candidate_path):
                 candidate_path = os.path.join(
@@ -1770,12 +1747,7 @@ class BrowserTab(QWidget):
 
     def get_video_script(self) -> str:
         try:
-            candidate_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "..",
-                "assets",
-                "video_engine.js",
-            )
+            candidate_path = asset_path("video_engine.js")
 
             if not os.path.exists(candidate_path):
                 candidate_path = os.path.join(
@@ -2016,24 +1988,7 @@ class BrowserTab(QWidget):
     def _get_icon(self, filename: str) -> QIcon:
         """The icon for filename in the current theme (the white variant in dark mode)."""
         is_dark = getattr(self, "dark_mode", False)
-        if (
-            is_dark
-            and filename.endswith(".svg")
-            and not filename.endswith("-white.svg")
-        ):
-            filename = filename.replace(".svg", "-white.svg")
-
-        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            base_path = getattr(sys, "_MEIPASS")
-            path = os.path.join(base_path, "riemann", "assets", "icons", filename)
-        else:
-            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            path = os.path.join(base_path, "assets", "icons", filename)
-
-        if not os.path.exists(path) and "-white.svg" in filename:
-            path = path.replace("-white.svg", ".svg")
-
-        return QIcon(path)
+        return QIcon(icon_path(filename, is_dark))
 
     def _update_icons(self) -> None:
         self.btn_back.setIcon(self._get_icon("chevron-left.svg"))

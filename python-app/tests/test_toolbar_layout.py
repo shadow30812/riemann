@@ -258,3 +258,47 @@ def test_reader_tab_has_everything_the_mixins_expect(qapp, store):
         tab.cleanup()
         tab.deleteLater()
         pump(qapp, 0.1)
+
+
+def test_full_screen_pill_hides_when_idle_and_returns_on_input(qapp, reader, store, monkeypatch):
+    from PySide6.QtCore import QEvent, QPoint, Qt
+    from PySide6.QtGui import QKeyEvent
+
+    monkeypatch.setattr(tl.ToolbarLayout, "PILL_IDLE_MS", 50)
+    tl.set_layout("default")
+    reader.toolbar.hide()
+    reader.update_fullscreen_icon(2)
+    pump(qapp, 0.2)
+    layout = reader.toolbar_layout
+    layout.wake_pill()
+    assert layout.pill_shown()
+
+    pump(qapp, 1.5, lambda: layout.pill.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents))
+    assert layout._pill_effect.opacity() < 0.01
+    assert not layout.pill_shown()
+
+    bar = reader.scroll.verticalScrollBar()
+    bar.setValue(bar.value() + 200)
+    assert layout.pill_shown()
+
+    pump(qapp, 1.5, lambda: not layout.pill_shown())
+    qapp.sendEvent(reader.scroll, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier))
+    assert layout.pill_shown()
+
+    pump(qapp, 1.5, lambda: not layout.pill_shown())
+    monkeypatch.setattr(tl.QCursor, "pos", staticmethod(lambda: QPoint(321, 123)))
+    pump(qapp, 0.5, layout.pill_shown)
+    assert layout.pill_shown()
+
+    reader.update_fullscreen_icon(0)
+    reader.toolbar.show()
+
+
+def test_layout_d_pill_stays_visible_outside_full_screen(qapp, reader, store, monkeypatch):
+    monkeypatch.setattr(tl.ToolbarLayout, "PILL_IDLE_MS", 50)
+    tl.set_layout("D")
+    pump(qapp, 0.2)
+    layout = reader.toolbar_layout
+    layout.wake_pill()
+    pump(qapp, 0.8)
+    assert layout.pill_shown()

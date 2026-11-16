@@ -1,6 +1,10 @@
 """
 Notes:
 
+Every test session gets its own HOME and XDG config, data and cache folders,
+removed at exit, so no test reads or writes a real Riemann profile or another
+run's leftovers.
+
 qapp: BrowserTab attaches a CaptionsServer to the app; it is normally stopped
 on aboutToQuit, which never fires under pytest. Its running QThread would
 otherwise abort the interpreter on exit.
@@ -11,9 +15,12 @@ checks every top-level widget twice a second) crashed later tests that were
 deleting widgets.
 """
 
+import atexit
 import importlib.util
 import os
+import shutil
 import sys
+import tempfile
 import pytest
 import shiboken6
 from PySide6.QtCore import QTimer
@@ -22,8 +29,11 @@ from PySide6.QtWidgets import QApplication
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("_RIEMANN_SANITIZED", "1")
 os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
-if "HOME" not in os.environ or os.environ["HOME"].startswith("/home/"):
-    os.environ["HOME"] = "/tmp"
+_SANDBOX = tempfile.mkdtemp(prefix="riemann-tests-")
+for _var, _sub in (("HOME", "home"), ("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache")):
+    os.environ[_var] = os.path.join(_SANDBOX, _sub)
+    os.makedirs(os.environ[_var], exist_ok=True)
+atexit.register(shutil.rmtree, _SANDBOX, True)
 
 @pytest.fixture(scope="session")
 def qapp():
