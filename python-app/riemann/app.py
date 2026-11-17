@@ -84,6 +84,7 @@ from .core.window_snap import (
     prefer_xwayland_for_snapping,
     snapping_default,
 )
+from .ui.browser import BrowserTab
 from .ui.components import (
     DraggableTabWidget,
     SplitPaneBadge,
@@ -409,19 +410,43 @@ class RiemannWindow(
 
 
 
+    close_confirmed = False
+
+    def confirm_close(self) -> bool:
+        """
+        Asks about each reader's page edits waiting for Save and lets each web
+        page with unsaved changes ask; False if the user cancelled one.
+        """
+        for tabs in (self.tabs_main, self.tabs_side):
+            for widget in [tabs.widget(i) for i in range(tabs.count())]:
+                if isinstance(widget, ReaderTab) and getattr(widget, "edit_scratch", None):
+                    tabs.setCurrentWidget(widget)
+                    if not widget.resolve_page_edits():
+                        return False
+                elif isinstance(widget, BrowserTab) and not widget.confirm_leave():
+                    return False
+        return True
+
     def exit_application(self) -> None:
-        """Saves all open windows and terminates the application."""
+        """
+        Asks about page edits and web pages with unsaved changes in every
+        window, then saves all windows and quits. quit() sends each window a
+        close event; close_confirmed stops closeEvent asking a second time.
+        """
+        windows = [self] + [w for w in RiemannWindow._all_open_windows if w is not self]
+        for window in windows:
+            if not window.confirm_close():
+                return
+        for window in windows:
+            window.close_confirmed = True
         RiemannWindow._save_all_windows_session()
         QApplication.instance().quit()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """Saves the session unless the window is incognito; asks first about page edits waiting for Save."""
-        for tabs in (self.tabs_main, self.tabs_side):
-            for i in range(tabs.count()):
-                widget = tabs.widget(i)
-                if isinstance(widget, ReaderTab) and not widget.resolve_page_edits():
-                    event.ignore()
-                    return
+        """Saves the session unless the window is incognito; asks first about page edits and web pages with unsaved changes."""
+        if not self.close_confirmed and not self.confirm_close():
+            event.ignore()
+            return
         if self.incognito:
             if self in RiemannWindow._all_open_windows:
                 RiemannWindow._all_open_windows.remove(self)

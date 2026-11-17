@@ -6,6 +6,8 @@ the window's attributes freely, as they did when they lived in one class.
 """
 
 import os
+
+import shiboken6
 from PySide6.QtCore import (
     QUrl,
 )
@@ -52,10 +54,21 @@ class TabsMixin:
         else:
             self.tabs_main.setCurrentIndex(self.tabs_main.count() - 1)
 
+    def may_close(self, widget) -> bool:
+        """Asks about a reader's page edits waiting for Save, or lets a web page with unsaved changes ask."""
+        if isinstance(widget, ReaderTab):
+            return widget.resolve_page_edits()
+        if isinstance(widget, BrowserTab):
+            return widget.confirm_leave() and shiboken6.isValid(widget)
+        return True
+
     def close_tab(self, index: int) -> None:
-        """Closes a main tab, first checking for open web dialogs."""
+        """Closes a main tab once its reader edits or web page allow it."""
         widget = self.tabs_main.widget(index)
-        if isinstance(widget, ReaderTab) and not widget.resolve_page_edits():
+        if not self.may_close(widget):
+            return
+        index = self.tabs_main.indexOf(widget) if widget is not None else index
+        if index == -1:
             return
         if widget is not None and widget is getattr(self, "preview_tab_widget", None):
             self.preview_tab_widget = None
@@ -64,8 +77,8 @@ class TabsMixin:
 
             if isinstance(widget, BrowserTab):
                 widget.web.triggerPageAction(QWebEnginePage.WebAction.Stop)
-                widget.web.setHtml("")
                 if widget.web.page():
+                    widget.web.page().setAudioMuted(True)
                     widget.web.page().deleteLater()
                 widget.web.deleteLater()
             elif isinstance(widget, ReaderTab):
@@ -75,8 +88,6 @@ class TabsMixin:
 
         self.tabs_main.removeTab(index)
         try:
-            import shiboken6
-
             if shiboken6.isValid(widget):
                 widget.deleteLater()
         except RuntimeError:
@@ -85,9 +96,12 @@ class TabsMixin:
         self._auto_save_session()
 
     def close_side_tab(self, index: int) -> None:
-        """Closes a side tab, first checking for open web dialogs."""
+        """Closes a side tab once its reader edits or web page allow it."""
         widget = self.tabs_side.widget(index)
-        if isinstance(widget, ReaderTab) and not widget.resolve_page_edits():
+        if not self.may_close(widget):
+            return
+        index = self.tabs_side.indexOf(widget) if widget is not None else index
+        if index == -1:
             return
         if widget is not None and widget is getattr(self, "preview_tab_widget", None):
             self.preview_tab_widget = None
@@ -96,8 +110,8 @@ class TabsMixin:
 
             if isinstance(widget, BrowserTab):
                 widget.web.triggerPageAction(QWebEnginePage.WebAction.Stop)
-                widget.web.setHtml("")
                 if widget.web.page():
+                    widget.web.page().setAudioMuted(True)
                     widget.web.page().deleteLater()
             elif isinstance(widget, ReaderTab):
                 widget.cleanup()
@@ -110,8 +124,6 @@ class TabsMixin:
                     active_main._sig_panel_dismissed = True
             else:
                 try:
-                    import shiboken6
-
                     if shiboken6.isValid(widget):
                         widget.deleteLater()
                 except RuntimeError:

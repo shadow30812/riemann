@@ -44,6 +44,16 @@ server's port and per-run token are invisible to the site's own scripts.
 Clipboard access goes through the site permissions in riemann.core.permissions
 instead of JavascriptCanAccessClipboard, which granted it to every page.
 
+Leaving a page with unsaved changes: a site that wants to warn first registers
+a beforeunload handler, and Chromium then asks through javaScriptConfirm with
+Qt's fixed LEAVE_PROMPT. WebPage shows that question as Leave or Stay, on the
+tab it belongs to (brought to the front). Closing a tab, a window or the app
+calls BrowserTab.confirm_leave first: it sends the page RequestClose, and
+Chromium answers with windowCloseRequested (no handler, or Leave) or, through
+WebPage, leave_refused (Stay). A page whose renderer never answers is let go
+after LEAVE_WAIT_MS. Chromium asks only on pages the person has interacted
+with, as in other browsers.
+
 Notes:
 
 _os_display_name: EXTENDED_NAME_FORMAT 3 = NameDisplay ("Ada Lovelace") Unix
@@ -81,6 +91,7 @@ from PySide6.QtCore import (
     QByteArray,
     QCoreApplication,
     QEvent,
+    QEventLoop,
     QIODevice,
     QObject,
     QSize,
@@ -124,10 +135,12 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QSizePolicy,
     QSlider,
+    QStackedWidget,
     QStyle,
     QTabWidget,
     QToolButton,
@@ -573,6 +586,8 @@ class YtDlpSettingsDialog(QDialog):
 
 DOWNLOAD_CLAIMED = "riemannDownloadClaimed"
 CAPTIONS_WORLD = QWebEngineScript.ScriptWorldId.ApplicationWorld
+LEAVE_PROMPT = "Are you sure you want to leave this page? Changes that you made may not be saved."
+LEAVE_WAIT_MS = 3000
 
 
 def owning_tab(page: Optional[QObject]) -> Optional["BrowserTab"]:
@@ -587,11 +602,36 @@ def is_pdf_download(path: str, mime_type: str = "") -> bool:
     return mime_type == "application/pdf" or path.lower().endswith(".pdf")
 
 
+def show_tab(tab: Optional[QWidget]) -> None:
+    """Makes tab the current page of the tab widget holding it."""
+    stack = tab.parentWidget() if tab is not None else None
+    if isinstance(stack, QStackedWidget) and isinstance(stack.parentWidget(), QTabWidget):
+        stack.parentWidget().setCurrentWidget(tab)
+
+
+def ask_to_leave(parent: Optional[QWidget], site: str) -> bool:
+    """The Leave or Stay question for a page with unsaved changes; True for Leave."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setWindowTitle("Leave page?")
+    box.setText(f"Changes you made on {site} may not be saved." if site else "Changes you made on this page may not be saved.")
+    box.setInformativeText("Leave the page anyway?")
+    leave = box.addButton("Leave", QMessageBox.ButtonRole.AcceptRole)
+    stay = box.addButton("Stay", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(stay)
+    box.setEscapeButton(stay)
+    box.exec()
+    return box.clickedButton() is leave
+
+
 class WebPage(QWebEnginePage):
     """
     Custom QWebEnginePage subclass implementing specific behaviors for
     window creation, JavaScript console logging, and custom scheme handling.
     """
+
+    leave_refused = Signal()
+    asking_to_leave = False
 
     def __init__(
         self, profile: QWebEngineProfile, parent: Optional[QObject] = None
@@ -636,6 +676,20 @@ class WebPage(QWebEnginePage):
     def _cleanup_popup(self, popup: QWebEngineView) -> None:
         if popup in self._popups:
             self._popups.remove(popup)
+
+    def javaScriptConfirm(self, origin: QUrl, msg: str) -> bool:
+        if msg != QCoreApplication.translate("QWebEnginePage", LEAVE_PROMPT):
+            return super().javaScriptConfirm(origin, msg)
+        tab = owning_tab(self)
+        show_tab(tab)
+        self.asking_to_leave = True
+        try:
+            leave = ask_to_leave(tab or QWebEngineView.forPage(self), origin.host())
+        finally:
+            self.asking_to_leave = False
+        if not leave:
+            self.leave_refused.emit()
+        return leave
 
     def javaScriptConsoleMessage(
         self,
@@ -2068,10 +2122,42 @@ class BrowserTab(QWidget):
         if hasattr(self, "web") and self.web:
             self.web.page().setAudioMuted(True)
             self.web.page().runJavaScript(
-                "window.onbeforeunload = null; "
                 "document.querySelectorAll('audio, video').forEach(media => media.pause());"
             )
         super().deleteLater()
+
+    def confirm_leave(self) -> bool:
+        """Lets the page ask before it is closed, if it has unsaved changes; False when the person chose Stay."""
+        page = self.web.page() if shiboken6.isValid(self.web) else None
+        if not isinstance(page, WebPage):
+            return True
+        loop = QEventLoop()
+        answer: list = []
+
+        def settle(leave: bool) -> None:
+            if not answer:
+                answer.append(leave)
+                loop.quit()
+
+        def closed() -> None:
+            settle(True)
+
+        def refused() -> None:
+            settle(False)
+
+        def no_reply() -> None:
+            if not page.asking_to_leave:
+                settle(True)
+
+        page.windowCloseRequested.connect(closed)
+        page.leave_refused.connect(refused)
+        QTimer.singleShot(LEAVE_WAIT_MS, loop, no_reply)
+        page.triggerAction(QWebEnginePage.WebAction.RequestClose)
+        if not answer:
+            loop.exec()
+        page.windowCloseRequested.disconnect(closed)
+        page.leave_refused.disconnect(refused)
+        return answer[0]
 
     def changeEvent(self, event: QEvent) -> None:
         """On activation, gives focus back to the web view."""

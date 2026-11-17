@@ -91,6 +91,9 @@ class DummyBrowserTab(QWidget):
     def toggle_theme(self):
         pass
 
+    def confirm_leave(self):
+        return True
+
 
 class DummyReaderTab(QWidget):
     signatures_detected = Signal(object)
@@ -1169,3 +1172,55 @@ def test_document_history_sorts_files_into_classes(qtbot, tmp_path):
 
     page.tabs.setCurrentIndex([k for k, _ in page.KINDS].index("web"))
     assert page.doc_class.isHidden()
+
+
+def test_quitting_asks_about_page_edits_and_cancel_keeps_the_app_open(qtbot):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    with patch("os.path.exists", return_value=True):
+        window._add_pdf_tab("/fake/edited.pdf", window.tabs_main)
+    reader = window.tabs_main.widget(window.tabs_main.count() - 1)
+    reader.edit_scratch = "/cache/scratch.pdf"
+    reader.resolve_page_edits = MagicMock(return_value=False)
+
+    with patch("riemann.app.QApplication") as app, patch.object(RiemannWindow, "_save_all_windows_session") as save:
+        window.exit_application()
+    reader.resolve_page_edits.assert_called_once()
+    app.instance.return_value.quit.assert_not_called()
+    save.assert_not_called()
+
+    reader.resolve_page_edits = MagicMock(return_value=True)
+    with patch("riemann.app.QApplication") as app, patch.object(RiemannWindow, "_save_all_windows_session"):
+        window.exit_application()
+    app.instance.return_value.quit.assert_called_once()
+
+
+def test_a_web_tab_whose_page_is_answered_stay_stays_open(qtbot):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    tab = window.new_browser_tab("https://example.com")
+    tab.confirm_leave = MagicMock(return_value=False)
+    window.close_tab(window.tabs_main.indexOf(tab))
+    tab.confirm_leave.assert_called_once()
+    assert window.tabs_main.indexOf(tab) != -1
+
+    tab.confirm_leave = MagicMock(return_value=True)
+    window.close_tab(window.tabs_main.indexOf(tab))
+    assert window.tabs_main.indexOf(tab) == -1
+
+
+def test_quitting_lets_web_pages_ask_once(qtbot):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    tab = window.new_browser_tab("https://example.com")
+    tab.confirm_leave = MagicMock(return_value=False)
+    with patch("riemann.app.QApplication") as app, patch.object(RiemannWindow, "_save_all_windows_session"):
+        window.exit_application()
+    app.instance.return_value.quit.assert_not_called()
+
+    tab.confirm_leave = MagicMock(return_value=True)
+    with patch("riemann.app.QApplication") as app, patch.object(RiemannWindow, "_save_all_windows_session"):
+        window.exit_application()
+        app.instance.return_value.quit.assert_called_once()
+        window.closeEvent(QCloseEvent())
+    tab.confirm_leave.assert_called_once()
