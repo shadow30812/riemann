@@ -9,11 +9,12 @@ A desktop PDF reader and web browser in one window, written in Python (PySide6 6
 | Part | Path | Notes |
 | --- | --- | --- |
 | Desktop app | `python-app/riemann/` | Entry `app.py` (`RiemannWindow`, `run()`). The window's behaviour is split into mixins in `window/` (documents, session, system, menus, panes, tabs, chrome, folders). |
-| Reader tab | `python-app/riemann/ui/reader/` | `tab.py` (`ReaderTab`) plus behaviour split into `mixins/` (toolbar, navigation, selection, input, appearance, document, pages, read_aloud, forms, citations, rendering, annotations, ai, ...). State and widgets that more than one mixin uses are declared in `mixins/host.py` (`ReaderHost`); a test checks `ReaderTab` has them all. Rendering runs in `render_worker.py`. Markdown and text files open here too, as one HTML page in the tab's web view; `replace_text.py` is Replace text. |
+| Reader tab | `python-app/riemann/ui/reader/` | `tab.py` (`ReaderTab`) plus behaviour split into `mixins/` (toolbar, navigation, selection, input, appearance, document, pages, read_aloud, forms, citations, rendering, annotations, ai, ...). State and widgets that more than one mixin uses are declared in `mixins/host.py` (`ReaderHost`); a test checks `ReaderTab` has them all. Rendering runs in `render_worker.py`. Markdown and text files open here too, as one HTML page in the tab's web view, and so do EPUB books and the basic views of Office files; Office files with LibreOffice open as a converted PDF, read-only (`mixins/document.py`). `replace_text.py` is Replace text. |
+| Viewer tabs | `python-app/riemann/ui/viewers/` | `image_tab.py` (pictures), `table_tab.py` (CSV and TSV, editable, saved only after asking), `spreadsheet_tab.py` (Excel and OpenDocument sheets, read-only). |
 | Reader toolbar layouts | `python-app/riemann/ui/reader/toolbar_layout.py` | The buttons are created once in `mixins/toolbar.py`; `ToolbarLayout` only places them (top bar, side rail, ribbon, floating pill, menus, hidden) per the layout chosen in Settings. Add a new button to `COMMANDS` there, or it shows nowhere. |
 | System tabs | `python-app/riemann/ui/system/` | Settings, history, bookmarks, downloads, library and help open as tabs (`window/system.py`). Help (`help_tab.py`, F1) is plain-words text for new users plus every keyboard shortcut. |
 | Browser tab | `python-app/riemann/ui/browser.py` | Qt WebEngine. Start page is a local file in `assets/homepage/`. |
-| Core services | `python-app/riemann/core/` | `ai_engine.py` (shared sidecar), `storage.py` (atomic JSON), `managers.py` (history, bookmarks, downloads, library), `doctypes.py` (what kind of document a file is), `pdf_annotations.py` (writes annotations into PDFs), `page_edit.py` (page edits, passwords), `redaction.py` (applies redaction marks), `captions_server.py`. |
+| Core services | `python-app/riemann/core/` | `ai_engine.py` (shared sidecar), `storage.py` (atomic JSON), `managers.py` (history, bookmarks, downloads, library), `doctypes.py` (what kind of document a file is), `convert_process.py` (EPUB and Office readers in a child process with a time limit: `epub.py`, `office_basic.py`, cleaned by `html_clean.py`), `office.py` (LibreOffice: finding it, converting in a locked-down profile, the cache), `office_install.py` (install commands), `tables.py` (CSV reading and saving), `images.py` (decoding pictures), `pdf_annotations.py` (writes annotations into PDFs), `page_edit.py` (page edits, passwords), `redaction.py` (applies redaction marks), `captions_server.py`. |
 | Theme | `python-app/riemann/ui/palette.py`, `assets/theme/modern_dark.css`, `modern_light.css`, `assets/homepage/homepage.css` | Colour tokens are duplicated in all of these. Change them together. |
 | Rust core | `rust-core/` | PyO3 0.30 module `riemann_core` on PDFium (pdfium-render 0.9, bindings for chromium/7543). Page indices are `u32` from Python. Typed in `python-app/riemann/riemann_core.pyi`. |
 | OCR worker | `rust-ocr-worker/` | Separate crate. `recognize_pngs` reads many pages with one Tesseract run. |
@@ -48,6 +49,12 @@ After changing a version in `pyproject.toml` (needs uv and network; CI fails unt
 
 ```bash
 just lock
+```
+
+Remake the screenshots in `docs/images/` (throwaway settings, offscreen; the split-view shot loads arXiv):
+
+```bash
+env -u LD_LIBRARY_PATH ./riemann/bin/python scripts/take_screenshots.py
 ```
 
 Modules the packaged builds leave out are listed once, in `scripts/build-excludes.txt`; `nbuild.sh`, `nbuild.ps1`, the release workflow and `Riemann.spec` all read it.

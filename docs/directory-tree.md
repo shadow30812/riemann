@@ -30,8 +30,10 @@ riemann/
 │   ├── README.md
 │   └── images/
 │       ├── collapsed-tabs.png
+│       ├── office.png
 │       ├── preview-markdown.png
 │       ├── split-view.png
+│       ├── table.png
 │       └── workspace.png
 ├── .github/
 │   └── workflows/
@@ -86,13 +88,20 @@ riemann/
 │   │   │   ├── captions_server.py
 │   │   │   ├── citations.py
 │   │   │   ├── constants.py
+│   │   │   ├── convert_process.py
 │   │   │   ├── dependencies.py
 │   │   │   ├── doctypes.py
 │   │   │   ├── endpoints.py
+│   │   │   ├── epub.py
 │   │   │   ├── features.py
+│   │   │   ├── html_clean.py
+│   │   │   ├── images.py
 │   │   │   ├── log.py
 │   │   │   ├── managers.py
 │   │   │   ├── mini_player.py
+│   │   │   ├── office.py
+│   │   │   ├── office_basic.py
+│   │   │   ├── office_install.py
 │   │   │   ├── page_edit.py
 │   │   │   ├── pdf_annotations.py
 │   │   │   ├── pdf_forms.py
@@ -103,6 +112,7 @@ riemann/
 │   │   │   ├── settings.py
 │   │   │   ├── signature_appearance.py
 │   │   │   ├── storage.py
+│   │   │   ├── tables.py
 │   │   │   └── window_snap.py
 │   │   ├── ui/
 │   │   │   ├── browser.py
@@ -111,6 +121,7 @@ riemann/
 │   │   │   ├── components.py
 │   │   │   ├── explorer.py
 │   │   │   ├── favourites.py
+│   │   │   ├── office_install.py
 │   │   │   ├── palette.py
 │   │   │   ├── shortcuts.py
 │   │   │   ├── sidecar.py
@@ -148,13 +159,18 @@ riemann/
 │   │   │   │       ├── selection.py
 │   │   │   │       ├── signatures.py
 │   │   │   │       └── toolbar.py
-│   │   │   └── system/
+│   │   │   ├── system/
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── base.py
+│   │   │   │   ├── help_tab.py
+│   │   │   │   ├── lists.py
+│   │   │   │   ├── settings_tab.py
+│   │   │   │   └── widgets.py
+│   │   │   └── viewers/
 │   │   │       ├── __init__.py
-│   │   │       ├── base.py
-│   │   │       ├── help_tab.py
-│   │   │       ├── lists.py
-│   │   │       ├── settings_tab.py
-│   │   │       └── widgets.py
+│   │   │       ├── image_tab.py
+│   │   │       ├── spreadsheet_tab.py
+│   │   │       └── table_tab.py
 │   │   └── window/
 │   │       ├── __init__.py
 │   │       ├── chrome.py
@@ -191,14 +207,19 @@ riemann/
 │       ├── test_core_bindings.py
 │       ├── test_dependency_lists.py
 │       ├── test_desktop.py
+│       ├── test_ebooks.py
 │       ├── test_endpoints.py
 │       ├── test_help.py
+│       ├── test_images.py
 │       ├── test_imports.py
 │       ├── test_managers.py
 │       ├── test_metadata.py
 │       ├── test_mini_player.py
 │       ├── test_notes.py
 │       ├── test_ocr_pages.py
+│       ├── test_office.py
+│       ├── test_office_basic.py
+│       ├── test_office_install.py
 │       ├── test_page_edit.py
 │       ├── test_palette.py
 │       ├── test_pdf_annotations.py
@@ -220,6 +241,8 @@ riemann/
 │       ├── test_signatures.py
 │       ├── test_storage.py
 │       ├── test_tab.py
+│       ├── test_table_edits.py
+│       ├── test_tables.py
 │       ├── test_text_view.py
 │       ├── test_threads.py
 │       ├── test_toolbar_layout.py
@@ -261,5 +284,6 @@ riemann/
     ├── nbuild.ps1
     ├── nbuild.sh
     ├── replace_exec.sh
+    ├── take_screenshots.py
     └── test_runner.sh
 ```
