@@ -159,4 +159,4 @@ class ReadAloudMixin(ReaderHostBase):
             self.show_toast("The speech engine stopped with an error.")
         elif state == QTextToSpeech.State.Ready and self._read_waiting and self.is_reading_aloud():
             self._read_waiting = False
-            QTimer.singleShot(0, self._speak_next)
+            QTimer.singleShot(0, self, self._speak_next)

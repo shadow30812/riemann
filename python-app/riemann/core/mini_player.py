@@ -98,7 +98,7 @@ class MiniAudioPlayer(QWidget):
             """
             self.active_browser.web.page().runJavaScript(js)
 
-        QTimer.singleShot(500, self._release_seek_lock)
+        QTimer.singleShot(500, self, self._release_seek_lock)
 
     def _release_seek_lock(self):
         self._is_seeking = False

@@ -1417,7 +1417,7 @@ class BrowserTab(QWidget):
         QtWebEngine at startup.
         """
         super().focusInEvent(event)
-        QTimer.singleShot(0, self._focus_web_view)
+        QTimer.singleShot(0, self, self._focus_web_view)
 
     def _focus_web_view(self) -> None:
         web = getattr(self, "web", None)
@@ -1939,7 +1939,7 @@ class BrowserTab(QWidget):
 
     def _restore_music_mode(self) -> None:
         if self.btn_music.isChecked():
-            QTimer.singleShot(1000, self.toggle_music_mode)
+            QTimer.singleShot(1000, self, self.toggle_music_mode)
 
     def _handle_download(self, download_item: QWebEngineDownloadRequest) -> None:
         """Asks where to save a download started on this profile; only one tab answers each request."""

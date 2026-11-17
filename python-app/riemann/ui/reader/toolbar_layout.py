@@ -268,7 +268,7 @@ class OverflowBox(QWidget):
     def refit(self) -> None:
         if not self._pending:
             self._pending = True
-            QTimer.singleShot(0, self._refit_now)
+            QTimer.singleShot(0, self, self._refit_now)
 
     def _refit_now(self) -> None:
         self._pending = False
@@ -537,7 +537,7 @@ class ToolbarLayout:
                 widget = getattr(self.tab, name, None)
                 if widget is not None:
                     action = menu.addAction(widget.icon(), label)
-                    action.triggered.connect(lambda _=False, w=widget: QTimer.singleShot(0, w.click))
+                    action.triggered.connect(lambda _=False, w=widget: QTimer.singleShot(0, w, w.click))
             return None
         if key == "page":
             return None
@@ -550,7 +550,7 @@ class ToolbarLayout:
         action.setCheckable(button.isCheckable())
         action.setChecked(button.isChecked())
         action.setEnabled(button.isEnabled())
-        action.triggered.connect(lambda _=False, b=button: QTimer.singleShot(0, b.click))
+        action.triggered.connect(lambda _=False, b=button: QTimer.singleShot(0, b, b.click))
         return action
 
     def _build_ribbon(self, keys: List[str]) -> None:
@@ -590,7 +590,7 @@ class ToolbarLayout:
 
     def _choose_ribbon_group(self, group: str) -> None:
         app_settings().setValue(RIBBON_GROUP_KEY, group)
-        QTimer.singleShot(0, self.apply)
+        QTimer.singleShot(0, self.tab, self.apply)
 
     def _build_rail(self, keys: List[str], flyout_keys: List[str]) -> None:
         if not keys:

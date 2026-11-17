@@ -58,7 +58,7 @@ class PanesMixin:
         if target is self.tabs_side and self.tabs_side.isHidden():
             self.tabs_side.show()
             self._split_evenly()
-            QTimer.singleShot(0, self._split_evenly)
+            QTimer.singleShot(0, self, self._split_evenly)
 
         new_idx = target.addTab(widget, icon, text)
         target.setTabToolTip(new_idx, tooltip)

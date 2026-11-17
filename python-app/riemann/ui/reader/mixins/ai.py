@@ -450,7 +450,7 @@ class AiMixin(ReaderHostBase):
         if isinstance(self, QObject):
             QTimer.singleShot(1000, self, self._ai_pump)
         else:
-            QTimer.singleShot(1000, self._ai_pump)
+            QTimer.singleShot(1000, self, self._ai_pump)
 
     def _on_ai_reply_finished(self, reply) -> None:
         if reply is not self._ai_reply:

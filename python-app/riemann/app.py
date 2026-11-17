@@ -661,7 +661,7 @@ def run() -> None:
 
     if smoke_ms:
         print("[Riemann] Smoke test: window shown", flush=True)
-        QTimer.singleShot(int(smoke_ms) if smoke_ms.isdigit() else 5000, app.quit)
+        QTimer.singleShot(int(smoke_ms) if smoke_ms.isdigit() else 5000, app, app.quit)
     sys.exit(app.exec())
 
 

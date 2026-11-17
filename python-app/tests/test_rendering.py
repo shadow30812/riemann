@@ -1,12 +1,14 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PySide6.QtCore import QObject
 from riemann.core.constants import ViewMode, ZoomMode
 from riemann.ui.reader.mixins.rendering import RenderingMixin
 
 
-class DummyRenderingReader(RenderingMixin):
+class DummyRenderingReader(RenderingMixin, QObject):
     def __init__(self):
+        QObject.__init__(self)
         self.current_doc = MagicMock()
         self._render_worker = None
         self.current_page_index = 0

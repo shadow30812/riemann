@@ -132,7 +132,7 @@ class RenderingMixin(ReaderHostBase):
             self.current_page_index = target_page
             self._ignore_scroll = False
 
-        QTimer.singleShot(50, _finalize_rebuild)
+        QTimer.singleShot(50, self, _finalize_rebuild)
 
     def _do_rebuild_and_render(self) -> None:
         """Debounced executor for expensive layout and render rebuilds."""
@@ -1020,4 +1020,4 @@ class RenderingMixin(ReaderHostBase):
             _apply()
             self.render_visible_pages()
 
-        QTimer.singleShot(0, _retry)
+        QTimer.singleShot(0, self, _retry)
