@@ -1,6 +1,19 @@
+"""
+The mini player on stand-in windows (QWidgets with mocked tab widgets).
+
+Each MiniAudioPlayer starts a poll timer, and a stand-in window and its
+player keep each other alive, so only the garbage collector frees them. Left
+polling, they ran during later tests, and a collection inside a poll freed a
+window that QApplication.topLevelWidgets had just returned: a segfault in CI.
+clean_windows deletes every stand-in at teardown and checks that no player
+is left polling.
+"""
+
+import gc
 import sys
 from unittest.mock import MagicMock, patch
 import pytest
+import shiboken6
 from PySide6.QtWidgets import QApplication, QTabWidget, QWidget
 
 if not QApplication.instance():
@@ -10,15 +23,36 @@ from riemann.app import RiemannWindow
 from riemann.core.mini_player import MiniAudioPlayer
 
 
+STAND_INS: list = []
+
+
+def polling_players() -> list:
+    return [
+        o for o in gc.get_objects()
+        if isinstance(o, MiniAudioPlayer) and shiboken6.isValid(o) and o.poll_timer.isActive()
+    ]
+
+
 @pytest.fixture(autouse=True)
 def clean_windows():
     RiemannWindow._all_open_windows = []
     yield
     RiemannWindow._all_open_windows = []
+    while STAND_INS:
+        widget = STAND_INS.pop()
+        if shiboken6.isValid(widget):
+            shiboken6.delete(widget)
+    assert not polling_players()
+
+
+def stand_in() -> QWidget:
+    widget = QWidget()
+    STAND_INS.append(widget)
+    return widget
 
 
 def make_window():
-    win = QWidget()
+    win = stand_in()
     win.dark_mode = False
     win.tabs_main = MagicMock(spec=QTabWidget)
     win.tabs_main.count.return_value = 0
@@ -35,7 +69,7 @@ def make_window():
 
 
 def create_mock_browser(recently_audible=False):
-    b = QWidget()
+    b = stand_in()
     b.web = MagicMock()
     page = MagicMock()
     page.recentlyAudible.return_value = recently_audible
@@ -53,7 +87,7 @@ def test_is_browser_valid():
     mock_b = create_mock_browser()
     assert player._is_browser_valid(mock_b) is True
 
-    no_web = QWidget()
+    no_web = stand_in()
     assert player._is_browser_valid(no_web) is False
 
 
@@ -63,7 +97,7 @@ def test_get_all_app_browsers_across_multiple_windows():
 
     b1 = create_mock_browser()
     b2 = create_mock_browser()
-    reader = QWidget()
+    reader = stand_in()
 
     win1.tabs_main.count.return_value = 2
     win1.tabs_main.widget.side_effect = lambda idx: [b1, reader][idx]
@@ -109,7 +143,7 @@ def test_find_active_browser_preserves_active_on_tab_switch():
     player.active_browser = active_b
     player._get_all_app_browsers = MagicMock(return_value=[active_b])
 
-    non_browser_tab = QWidget()
+    non_browser_tab = stand_in()
     win.tabs_main.isVisible.return_value = True
     win.tabs_main.hasFocus.return_value = True
     win.tabs_main.currentWidget.return_value = non_browser_tab
