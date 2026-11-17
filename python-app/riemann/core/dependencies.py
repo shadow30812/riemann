@@ -249,12 +249,20 @@ PINNED = {
     "deno": "deno==2.9.8",
     "Pygments": "Pygments==2.21.0",
     "faster-whisper": "faster-whisper==1.2.1",
+    "mammoth": "mammoth==1.13.0",
+    "python-pptx": "python-pptx==1.0.2",
+    "openpyxl": "openpyxl==3.1.5",
+    "xlrd": "xlrd==2.0.2",
+    "striprtf": "striprtf==0.0.35",
 }
 
 LATEX_OCR_REQUIREMENTS = ["pix2tex[gui]", "torch", "torchvision"]
 
 
 LATEX_OCR_LOCK = "latex-ocr"
+
+OFFICE_VIEWERS_REQUIREMENTS = ["mammoth", "python-pptx", "openpyxl", "xlrd", "striprtf"]
+OFFICE_VIEWERS_LOCK = "office-viewers"
 
 
 def lock_file(pip_name: str) -> str:

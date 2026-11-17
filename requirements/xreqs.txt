@@ -28,12 +28,16 @@ charset-normalizer==3.5.1
     # via requests
 click==8.3.3
     # via uvicorn
+cobble==0.1.4
+    # via mammoth
 cryptography==50.0.1
     # via
     #   pyhanko
     #   pyhanko-certvalidator
 deprecated==1.3.1
     # via pikepdf
+et-xmlfile==2.0.0
+    # via openpyxl
 fastapi==0.141.1
     # via riemann (pyproject.toml)
 filelock==3.32.5
@@ -64,6 +68,9 @@ lxml==6.1.3
     #   riemann (pyproject.toml)
     #   pikepdf
     #   pyhanko
+    #   python-pptx
+mammoth==1.13.0
+    # via riemann (pyproject.toml)
 markdown==3.10.1
     # via riemann (pyproject.toml)
 markdown-it-py==4.2.0
@@ -75,6 +82,8 @@ numpy==2.4.6
     #   riemann (pyproject.toml)
     #   onnxruntime
 onnxruntime==1.29.0
+    # via riemann (pyproject.toml)
+openpyxl==3.1.5
     # via riemann (pyproject.toml)
 oscrypto==1.3.0
     # via pyhanko-certvalidator
@@ -89,6 +98,7 @@ pillow==12.3.0
     # via
     #   riemann (pyproject.toml)
     #   pikepdf
+    #   python-pptx
 protobuf==7.36.1
     # via onnxruntime
 psutil==7.2.2
@@ -121,6 +131,8 @@ pyside6-essentials==6.10.1
     # via
     #   pyside6
     #   pyside6-addons
+python-pptx==1.0.2
+    # via riemann (pyproject.toml)
 pyyaml==6.0.3
     # via
     #   huggingface-hub
@@ -141,6 +153,8 @@ shiboken6==6.10.1
     #   pyside6-essentials
 starlette==1.6.0
     # via fastapi
+striprtf==0.0.35
+    # via riemann (pyproject.toml)
 tokenizers==0.23.2
     # via riemann (pyproject.toml)
 tqdm==4.70.0
@@ -154,6 +168,7 @@ typing-extensions==4.16.0
     #   huggingface-hub
     #   pydantic
     #   pydantic-core
+    #   python-pptx
     #   starlette
     #   typing-inspection
 typing-inspection==0.4.4
@@ -170,6 +185,10 @@ uvicorn==0.52.4
     # via riemann (pyproject.toml)
 wrapt==2.5.2
     # via deprecated
+xlrd==2.0.2
+    # via riemann (pyproject.toml)
+xlsxwriter==3.3.1
+    # via python-pptx
 yt-dlp==2026.10.26
     # via riemann (pyproject.toml)
 yt-dlp-ejs==0.8.0

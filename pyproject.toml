@@ -41,7 +41,12 @@ dependencies = [
 
 # Shipped inside release builds. Install via: pip install .[bundled]
 bundled = [
+    "mammoth==1.13.0",
+    "openpyxl==3.1.5",
     "Pygments==2.21.0",
+    "python-pptx==1.0.2",
+    "striprtf==0.0.35",
+    "xlrd==2.0.2",
     "yt-dlp==2026.10.26",
     "yt-dlp-ejs==0.8.0",
 ]

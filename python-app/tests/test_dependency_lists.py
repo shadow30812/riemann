@@ -25,6 +25,7 @@ IMPORT_TO_DIST = {
     "pygments": "pygments",
     "pyhanko": "pyhanko",
     "PySide6": "pyside6",
+    "pptx": "python-pptx",
 }
 NOT_DISTRIBUTIONS = {"riemann", "riemann_core"}
 

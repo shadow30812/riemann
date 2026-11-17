@@ -11,7 +11,9 @@ python-app/riemann/assets/requirements/:
   versions PINNED repeats) gets <name>.txt, with the packages in COMPANIONS
   (yt-dlp brings its YouTube solver and Deno, the JavaScript runtime that runs
   it); ONLY_AS_COMPANION ones get no lock of their own;
-- LATEX_OCR gets latex-ocr.txt, everything Snip-to-LaTeX needs in one go.
+- LATEX_OCR gets latex-ocr.txt, everything Snip-to-LaTeX needs in one go;
+- OFFICE_VIEWERS gets office-viewers.txt, the readers behind the basic views
+  of Office files when LibreOffice isn't installed.
 
 All locks are resolved against one shared set of versions
 (requirements/optional-all.txt, every optional package at once) and the app's own pinned dependencies, so two
@@ -39,6 +41,7 @@ PYTHON_VERSION = "3.11"
 COMPANIONS = {"yt-dlp": ["yt-dlp-ejs", "deno"]}
 ONLY_AS_COMPANION = {"yt-dlp-ejs"}
 LATEX_OCR = ["pix2tex", "torch", "torchvision"]
+OFFICE_VIEWERS = ["mammoth", "python-pptx", "openpyxl", "xlrd", "striprtf"]
 
 
 def dist_name(requirement: str) -> str:
@@ -85,6 +88,7 @@ def main() -> int:
             extra = [by_name[c] for c in COMPANIONS.get(name, [])]
             compile_lock([requirement] + extra, os.path.join(OUT, f"{name}.txt"), [core, shared])
         compile_lock([by_name[n] for n in LATEX_OCR], os.path.join(OUT, "latex-ocr.txt"), [core, shared])
+        compile_lock([by_name[n] for n in OFFICE_VIEWERS], os.path.join(OUT, "office-viewers.txt"), [core, shared])
     print(f"Wrote the locks in {os.path.relpath(OUT, ROOT)}")
     return 0
 
