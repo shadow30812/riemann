@@ -99,6 +99,27 @@ def _relative_rect(rect, origin_x: float, origin_y: float, cw: float, ch: float)
     return (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
 
 
+def _display_space(page) -> "pdf_annotations._PageSpace":
+    """The crop box (clipped to the media box) and /Rotate of a pypdf page, as the renderer shows it."""
+    def box(b):
+        return (float(b.left), float(b.bottom), float(b.right), float(b.top))
+
+    try:
+        rotate = int(page.rotation or 0)
+    except Exception:
+        rotate = 0
+    return pdf_annotations._PageSpace(pdf_annotations.visible_box(box(page.cropbox), box(page.mediabox)), rotate)
+
+
+def _relative_display_rect(rect, space) -> tuple:
+    """Maps a PDF rectangle to 0..1 coordinates on the page as displayed, top-left origin."""
+    if not rect:
+        return (0.0, 0.0, 0.0, 0.0)
+    u1, v1 = space.from_pdf(rect[0], rect[1])
+    u2, v2 = space.from_pdf(rect[2], rect[3])
+    return (min(u1, u2), min(v1, v2), max(u1, u2), max(v1, v2))
+
+
 def read_comments_from_core(doc) -> Dict[int, List[Dict[str, Any]]]:
     """
     Same result as read_external_comments, read through the Rust core. Each
@@ -148,11 +169,7 @@ def read_external_comments(path: str) -> Dict[int, List[Dict[str, Any]]]:
             if "/Annots" not in page:
                 continue
             annots = page["/Annots"]
-            crop = page.cropbox
-            origin_x = float(crop.left)
-            origin_y = float(crop.bottom)
-            cw = float(crop.width) if float(crop.width) > 0 else 1.0
-            ch = float(crop.height) if float(crop.height) > 0 else 1.0
+            space = _display_space(page)
 
             page_comments = []
             for annot_ref in annots:
@@ -187,10 +204,7 @@ def read_external_comments(path: str) -> Dict[int, List[Dict[str, Any]]]:
                         str(obj.get("/M", "") or obj.get("/CreationDate", "") or "")
                     )
                     rect = obj.get("/Rect", [])
-                    rel_rect = _relative_rect(
-                        [float(v) for v in rect] if len(rect) == 4 else None,
-                        origin_x, origin_y, cw, ch,
-                    )
+                    rel_rect = _relative_display_rect([float(v) for v in rect] if len(rect) == 4 else None, space)
 
                     page_comments.append(
                         {

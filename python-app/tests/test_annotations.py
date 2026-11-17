@@ -12,6 +12,9 @@ if not QApplication.instance():
 
 
 class DummyAnnotationReader(AnnotationsMixin):
+    def pdf_path(self):
+        return self.current_path
+
     def __init__(self):
         self.current_path = "/fake/path/doc.pdf"
         self.annotations = {}
@@ -158,10 +161,9 @@ def test_load_external_comments(mock_pdf_reader_cls, mock_isfile, reader):
     mock_page = MagicMock()
     mock_page.__contains__.side_effect = lambda key: key == "/Annots"
     mock_page.__getitem__.side_effect = lambda key: [mock_annot] if key == "/Annots" else None
-    mock_page.cropbox.left = 0
-    mock_page.cropbox.bottom = 0
-    mock_page.cropbox.width = 600
-    mock_page.cropbox.height = 800
+    for box in (mock_page.cropbox, mock_page.mediabox):
+        box.left, box.bottom, box.right, box.top = 0, 0, 600, 800
+    mock_page.rotation = 0
 
     mock_pdf = MagicMock()
     mock_pdf.pages = [mock_page]

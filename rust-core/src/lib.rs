@@ -84,6 +84,16 @@ impl DisplayFrame {
         }
     }
 
+    /// Width of the page as displayed, in points.
+    fn width(&self) -> f32 {
+        if self.rotation % 180 == 90 { self.top - self.bottom } else { self.right - self.left }
+    }
+
+    /// Height of the page as displayed, in points.
+    fn height(&self) -> f32 {
+        if self.rotation % 180 == 90 { self.right - self.left } else { self.top - self.bottom }
+    }
+
     /// Converts a (left, top, right, bottom) box.
     fn rect(&self, r: &PdfRect) -> (f32, f32, f32, f32) {
         let (x1, y1) = self.point(r.left().value, r.top().value);
@@ -824,9 +834,10 @@ impl RiemannDocument {
     /// Okular): every annotation with text contents except links, form widgets
     /// and popups.
     ///
-    /// Returns `(crop_box, comments)`: the visible page box (crop box clipped to
-    /// the media box, as `DisplayFrame` uses) as `(left, bottom, right, top)`,
-    /// and a list of `(subtype, contents, author, date, (left, top, right, bottom))`.
+    /// Returns `(page_box, comments)`: the page as displayed, `(0, 0, width,
+    /// height)`, and a list of `(subtype, contents, author, date, (left, top,
+    /// right, bottom))` with each box mapped through `DisplayFrame`, like every
+    /// other box this module returns, so comments on rotated pages line up.
     /// Dates are the raw PDF date strings (`D:YYYYMMDDHHmmSS...`).
     fn get_comments(
         &self,
@@ -844,7 +855,7 @@ impl RiemannDocument {
             let page = pages.get(page_at(page_index)?).map_err(value_err)?;
 
             let frame = DisplayFrame::of(&page);
-            let crop = (frame.left, frame.bottom, frame.right, frame.top);
+            let crop = (0.0, 0.0, frame.width(), frame.height());
 
             let mut comments = Vec::new();
             for annotation in page.annotations().iter() {
@@ -872,7 +883,7 @@ impl RiemannDocument {
                     .to_string();
                 let bounds = annotation
                     .bounds()
-                    .map(|r| (r.left().value, r.top().value, r.right().value, r.bottom().value))
+                    .map(|r| frame.rect(&r))
                     .unwrap_or((0.0, 0.0, 0.0, 0.0));
                 comments.push((annotation_subtype_name(kind), contents, author, date, bounds));
             }

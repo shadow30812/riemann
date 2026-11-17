@@ -210,3 +210,38 @@ def test_silent_scroll_moves_the_content_but_skips_the_scroll_handler(qapp):
     assert seen_ignore == [True]
     assert getattr(tab, "_ignore_scroll", False) is False
     tab.deleteLater()
+
+
+def _rotated_pdf_with_comment(path, rotate):
+    import pikepdf
+
+    from riemann.core import pdf_annotations
+
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(600, 800))
+    page = pdf.pages[0]
+    page.obj["/Rotate"] = rotate
+    rect = pdf_annotations._page_space(page).rect(0.1, 0.1, 0.3, 0.2)
+    annot = pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name.Annot,
+            Subtype=pikepdf.Name.Text,
+            Rect=pikepdf.Array(list(rect)),
+            Contents=pikepdf.String("From another viewer"),
+        )
+    )
+    page.obj["/Annots"] = pikepdf.Array([annot])
+    pdf.save(path)
+    return str(path)
+
+
+@pytest.mark.parametrize("rotate", [0, 90, 180, 270])
+def test_comments_on_rotated_pages_are_placed_as_displayed(tmp_path, rotate):
+    from riemann.ui.reader.mixins.annotations import read_comments_from_core, read_external_comments
+
+    path = _rotated_pdf_with_comment(tmp_path / f"r{rotate}.pdf", rotate)
+    expected = pytest.approx((0.1, 0.1, 0.3, 0.2), abs=1e-3)
+    assert read_external_comments(path)[0][0]["rel_rect"] == expected
+    riemann_core = pytest.importorskip("riemann_core")
+    doc = riemann_core.PdfEngine().load_document(path, None)
+    assert read_comments_from_core(doc)[0][0]["rel_rect"] == expected

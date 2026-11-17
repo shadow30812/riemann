@@ -110,9 +110,10 @@ class RiemannDocument:
             page_index: Zero-based index of the page.
 
         Returns:
-            (crop_box, comments). The crop box is (left, bottom, right, top).
-            Each comment is (subtype, contents, author, date, (left, top, right,
-            bottom)), with the date as a raw PDF date string.
+            (page_box, comments). The page box is (0, 0, width, height) of the
+            page as displayed. Each comment is (subtype, contents, author,
+            date, (left, top, right, bottom)) in the same display space as the
+            other boxes, with the date as a raw PDF date string.
         """
         ...
 
