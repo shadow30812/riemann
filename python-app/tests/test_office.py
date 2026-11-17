@@ -457,6 +457,26 @@ def test_incognito_conversions_stay_out_of_the_cache(qtbot, tmp_path, fake):
         app_settings().remove(OFFICE_PATH_KEY)
 
 
+def test_incognito_spreadsheets_stay_out_of_the_cache(qtbot, tmp_path, fake):
+    from riemann.app import RiemannWindow
+
+    app_settings().setValue(OFFICE_PATH_KEY, fake.path)
+    win = RiemannWindow(incognito=True, restore_session=False)
+    qtbot.addWidget(win)
+    try:
+        book = tmp_path / "private.xlsx"
+        book.write_bytes(b"PK")
+        tab = win._open_document(str(book), preview=False)
+        assert wait_for(lambda: tab.worker is None)
+        folder = tab.office_folder
+        assert folder and any(name.endswith(".xlsx") for name in os.listdir(folder))
+        assert not os.path.exists(office.files_dir()) or not os.listdir(office.files_dir())
+        tab.cleanup()
+        assert not os.path.exists(folder)
+    finally:
+        app_settings().remove(OFFICE_PATH_KEY)
+
+
 def test_settings_finds_libreoffice_and_deletes_converted_copies(window, fake, tmp_path):
     from riemann.ui.system.settings_tab import SettingsTab
 

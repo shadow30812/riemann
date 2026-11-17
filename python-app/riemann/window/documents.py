@@ -343,7 +343,10 @@ class DocumentsMixin:
     def _create_viewer(self, kind: str, path: str, preview: bool) -> QWidget:
         """The ImageTab, TableTab or SpreadsheetTab for path."""
         viewer = {"image": ImageTab, "spreadsheet": SpreadsheetTab}.get(kind, TableTab)
-        widget = viewer(path, getattr(self, "dark_mode", False), preview=preview)
+        if viewer is SpreadsheetTab:
+            widget = viewer(path, getattr(self, "dark_mode", False), preview=preview, incognito=bool(getattr(self, "incognito", False)))
+        else:
+            widget = viewer(path, getattr(self, "dark_mode", False), preview=preview)
         if isinstance(widget, TableTab):
             widget.renamed.connect(lambda w=widget: self._retitle_tab(w))
         return widget

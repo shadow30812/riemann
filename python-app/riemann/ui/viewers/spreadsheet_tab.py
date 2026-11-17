@@ -18,12 +18,15 @@ fills in its sheets when a SpreadsheetWorker is done:
 
 With LibreOffice, "Show as pages" asks the window for a reader tab that shows
 the workbook as LibreOffice prints it, charts and pictures included.
-Closing the tab while it opens cancels both steps.
+Closing the tab while it opens cancels both steps. In an incognito window
+(incognito=True) LibreOffice's copy goes to a temporary folder of the tab's
+own, deleted when it closes, so nothing stays in the cache.
 """
 
 import json
 import os
 import shutil
+import tempfile
 import threading
 from typing import Iterator, Optional
 
@@ -103,9 +106,10 @@ def _jsonl_rows(file: str) -> Iterator[list]:
 
 
 class SpreadsheetTab(TableTab):
-    def __init__(self, path: str, dark_mode: bool = False, preview: bool = False, parent=None):
+    def __init__(self, path: str, dark_mode: bool = False, preview: bool = False, parent=None, incognito: bool = False):
         super().__init__(path, dark_mode, preview, sheets=[], parent=parent)
         self.folder: Optional[str] = None
+        self.office_folder = tempfile.mkdtemp(prefix="riemann-office-") if incognito else None
         self.btn_pages = QToolButton()
         self.btn_pages.setProperty("icon_name", "file-text.svg")
         self.btn_pages.setToolTip("Show the workbook as LibreOffice prints it, charts and pictures included")
@@ -120,7 +124,7 @@ class SpreadsheetTab(TableTab):
         self.apply_ui_theme(dark_mode)
         self.status.setText(f"Opening {os.path.basename(self.current_path)}…")
         self.worker: Optional[SpreadsheetWorker] = SpreadsheetWorker(
-            self.current_path, app_settings().value(OFFICE_PATH_KEY, "", type=str)
+            self.current_path, app_settings().value(OFFICE_PATH_KEY, "", type=str), self.office_folder
         )
         self.worker.loaded.connect(self._on_loaded)
         self.worker.failed.connect(self._on_failed)
@@ -156,6 +160,7 @@ class SpreadsheetTab(TableTab):
             worker.cancel()
             release(worker, worker.loaded, worker.failed)
         super().cleanup()
-        if self.folder:
-            shutil.rmtree(self.folder, ignore_errors=True)
-            self.folder = None
+        for folder in (self.folder, self.office_folder):
+            if folder:
+                shutil.rmtree(folder, ignore_errors=True)
+        self.folder = self.office_folder = None
