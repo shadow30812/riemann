@@ -50,6 +50,7 @@ from .render_worker import PageRenderWorker
 from ...core.render_process import PageRenderer
 from .widgets import PageWidget
 from ..palette import CONTENT, overlay_style, tokens
+from ..shortcuts import share_keys
 from .mixins.toolbar import ToolbarMixin
 from .mixins.navigation import NavigationMixin
 from .mixins.selection import SelectionMixin
@@ -236,6 +237,7 @@ class ReaderTab(
         sc2 = QShortcut(QKeySequence("Ctrl+Shift+Tab"), self)
         sc2.setContext(Qt.ShortcutContext.WindowShortcut)
         sc2.activated.connect(lambda: self.cycle_tab(-1))
+        share_keys(self)
 
     def _get_tab_widget(self) -> Optional[QTabWidget]:
         """The QTabWidget this tab sits in, or None."""

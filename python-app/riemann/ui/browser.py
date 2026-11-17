@@ -152,6 +152,7 @@ from ..core import permissions
 from ..core.captions_server import CaptionsServer
 from .browser_handlers import WHATSAPP_HEADER_UA, WHATSAPP_HOST, ScriptInjector
 from .palette import incognito_url_style, link_tip_style, toast_style, tokens
+from .shortcuts import share_keys
 from .toast import Toast
 from ..core.log import log
 from ..core.settings import (
@@ -1360,6 +1361,7 @@ class BrowserTab(QWidget):
         self.shortcut_devtools = QShortcut(QKeySequence("Ctrl+Shift+I"), self)
         self.shortcut_devtools.setContext(Qt.ShortcutContext.WindowShortcut)
         self.shortcut_devtools.activated.connect(self.open_devtools)
+        share_keys(self)
 
         self.apply_theme()
         self.web.installEventFilter(self)

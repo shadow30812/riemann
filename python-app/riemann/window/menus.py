@@ -118,11 +118,8 @@ class MenusMixin:
         self.fav_folder_menu.aboutToShow.connect(self._populate_fav_folder_menu)
 
         self.fav_menu.addSeparator()
-        action_manage_fav = self.fav_menu.addAction("Manage Favorites (Ctrl+Shift+F)")
+        action_manage_fav = self.fav_menu.addAction("Manage Favorites")
         action_manage_fav.triggered.connect(self.manage_favorites)
-        QShortcut(QKeySequence("Ctrl+Shift+F"), self).activated.connect(
-            self.manage_favorites
-        )
 
         action_open_folder = file_menu.addAction("Open Folder (Ctrl+K, Ctrl+O)")
         action_open_folder.triggered.connect(lambda: self.open_folder())

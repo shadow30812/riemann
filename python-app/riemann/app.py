@@ -92,6 +92,7 @@ from .ui.components import (
 from .ui.explorer import FileExplorerPanel
 from .ui.palette import UI_FONT
 from .ui.reader.render_worker import stop_all_render_workers
+from .ui.shortcuts import share_keys
 from .ui.reader.tab import ReaderTab
 from .ui.threads import wait_for_released
 from .ui.sidecar import AiSidecarPanel
@@ -302,6 +303,7 @@ class RiemannWindow(
 
         self.setup_menu()
         self._init_shortcuts()
+        share_keys(self)
         self._restore_session()
 
         self.setMouseTracking(True)

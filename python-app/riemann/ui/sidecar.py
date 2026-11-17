@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
 )
 
 from .palette import tinted_icon, tokens
+from .shortcuts import share_keys
 from .reader.utils import render_markdown_safely
 from ..core.log import log
 from ..core.settings import app_settings
@@ -578,6 +579,7 @@ class AiSidecarPanel(QWidget):
         layout.addLayout(outer)
 
         QShortcut(QKeySequence("Ctrl+L"), self, activated=self.input.setFocus)
+        share_keys(self)
 
     def eventFilter(self, obj, event) -> bool:
         if obj is self.input and event.type() == event.Type.KeyPress:
