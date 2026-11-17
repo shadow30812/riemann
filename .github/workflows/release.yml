@@ -161,6 +161,11 @@ jobs:
               --include-package=uvicorn `
               --include-package=yt_dlp_ejs `
               --include-package-data=yt_dlp_ejs `
+              --include-package=mammoth `
+              --include-package=pptx `
+              --include-package=openpyxl `
+              --include-package=xlrd `
+              --include-package=striprtf `
               --include-data-file=libs/pdfium.dll=pdfium.dll `
               --windows-console-mode=attach `
               --windows-icon-from-ico=python-app/riemann/assets/icons/windows-icon.ico `

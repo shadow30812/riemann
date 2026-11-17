@@ -6,7 +6,8 @@ This configuration file defines the build process for creating the standalone
 Riemann executable. It handles:
 1. Resource collection (riemann package, PySide6, and onnxruntime, tokenizers
    and uvicorn's dynamically imported modules for the AI engine, which runs
-   as this executable with --riemann-ai-sidecar). Asset files that only
+   as this executable with --riemann-ai-sidecar; the readers behind the
+   basic Office views, imported only inside the converter's functions). Asset files that only
    matter in a checkout (the JavaScript tests, logs) are left out.
 2. Binary dependency management (libpdfium).
 3. Exclusion of the modules listed in scripts/build-excludes.txt, the list
@@ -53,7 +54,7 @@ def collect_resources():
     binaries += q_binaries
     hiddenimports += q_hidden
 
-    for package in ('onnxruntime', 'tokenizers', 'yt_dlp_ejs'):
+    for package in ('onnxruntime', 'tokenizers', 'yt_dlp_ejs', 'mammoth', 'pptx', 'openpyxl', 'xlrd', 'striprtf'):
         p_datas, p_binaries, p_hidden = collect_all(package)
         datas += p_datas
         binaries += p_binaries

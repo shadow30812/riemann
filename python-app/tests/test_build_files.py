@@ -43,6 +43,13 @@ def test_build_bundles_the_local_youtube_solver(build):
     assert "yt_dlp_ejs" in (REPO / build).read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("build", BUILDS)
+def test_build_bundles_the_office_readers(build):
+    text = (REPO / build).read_text(encoding="utf-8")
+    for package in ("mammoth", "pptx", "openpyxl", "xlrd", "striprtf"):
+        assert f"--include-package={package}" in text or f"'{package}'" in text, package
+
+
 def test_windows_builds_agree_on_console_mode_and_icon():
     builds = [(REPO / b).read_text(encoding="utf-8") for b in ("scripts/nbuild.ps1", ".github/workflows/release.yml")]
     modes = [re.findall(r"^\s*--windows-console-mode=(\w+)", t, re.M) for t in builds]

@@ -129,6 +129,11 @@ python3 -m nuitka \
     --include-package=uvicorn \
     --include-package=yt_dlp_ejs \
     --include-package-data=yt_dlp_ejs \
+    --include-package=mammoth \
+    --include-package=pptx \
+    --include-package=openpyxl \
+    --include-package=xlrd \
+    --include-package=striprtf \
     --include-data-file=libs/libpdfium.so=libpdfium.so \
     --include-data-files=${QT_STAGING}/lib/*=./ \
     --output-dir=dist \

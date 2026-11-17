@@ -68,6 +68,11 @@ python -m nuitka `
     --include-package=uvicorn `
     --include-package=yt_dlp_ejs `
     --include-package-data=yt_dlp_ejs `
+    --include-package=mammoth `
+    --include-package=pptx `
+    --include-package=openpyxl `
+    --include-package=xlrd `
+    --include-package=striprtf `
     --include-data-file=libs/pdfium.dll=pdfium.dll `
     --include-windows-runtime-dlls=no `
     --windows-console-mode=attach `
