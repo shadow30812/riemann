@@ -18,7 +18,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent / "riemann"
 
 def _sources():
     for path in sorted(ROOT.rglob("*.py")):
-        if "riemann_ai_engine" in path.parts or "__pycache__" in path.parts:
+        if "__pycache__" in path.parts:
             continue
         yield path, ast.parse(path.read_text(encoding="utf-8"))
 

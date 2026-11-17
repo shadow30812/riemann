@@ -10,6 +10,12 @@ it becomes a page-render child, and with --riemann-ai-sidecar
 (riemann.core.ai_engine.SERVER_FLAG) the AI search engine. Neither loads Qt,
 so those checks come before the Qt setup below.
 
+On Linux, a folder on LD_LIBRARY_PATH that holds another Qt 6 (some
+engineering tools put theirs there) makes the dynamic loader pick its
+libraries over the bundled ones, and Riemann fails to start. Such folders are
+dropped and the process starts itself again once, which only an environment
+variable set before launch can achieve.
+
 The Windows build has no console, so a crash during startup used to vanish
 without a trace. Startup errors and native crashes are now written to
 crash.log in the app's data folder (%LOCALAPPDATA%\\Riemann on Windows,
@@ -75,11 +81,17 @@ def _report_crash() -> None:
             pass
 
 
-if sys.platform.startswith("linux"):
-    # Self-sanitization: Protect against toxic library paths in LD_LIBRARY_PATH (e.g. /opt/plecs)
-    _ld_path = os.environ.get("LD_LIBRARY_PATH", "")
-    if "plecs" in _ld_path and "_RIEMANN_SANITIZED" not in os.environ:
-        _clean_parts = [p for p in _ld_path.split(":") if "plecs" not in p and p]
+def _foreign_qt_dirs(paths: list) -> list:
+    """The LD_LIBRARY_PATH folders that hold a Qt 6 other than the one bundled with Riemann."""
+    own = os.path.dirname(os.path.abspath(__file__))
+    return [p for p in paths if p and not os.path.abspath(p).startswith(own) and os.path.exists(os.path.join(p, "libQt6Core.so.6"))]
+
+
+if sys.platform.startswith("linux") and "_RIEMANN_SANITIZED" not in os.environ:
+    _ld_parts = os.environ.get("LD_LIBRARY_PATH", "").split(":")
+    _foreign = _foreign_qt_dirs(_ld_parts)
+    if _foreign:
+        _clean_parts = [p for p in _ld_parts if p and p not in _foreign]
         if _clean_parts:
             os.environ["LD_LIBRARY_PATH"] = ":".join(_clean_parts)
         else:

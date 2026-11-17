@@ -6,8 +6,8 @@ This configuration file defines the build process for creating the standalone
 Riemann executable. It handles:
 1. Resource collection (riemann package, PySide6, and onnxruntime, tokenizers
    and uvicorn's dynamically imported modules for the AI engine, which runs
-   as this executable with --riemann-ai-sidecar). The old packed AI
-   environment in assets/riemann_ai_engine is left out if it is still there.
+   as this executable with --riemann-ai-sidecar). Asset files that only
+   matter in a checkout (the JavaScript tests, logs) are left out.
 2. Binary dependency management (libpdfium).
 3. Exclusion of the modules listed in scripts/build-excludes.txt, the list
    the Nuitka builds use too: on-demand and unused libraries (torch, cv2),
@@ -53,7 +53,7 @@ def collect_resources():
     binaries += q_binaries
     hiddenimports += q_hidden
 
-    for package in ('onnxruntime', 'tokenizers'):
+    for package in ('onnxruntime', 'tokenizers', 'yt_dlp_ejs'):
         p_datas, p_binaries, p_hidden = collect_all(package)
         datas += p_datas
         binaries += p_binaries
@@ -65,10 +65,10 @@ def collect_resources():
         'uvicorn.lifespan.on',
         'riemann.core.ai_server',
     ]
-    datas = [d for d in datas if 'riemann_ai_engine' not in d[0]]
+    datas = [d for d in datas if '__tests__' not in d[0] and not d[0].endswith('.log')]
     hiddenimports = [h for h in hiddenimports if not _excluded(h)]
 
-    icon_path = os.path.join('python-app', 'riemann', 'assets', 'icons', 'icon.ico')
+    icon_path = os.path.join('python-app', 'riemann', 'assets', 'icons', 'windows-icon.ico')
     png_path = os.path.join('python-app', 'riemann', 'assets', 'icons', 'Icon.png')
 
     if os.path.exists(icon_path):
@@ -150,5 +150,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='python-app/riemann/assets/icons/icon.ico',
+    icon='python-app/riemann/assets/icons/windows-icon.ico',
 )

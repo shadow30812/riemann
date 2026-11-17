@@ -58,17 +58,20 @@ python -m nuitka `
     --enable-plugin=pyside6 `
     --include-package=riemann `
     --include-data-dir=python-app/riemann/assets=riemann/assets `
-    --noinclude-data-files=riemann/assets/riemann_ai_engine/* `
+    --noinclude-data-files=riemann/assets/__tests__/* `
+    --noinclude-data-files=riemann/assets/*.log `
     --include-package=onnxruntime `
     --include-package-data=onnxruntime `
     --noinclude-data-files=onnxruntime/datasets/* `
     --noinclude-data-files=onnxruntime/tools/* `
     --include-package=tokenizers `
     --include-package=uvicorn `
+    --include-package=yt_dlp_ejs `
+    --include-package-data=yt_dlp_ejs `
     --include-data-file=libs/pdfium.dll=pdfium.dll `
     --include-windows-runtime-dlls=no `
-    --windows-console-mode=disable `
-    --windows-icon-from-ico=python-app/riemann/assets/icons/icon.ico `
+    --windows-console-mode=attach `
+    --windows-icon-from-ico=python-app/riemann/assets/icons/windows-icon.ico `
     --output-dir=dist `
     --output-filename=Riemann.exe `
     @EXCLUDE_ARGS `

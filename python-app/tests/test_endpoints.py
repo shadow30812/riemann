@@ -45,7 +45,7 @@ def test_loopback_url():
 def test_loopback_address_is_written_only_in_core_endpoints():
     offenders = []
     for path in sorted(ROOT.rglob("*.py")):
-        if "riemann_ai_engine" in path.parts or "__pycache__" in path.parts or path.name == "endpoints.py":
+        if "__pycache__" in path.parts or path.name == "endpoints.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         docstrings = {

@@ -1,6 +1,6 @@
 # Runs every test suite on pushes and pull requests: the Python app (offscreen
-# Qt), the Rust OCR worker and the Rust core, plus a lint for undefined and
-# unused names. PDFium and the benchmark PDFs are downloaded by their own
+# Qt), the start page's JavaScript (Jest, versions from package-lock.json), the
+# Rust OCR worker and the Rust core, plus a lint for undefined and unused names. PDFium and the benchmark PDFs are downloaded by their own
 # scripts, each pinned by SHA-256. The AI model is not downloaded; its tests
 # that need it are skipped.
 name: Tests
@@ -71,11 +71,21 @@ jobs:
           pip install --no-deps dist-wheels/*.whl
 
       - name: Lint
-        run: pipx run ruff check --select F python-app/riemann python-app/tests --exclude python-app/riemann/assets/riemann_ai_engine
+        run: pipx run ruff check --select F python-app/riemann python-app/tests
 
       - name: Python tests
         working-directory: python-app
         run: python -m pytest tests -q -p no:cacheprovider
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: JavaScript tests (start page, audio engine)
+        run: |
+          npm ci
+          npx jest python-app/riemann/assets/__tests__
 
       - name: Rust tests
         run: |

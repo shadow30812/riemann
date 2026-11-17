@@ -119,13 +119,16 @@ python3 -m nuitka \
     $UPX_PLUGIN \
     --include-package=riemann \
     --include-data-dir=python-app/riemann/assets=riemann/assets \
-    --noinclude-data-files='riemann/assets/riemann_ai_engine/*' \
+    --noinclude-data-files='riemann/assets/__tests__/*' \
+    --noinclude-data-files='riemann/assets/*.log' \
     --include-package=onnxruntime \
     --include-package-data=onnxruntime \
     --noinclude-data-files='onnxruntime/datasets/*' \
     --noinclude-data-files='onnxruntime/tools/*' \
     --include-package=tokenizers \
     --include-package=uvicorn \
+    --include-package=yt_dlp_ejs \
+    --include-package-data=yt_dlp_ejs \
     --include-data-file=libs/libpdfium.so=libpdfium.so \
     --include-data-files=${QT_STAGING}/lib/*=./ \
     --output-dir=dist \
