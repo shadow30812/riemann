@@ -27,7 +27,9 @@ Security: the app starts the server with RIEMANN_AI_PORT (a free port on
 127.0.0.1) and RIEMANN_AI_TOKEN (a random secret). Every request must carry
 the token in the X-Riemann-Token header, compared with hmac.compare_digest. A
 web page cannot add that header without a CORS preflight, which the server
-never approves.
+never approves. Without a token the server refuses to start, and a server
+whose token is somehow empty refuses every request, so a stray launch can
+never serve unauthenticated.
 
 Vectors are cached on disk when RIEMANN_AI_CACHE is set, keyed by the file's
 path, size, modification time, the chunking and MODEL_NAME, so a paper is
@@ -49,6 +51,7 @@ import hmac
 import json
 import os
 import re
+import sys
 import threading
 import urllib.request
 from contextlib import asynccontextmanager
@@ -225,7 +228,7 @@ class LibrarySearchRequest(BaseModel):
 
 def token_ok(token: Optional[str]) -> bool:
     if not AUTH_TOKEN:
-        return True
+        return False
     return hmac.compare_digest((token or "").encode(), AUTH_TOKEN.encode())
 
 
@@ -455,8 +458,10 @@ async def generate_tags(req: TagRequest) -> dict[str, list[str]]:
 def main() -> None:
     import uvicorn
 
-    port = int(os.environ.get("RIEMANN_AI_PORT", "8080"))
-    uvicorn.run(app, host=LOOPBACK, port=port, log_level="info")
+    port = os.environ.get("RIEMANN_AI_PORT", "")
+    if not AUTH_TOKEN or not port.isdigit():
+        sys.exit("The AI engine is started by Riemann, which sets RIEMANN_AI_PORT and RIEMANN_AI_TOKEN; refusing to run without them.")
+    uvicorn.run(app, host=LOOPBACK, port=int(port), log_level="info")
 
 
 if __name__ == "__main__":

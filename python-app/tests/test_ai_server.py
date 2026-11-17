@@ -38,13 +38,13 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(srv, "embedder", embedder)
     monkeypatch.setattr(srv, "load_status", "ready")
     monkeypatch.setattr(srv, "load_error", "")
-    monkeypatch.setattr(srv, "AUTH_TOKEN", "")
+    monkeypatch.setattr(srv, "AUTH_TOKEN", "test-token")
     monkeypatch.setattr(srv, "CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(srv, "vectors", None)
     monkeypatch.setattr(srv, "chunk_metadata", [])
     srv.indexes.clear()
     srv.tag_embeddings.clear()
-    with TestClient(srv.app) as c:
+    with TestClient(srv.app, headers={"X-Riemann-Token": "test-token"}) as c:
         c.embedder = embedder
         yield c
 
@@ -298,3 +298,27 @@ def test_the_engine_starts_as_a_child_process_and_loads_the_model(tmp_path, monk
         assert tags == {"tags": ["Machine Learning"]}
     finally:
         ai_engine.stop()
+
+
+def test_server_without_a_token_refuses_every_request(client, monkeypatch):
+    monkeypatch.setattr(srv, "AUTH_TOKEN", "")
+    assert client.get("/status", headers={"X-Riemann-Token": ""}).status_code == 403
+    assert not srv.token_ok("")
+    assert not srv.token_ok(None)
+
+
+@pytest.mark.parametrize("env", [{}, {"RIEMANN_AI_PORT": "8080"}, {"RIEMANN_AI_TOKEN": "x"}])
+def test_server_refuses_to_start_without_port_and_token(env):
+    import subprocess
+    import sys
+
+    child_env = {k: v for k, v in os.environ.items() if not k.startswith("RIEMANN_AI_")}
+    child_env.pop("LD_LIBRARY_PATH", None)
+    child_env.update(env)
+    result = subprocess.run(
+        [sys.executable, "-m", "riemann.core.ai_server"],
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        env=child_env, capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode != 0
+    assert "refusing to run" in result.stderr
