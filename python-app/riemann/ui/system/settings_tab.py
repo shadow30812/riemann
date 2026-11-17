@@ -45,6 +45,7 @@ from ...core.settings import (
     DEFAULT_UI_SCALE,
     HOMEPAGE_NAME_KEY,
     OCR_LANGUAGES_KEY,
+    OFFICE_ASK_KEY,
     OFFICE_PATH_KEY,
     POPULAR_SITES_KEY,
     SEARCH_URL_KEY,
@@ -69,7 +70,7 @@ def app_version() -> str:
 
 
 class _OfficeBridge(QObject):
-    found = Signal(str)
+    found = Signal(str, bool)
 
 
 class SettingsTab(SectionedSystemTab):
@@ -216,7 +217,11 @@ class SettingsTab(SectionedSystemTab):
         self.lbl_office.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         check = QPushButton("Check again")
         check.clicked.connect(lambda: self._find_office(again=True))
+        self.btn_install_office = QPushButton("Install…")
+        self.btn_install_office.setVisible(False)
+        self.btn_install_office.clicked.connect(self._install_office)
         status_row.addWidget(self.lbl_office, 1)
+        status_row.addWidget(self.btn_install_office)
         status_row.addWidget(check)
         setting_row(c, "LibreOffice", status)
         program = row_container()
@@ -231,8 +236,12 @@ class SettingsTab(SectionedSystemTab):
         program_row.addWidget(self.txt_office_path, 1)
         program_row.addWidget(browse_office)
         setting_row(c, "LibreOffice program", program, "Only needed when it is installed somewhere unusual.")
+        self.cb_office_ask = self._check(
+            self._bool(OFFICE_ASK_KEY, True), lambda v: self._set_value(OFFICE_ASK_KEY, v)
+        )
+        setting_row(c, "Offer to install LibreOffice", self.cb_office_ask, "When an Office file is opened without it.")
         self._office_bridge = _OfficeBridge(self)
-        self._office_bridge.found.connect(self.lbl_office.setText)
+        self._office_bridge.found.connect(self._show_office)
         self._find_office()
 
         c = card(layout, "Reading")
@@ -504,11 +513,21 @@ class SettingsTab(SectionedSystemTab):
             found = office.find_office(override)
             text = found.label if found is not None else "Not installed"
             try:
-                bridge.found.emit(text)
+                bridge.found.emit(text, found is not None)
             except RuntimeError:
                 pass
 
         threading.Thread(target=work, name="riemann-find-office", daemon=True).start()
+
+    def _show_office(self, text: str, found: bool) -> None:
+        self.lbl_office.setText(text)
+        self.btn_install_office.setVisible(not found)
+
+    def _install_office(self) -> None:
+        from ..office_install import InstallDialog
+
+        InstallDialog(self).exec()
+        self._find_office(again=True)
 
     def _set_office_path(self) -> None:
         self._set_value(OFFICE_PATH_KEY, self.txt_office_path.text().strip())

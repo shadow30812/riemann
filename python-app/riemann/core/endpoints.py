@@ -7,8 +7,9 @@ the Security rules in AGENTS.md). loopback_url builds a request URL for one.
 
 The remote ones are the scholarly metadata APIs, the link formats written into
 citations and exports, the model host, the release downloads (the Snip-to-LaTeX
-module pack), the CDN KaTeX comes from, and the AI providers of the assistant
-panel. Whatever is fetched from these is pinned by version and hash where it is
+module pack), the CDN KaTeX comes from, the AI providers of the assistant
+panel, and LibreOffice's download page and the Flathub repository it can be
+installed from (core/office_install.py). Whatever is fetched from these is pinned by version and hash where it is
 used. The web search engine and the Ollama address are user settings
 (core.settings.search_url, ui.sidecar.ollama_url); only their defaults are here.
 
@@ -36,6 +37,9 @@ GEMINI_API = "https://generativelanguage.googleapis.com/v1beta"
 OLLAMA_DEFAULT_URL = "http://localhost:11434"
 
 DEFAULT_SEARCH_URL = "https://www.google.com/search?q={query}"
+
+LIBREOFFICE_DOWNLOAD = "https://www.libreoffice.org/download/download-libreoffice/"
+FLATHUB_REPO = "https://dl.flathub.org/repo/flathub.flatpakrepo"
 
 
 def loopback_url(port: int, path: str = "") -> str:

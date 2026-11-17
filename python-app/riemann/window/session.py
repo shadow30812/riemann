@@ -243,6 +243,13 @@ class SessionMixin:
         if isinstance(items, str):
             items = [items]
 
+        self._restoring_tabs = True
+        try:
+            self._restore_items(items, target_widget)
+        finally:
+            self._restoring_tabs = False
+
+    def _restore_items(self, items: list, target_widget: QTabWidget) -> None:
         for item in items:
             if isinstance(item, str) and os.path.exists(item):
                 self._add_pdf_tab(item, target_widget)

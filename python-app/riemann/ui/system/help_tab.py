@@ -215,6 +215,9 @@ TOPICS = [
                     "PDF (Ctrl+S): the PDF opens in the tab, and highlights and notes work there.",
                     "To change the file itself, click Edit in LibreOffice above the pages. When you save "
                     "it there, the tab updates on its own and stays on the same page.",
+                    "Without LibreOffice, Riemann offers to install it, with your system's packages, "
+                    "Flatpak or winget. It shows the commands first and runs nothing until you click "
+                    "Install. Settings > Documents can install it later too.",
                     "Riemann's copy of LibreOffice runs no macros and loads no pictures from the web, so "
                     "opening a file never tells its sender. Settings > Documents shows where LibreOffice "
                     "was found, and Settings > Privacy deletes the converted copies.",

@@ -357,9 +357,10 @@ def test_the_tab_updates_when_the_file_is_saved_elsewhere(window, tmp_path, fake
     tab.cleanup()
 
 
-def test_without_libreoffice_the_tab_says_what_is_needed(window, tmp_path, monkeypatch):
+def test_a_restored_tab_without_libreoffice_says_what_is_needed(window, tmp_path, monkeypatch):
     monkeypatch.setenv("RIEMANN_NO_OFFICE", "1")
-    tab = window._open_document(docx(tmp_path / "report.docx"), preview=False)
+    window._restore_tabs_from_items([{"type": "doc", "data": docx(tmp_path / "report.docx")}], window.tabs_main)
+    tab = window.tabs_main.widget(window.tabs_main.count() - 1)
     page = []
     assert wait_for(lambda: tab.convert_worker is None and tab.web is not None)
     assert wait_for(lambda: (tab.web.page().toHtml(page.append), bool(page) and "needs LibreOffice" in page[-1])[1])

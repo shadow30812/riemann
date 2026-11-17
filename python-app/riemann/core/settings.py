@@ -64,6 +64,7 @@ NOTES_VISIBLE_KEY = "reader/notes_visible"
 SIDEBAR_VISIBLE_KEY = "reader/sidebar_visible"
 SIDEBAR_MODE_KEY = "reader/sidebar_mode"
 OFFICE_PATH_KEY = "office/libreoffice_path"
+OFFICE_ASK_KEY = "office/ask_to_install"
 
 SEARCH_URL_KEY = "browser/search_url"
 

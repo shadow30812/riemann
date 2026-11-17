@@ -7,6 +7,12 @@ the window's attributes freely, as they did when they lived in one class.
 Notes:
 
 open_path: A tab still loading in the background only knows its _load_path.
+
+_office_ready: opening an Office file (not a preview) without LibreOffice
+asks to install it (ui/office_install.py), once per kind of Office file per
+session and only while Settings allows asking. Declined, the file isn't
+opened and a message says why. Tabs restored from a session never ask: they
+open and say in the page that LibreOffice is needed.
 """
 
 import os
@@ -38,8 +44,9 @@ from ..ui.palette import tinted_icon, tokens
 from ..ui.reader.tab import PreviewReaderTab, ReaderTab
 from ..ui.viewers import ImageTab, TableTab
 from ..core.assets import icon_path
-from ..core.doctypes import HTML_SUFFIXES, VIEWER_KINDS, dialog_filter, document_kind, is_reader_name
-from ..core.settings import get_dialog_directory, save_last_directory
+from ..core import office
+from ..core.doctypes import HTML_SUFFIXES, VIEWER_KINDS, dialog_filter, document_kind, is_reader_name, office_type
+from ..core.settings import OFFICE_ASK_KEY, OFFICE_PATH_KEY, get_dialog_directory, save_last_directory
 
 
 class DocumentsMixin:
@@ -265,6 +272,22 @@ class DocumentsMixin:
         """'pdf', 'markdown', 'html', 'ebook', 'office', 'image', 'table', 'text' or 'binary' (core/doctypes.py)."""
         return document_kind(path)
 
+    def _office_ready(self, path: str) -> bool:
+        if getattr(self, "_restoring_tabs", False):
+            return True
+        if office.find_office(self.settings.value(OFFICE_PATH_KEY, "", type=str)) is not None:
+            return True
+        asked = self.__dict__.setdefault("_office_asked", set())
+        kind = office_type(path) or "document"
+        if self.settings.value(OFFICE_ASK_KEY, True, type=bool) and kind not in asked:
+            asked.add(kind)
+            from ..ui.office_install import offer_office
+
+            if offer_office(self, path):
+                return True
+        self.show_toast(f"{os.path.basename(path)} needs LibreOffice. Settings > Documents can install it.")
+        return False
+
     def _refuse_binary(self, path: str) -> None:
         self.show_toast(f"{os.path.basename(path)} isn't a document, image or text file, so Riemann can't show it.")
 
@@ -337,6 +360,8 @@ class DocumentsMixin:
         kind = self._document_kind(path)
         if kind == "binary":
             self._refuse_binary(path)
+            return None
+        if kind == "office" and not preview and not self._office_ready(path):
             return None
         self.add_to_history(path, "web" if kind == "html" else "pdf")
 
@@ -415,6 +440,8 @@ class DocumentsMixin:
                 return
             if kind in VIEWER_KINDS:
                 self._open_document(path, tab_widget)
+                return
+            if kind == "office" and not getattr(reader, "is_preview", False) and not self._office_ready(path):
                 return
             self.add_to_history(path, "web" if kind == "html" else "pdf")
             reader.load_document(path)
