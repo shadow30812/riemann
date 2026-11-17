@@ -50,6 +50,7 @@ import weakref
 from typing import Any, Optional
 
 from .assets import PACKAGE_DIR, is_frozen
+from .processes import NO_WINDOW
 
 log = logging.getLogger("riemann")
 
@@ -175,14 +176,13 @@ class RenderProcess:
         self.ready = threading.Event()
         self.failed: Optional[str] = None
         self.proc: Optional[subprocess.Popen] = None
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
         try:
             self.proc = subprocess.Popen(
                 child_command(),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 env=_child_env(),
-                creationflags=flags,
+                **NO_WINDOW,
             )
         except OSError as error:
             self._fail(f"could not start: {error}")

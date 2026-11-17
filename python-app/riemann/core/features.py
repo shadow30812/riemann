@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 from .log import log
+from .processes import NO_WINDOW
 from .settings import app_settings, get_dialog_directory, save_last_directory
 from ..ui.palette import LIGHT
 from .settings import DEFAULT_DIR_KEY, LAST_DIR_KEY
@@ -730,7 +731,7 @@ class CaptionGeneratorWorker(QThread):
             ]
 
             subprocess.run(
-                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, **NO_WINDOW
             )
 
             self.finished.emit(True, f"Successfully created:\n{output_path}\n{srt_path}")

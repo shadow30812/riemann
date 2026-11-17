@@ -14,6 +14,10 @@
 //! form feed after the last page. A blank page gives an empty string. If the
 //! number of pages read back does not match, it is an error rather than text
 //! assigned to the wrong page.
+//!
+//! `recognize_text_in` feeds the image to Tesseract's stdin from a thread
+//! while the caller reads its stdout and stderr: writing it all first could
+//! block for ever once Tesseract, still reading, filled its stderr pipe.
 
 use anyhow::{Context, Result};
 use image::{ImageBuffer, Rgba};
@@ -23,6 +27,22 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static BATCH: AtomicU64 = AtomicU64::new(0);
+
+/// `CREATE_NO_WINDOW`: no console window for Tesseract in the windowed Windows build.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// A `tesseract` command that opens no console window on Windows.
+fn tesseract() -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new("tesseract");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
 
 /// Encodes raw RGBA pixels as a PNG.
 pub fn encode_png(width: u32, height: u32, data: &[u8]) -> Result<Vec<u8>> {
@@ -103,7 +123,7 @@ impl OcrEngine {
         }
         let png_data = encode_png(width, height, data)?;
 
-        let mut child = Command::new("tesseract")
+        let mut child = tesseract()
             .arg("stdin")
             .arg("stdout")
             .arg("-l")
@@ -114,15 +134,19 @@ impl OcrEngine {
             .spawn()
             .context("Tesseract process failed to start. Please ensure 'tesseract-ocr' is installed and in your PATH.")?;
 
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(&png_data)
-                .context("Failed to pipe PNG data to Tesseract stdin")?;
-        }
+        let writer = child.stdin.take().map(|mut stdin| {
+            std::thread::spawn(move || stdin.write_all(&png_data))
+        });
 
         let output = child
             .wait_with_output()
             .context("Failed to wait for Tesseract process execution")?;
+        if let Some(writer) = writer {
+            writer
+                .join()
+                .map_err(|_| anyhow::anyhow!("The thread feeding Tesseract panicked"))?
+                .context("Failed to pipe PNG data to Tesseract stdin")?;
+        }
 
         if !output.status.success() {
             let err_msg = String::from_utf8_lossy(&output.stderr);
@@ -152,7 +176,7 @@ impl OcrEngine {
         let list_path = dir.0.join("pages.txt");
         std::fs::write(&list_path, list).context("Failed to write the OCR page list")?;
 
-        let output = Command::new("tesseract")
+        let output = tesseract()
             .arg(&list_path)
             .arg("stdout")
             .arg("-l")
