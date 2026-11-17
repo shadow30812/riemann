@@ -30,7 +30,7 @@ test:
 
 test-rust:
 	cargo test -p riemann_ocr_worker
-	cd rust-core && PYO3_PYTHON="$(realpath {{python}})" LD_LIBRARY_PATH="$({{python}} -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')" cargo test --no-default-features
+	PYO3_PYTHON="$(realpath {{python}})" LD_LIBRARY_PATH="$({{python}} -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')" cargo test --manifest-path rust-core/Cargo.toml --no-default-features
 
 clean:
 	cargo clean
