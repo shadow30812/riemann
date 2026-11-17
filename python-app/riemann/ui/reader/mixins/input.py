@@ -7,7 +7,9 @@ QWidget, so its Qt event handlers override QWidget's.
 Notes:
 
 eventFilter: Clicks on links tolerate more hand jitter before they turn into a
-text selection and stop following the link.
+text selection and stop following the link. A resize of the page area re-fits
+the pages in the fit zoom modes even when the tab keeps its size: pure full
+screen hides the toolbar and the side rail, and the pages get wider.
 """
 
 import os
@@ -47,6 +49,8 @@ class InputMixin(ReaderHostBase):
     _press_on_link = False
 
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Resize and source is self.scroll:
+            self._schedule_fit_refresh()
         if event.type() == QEvent.Type.MouseButtonPress and event.button() in (
             Qt.MouseButton.BackButton,
             Qt.MouseButton.ForwardButton,

@@ -139,6 +139,27 @@ def test_rail_follows_the_toolbar_and_can_be_hidden(qapp, reader, store):
 
 
 @pytest.mark.skipif(not os.path.exists(CORPUS), reason="benchmark corpus not downloaded")
+@pytest.mark.parametrize("fit,mode", [("Fit Width", "FIT_WIDTH"), ("Fit Height", "FIT_HEIGHT"), ("Auto Fit", "AUTO_FIT")])
+def test_fit_modes_refit_when_full_screen_hides_the_bars(qapp, reader, store, fit, mode):
+    """Pure full screen hides the toolbar and the side rail: the pages get more room though the tab keeps its size."""
+    from riemann.core.constants import ZoomMode
+
+    reader.apply_zoom_string(fit)
+    pump(qapp, 0.3)
+    before = reader._last_applied_scale
+    reader.update_fullscreen_icon(2)
+    reader.toolbar.hide()
+    assert not reader.toolbar_layout.rail.isVisible()
+    pump(qapp, 0.5)
+    assert reader.zoom_mode == ZoomMode[mode]
+    assert reader._last_applied_scale == pytest.approx(reader.calculate_scale())
+    assert reader._last_applied_scale > before
+    reader.toolbar.show()
+    reader.update_fullscreen_icon(0)
+    pump(qapp, 0.5)
+    assert reader._last_applied_scale == pytest.approx(before)
+
+
 def test_full_screen_pill_only_in_default_and_custom(qapp, reader, store):
     tl.set_layout("default")
     pump(qapp, 0.2)
