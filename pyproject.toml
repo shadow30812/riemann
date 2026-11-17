@@ -11,7 +11,9 @@ requires-python = ">=3.11"
 # The one list of Python dependencies. Install via: pip install .
 # Optional features are installed on demand by the app at the versions in
 # core/dependencies.py PINNED; the "bundled" and "extra" groups below repeat
-# them (tests/test_dependencies.py checks the two agree). requirements/xreqs.txt
+# them (tests/test_dependency_lists.py checks the two agree), and
+# scripts/lock_optional.py turns them into the hashed locks the app installs
+# from (python-app/riemann/assets/requirements/). requirements/xreqs.txt
 # is a lock generated from this file (requirements/requirements.sh); the
 # Windows release compiles its own lock from it.
 dependencies = [
@@ -40,11 +42,13 @@ dependencies = [
 # Shipped inside release builds. Install via: pip install .[bundled]
 bundled = [
     "Pygments==2.21.0",
-    "yt-dlp>=2026.8.19",
+    "yt-dlp==2026.10.26",
+    "yt-dlp-ejs==0.8.0",
 ]
 
 # Heavy features (Snip-to-LaTeX, local captions). Install via: pip install .[extra]
 extra = [
+    "deno==2.9.8",
     "faster-whisper==1.2.1",
     "opencv-python-headless==5.0.0.93",
     "pandas==3.0.5",

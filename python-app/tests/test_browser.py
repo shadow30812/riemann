@@ -523,8 +523,8 @@ def test_browser_tab_download_finished(mock_injector, qtbot, webengine):
     assert tab.btn_download.toolTip() == "Download Video via yt-dlp"
 
 
-def test_ytdlp_worker_remote_components_and_single_video():
-    """Item 8: YtDlpWorker configures remote_components and noplaylist for single video."""
+def test_ytdlp_worker_downloads_no_solver_code_and_single_video():
+    """YtDlpWorker never asks yt-dlp to download solver code, and sets noplaylist for a single video."""
     worker = YtDlpWorker("https://youtube.com/watch?v=123", "/tmp", {"playlist": False})
     with patch("yt_dlp.YoutubeDL") as mock_ydl:
         mock_inst = MagicMock()
@@ -532,7 +532,7 @@ def test_ytdlp_worker_remote_components_and_single_video():
         worker.run()
         assert mock_ydl.called
         opts = mock_ydl.call_args[0][0]
-        assert opts.get("remote_components") == ["ejs:github"]
+        assert "remote_components" not in opts
         assert opts.get("noplaylist") is True
 
 
@@ -548,8 +548,8 @@ def test_ytdlp_worker_playlist_options():
         assert "playlist_index" in opts.get("outtmpl", "")
 
 
-def test_ytdlp_stream_worker_remote_components():
-    """Item 8: YtDlpStreamWorker sets remote_components."""
+def test_ytdlp_stream_worker_downloads_no_solver_code():
+    """YtDlpStreamWorker never asks yt-dlp to download solver code."""
     worker = YtDlpStreamWorker("https://youtube.com/watch?v=123")
     with patch("yt_dlp.YoutubeDL") as mock_ydl:
         mock_inst = MagicMock()
@@ -557,7 +557,7 @@ def test_ytdlp_stream_worker_remote_components():
         mock_ydl.return_value.__enter__.return_value = mock_inst
         worker.run()
         opts = mock_ydl.call_args[0][0]
-        assert opts.get("remote_components") == ["ejs:github"]
+        assert "remote_components" not in opts
 
 
 def test_ytdlp_settings_dialog_playlist_autodetection(qapp):

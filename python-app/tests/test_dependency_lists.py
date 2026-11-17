@@ -91,3 +91,57 @@ def test_nothing_declared_is_unused():
     dists = {IMPORT_TO_DIST.get(m, m.lower().replace("_", "-")) for m in imported}
     unused = [r for r in project["dependencies"] if _name(r) not in dists]
     assert unused == []
+
+
+def _lock_pins(path):
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    entries = re.findall(r"^([A-Za-z0-9][^\s;\\]*)[^\n]*((?:\n\s+--hash=sha256:[0-9a-f]{64}[^\n]*)+)", text, re.M)
+    return {_name(req): req.split("==", 1)[1] for req, _ in entries}, len(entries), len(re.findall(r"^[A-Za-z0-9]", text, re.M))
+
+
+def test_every_on_demand_package_has_a_hashed_lock_with_its_pinned_version():
+    from riemann.core.dependencies import LATEX_OCR_LOCK, LATEX_OCR_REQUIREMENTS, lock_file
+
+    for name, req in PINNED.items():
+        if name == "yt-dlp-ejs":
+            continue
+        pins, hashed, listed = _lock_pins(lock_file(name))
+        assert hashed == listed, name
+        assert pins[_name(req)] == req.split("==", 1)[1], name
+    pins, hashed, listed = _lock_pins(lock_file(LATEX_OCR_LOCK))
+    assert hashed == listed
+    for name in LATEX_OCR_REQUIREMENTS:
+        assert pins[_name(PINNED[name])] == PINNED[name].split("==", 1)[1]
+    pins, _, _ = _lock_pins(lock_file("yt-dlp"))
+    assert pins["yt-dlp-ejs"] == PINNED["yt-dlp-ejs"].split("==", 1)[1]
+
+
+def test_installs_require_hashes_and_take_nothing_outside_the_lock():
+    from riemann.core.dependencies import pip_install_command
+
+    command = pip_install_command("python", "pix2tex[gui]")
+    assert command[:4] == ["python", "-m", "pip", "install"]
+    assert "--require-hashes" in command and "--no-deps" in command
+    assert command[-2] == "-r" and command[-1].endswith(os.path.join("requirements", "pix2tex.txt"))
+
+
+def test_startup_never_creates_the_venv_or_looks_for_python(tmp_path, monkeypatch):
+    from riemann.core import dependencies
+
+    monkeypatch.setattr(dependencies, "_venv_paths", lambda: (str(tmp_path), str(tmp_path / "venv"), str(tmp_path / "venv" / "bin" / "python")))
+    started = []
+    monkeypatch.setattr(dependencies.subprocess, "check_output", lambda *a, **k: started.append(a))
+    monkeypatch.setattr(dependencies.subprocess, "check_call", lambda *a, **k: started.append(a))
+    monkeypatch.setattr(dependencies, "_find_base_python", lambda: started.append("probe") or "python")
+    assert dependencies.mount_existing_venv() is False
+    assert dependencies.venv_python() == ""
+    assert started == []
+    assert not (tmp_path / "venv").exists()
+
+
+def test_app_startup_mounts_only_an_existing_venv():
+    with open(os.path.join(APP, "app.py"), encoding="utf-8") as f:
+        source = f.read()
+    assert "mount_existing_venv()" in source
+    assert "setup_and_get_venv" not in source

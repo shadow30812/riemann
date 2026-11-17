@@ -16,7 +16,8 @@ from PySide6.QtCore import QThread, Signal
 
 from ...core import ai_engine
 from ...core.settings import AI_TAGS_KEY, OCR_LANGUAGES_KEY, app_settings, string_list
-from ...core.dependencies import LATEX_OCR_REQUIREMENTS, requirement, setup_and_get_venv
+from ...core.processes import NO_WINDOW
+from ...core.dependencies import LATEX_OCR_LOCK, pip_install_command, setup_and_get_venv
 from ...core.log import log
 from ...core.endpoints import CROSSREF_WORKS, OPENALEX_WORKS, USER_AGENT, loopback_url
 
@@ -132,14 +133,7 @@ class InstallerThread(QThread):
         Invokes core module subprocess installations targeting python packages required for inference.
         """
         try:
-            cmd = [
-                setup_and_get_venv(),
-                "-m",
-                "pip",
-                "install",
-                *(requirement(name) for name in LATEX_OCR_REQUIREMENTS),
-            ]
-            subprocess.check_call(cmd)
+            subprocess.check_call(pip_install_command(setup_and_get_venv(), LATEX_OCR_LOCK))
             self.finished_install.emit()
         except Exception as e:
             self.install_error.emit(f"Installer Error: {e}")
@@ -166,7 +160,7 @@ def available_ocr_languages() -> list[str]:
     """The languages the installed Tesseract can read ([] when it is missing)."""
     try:
         out = subprocess.run(
-            ["tesseract", "--list-langs"], capture_output=True, text=True, timeout=10
+            ["tesseract", "--list-langs"], capture_output=True, text=True, timeout=10, **NO_WINDOW
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return []

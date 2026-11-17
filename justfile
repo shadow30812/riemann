@@ -20,6 +20,11 @@ build:
 fetch-pdfium:
 	{{python}} scripts/fetch_pdfium.py
 
+# Rewrites the hashed locks of optional packages and requirements/xreqs.txt after a version in pyproject.toml changes. Needs uv and network.
+lock:
+	{{python}} scripts/lock_optional.py
+	bash requirements/requirements.sh
+
 test:
 	bash scripts/test_runner.sh
 

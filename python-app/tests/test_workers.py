@@ -107,8 +107,8 @@ def test_model_downloader_reports_network_errors(tmp_path):
 def test_installer_pins_versions(mock_check_call, mock_venv):
     InstallerThread().run()
     args = mock_check_call.call_args[0][0]
-    pinned = [a for a in args if a.startswith(("pix2tex", "torch"))]
-    assert pinned and all("==" in a for a in pinned)
+    assert "--require-hashes" in args and "--no-deps" in args
+    assert args[-1].endswith("latex-ocr.txt")
 
 
 def test_tag_request_sends_the_users_labels(qapp, monkeypatch):

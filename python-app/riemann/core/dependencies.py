@@ -4,9 +4,16 @@ Optional Python packages and the private virtual environment they live in.
 Heavy features (snip-to-LaTeX, live captions, video streaming) need packages
 that are not bundled with Riemann. They are installed on request into a venv in
 the app's local data folder. Installs use the exact versions in PINNED, the
-ones Riemann was tested with, so a compromised or broken future release on PyPI
-is never pulled in silently. yt-dlp is the exception: sites change often enough
-that an old yt-dlp stops working, so it gets a minimum version instead.
+ones Riemann was tested with, and are made from the hashed locks in
+assets/requirements/ (lock_file): pip runs with --require-hashes and
+--no-deps, so every package, dependencies included, must match the version and
+SHA-256 in the lock, and a substituted file on PyPI is refused.
+scripts/lock_optional.py writes the locks from pyproject.toml; run it after
+changing a version. yt-dlp needs updating more often than the rest, since
+sites change; it comes with yt-dlp-ejs, the pinned JavaScript that solves
+YouTube's challenges locally, and with Deno from PyPI, the JavaScript runtime
+the solver runs in (ui/browser.py js_runtimes points yt-dlp at it; a Deno on
+PATH works too), so yt-dlp never downloads solver code at run time.
 
 Notes:
 
@@ -14,12 +21,17 @@ _venv_site_paths: Interrogate site-packages only; NEVER inject standard library
 directories into sys.path.
 
 setup_and_get_venv: If the venv exists, ensure its Python major/minor matches
-the current interpreter.
+the current interpreter. It may look for an installed Python and create the
+venv, which takes seconds, so only the installers call it, on their worker
+threads. Startup calls mount_existing_venv, which only adds the site-packages
+of a venv that is already there (from a cached list) and never starts a
+process for a missing one.
 """
 
 import importlib
 import json
 import os
+import re
 import shutil
 import site
 import subprocess
@@ -38,12 +50,13 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 from .log import log
-from .assets import is_frozen
+from .assets import asset_path, is_frozen
+from .processes import NO_WINDOW
 from ..ui.palette import app_is_dark, tokens
 
 
-# Keeps subprocesses from flashing a console window in the Windows GUI build.
-_NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+_NO_WINDOW = NO_WINDOW
+PYTHON_PROBE_TIMEOUT = 5
 
 
 def _is_frozen() -> bool:
@@ -78,7 +91,7 @@ def _find_base_python() -> str:
             out = subprocess.check_output(
                 [exe, *cmd[1:], "-c", "import sys; print(sys.executable); print(f'{sys.version_info[0]}.{sys.version_info[1]}')"],
                 text=True,
-                timeout=15,
+                timeout=PYTHON_PROBE_TIMEOUT,
                 **_NO_WINDOW,
             ).split()
         except Exception:
@@ -154,22 +167,48 @@ def _venv_site_paths(venv_dir: str, python_exe: str) -> list:
     return paths
 
 
+def _venv_paths() -> tuple:
+    data_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
+    venv_dir = os.path.join(data_dir, "venv")
+    if os.name == "nt":
+        return data_dir, venv_dir, os.path.join(venv_dir, "Scripts", "python.exe")
+    return data_dir, venv_dir, os.path.join(venv_dir, "bin", "python")
+
+
+def _mount(venv_dir: str, python_exe: str) -> None:
+    for sp in _venv_site_paths(venv_dir, python_exe):
+        if os.path.exists(sp) and sp not in sys.path:
+            site.addsitedir(sp)
+    importlib.invalidate_caches()
+
+
+def venv_python() -> str:
+    """The optional-packages venv's Python, or "" when the venv has not been created."""
+    python_exe = _venv_paths()[2]
+    return python_exe if os.path.exists(python_exe) else ""
+
+
+def mount_existing_venv() -> bool:
+    """Adds an existing venv's packages to sys.path; True when there was one for this Python to mount."""
+    _, venv_dir, python_exe = _venv_paths()
+    if not os.path.exists(python_exe):
+        return False
+    try:
+        if _venv_version(venv_dir, python_exe) != f"{sys.version_info[0]}.{sys.version_info[1]}":
+            return False
+        _mount(venv_dir, python_exe)
+    except Exception as e:
+        print(f"[Riemann Warning] Failed to mount local virtual environment: {e}")
+        return False
+    return True
+
+
 def setup_and_get_venv() -> str:
     """
     Creates (or, after a Python upgrade, recreates) the optional-packages venv in the
     app data folder, adds its site-packages to sys.path, and returns its Python.
     """
-    data_dir = QStandardPaths.writableLocation(
-        QStandardPaths.StandardLocation.AppLocalDataLocation
-    )
-    venv_dir = os.path.join(data_dir, "venv")
-
-    win = os.name == "nt"
-    python_exe = (
-        os.path.join(venv_dir, "Scripts", "python.exe")
-        if win
-        else os.path.join(venv_dir, "bin", "python")
-    )
+    data_dir, venv_dir, python_exe = _venv_paths()
 
     if os.path.exists(python_exe):
         try:
@@ -190,14 +229,7 @@ def setup_and_get_venv() -> str:
         )
 
     try:
-        site_paths = _venv_site_paths(venv_dir, python_exe)
-
-        for sp in site_paths:
-            if os.path.exists(sp) and sp not in sys.path:
-                site.addsitedir(sp)
-
-        importlib.invalidate_caches()
-
+        _mount(venv_dir, python_exe)
     except Exception as e:
         print(f"[Riemann Warning] Failed to mount local virtual environment: {e}")
 
@@ -212,7 +244,9 @@ PINNED = {
     "transformers": "transformers==5.16.1",
     "scipy": "scipy==1.17.1",
     "pandas": "pandas==3.0.5",
-    "yt-dlp": "yt-dlp>=2026.8.19",
+    "yt-dlp": "yt-dlp==2026.10.26",
+    "yt-dlp-ejs": "yt-dlp-ejs==0.8.0",
+    "deno": "deno==2.9.8",
     "Pygments": "Pygments==2.21.0",
     "faster-whisper": "faster-whisper==1.2.1",
 }
@@ -220,9 +254,18 @@ PINNED = {
 LATEX_OCR_REQUIREMENTS = ["pix2tex[gui]", "torch", "torchvision"]
 
 
-def requirement(pip_name: str) -> str:
-    """The pinned pip requirement for a package name from the catalogue."""
-    return PINNED.get(pip_name, pip_name)
+LATEX_OCR_LOCK = "latex-ocr"
+
+
+def lock_file(pip_name: str) -> str:
+    """The hashed lock a catalogue package (or LATEX_OCR_LOCK) is installed from."""
+    name = re.split(r"[\[<>=! ]", pip_name, 1)[0].lower().replace("_", "-")
+    return asset_path("requirements", f"{name}.txt")
+
+
+def pip_install_command(python: str, pip_name: str) -> list:
+    """Installs exactly what the lock lists, refusing any file whose hash differs."""
+    return [python, "-m", "pip", "install", "--require-hashes", "--no-deps", "-r", lock_file(pip_name)]
 
 
 class DependencyWorker(QThread):
@@ -240,13 +283,7 @@ class DependencyWorker(QThread):
     def run(self):
         try:
             cmd = (
-                [
-                    setup_and_get_venv(),
-                    "-m",
-                    "pip",
-                    "install",
-                    requirement(self.pip_name),
-                ]
+                pip_install_command(setup_and_get_venv(), self.pip_name)
                 if self.action == "install"
                 else [
                     setup_and_get_venv(),
@@ -312,6 +349,7 @@ class DependenciesDialog(QDialog):
             "SciPy (Math/DSP Engine)": "scipy",
             "Pandas (Data Parsing)": "pandas",
             "YT-DLP (Video Streaming Engine)": "yt-dlp",
+            "Deno (runs YouTube's challenge solver)": "deno",
             "Pygments (Markdown Syntax)": "Pygments",
             "Faster-Whisper (Live Captions)": "faster-whisper",
         }
@@ -344,9 +382,12 @@ class DependenciesDialog(QDialog):
     def _check_pip_installed(self, pip_name: str) -> bool:
         """Safely checks if a pip package is installed via subprocess."""
         base_pkg = pip_name.split("[")[0]
+        python_exe = venv_python()
+        if not python_exe:
+            return False
         try:
             subprocess.check_output(
-                [setup_and_get_venv(), "-m", "pip", "show", base_pkg],
+                [python_exe, "-m", "pip", "show", base_pkg],
                 stderr=subprocess.DEVNULL,
                 **_NO_WINDOW,
             )

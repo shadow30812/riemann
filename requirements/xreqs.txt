@@ -172,3 +172,5 @@ wrapt==2.5.2
     # via deprecated
 yt-dlp==2026.10.26
     # via riemann (pyproject.toml)
+yt-dlp-ejs==0.8.0
+    # via riemann (pyproject.toml)

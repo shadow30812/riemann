@@ -204,6 +204,19 @@ def sanitize_homepage_links(payload: Any) -> Optional[str]:
     return json.dumps(links)
 
 
+def js_runtimes() -> dict:
+    """
+    yt-dlp's js_runtimes option: the Deno that the pinned deno package put
+    next to the optional-packages venv's Python, else Deno on PATH.
+    """
+    python = venv_python()
+    if python:
+        path = os.path.join(os.path.dirname(python), "deno" + (".exe" if os.name == "nt" else ""))
+        if os.path.isfile(path):
+            return {"deno": {"path": path}}
+    return {"deno": {}}
+
+
 class YtDlpStreamWorker(QThread):
     """
     Finds a direct stream URL for a page's media with yt-dlp, without downloading it, so
@@ -230,7 +243,7 @@ class YtDlpStreamWorker(QThread):
             "format": "best[ext=mp4]",
             "quiet": True,
             "noplaylist": True,
-            "remote_components": ["ejs:github"],
+            "js_runtimes": js_runtimes(),
         }
         if self.cookies_browser:
             ydl_opts["cookiesfrombrowser"] = (self.cookies_browser,)
@@ -274,7 +287,7 @@ class YtDlpWorker(QThread):
             "no_warnings": True,
             "progress_hooks": [self.progress_hook],
             "ignoreerrors": True,
-            "remote_components": ["ejs:github"],
+            "js_runtimes": js_runtimes(),
         }
 
         if is_playlist:
