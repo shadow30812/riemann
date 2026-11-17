@@ -18,6 +18,7 @@ import os
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -40,6 +41,8 @@ from PySide6.QtWidgets import (
 from ...core import ai_engine
 from ...core.bibliography import to_bibtex, to_csl_json
 from ...core.doctypes import DOCUMENT_CLASSES, document_class
+from ...core.assets import icon_path
+from ..file_icons import CLASS_ICONS, FOLDER_ICON, TEXT_ICON
 from ..threads import release as release_thread
 from ..threads import track
 from .base import SystemTab
@@ -83,7 +86,7 @@ class HistoryTab(SystemTab):
         self.doc_class = QComboBox()
         self.doc_class.addItem("All documents", "")
         for name in DOCUMENT_CLASSES:
-            self.doc_class.addItem(name, name)
+            self.doc_class.addItem(QIcon(icon_path(CLASS_ICONS[name])), name, name)
         self.doc_class.setToolTip("Show one kind of document")
         row.addWidget(self.doc_class)
         self.btn_open = QPushButton("Open")
@@ -138,6 +141,10 @@ class HistoryTab(SystemTab):
                     if kind == "pdf":
                         columns.insert(1, document_class(path))
                 item = QTreeWidgetItem(columns + [when(entry.get("timestamp", ""))])
+                if kind == "pdf":
+                    item.setIcon(1, QIcon(icon_path(CLASS_ICONS.get(columns[1], TEXT_ICON))))
+                elif kind == "folder":
+                    item.setIcon(0, QIcon(icon_path(FOLDER_ICON)))
                 item.setData(0, Qt.ItemDataRole.UserRole, path)
                 if kind == "pdf":
                     item.setData(1, Qt.ItemDataRole.UserRole, columns[1])

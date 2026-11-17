@@ -11,7 +11,8 @@ name says they are source code get the code icon.
 name_icon decides from the name alone and returns "" when the name says
 nothing, for the explorer, which never reads files. document_icon takes the
 kind core.doctypes found and may read the file (office_type of a renamed
-Office file).
+Office file). CLASS_ICONS gives the icon of each of core.doctypes'
+DOCUMENT_CLASSES, for History's Type column, and FOLDER_ICON marks folders.
 """
 
 import os
@@ -41,6 +42,19 @@ KIND_ICONS = {
     "html": "browser.png",
     "binary": "binary.png",
 }
+CLASS_ICONS = {
+    "PDF": "pdf.png",
+    "Word": "word.png",
+    "Slides": "slide.png",
+    "Spreadsheet": "sheet.png",
+    "Markdown": TEXT_ICON,
+    "E-book": "epub.png",
+    "Code": "code.png",
+    "Text": TEXT_ICON,
+    "Image": "gallery.png",
+    "Other": "binary.png",
+}
+FOLDER_ICON = "folder.png"
 OFFICE_ICONS = {"document": "word.png", "presentation": "slide.png", "drawing": "slide.png", "spreadsheet": "sheet.png"}
 
 

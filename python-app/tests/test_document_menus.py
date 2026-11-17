@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QMenu
 
 from riemann.app import RiemannWindow
 from riemann.core.assets import icon_path
-from riemann.ui.file_icons import KIND_ICONS, OFFICE_ICONS, name_icon
+from riemann.ui.file_icons import CLASS_ICONS, KIND_ICONS, OFFICE_ICONS, name_icon
 
 CORPUS_PDF = os.path.join(os.path.dirname(__file__), "..", "..", "benchmarks", "corpus", "attention.pdf")
 
@@ -112,3 +112,21 @@ def test_the_explorer_names_icons_without_reading_files():
 def test_every_document_icon_is_bundled():
     for name in set(KIND_ICONS.values()) | set(OFFICE_ICONS.values()) | {"code.png", "file.svg"}:
         assert os.path.exists(icon_path(name)), name
+
+
+def test_history_shows_each_document_type_with_its_icon(window, tmp_path):
+    from riemann.core.doctypes import DOCUMENT_CLASSES
+    from riemann.ui.system.lists import HistoryTab
+
+    assert set(CLASS_ICONS) == set(DOCUMENT_CLASSES)
+    report = tmp_path / "report.docx"
+    report.write_bytes(b"")
+    window.history_manager.add(str(report), "pdf")
+    window.history_manager.add(str(tmp_path), "folder")
+    tab = HistoryTab(window)
+    tab.refresh()
+    tree = tab.trees["pdf"]
+    item = next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount()) if tree.topLevelItem(i).text(1) == "Word")
+    assert not item.icon(1).isNull()
+    assert not tab.trees["folder"].topLevelItem(0).icon(0).isNull()
+    assert all(not tab.doc_class.itemIcon(i).isNull() for i in range(1, tab.doc_class.count()))
