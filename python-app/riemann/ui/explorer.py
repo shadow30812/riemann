@@ -37,14 +37,7 @@ from PySide6.QtWidgets import (
 from .palette import FONT_STACK, GridCanvas, path_row, short_folder, tinted_icon, tinted_pixmap, tokens
 from ..core.settings import FAVOURITE_FOLDERS_KEY, favourites_settings
 from ..core.assets import icon_path
-from ..core.doctypes import (
-    EBOOK_SUFFIXES,
-    HTML_SUFFIXES,
-    has_image_name,
-    has_office_name,
-    has_table_name,
-    is_reader_name,
-)
+from .file_icons import BLANK_ICON, name_icon
 
 
 
@@ -61,7 +54,7 @@ class FileIconProxyModel(QSortFilterProxyModel):
     def _get_icon(self, name):
         key = (name, self.dark_mode)
         if key not in self._cache:
-            self._cache[key] = QIcon(icon_path(f"{name}.svg", self.dark_mode))
+            self._cache[key] = QIcon(icon_path(name, self.dark_mode))
         return self._cache[key]
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
@@ -74,18 +67,10 @@ class FileIconProxyModel(QSortFilterProxyModel):
 
             name = model.fileInfo(source_index).fileName()
 
-            if has_image_name(name):
-                return self._get_icon("image")
-            if has_table_name(name) or has_office_name(name):
-                return self._get_icon("file-text")
-            if name.lower().endswith(EBOOK_SUFFIXES):
-                return self._get_icon("book-open")
-            if is_reader_name(name):
-                return self._get_icon("pdf")
-            elif name.lower().endswith(HTML_SUFFIXES):
-                return self._get_icon("browser")
-            else:
-                return self._get_icon("circle-question-mark")
+            icon = name_icon(name)
+            if icon:
+                return self._get_icon(icon)
+            return self._get_icon(BLANK_ICON)
 
         return super().data(index, role)
 

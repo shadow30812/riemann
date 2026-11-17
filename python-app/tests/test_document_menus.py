@@ -13,6 +13,8 @@ import pytest
 from PySide6.QtWidgets import QApplication, QMenu
 
 from riemann.app import RiemannWindow
+from riemann.core.assets import icon_path
+from riemann.ui.file_icons import KIND_ICONS, OFFICE_ICONS, name_icon
 
 CORPUS_PDF = os.path.join(os.path.dirname(__file__), "..", "..", "benchmarks", "corpus", "attention.pdf")
 
@@ -73,15 +75,40 @@ def test_each_kind_of_document_has_its_own_tab_icon(window, tmp_path):
         ("c.md", b"# c\n"),
         ("d.png", b"\x89PNG\r\n\x1a\n" + bytes(16)),
         ("e.py", b"print(1)\n"),
+        ("f.docx", b""),
+        ("g.pptx", b""),
+        ("h.xlsx", b""),
+        ("i.epub", b""),
+        ("notes", b"plain words\n"),
     ):
         path = tmp_path / name
         path.write_bytes(data)
         names[name] = window._document_icon_name(str(path))
     assert names == {
         "a.pdf": "pdf.png",
-        "b.csv": "file-spreadsheet.svg",
-        "c.md": "file-text.svg",
-        "d.png": "file-image.svg",
-        "e.py": "file-code.svg",
+        "b.csv": "sheet.png",
+        "c.md": "text.png",
+        "d.png": "gallery.png",
+        "e.py": "code.png",
+        "f.docx": "word.png",
+        "g.pptx": "slide.png",
+        "h.xlsx": "sheet.png",
+        "i.epub": "epub.png",
+        "notes": "text.png",
     }
     assert window._document_icon_name() == "file.svg"
+    assert window._document_icon_name(str(tmp_path / "b.csv"), text=True) == "text.png"
+
+
+def test_the_explorer_names_icons_without_reading_files():
+    assert name_icon("/nowhere/report.docx") == "word.png"
+    assert name_icon("/nowhere/deck.odp") == "slide.png"
+    assert name_icon("/nowhere/Makefile") == "code.png"
+    assert name_icon("/nowhere/photo.JPG") == "gallery.png"
+    assert name_icon("/nowhere/page.html") == "browser.png"
+    assert name_icon("/nowhere/blob") == ""
+
+
+def test_every_document_icon_is_bundled():
+    for name in set(KIND_ICONS.values()) | set(OFFICE_ICONS.values()) | {"code.png", "file.svg"}:
+        assert os.path.exists(icon_path(name)), name

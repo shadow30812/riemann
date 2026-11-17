@@ -57,17 +57,9 @@ from ..ui.viewers import ImageTab, SpreadsheetTab, TableTab
 from ..core.assets import icon_path
 from ..core import office
 from ..core.office_basic import basic_format, packages_ready
-from ..core.doctypes import HTML_SUFFIXES, VIEWER_KINDS, dialog_filter, document_class, document_kind, is_reader_name, office_type
+from ..core.doctypes import HTML_SUFFIXES, VIEWER_KINDS, dialog_filter, document_kind, is_reader_name, office_type
 from ..core.settings import AUTO_OPEN_DOWNLOADS_KEY, OFFICE_ASK_KEY, OFFICE_PATH_KEY, get_dialog_directory, save_last_directory
-
-
-DOCUMENT_ICONS = {
-    "pdf": "pdf.png",
-    "image": "file-image.svg",
-    "table": "file-spreadsheet.svg",
-    "spreadsheet": "file-spreadsheet.svg",
-    "ebook": "book-open.svg",
-}
+from ..ui.file_icons import BLANK_ICON, TEXT_ICON, document_icon
 
 
 class DocumentsMixin:
@@ -390,15 +382,10 @@ class DocumentsMixin:
     def _document_icon_name(self, path: str = "", text: bool = False) -> str:
         """The tab icon for path's kind of document; a page of text with text, a blank page without a path."""
         if not path:
-            return "file.svg"
+            return BLANK_ICON
         if text:
-            return "file-text.svg"
-        kind = self._viewer_kind(self._document_kind(path), path)
-        if kind == "office" and office_type(path) in ("presentation", "drawing"):
-            return "presentation.svg"
-        if kind in ("text", "markdown") and document_class(path) == "Code":
-            return "file-code.svg"
-        return DOCUMENT_ICONS.get(kind, "file-text.svg")
+            return TEXT_ICON
+        return document_icon(path, self._document_kind(path))
 
     def _document_icon(self, path: str = "", text: bool = False) -> QIcon:
         return QIcon(icon_path(self._document_icon_name(path, text), getattr(self, "dark_mode", False)))

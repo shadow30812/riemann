@@ -145,6 +145,12 @@ def has_text_name(path: str) -> bool:
     return name in TEXT_NAMES or name.endswith(TEXT_SUFFIXES)
 
 
+def has_code_name(path: str) -> bool:
+    """True for the source, build and style files CODE_SUFFIXES and CODE_NAMES list."""
+    name = os.path.basename(path).lower()
+    return name in CODE_NAMES or name.endswith(CODE_SUFFIXES)
+
+
 def has_image_name(path: str) -> bool:
     return path.lower().endswith(IMAGE_SUFFIXES)
 
@@ -264,8 +270,7 @@ def is_text_document(path: str) -> bool:
 
 
 def document_class(path: str) -> str:
-    name = os.path.basename(path).lower()
-    if name in CODE_NAMES or name.endswith(CODE_SUFFIXES):
+    if has_code_name(path):
         return "Code"
     if has_table_name(path):
         return "Spreadsheet"
