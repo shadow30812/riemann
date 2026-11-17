@@ -38,6 +38,7 @@ from ...core.dependencies import DependenciesDialog
 from ...core.log import log_folder
 from ...core.settings import (
     AI_TAGS_KEY,
+    AUTO_OPEN_DOWNLOADS_KEY,
     AUTOSCROLL_SPEED_KEY,
     DEFAULT_AUTOSCROLL_SPEED,
     DEFAULT_DIR_KEY,
@@ -129,7 +130,7 @@ class SettingsTab(SectionedSystemTab):
             "Used by the address bar, the start page and \"Search the web\". {query} marks where the words go.",
         )
 
-        c = card(layout, "Reader toolbar", "Where the PDF reader's buttons go. Changes apply to open documents at once.")
+        c = card(layout, "Reader toolbar", "Where the reader's buttons go. Changes apply to open documents at once.")
         self.toolbar_editor = ToolbarLayoutEditor()
         c.addWidget(self.toolbar_editor)
 
@@ -287,10 +288,15 @@ class SettingsTab(SectionedSystemTab):
         win = self.window_ref
         c = card(layout, "Downloads")
         self.cb_auto_pdf = self._check(
-            self._bool("browser/auto_open_pdf", False),
-            lambda v: win.toggle_auto_pdf(v) if hasattr(win, "toggle_auto_pdf") else self._set_value("browser/auto_open_pdf", v),
+            self._bool(AUTO_OPEN_DOWNLOADS_KEY, True),
+            lambda v: win.toggle_auto_pdf(v) if hasattr(win, "toggle_auto_pdf") else self._set_value(AUTO_OPEN_DOWNLOADS_KEY, v),
         )
-        setting_row(c, "Open downloaded PDFs in Riemann", self.cb_auto_pdf)
+        setting_row(
+            c,
+            "Open downloaded documents in Riemann",
+            self.cb_auto_pdf,
+            "PDFs, e-books and Office files open in a tab once they finish downloading.",
+        )
 
         c = card(
             layout,

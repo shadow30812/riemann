@@ -24,6 +24,7 @@ from PySide6.QtWebEngineCore import (
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QWidget
+from riemann.core.settings import AUTO_OPEN_DOWNLOADS_KEY, app_settings
 from riemann.ui.browser import (
     BrowserTab,
     RequestInterceptor,
@@ -489,7 +490,12 @@ def _wait_until(predicate, timeout_ms=15000):
 
 @pytest.fixture
 def download_server():
-    files = {"/report.pdf": (b"%PDF-1.4\n%%EOF\n", "application/pdf"), "/bundle.zip": (b"PK\x05\x06" + bytes(18), "application/zip")}
+    files = {
+        "/report.pdf": (b"%PDF-1.4\n%%EOF\n", "application/pdf"),
+        "/bundle.zip": (b"PK\x05\x06" + bytes(18), "application/zip"),
+        "/book.epub": (b"PK\x03\x04" + bytes(26) + b"mimetypeapplication/epub+zip", "application/epub+zip"),
+        "/script.py": (b"print('hi')\n", "text/x-python"),
+    }
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -523,7 +529,7 @@ def _download(webengine, qtbot, tmp_path, url, tabs=1):
         qtbot.addWidget(tab)
         tab.show_toast = toasts.append
         made.append(tab)
-    made[0]._on_pdf_downloaded = opened.append
+    made[0]._on_document_downloaded = opened.append
     target = tmp_path / url.rsplit("/", 1)[1]
 
     def save_dialog(*args, **kwargs):
@@ -559,6 +565,24 @@ def test_finished_download_that_is_not_a_pdf_is_not_opened(mock_injector, qtbot,
     assert "Download complete!" in toasts
     assert target.exists()
     assert opened == []
+
+
+@patch("riemann.ui.browser.ScriptInjector")
+def test_a_downloaded_ebook_opens_and_source_code_does_not(mock_injector, qtbot, webengine, tmp_path, download_server):
+    target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/book.epub")
+    assert opened == [str(target)]
+    target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/script.py")
+    assert target.exists() and opened == []
+
+
+@patch("riemann.ui.browser.ScriptInjector")
+def test_downloads_stay_closed_when_the_setting_is_off(mock_injector, qtbot, webengine, tmp_path, download_server):
+    app_settings().setValue(AUTO_OPEN_DOWNLOADS_KEY, False)
+    try:
+        target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/report.pdf")
+    finally:
+        app_settings().remove(AUTO_OPEN_DOWNLOADS_KEY)
+    assert "Download complete!" in toasts and opened == []
 
 
 @patch("riemann.ui.browser.ScriptInjector")

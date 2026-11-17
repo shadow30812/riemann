@@ -155,7 +155,9 @@ from .palette import incognito_url_style, link_tip_style, toast_style, tokens
 from .shortcuts import share_keys
 from .toast import Toast
 from ..core.log import log
+from ..core.doctypes import document_kind
 from ..core.settings import (
+    AUTO_OPEN_DOWNLOADS_KEY,
     DARK_MODE_KEY,
     HOMEPAGE_NAME_KEY,
     app_settings,
@@ -599,8 +601,11 @@ def owning_tab(page: Optional[QObject]) -> Optional["BrowserTab"]:
     return obj
 
 
-def is_pdf_download(path: str, mime_type: str = "") -> bool:
-    return mime_type == "application/pdf" or path.lower().endswith(".pdf")
+def opens_after_download(path: str, mime_type: str = "") -> bool:
+    """PDFs, e-books and Office files open in a tab once downloaded; code, text and pictures don't."""
+    if mime_type == "application/pdf" or path.lower().endswith(".pdf"):
+        return True
+    return document_kind(path) in ("pdf", "ebook", "office")
 
 
 def show_tab(tab: Optional[QWidget]) -> None:
@@ -1973,7 +1978,7 @@ class BrowserTab(QWidget):
             if state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
                 self.show_toast("Download complete!")
                 self.progress.setValue(0)
-                self._check_pdf_open(
+                self._check_download_open(
                     state, download_item, download_item.downloadDirectory()
                 )
             elif state == QWebEngineDownloadRequest.DownloadState.DownloadCancelled:
@@ -1987,15 +1992,18 @@ class BrowserTab(QWidget):
         if self.window() and hasattr(self.window(), "download_manager_dialog"):
             self.window().download_manager_dialog.add_download(download_item)
 
-    def _check_pdf_open(
+    def _check_download_open(
         self, state: int, item: QWebEngineDownloadRequest, temp_folder: str
     ) -> None:
-        if state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
-            full_path = os.path.join(temp_folder, item.downloadFileName())
-            if is_pdf_download(full_path, item.mimeType()):
-                self._on_pdf_downloaded(full_path)
+        if state != QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
+            return
+        if not app_settings().value(AUTO_OPEN_DOWNLOADS_KEY, True, type=bool):
+            return
+        full_path = os.path.join(temp_folder, item.downloadFileName())
+        if opens_after_download(full_path, item.mimeType()):
+            self._on_document_downloaded(full_path)
 
-    def _on_pdf_downloaded(self, path: str) -> None:
+    def _on_document_downloaded(self, path: str) -> None:
         if (
             os.path.exists(path)
             and self.window()
