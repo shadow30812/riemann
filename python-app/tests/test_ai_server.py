@@ -276,6 +276,7 @@ def test_the_engine_starts_as_a_child_process_and_loads_the_model(tmp_path, monk
 
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     models = tmp_path / "Riemann" / "models" / "all-MiniLM-L6-v2-onnx"
+    srv.ensure_model(os.environ["RIEMANN_TEST_AI_MODELS"])
     shutil.copytree(os.environ["RIEMANN_TEST_AI_MODELS"], models)
     try:
         port, token = ai_engine.ensure_started()

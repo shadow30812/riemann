@@ -1,8 +1,9 @@
 # Runs every test suite on pushes and pull requests: the Python app (offscreen
 # Qt), the start page's JavaScript (Jest, versions from package-lock.json), the
 # Rust OCR worker and the Rust core, plus a lint for undefined and unused names. PDFium and the benchmark PDFs are downloaded by their own
-# scripts, each pinned by SHA-256. The AI model is not downloaded; its tests
-# that need it are skipped.
+# scripts, each pinned by SHA-256. The AI model's tests download it the way
+# the app does (pinned commit, SHA-256 per file) into a folder kept in the
+# Actions cache, keyed by that commit, so it is fetched once per model version.
 name: Tests
 
 on:
@@ -73,8 +74,20 @@ jobs:
       - name: Lint
         run: pipx run ruff check --select F python-app/riemann python-app/tests
 
+      - name: Pick the AI model's cache key
+        id: model
+        run: echo "commit=$(sed -n 's/^MODEL_COMMIT = "\(.*\)"$/\1/p' python-app/riemann/core/ai_server.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the AI model
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ai-model
+          key: ai-model-${{ steps.model.outputs.commit }}
+
       - name: Python tests
         working-directory: python-app
+        env:
+          RIEMANN_TEST_AI_MODELS: ${{ runner.temp }}/ai-model
         run: python -m pytest tests -q -p no:cacheprovider
 
       - name: Set up Node
