@@ -12,6 +12,12 @@ file's annotations are read back and merged with Riemann's by annotation ID
 against that record, so neither side's edits are lost. A file that has piled
 up many incremental saves is compacted when its tab closes.
 
+Redaction marks ("redact") are annotations until applied. apply_redactions
+hands them to core/redaction.py as a page edit, so the removal lands in the
+scratch copy and reaches the file on Save; afterwards the marks, and every
+annotation that touched them, leave the in-memory list too. Replace-text
+overlays ("replace") are exempt, since they sit over their own mark.
+
 The worker threads that read and write PDFs are not daemon threads: Python
 kills daemon threads at exit even inside pikepdf or PDFium, which aborts the
 process and could cut an appended save short.
@@ -40,17 +46,21 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
 )
 
-from ....core import annotation_store, pdf_annotations
+from ....core import annotation_store, pdf_annotations, redaction
+from ....core.doctypes import document_kind
 from ....core.storage import write_json_atomic
 from ..widgets import PageWidget
 from ....core.settings import app_settings
-from ...palette import app_is_dark, tokens
+from ...palette import CONTENT, app_is_dark, tokens
+from ..replace_text import ReplaceTextDialog, overlay_from_selection, ring_colour
 from .host import ReaderHostBase
+from .pages import format_page_ranges
 
 
 class _CommentsBridge(QObject):
@@ -64,6 +74,26 @@ class _PdfStoreBridge(QObject):
 
     read_done = Signal(str, object, object)
     write_done = Signal(str, object, str)
+
+
+def annotation_touches(anno: Dict[str, Any], rects: List[List[float]]) -> bool:
+    """Whether a Riemann annotation (relative page coordinates) touches any of rects."""
+    boxes = [(min(l, r), min(t, b), max(l, r), max(t, b)) for l, t, r, b in rects]
+
+    def hit(x1: float, y1: float, x2: float, y2: float) -> bool:
+        return any(x1 <= bx2 and bx1 <= x2 and y1 <= by2 and by1 <= y2 for bx1, by1, bx2, by2 in boxes)
+
+    points = []
+    if "rel_pos" in anno:
+        points.append(anno["rel_pos"])
+    points += anno.get("points", []) or []
+    for l, t, r, b in anno.get("rects", []) or []:
+        if hit(min(l, r), min(t, b), max(l, r), max(t, b)):
+            return True
+    if points:
+        xs, ys = [float(p[0]) for p in points], [float(p[1]) for p in points]
+        return hit(min(xs), min(ys), max(xs), max(ys))
+    return False
 
 
 def compact_if_needed(path: str) -> None:
@@ -158,7 +188,7 @@ def read_external_comments(path: str) -> Dict[int, List[Dict[str, Any]]]:
     safe to run off the UI thread.
     """
     comments: Dict[int, List[Dict[str, Any]]] = {}
-    if not path or not os.path.isfile(path) or path.lower().endswith(".md"):
+    if not path or not os.path.isfile(path) or document_kind(path) != "pdf":
         return comments
 
     try:
@@ -631,6 +661,124 @@ class AnnotationsMixin(ReaderHostBase):
         self.save_annotations()
         self.refresh_page_render(page_idx)
 
+    def _add_redaction_mark(self, page_idx: int, rects: List[List[float]]) -> None:
+        """Marks rects (relative, unrotated) on a page for redaction; nothing is removed until applied."""
+        boxes = [[min(l, r), min(t, b), max(l, r), max(t, b)] for l, t, r, b in rects]
+        self._add_anno_data(page_idx, {"type": "redact", "rects": boxes})
+
+    def _selected_rects(self) -> Dict[int, List[List[float]]]:
+        """The current text selection as relative, unrotated rects per page."""
+        out: Dict[int, List[List[float]]] = {}
+        for page_idx, widget in sorted(self.page_widgets.items()):
+            rects = getattr(widget, "selected_text_rects", None) or []
+            w, h = widget.width(), widget.height()
+            if not rects or w <= 0 or h <= 0:
+                continue
+            for r in rects:
+                rx1, ry1 = self._map_to_unrotated(r.left() / w, r.top() / h)
+                rx2, ry2 = self._map_to_unrotated((r.right() + 1) / w, (r.bottom() + 1) / h)
+                out.setdefault(page_idx, []).append([min(rx1, rx2), min(ry1, ry2), max(rx1, rx2), max(ry1, ry2)])
+        return out
+
+    def replace_selected_text(self) -> None:
+        """Covers the selected text with new text in a matching box (a "replace" annotation)."""
+        selected = self._selected_rects()
+        if len(selected) != 1:
+            self.show_toast("Select text on one page to replace it.")
+            return
+        page_idx, rects = next(iter(selected.items()))
+        dialog = ReplaceTextDialog(self.current_selected_text or "", self)
+        if not dialog.exec() or not dialog.text().strip():
+            return
+        page_size = self.current_doc.get_page_size(page_idx)
+        background = self._background_around(page_idx, rects, page_size)
+        overlay = overlay_from_selection(rects, self.current_doc.get_char_styles(page_idx), page_size, dialog.text(), background)
+        self._add_anno_data(page_idx, overlay)
+        if dialog.remove_original():
+            self._add_redaction_mark(page_idx, rects)
+        self.clear_all_text_selections()
+
+    def _background_around(self, page_idx: int, rects: List[List[float]], page_size) -> str:
+        """The page's own colour around rects, from a render without the dark theme."""
+        width, height = page_size
+        try:
+            result = self.page_renderer.render_page(page_idx, 1.0, 0)
+            pixels, pw, ph = bytes(result.data), result.width, result.height
+        except Exception:
+            return CONTENT["paper"]
+        sx, sy = pw / max(width, 1.0), ph / max(height, 1.0)
+        l = min(r[0] for r in rects) * width * sx
+        t = min(r[1] for r in rects) * height * sy
+        r_ = max(r[2] for r in rects) * width * sx
+        b = max(r[3] for r in rects) * height * sy
+        return ring_colour(pixels, pw, ph, (int(l), int(t), int(r_), int(b)))
+
+    def mark_selection_for_redaction(self) -> None:
+        """Turns the selected text on every page into redaction marks."""
+        selected = self._selected_rects()
+        for page_idx, rects in selected.items():
+            self._add_redaction_mark(page_idx, rects)
+        self.clear_all_text_selections()
+        if selected:
+            self.show_toast("Marked for redaction. Apply redactions to remove the text.")
+
+    def redaction_marks(self) -> Dict[int, List[List[float]]]:
+        marks: Dict[int, List[List[float]]] = {}
+        for pid, annos in self.annotations.items():
+            for anno in annos:
+                if anno.get("type") == "redact" and anno.get("rects"):
+                    marks.setdefault(int(pid), []).extend(anno["rects"])
+        return marks
+
+    def apply_redactions(self) -> None:
+        """Removes everything under the redaction marks from the document, through the scratch copy (so on Save)."""
+        marks = self.redaction_marks()
+        if not marks:
+            self.show_toast("Nothing is marked. Use the redaction tool or select text and choose Mark for Redaction.")
+            return
+        count = sum(len(r) for r in marks.values())
+        pages = sorted(marks)
+        noun = "page" if len(pages) == 1 else "pages"
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Apply redactions")
+        box.setText(
+            f"Remove everything under {count} redaction mark{'s' if count != 1 else ''} "
+            f"on {noun} {format_page_ranges(pages)}?"
+        )
+        box.setInformativeText(
+            "Text, images and drawings under the marks are deleted from the document, not just covered, "
+            "along with annotations, links and form fields that touch them. A black box is left in their place. "
+            "The file changes when you save; until then, Discard brings everything back.\n\n"
+            "Not removed: document metadata, bookmarks, attachments, text kept for accessibility, "
+            "and the glyph shapes stored in embedded fonts."
+        )
+        go = box.addButton("Apply", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        if box.clickedButton() is not go:
+            return
+        keep = self._redaction_exempt_ids()
+        if not self._edit_pages(redaction.apply_redactions, marks, keep, done="Redacted."):
+            return
+        for pid in list(self.annotations):
+            rects = marks.get(int(pid))
+            if not rects:
+                continue
+            self.annotations[pid] = [
+                a for a in self.annotations[pid]
+                if a.get("id") in keep or (a.get("type") != "redact" and not annotation_touches(a, rects))
+            ]
+        self.undo_stack.clear()
+        self.redo_stack.clear()
+        self.save_annotations()
+
+    def _redaction_exempt_ids(self) -> List[str]:
+        return [
+            str(a["id"]) for annos in self.annotations.values() for a in annos
+            if a.get("type") == "replace" and a.get("id")
+        ]
+
     def _handle_eraser_click(self, label: PageWidget, pos: Any, page_idx: int) -> None:
         """Deletes the annotation nearest the click, if it is within reach."""
         pid = str(page_idx)
@@ -668,7 +816,7 @@ class AnnotationsMixin(ReaderHostBase):
                             [((rx - px) ** 2 + (ry - py) ** 2) ** 0.5 for px, py in pts]
                         )
 
-            elif atype == "markup":
+            elif atype in ("markup", "redact", "replace"):
                 rects = anno.get("rects", [])
                 if rects:
                     for l, t, r, b in rects:

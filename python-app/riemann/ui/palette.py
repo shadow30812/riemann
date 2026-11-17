@@ -20,8 +20,9 @@ document content in either theme, so it always uses the dark tokens.
 CONTENT holds colours that belong to the document or the projector rather than
 the interface theme, so they don't change with it: the presentation stage and
 its black and white blanks, the laser pointer, the default pen and text ink,
-search hits, note markers, text selection, the read-aloud highlight, and the
-glow of a tab playing media. qcolor turns any of these values into a QColor
+search hits, note markers, text selection, the read-aloud highlight, the
+outline of a redaction mark and the box a redaction leaves, and the glow of a
+tab playing media. qcolor turns any of these values into a QColor
 with alpha.
 
 The interface font is Inter, bundled in assets/fonts (SIL Open Font License,
@@ -104,6 +105,8 @@ CONTENT = {
     "search_hit": "#FFFF00",
     "note": "#FFFF00",
     "selection": LIGHT["accent"],
+    "redact_mark": "#E53935",
+    "redaction": "#000000",
     "spoken": DARK["system"],
     "playing_from": "#FF4500",
     "playing_to": "#8A2BE2",

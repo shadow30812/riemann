@@ -633,7 +633,7 @@ class DraggableTabBar(QTabBar):
 class AnnotationToolbar(QWidget):
     """
     Toolbar for the annotation tools. Emits tool_changed (a tool id), color_changed (a
-    hex colour) and thickness_changed (pixels).
+    hex colour), thickness_changed (pixels) and apply_redactions_requested.
     """
 
     tool_changed = Signal(str)
@@ -641,6 +641,7 @@ class AnnotationToolbar(QWidget):
     thickness_changed = Signal(int)
     undo_requested = Signal()
     redo_requested = Signal()
+    apply_redactions_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -712,6 +713,19 @@ class AnnotationToolbar(QWidget):
         )
         self.btn_stamps.setMenu(stamp_menu)
         layout.addWidget(self.btn_stamps)
+
+        self._add_separator(layout)
+
+        self.btn_redact = self._add_tool_btn(
+            "redact.svg", "redact", "Mark for redaction (drag a box)", layout
+        )
+        self.btn_apply_redactions = QToolButton()
+        self.btn_apply_redactions.setText("Apply redactions…")
+        self.btn_apply_redactions.setToolTip(
+            "Remove everything under the redaction marks (takes effect on Save)"
+        )
+        self.btn_apply_redactions.clicked.connect(self.apply_redactions_requested.emit)
+        layout.addWidget(self.btn_apply_redactions)
 
         self._add_separator(layout)
 
@@ -801,6 +815,7 @@ class AnnotationToolbar(QWidget):
 
         self.btn_shapes.setIcon(self._get_icon("square-dashed.svg"))
         self.btn_stamps.setIcon(self._get_icon("check.svg"))
+        self.btn_redact.setIcon(self._get_icon("redact.svg"))
         self.btn_eraser.setIcon(self._get_icon("eraser.svg"))
         self.btn_undo.setIcon(self._get_icon("undo.svg"))
         self.btn_redo.setIcon(self._get_icon("redo.svg"))

@@ -192,6 +192,24 @@ class RiemannDocument:
         """
         ...
 
+    def get_char_styles(
+        self, page_index: int
+    ) -> List[Tuple[str, Tuple[float, float, float, float], float, str, bool, bool, bool, bool, str]]:
+        """
+        The look of every character, in the same order and with the same
+        filtering as get_char_boxes.
+
+        Args:
+            page_index: Zero-based index of the page.
+
+        Returns:
+            A list of (character, (left, top, right, bottom), font size in
+            points, font name, serif, fixed pitch, bold, italic, fill colour
+            as a hex string) tuples. The flags come from the font descriptor,
+            which built-in fonts may lack; look at the name too.
+        """
+        ...
+
     def get_outline(self) -> List[Tuple[int, str, int]]:
         """
         Returns the document outline (bookmarks), flattened depth-first.

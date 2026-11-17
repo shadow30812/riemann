@@ -412,6 +412,11 @@ type TextSegment = (String, (f32, f32, f32, f32));
 /// Tuple structure: `(character, loose_bounds_tuple)`.
 type CharBox = (String, (f32, f32, f32, f32));
 
+/// Type definition for the look of one character, used to match new text to it.
+/// Tuple structure: `(character, loose_bounds_tuple, font_size, font_name,
+/// serif, fixed_pitch, bold, italic, fill_colour_hex)`.
+type CharStyle = (String, (f32, f32, f32, f32), f32, String, bool, bool, bool, bool, String);
+
 /// Type definition for one outline (bookmark) entry, flattened depth-first.
 /// Tuple structure: `(depth, title, page_index)`, with -1 when the entry has no
 /// destination inside the document.
@@ -764,6 +769,60 @@ impl RiemannDocument {
                 boxes.push((s, frame.rect(&rect)));
             }
             Ok(boxes)
+        })
+    }
+
+    /// The look of every character on a page, in the same order and with the
+    /// same filtering as `get_char_boxes`: font size in points (scaled by the
+    /// text matrix), font name, its serif, fixed-pitch, bold and italic flags,
+    /// and fill colour. PDFium reads the flags from the font descriptor, which
+    /// built-in fonts may lack, so callers also look at the name.
+    fn get_char_styles(&self, py: Python, page_index: u32) -> PyResult<Vec<CharStyle>> {
+        let inner = &self.inner;
+        py.detach(|| {
+            let _guard = pdfium_guard();
+            let doc_guard = lock_doc(inner);
+            let pages = doc_guard.0.pages();
+
+            if (page_index as usize) >= (pages.len() as usize) {
+                return Ok(Vec::new());
+            }
+
+            let page = pages.get(page_at(page_index)?).map_err(value_err)?;
+            let text_accessor = page
+                .text()
+                .map_err(|e| runtime_err(format!("Text Access Error: {}", e)))?;
+
+            let frame = DisplayFrame::of(&page);
+            let mut styles = Vec::new();
+            for ch in text_accessor.chars().iter() {
+                let Some(s) = ch.unicode_string() else { continue };
+                let rect = match ch.loose_bounds() {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                let bold = match ch.font_weight() {
+                    Some(PdfFontWeight::Weight600)
+                    | Some(PdfFontWeight::Weight700Bold)
+                    | Some(PdfFontWeight::Weight800)
+                    | Some(PdfFontWeight::Weight900) => true,
+                    Some(PdfFontWeight::Custom(w)) => w >= 600,
+                    _ => ch.font_is_bold_reenforced(),
+                };
+                let colour = ch.fill_color().map(|c| format!("#{}", c.to_hex())).unwrap_or_default();
+                styles.push((
+                    s,
+                    frame.rect(&rect),
+                    ch.scaled_font_size().value,
+                    ch.font_name(),
+                    ch.font_is_serif(),
+                    ch.font_is_fixed_pitch(),
+                    bold,
+                    ch.font_is_italic(),
+                    colour,
+                ));
+            }
+            Ok(styles)
         })
     }
 

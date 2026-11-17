@@ -309,3 +309,19 @@ def test_visible_box_clips_the_crop_box_to_the_media_box():
     assert pa.visible_box((50, 50, 300, 300), (0, 0, 612, 792)) == (50, 50, 300, 300)
     assert pa.visible_box((700, 800, 900, 1000), (0, 0, 612, 792)) == (0, 0, 612, 792)
     assert pa.visible_box(None, None) == (0.0, 0.0, 612.0, 792.0)
+
+
+def test_redaction_marks_are_written_as_redact_annotations(tmp_path):
+    path = str(tmp_path / "doc.pdf")
+    _make_pdf(path, pages=1)
+    mark = {"id": "r1", "type": "redact", "rects": [[0.1, 0.1, 0.5, 0.2], [0.1, 0.25, 0.3, 0.3]]}
+    assert pa.write_annotations(path, {"0": [mark]})
+
+    reader = pypdf.PdfReader(path, strict=True)
+    annot = reader.pages[0]["/Annots"][0].get_object()
+    assert annot["/Subtype"] == "/Redact"
+    assert [float(c) for c in annot["/IC"]] == [0, 0, 0]
+    assert len(annot["/QuadPoints"]) == 16
+    x1, y1, x2, y2 = (float(c) for c in annot["/Rect"])
+    assert (round(x1), round(y2), round(x2), round(y1)) == (61, 713, 306, 554)
+    assert pa.read_annotations(path)["0"][0]["type"] == "redact"

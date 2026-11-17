@@ -33,13 +33,13 @@ the low-resolution render is the fallback for older builds.
 """
 
 import sys
-import urllib.parse
 from typing import Dict, Optional, Tuple
 
 import shiboken6
-from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
+    QFont,
     QPainter,
     QPen,
     QPixmap,
@@ -50,12 +50,12 @@ from PySide6.QtWidgets import QApplication, QCheckBox, QHBoxLayout, QLineEdit, Q
 
 from ....core.constants import FALLBACK_PAGE_SIZE, ViewMode, ZoomMode
 from ..render_worker import MAX_PAGE_PIXELS, PAGE_CACHE, page_image
-from ..utils import generate_markdown_html, generate_reflow_html
+from ..utils import generate_reflow_html
 from ..widgets import PageWidget
 from ....core.log import log
 from ...palette import CONTENT, qcolor, tokens
+from ..replace_text import qt_families, themed
 from .host import ReaderHostBase
-from ....core.assets import asset_path
 
 # Thumbnails are rendered at this fraction of the target resolution and shown
 # (upscaled) until the full-resolution page arrives.
@@ -714,6 +714,35 @@ class RenderingMixin(ReaderHostBase):
             elif subtype == "stamp_cross":
                 painter.drawLine(cx - size, cy - size, cx + size, cy + size)
                 painter.drawLine(cx - size, cy + size, cx + size, cy - size)
+
+        elif atype == "replace" and anno.get("rects"):
+            l, t, r, b = anno["rects"][0]
+            x1, x2 = sorted((l * lw, r * lw))
+            y1, y2 = sorted((t * lh, b * lh))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(themed(anno.get("background") or CONTENT["paper"], self.theme_mode))
+            painter.drawRect(QRectF(x1, y1, x2 - x1, y2 - y1))
+            name = str(anno.get("font", "Helvetica"))
+            font = QFont()
+            font.setFamilies(qt_families(name))
+            font.setBold("Bold" in name)
+            font.setItalic("Italic" in name or "Oblique" in name)
+            size = float(anno.get("size", 12))
+            font.setPixelSize(max(1, round(size * scale)))
+            painter.setFont(font)
+            painter.setPen(themed(anno.get("color") or CONTENT["ink"], self.theme_mode))
+            baseline = float(anno.get("baseline", size)) * scale
+            leading = float(anno.get("leading", size * 1.2)) * scale
+            for i, line in enumerate(str(anno.get("text", "")).splitlines()):
+                painter.drawText(QPointF(x1, y1 + baseline + i * leading), line)
+
+        elif atype == "redact":
+            painter.setPen(QPen(qcolor(CONTENT["redact_mark"]), max(1, int(2 * scale))))
+            painter.setBrush(qcolor(CONTENT["redact_mark"], 40))
+            for l, t, r, b in anno.get("rects", []):
+                x1, x2 = sorted((l * lw, r * lw))
+                y1, y2 = sorted((t * lh, b * lh))
+                painter.drawRect(int(x1), int(y1), max(1, int(x2 - x1)), max(1, int(y2 - y1)))
 
         elif atype == "markup" and "rects" in anno:
             subtype = anno.get("subtype", "highlight")

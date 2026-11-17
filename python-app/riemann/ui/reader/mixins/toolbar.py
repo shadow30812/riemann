@@ -75,6 +75,7 @@ class ToolbarMixin(ReaderHostBase):
         self.anno_toolbar.thickness_changed.connect(self.set_thickness)
         self.anno_toolbar.undo_requested.connect(self.undo_annotation)
         self.anno_toolbar.redo_requested.connect(self.redo_annotation)
+        self.anno_toolbar.apply_redactions_requested.connect(self.apply_redactions)
         layout.addWidget(self.anno_toolbar)
 
         self.signature_banner = QWidget()

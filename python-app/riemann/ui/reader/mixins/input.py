@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
     QRubberBand,
 )
 from ....core.constants import ViewMode, ZoomMode, clamp_zoom
+from ....core.doctypes import document_kind
+from ...palette import CONTENT
 from ..widgets import PageWidget
 from .host import ReaderHostBase
 
@@ -246,6 +248,7 @@ class InputMixin(ReaderHostBase):
                         "markup_strikeout",
                         "rect",
                         "oval",
+                        "redact",
                     ):
                         self.active_drawing = [QPoint(event.pos().x(), event.pos().y())]
                         if self.current_tool.startswith("markup"):
@@ -263,16 +266,17 @@ class InputMixin(ReaderHostBase):
                         preview_color.setAlpha(100)
                         source.set_markup_preview([rect], preview_color)
 
-                    elif self.current_tool in ("rect", "oval"):
+                    elif self.current_tool in ("rect", "oval", "redact"):
                         self.active_drawing.append(
                             QPoint(event.pos().x(), event.pos().y())
                         )
+                        redact = self.current_tool == "redact"
                         source.set_shape_preview(
                             self.active_drawing[0],
                             event.pos(),
-                            self.current_tool,
-                            self.pen_color,
-                            self.pen_thickness,
+                            "rect" if redact else self.current_tool,
+                            CONTENT["redact_mark"] if redact else self.pen_color,
+                            2 if redact else self.pen_thickness,
                         )
 
                     else:
@@ -329,6 +333,18 @@ class InputMixin(ReaderHostBase):
                         )
                         self.active_drawing = []
                         source.clear_temp_stroke()
+                        return True
+
+                    elif self.current_tool == "redact" and self.active_drawing:
+                        w, h = source.width(), source.height()
+                        p1 = self.active_drawing[0]
+                        p2 = self.active_drawing[-1]
+                        self.active_drawing = []
+                        source.clear_temp_stroke()
+                        if abs(p2.x() - p1.x()) > 2 and abs(p2.y() - p1.y()) > 2:
+                            rx1, ry1 = self._map_to_unrotated(p1.x() / w, p1.y() / h)
+                            rx2, ry2 = self._map_to_unrotated(p2.x() / w, p2.y() / h)
+                            self._add_redaction_mark(page_idx, [[rx1, ry1, rx2, ry2]])
                         return True
 
                     elif self.current_tool.startswith("markup") and self.active_drawing:
@@ -573,6 +589,9 @@ class InputMixin(ReaderHostBase):
                     menu = QMenu(source)
                     copy_action = menu.addAction("Copy Text")
                     search_action = menu.addAction("Search Web")
+                    menu.addSeparator()
+                    replace_action = menu.addAction("Replace Text…")
+                    redact_action = menu.addAction("Mark for Redaction")
 
                     action = menu.exec(event.globalPos())
 
@@ -581,6 +600,10 @@ class InputMixin(ReaderHostBase):
                         self.show_toast("Copied text to clipboard! 📋")
                     elif action == search_action:
                         self._search_web_for_selected_text(self.current_selected_text)
+                    elif action == redact_action:
+                        self.mark_selection_for_redaction()
+                    elif action == replace_action:
+                        self.replace_selected_text()
                 return True
 
         return super().eventFilter(source, event)

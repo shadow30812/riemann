@@ -16,6 +16,16 @@ file open.
 Each annotation Riemann writes is named "riemann:<id>" (/NM) and carries the
 original dict as JSON under /RiemannData, so it round-trips losslessly.
 
+A redaction mark ("redact", with "rects" like markup) is a standard /Redact
+annotation (§12.5.6.23): other apps list it as a pending redaction, and
+/IC asks for a black box once applied. Marking removes nothing; applying
+does (core/redaction.py).
+
+A replace-text overlay ("replace") is a FreeText annotation whose appearance
+fills its box with the page's background colour and then draws the new text
+in a standard font (ui/reader/replace_text.py chooses the look). On a rotated
+page the appearance is turned with the page, so the text reads upright.
+
 New objects are told apart from existing ones by an unreferenced probe object
 made before anything else: qpdf numbers new objects from the highest existing
 one, not from the trailer's /Size, which may be larger.
@@ -39,6 +49,11 @@ DATA_KEY = "/RiemannData"
 RECT_KEY = "/RiemannRect"
 
 Box = Tuple[float, float, float, float]
+STANDARD_FONTS = {
+    "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique",
+    "Times-Roman", "Times-Bold", "Times-Italic", "Times-BoldItalic",
+    "Courier", "Courier-Bold", "Courier-Oblique", "Courier-BoldOblique",
+}
 
 
 def new_annotation_id() -> str:
@@ -223,6 +238,46 @@ def _build_annotation(pdf, page, space: _PageSpace, anno: Dict[str, Any], author
         d.AP = Dictionary(N=ap)
         return d
 
+    if atype == "replace":
+        rects = anno.get("rects") or []
+        if not rects or len(rects[0]) != 4:
+            return None
+        x1, y1, x2, y2 = space.rect(*(float(c) for c in rects[0]))
+        turned = space.rotate % 180 == 90
+        dw, dh = (y2 - y1, x2 - x1) if turned else (x2 - x1, y2 - y1)
+        size = float(anno.get("size", 12) or 12)
+        leading = float(anno.get("leading", size * 1.2) or size * 1.2)
+        baseline = float(anno.get("baseline", size) or size)
+        font_name = str(anno.get("font", "Helvetica"))
+        if font_name not in STANDARD_FONTS:
+            font_name = "Helvetica"
+        background = _hex_to_rgb(anno.get("background")) if anno.get("background") else [1.0, 1.0, 1.0]
+        fill = "{:.3f} {:.3f} {:.3f} rg".format(*background)
+        color_op = "{:.3f} {:.3f} {:.3f} rg".format(*rgb)
+        lines = contents.splitlines() or [""]
+        ops = [f"{fill} 0 0 {dw:g} {dh:g} re f", f"BT /RmF {size:g} Tf {color_op} {leading:g} TL 0 {dh - baseline:g} Td"]
+        ops += [f"{_text_stream_literal(line)} Tj T*" for line in lines]
+        ops.append("ET")
+        d.Subtype = Name.FreeText
+        d.Contents = String(contents)
+        d.Rect = Array([x1, y1, x2, y2])
+        d.DA = String(f"/RmF {size:g} Tf {color_op}")
+        d.BS = Dictionary(W=0)
+        d.IC = Array(background)
+        font = Dictionary(
+            Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/" + font_name), Encoding=Name.WinAnsiEncoding
+        )
+        ap = pikepdf.Stream(pdf, "\n".join(ops).encode("latin-1", "replace"))
+        ap.Type = Name.XObject
+        ap.Subtype = Name.Form
+        ap.BBox = Array([0, 0, dw, dh])
+        turn = {90: [0, 1, -1, 0, 0, 0], 180: [-1, 0, 0, -1, 0, 0], 270: [0, -1, 1, 0, 0, 0]}.get(space.rotate)
+        if turn:
+            ap.Matrix = Array(turn)
+        ap.Resources = Dictionary(Font=Dictionary(RmF=font))
+        d.AP = Dictionary(N=ap)
+        return d
+
     if atype == "stamp":
         u, v = (float(c) for c in anno.get("rel_pos", (0.1, 0.1)))
         s = 0.012
@@ -244,7 +299,7 @@ def _build_annotation(pdf, page, space: _PageSpace, anno: Dict[str, Any], author
             return ink([pts], thickness * 3, opacity=0.3)
         return ink([pts], thickness)
 
-    if atype == "markup":
+    if atype in ("markup", "redact"):
         quads, bounds = [], None
         for r in anno.get("rects", []):
             if len(r) != 4:
@@ -258,9 +313,13 @@ def _build_annotation(pdf, page, space: _PageSpace, anno: Dict[str, Any], author
             )
         if not quads:
             return None
-        d.Subtype = {"underline": Name.Underline, "strikeout": Name.StrikeOut}.get(
-            subtype, Name.Highlight
-        )
+        if atype == "redact":
+            d.Subtype = Name.Redact
+            d.IC = Array([0, 0, 0])
+        else:
+            d.Subtype = {"underline": Name.Underline, "strikeout": Name.StrikeOut}.get(
+                subtype, Name.Highlight
+            )
         d.QuadPoints = Array(quads)
         d.Rect = Array(list(bounds))
         if contents:
