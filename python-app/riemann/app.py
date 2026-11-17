@@ -125,6 +125,7 @@ from .window.instance import (
     decode_ipc_message,
     encode_ipc_paths,
     hand_off_to_running_instance,
+    handed_over_paths,
     listen_for_instances,
     single_instance_name,
 )
@@ -577,15 +578,16 @@ def run() -> None:
         def finish():
             """Opens the paths the secondary instance sent, then raises the window."""
             buffer.extend(client.readAll().data())
-            for path in decode_ipc_message(bytes(buffer)):
-                clean_p = QUrl(path).toLocalFile() if path.startswith("file://") else path
-                if os.path.isfile(clean_p):
-                    window.open_path(os.path.abspath(clean_p))
-                elif os.path.isdir(clean_p):
-                    window.open_folder(os.path.abspath(clean_p))
+            client.deleteLater()
+            if not buffer:
+                return
+            files, folders = handed_over_paths(bytes(buffer))
+            for path in files:
+                window.open_path(path)
+            for folder in folders:
+                window.open_folder(folder)
             window.activateWindow()
             window.raise_()
-            client.deleteLater()
 
         client.readyRead.connect(read_data)
         client.disconnected.connect(finish)

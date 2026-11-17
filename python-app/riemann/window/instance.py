@@ -1,13 +1,28 @@
 """
 Single-instance hand-off: a second launch passes its paths to the running
 Riemann over a per-user local socket and exits. Each path is NUL-terminated;
-an empty message only asks the running window to come to the front.
+ACTIVATE_MESSAGE only asks the running window to come to the front, and a
+connection that sends nothing is a probe and is ignored.
+
+listen_for_instances removes a socket file only when nobody answers on it (a
+crashed run left it behind). When another Riemann is listening, for instance
+the first window while a second one starts with --new-window, the new process
+goes without the socket rather than taking it from the running one. Qt
+creates a socket with options set in a temporary folder and renames it into
+place, replacing whatever is there, so the probe comes before listen. The
+socket is created with UserAccessOption, so only the same user account can
+connect, and the running instance opens only what accepts_handoff allows:
+existing folders, and existing files of the types the desktop entry registers
+(PDF, Markdown, HTML) or that start with a PDF header.
 """
 
 import os
 import hashlib
-from typing import List
+from typing import List, Tuple
+from PySide6.QtCore import QUrl
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
+
+from ..core.log import log
 
 
 ACTIVATE_MESSAGE = "--activate"
@@ -58,9 +73,54 @@ def hand_off_to_running_instance(server_name: str, payload: bytes, attempts: int
     return False
 
 
+HANDOFF_SUFFIXES = (".pdf", ".md", ".markdown", ".html", ".htm", ".xhtml")
+PROBE_TIMEOUT_MS = 500
+
+
+def accepts_handoff(path: str) -> bool:
+    if os.path.isdir(path):
+        return True
+    if not os.path.isfile(path):
+        return False
+    if path.lower().endswith(HANDOFF_SUFFIXES):
+        return True
+    try:
+        with open(path, "rb") as f:
+            return f.read(5) == b"%PDF-"
+    except OSError:
+        return False
+
+
+def instance_is_listening(server_name: str) -> bool:
+    """True when a running Riemann accepts connections on server_name; the probe sends nothing."""
+    socket = QLocalSocket()
+    socket.connectToServer(server_name)
+    if not socket.waitForConnected(PROBE_TIMEOUT_MS):
+        return socket.error() == QLocalSocket.LocalSocketError.SocketTimeoutError
+    socket.abort()
+    return True
+
+
 def listen_for_instances(server: QLocalServer, server_name: str) -> bool:
-    """Listens on the single-instance socket, clearing one left by a crashed run."""
+    """Listens on the single-instance socket, clearing one left by a crashed run but never a live one."""
+    server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
+    if instance_is_listening(server_name):
+        return False
     if server.listen(server_name):
         return True
     QLocalServer.removeServer(server_name)
     return server.listen(server_name)
+
+
+def handed_over_paths(data: bytes) -> Tuple[List[str], List[str]]:
+    """The files and folders in a message from a second launch that the running instance should open."""
+    files, folders = [], []
+    for path in decode_ipc_message(data):
+        clean = QUrl(path).toLocalFile() if path.startswith("file://") else path
+        if not accepts_handoff(clean):
+            log.warning("Ignored a path handed over by another instance: %s", clean)
+        elif os.path.isdir(clean):
+            folders.append(os.path.abspath(clean))
+        else:
+            files.append(os.path.abspath(clean))
+    return files, folders

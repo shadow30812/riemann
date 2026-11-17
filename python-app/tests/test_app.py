@@ -981,3 +981,76 @@ def test_empty_tab_in_preview_mode_shows_the_preview_eye(qtbot):
     shown = window.tabs_main.tabIcon(idx).pixmap(16, 16).toImage()
     eye = window._preview_icon().pixmap(16, 16).toImage()
     assert shown == eye
+
+
+def test_second_instance_does_not_take_the_socket_from_a_live_one(qapp):
+    import uuid
+
+    from PySide6.QtNetwork import QLocalServer
+
+    from riemann.app import hand_off_to_running_instance, listen_for_instances
+
+    name = f"riemann-test-{uuid.uuid4().hex[:8]}"
+    first = QLocalServer()
+    assert listen_for_instances(first, name)
+    assert first.socketOptions() & QLocalServer.SocketOption.UserAccessOption
+    second = QLocalServer()
+    assert not listen_for_instances(second, name)
+    assert os.path.exists(first.fullServerName())
+    received = []
+    first.newConnection.connect(lambda: received.append(first.nextPendingConnection()))
+    assert hand_off_to_running_instance(name, b"paper.pdf\0", attempts=1)
+    qapp.processEvents()
+    assert received
+    first.close()
+    second.close()
+
+
+def test_running_instance_opens_only_files_it_can_show(tmp_path):
+    from riemann.window.instance import encode_ipc_paths, handed_over_paths
+
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    unnamed = tmp_path / "download"
+    unnamed.write_bytes(b"%PDF-1.7\n")
+    script = tmp_path / "run.sh"
+    script.write_text("echo hi")
+    folder = tmp_path / "papers"
+    folder.mkdir()
+    message = encode_ipc_paths([str(pdf), str(unnamed), str(script), str(folder), str(tmp_path / "missing.pdf")])
+    files, folders = handed_over_paths(message)
+    assert files == [str(pdf), str(unnamed)]
+    assert folders == [str(folder)]
+
+
+def test_reopened_reader_tab_returns_to_its_own_page(qtbot):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    tab = window.tabs_main.widget(0)
+    tab.current_path = "/fake/a.pdf"
+    tab.current_doc = MagicMock(page_count=80)
+    tab.current_page_index = 39
+    window.close_tab(0)
+    window.settings.setValue("lastPage", 2)
+    opened = []
+    with patch.object(window, "_open_document", lambda *a, **k: opened.append(k)):
+        window.restore_last_closed_tab()
+    assert opened[0]["page"] == 39
+
+
+def test_windows_share_one_persistent_web_profile(qtbot, monkeypatch):
+    from PySide6.QtWebEngineCore import QWebEngineProfile
+
+    import riemann.app
+
+    monkeypatch.setattr(riemann.app, "QWebEngineProfile", QWebEngineProfile)
+    monkeypatch.setattr(riemann.app, "_persistent", None)
+    first = riemann.app.persistent_profile()
+    assert riemann.app.persistent_profile() is first
+    assert first.parent() is QApplication.instance()
+    assert not first.isOffTheRecord()
+    with patch.object(riemann.app, "persistent_profile", return_value=first):
+        windows = [RiemannWindow(incognito=False, restore_session=False) for _ in range(2)]
+    for w in windows:
+        qtbot.addWidget(w)
+    assert windows[0].web_profile is windows[1].web_profile is first
