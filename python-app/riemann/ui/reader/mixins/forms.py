@@ -47,7 +47,7 @@ class FormsMixin(ReaderHostBase):
         return bridge
 
     def _save_forms(self, blocking: bool = False) -> None:
-        path = self.current_path or ""
+        path = self.pdf_path()
         values = dict(self.form_values_cache or {})
         if not path.lower().endswith(".pdf") or not values or self._forms_blocked:
             return
@@ -72,19 +72,20 @@ class FormsMixin(ReaderHostBase):
             threading.Thread(target=work, name="riemann-forms").start()
 
     def _on_forms_written(self, path: str, result: str) -> None:
-        if path != self.current_path:
+        if path != self.pdf_path():
             return
         if result == "ok":
             sig = pdf_annotations.file_signature(path)
             if self._anno_file_sig is not None:
                 self._anno_file_sig = sig
                 self._write_annotation_json()
-            try:
-                import os
+            if path == self.current_path:
+                try:
+                    import os
 
-                self._loaded_mtime = os.path.getmtime(path)
-            except OSError:
-                pass
+                    self._loaded_mtime = os.path.getmtime(path)
+                except OSError:
+                    pass
         elif result == "blocked":
             self._forms_blocked = True
             self.show_toast("This PDF is signed or encrypted: form entries stay in Riemann. Save a copy to keep them.")

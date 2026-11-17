@@ -505,12 +505,89 @@ def test_deleting_a_page_moves_annotations_with_it(reader_tab, qapp, tmp_path, m
     reader_tab.flush_annotations_to_pdf()
     reader_tab._store_annotations_in_pdf(blocking=True)
 
+    before = open(path, "rb").read()
+    mode = 0o664
+    os.chmod(path, mode)
     reader_tab.delete_pages([0])
     pump(15, lambda: reader_tab.current_doc is not None and reader_tab.current_doc.page_count == 14)
     assert reader_tab.current_doc.page_count == 14
     assert list(reader_tab.annotations) == ["1"]
+    assert open(path, "rb").read() == before
+    assert reader_tab.has_unsaved_page_edits()
+    assert pdf_annotations.read_annotations(reader_tab.pdf_path())["1"][0]["text"] == "keep me"
+
+    assert reader_tab.save_page_edits()
+    pump(15, lambda: reader_tab.current_doc is not None)
+    assert not reader_tab.has_unsaved_page_edits()
     assert pdf_annotations.read_annotations(path)["1"][0]["text"] == "keep me"
+    assert os.stat(path).st_mode & 0o777 == mode
     reader_tab.cleanup()
+
+
+def test_discarded_page_edits_leave_the_file_and_annotations_as_they_were(reader_tab, qapp, tmp_path, monkeypatch):
+    import shutil
+    import time
+
+    from riemann.core import annotation_store
+
+    monkeypatch.setattr(annotation_store, "_shared", annotation_store.AnnotationStore(str(tmp_path / "store")))
+
+    def pump(seconds, until=lambda: False):
+        end = time.time() + seconds
+        while time.time() < end and not until():
+            qapp.processEvents()
+            time.sleep(0.01)
+
+    path = str(tmp_path / "paper.pdf")
+    shutil.copyfile(ATTENTION, path)
+    reader_tab.resize(1000, 800)
+    reader_tab.show()
+    reader_tab.load_document(path)
+    pump(15, lambda: reader_tab.current_doc is not None)
+    reader_tab.annotations = {"3": [{"id": "n1", "type": "note", "rel_pos": [0.5, 0.5], "text": "stay", "color": "#ff0000"}]}
+    reader_tab.save_annotations()
+    reader_tab.flush_annotations_to_pdf()
+    reader_tab._store_annotations_in_pdf(blocking=True)
+    before = open(path, "rb").read()
+    from riemann.core import page_edit
+
+    reader_tab._edit_pages(page_edit.move_page, 0, 5)
+    pump(15, lambda: reader_tab.current_doc is not None)
+    assert list(reader_tab.annotations) == ["2"]
+    scratch = reader_tab.pdf_path()
+    assert scratch != path and os.path.exists(scratch)
+
+    clicked = []
+
+    def choose_discard(box):
+        for button in box.buttons():
+            if button.text() == "Discard":
+                clicked.append(button)
+        return 0
+
+    monkeypatch.setattr("riemann.ui.reader.mixins.pages.QMessageBox.exec", choose_discard)
+    monkeypatch.setattr("riemann.ui.reader.mixins.pages.QMessageBox.clickedButton", lambda box: clicked[-1])
+    assert reader_tab.resolve_page_edits()
+    assert not reader_tab.has_unsaved_page_edits()
+    assert not os.path.exists(scratch)
+    assert open(path, "rb").read() == before
+    assert list(reader_tab.annotations) == ["3"]
+    reader_tab.cleanup()
+
+
+def test_cancelling_the_unsaved_edits_question_keeps_the_tab_open(qtbot, tmp_path):
+    from unittest.mock import patch as _patch
+
+    from riemann.app import RiemannWindow
+
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    tab = ReaderTab()
+    window.tabs_main.addTab(tab, "doc")
+    count = window.tabs_main.count()
+    with _patch.object(ReaderTab, "resolve_page_edits", return_value=False):
+        window.close_tab(window.tabs_main.indexOf(tab))
+    assert window.tabs_main.count() == count
 
 
 def test_form_entries_are_saved_into_the_pdf(reader_tab, qapp, tmp_path, monkeypatch):

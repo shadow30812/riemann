@@ -4,18 +4,32 @@ insert another PDF (plus OCR of a page range, from mixins/ai.py), from the
 Pages toolbar menu or the thumbnails' context
 menu (acting on the selected thumbnails, or the current page).
 
-An edit first writes pending annotations into the PDF, lets go of the open
-document, rewrites the file (riemann.core.page_edit), renumbers Riemann's own
-annotation copy with the page mapping the edit returns, and reopens the file
-at the page the reader was on. The new file signature is recorded as Riemann's
-own, so the reload is not mistaken for a change made by another app.
+Edits change a scratch copy, never the file on disk, until the user saves.
+The first edit writes pending annotations into the PDF, records the
+annotations as they are (so Discard can put them back), and copies the file
+to a private folder in the cache (edit_scratch). From then on pdf_path() is
+the scratch copy: the reader loads and renders it, and annotations, form
+entries and further edits are written into it, while current_path stays the
+document's identity for notes, the session, history and the library. Each
+edit rewrites the scratch copy (riemann.core.page_edit), renumbers Riemann's
+own annotation copy with the page mapping the edit returns, and reopens it at
+the page the reader was on.
+
+Save writes the scratch copy over the original in one rename, keeping its
+permissions, after asking if the original changed on disk meanwhile.
+Discard deletes the scratch copy, restores the annotations and reopens the
+original. Closing a tab with edits waiting asks which (resolve_page_edits);
+so does loading another file into the tab.
 """
 
+import copy
 import os
 import re
-from typing import List
+import shutil
+import tempfile
+from typing import List, Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QStandardPaths, Qt, QTimer
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMenu, QMessageBox
 
 from ....core import page_edit, pdf_annotations
@@ -56,7 +70,128 @@ def format_page_ranges(pages: List[int]) -> str:
     return ", ".join(out)
 
 
+SCRATCH_FOLDER = "page-edits"
+
+
+def scratch_root() -> str:
+    return os.path.join(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation), SCRATCH_FOLDER)
+
+
 class PagesMixin(ReaderHostBase):
+    edit_scratch: Optional[str] = None
+    _edit_snapshot = None
+
+    def pdf_path(self) -> str:
+        """The file the reader shows and writes: the scratch copy while page edits wait for Save."""
+        return self.edit_scratch or self.current_path or ""
+
+    def has_unsaved_page_edits(self) -> bool:
+        return bool(self.edit_scratch)
+
+    def _start_scratch(self) -> str:
+        self.flush_annotations_to_pdf()
+        os.makedirs(scratch_root(), exist_ok=True)
+        folder = tempfile.mkdtemp(dir=scratch_root())
+        scratch = os.path.join(folder, os.path.basename(self.current_path))
+        shutil.copy2(self.current_path, scratch)
+        self._edit_snapshot = (
+            copy.deepcopy(self.annotations),
+            copy.deepcopy(self._anno_written),
+            self._anno_file_sig,
+        )
+        self.edit_scratch = scratch
+        return scratch
+
+    def _drop_scratch(self) -> None:
+        scratch, self.edit_scratch, self._edit_snapshot = self.edit_scratch, None, None
+        if scratch:
+            shutil.rmtree(os.path.dirname(scratch), ignore_errors=True)
+
+    def _reopen_at(self, page: int) -> None:
+        self.load_document(self.current_path)
+        QTimer.singleShot(300, self, lambda: self.jump_to_page(page))
+
+    def _release_document(self) -> None:
+        self._stop_render_worker()
+        self._replace_page_renderer(None)
+        self.current_doc = None
+
+    def save_page_edits(self) -> bool:
+        """Writes the edited scratch copy over the original; True when it was saved."""
+        if not self.edit_scratch:
+            return True
+        path = self.current_path
+        try:
+            changed = self._loaded_mtime is not None and os.path.getmtime(path) != self._loaded_mtime
+        except OSError:
+            changed = False
+        if changed:
+            answer = QMessageBox.question(
+                self,
+                "Save page changes",
+                f"{os.path.basename(path)} was changed by another app since it was opened. Replace it with the edited pages?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return False
+        self.flush_annotations_to_pdf()
+        try:
+            self.flush_forms_to_pdf()
+        except Exception as e:
+            print(f"[Warning] Could not store form entries in the PDF: {e}")
+        current = self.current_page_index
+        self._release_document()
+        try:
+            page_edit.replace_with(path, self.edit_scratch)
+        except OSError as e:
+            QMessageBox.warning(self, "Save page changes", str(e) or type(e).__name__)
+            self._reopen_at(current)
+            return False
+        self._drop_scratch()
+        self._anno_file_sig = pdf_annotations.file_signature(path)
+        try:
+            self._loaded_mtime = os.path.getmtime(path)
+        except OSError:
+            self._loaded_mtime = None
+        self.invalidate_page_cache()
+        self._reopen_at(current)
+        self.show_toast(f"Saved the page changes to {os.path.basename(path)}.")
+        return True
+
+    def discard_page_edits(self) -> None:
+        """Forgets the edits: the scratch copy goes, the annotations are put back, the original is shown."""
+        if not self.edit_scratch:
+            return
+        annotations, written, sig = self._edit_snapshot or (self.annotations, self._anno_written, self._anno_file_sig)
+        timer = self._pdf_store_timer
+        if timer is not None:
+            timer.stop()
+        self._release_document()
+        self._drop_scratch()
+        self.annotations = annotations
+        self._anno_written = written
+        self._anno_file_sig = sig
+        self._write_annotation_json()
+        self.invalidate_page_cache()
+
+    def resolve_page_edits(self) -> bool:
+        """Asks whether to save edits that wait for Save; False when the user cancels."""
+        if not self.edit_scratch:
+            return True
+        box = QMessageBox(self)
+        box.setWindowTitle("Unsaved page changes")
+        box.setText(f"Save the page changes to {os.path.basename(self.current_path)}?")
+        save = box.addButton("Save", QMessageBox.ButtonRole.AcceptRole)
+        discard = box.addButton("Discard", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        if box.clickedButton() is save:
+            return self.save_page_edits()
+        if box.clickedButton() is discard:
+            self.discard_page_edits()
+            return True
+        return False
+
     def _target_pages(self) -> List[int]:
         thumbs = getattr(self.sidebar_nav, "thumbs", None)
         if thumbs is not None and thumbs.isVisible():
@@ -101,18 +236,19 @@ class PagesMixin(ReaderHostBase):
     def _edit_pages(self, operation, *args, done: str = "") -> bool:
         if not self._editable():
             return False
-        path = self.current_path
-        self.flush_annotations_to_pdf()
         current = self.current_page_index
-        self._stop_render_worker()
-        self._replace_page_renderer(None)
-        self.current_doc = None
+        try:
+            path = self.edit_scratch or self._start_scratch()
+        except OSError as e:
+            QMessageBox.warning(self, "Edit pages", str(e) or type(e).__name__)
+            return False
+        self.flush_annotations_to_pdf()
+        self._release_document()
         try:
             mapping = operation(path, *args)
         except Exception as e:
             QMessageBox.warning(self, "Edit pages", str(e) or type(e).__name__)
-            self.load_document(path, restore_state=False)
-            QTimer.singleShot(300, lambda: self.jump_to_page(current))
+            self._reopen_at(current)
             return False
         self.annotations = page_edit.remap_pages(self.annotations, mapping)
         if self._anno_written is not None:
@@ -120,17 +256,12 @@ class PagesMixin(ReaderHostBase):
         self._anno_file_sig = pdf_annotations.file_signature(path)
         self._write_annotation_json()
         self.invalidate_page_cache()
-        try:
-            self._loaded_mtime = os.path.getmtime(path)
-        except OSError:
-            self._loaded_mtime = None
         target = mapping.get(current)
         if target is None:
             target = min((v for v in mapping.values() if v is not None), key=lambda v: abs(v - current), default=0)
-        self.load_document(path, restore_state=False)
-        QTimer.singleShot(300, lambda: self.jump_to_page(target))
+        self._reopen_at(target)
         if done:
-            self.show_toast(done)
+            self.show_toast(f"{done} Save to keep it in the file.")
         return True
 
     def rotate_pages(self, pages: List[int], degrees: int) -> None:
@@ -170,7 +301,7 @@ class PagesMixin(ReaderHostBase):
             return
         save_last_directory(self.settings, dest)
         try:
-            page_edit.extract_pages(self.current_path, chosen, dest)
+            page_edit.extract_pages(self.pdf_path(), chosen, dest)
         except Exception as e:
             QMessageBox.warning(self, "Extract pages", str(e))
             return

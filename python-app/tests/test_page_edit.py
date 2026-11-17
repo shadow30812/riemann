@@ -1,5 +1,7 @@
 """Tests for riemann/core/page_edit.py."""
 
+import os
+
 import pikepdf
 import pytest
 
@@ -70,3 +72,28 @@ def test_signed_files_are_refused(tmp_path):
 def test_remap_pages():
     pages = {"0": ["a"], "1": ["b"], "3": ["d"]}
     assert page_edit.remap_pages(pages, {0: 0, 1: None, 2: 1, 3: 2}) == {"0": ["a"], "2": ["d"]}
+
+
+@pytest.mark.parametrize("edit", [
+    lambda p: page_edit.rotate_pages(p, [0], 90),
+    lambda p: page_edit.delete_pages(p, [1]),
+    lambda p: page_edit.move_page(p, 0, 2),
+])
+def test_edits_keep_the_file_permissions(tmp_path, edit):
+    import os
+    import stat
+
+    p = make(tmp_path / "shared.pdf")
+    os.chmod(p, 0o664)
+    edit(p)
+    assert stat.S_IMODE(os.stat(p).st_mode) == 0o664
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="counts open files through /proc")
+def test_refused_edit_closes_the_file(tmp_path):
+    p = make(tmp_path / "a.pdf")
+    before = len(os.listdir("/proc/self/fd"))
+    for edit in (lambda: page_edit.rotate_pages(p, [9], 90), lambda: page_edit.delete_pages(p, [0, 1, 2, 3])):
+        with pytest.raises(page_edit.PageEditError):
+            edit()
+    assert len(os.listdir("/proc/self/fd")) == before

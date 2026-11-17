@@ -113,20 +113,20 @@ class DocumentMixin(ReaderHostBase):
         self.load_progress.show()
 
         self._load_path = path
-        self._load_restore_state = restore_state
+        self._load_source = self.edit_scratch if self.edit_scratch and path == self.current_path else path
         self._load_password = password
         self._load_is_retry = is_retry
 
-        self.load_worker = DocumentLoadWorker(self.engine, path, password)
-        self.load_worker.finished.connect(self._on_document_loaded)
+        self.load_worker = DocumentLoadWorker(self.engine, self._load_source, password)
+        self.load_worker.loaded.connect(self._on_document_loaded)
         self.load_worker.error.connect(self._on_document_load_error)
-        self.load_worker.start()
+        track(self.load_worker).start()
 
     def _on_document_loaded(self, doc):
         """Callback for when the thread successfully returns the PDF."""
         self.load_progress.accept()
         self.current_doc = doc
-        self._replace_page_renderer(PageRenderer(doc, self._load_path, self._load_password))
+        self._replace_page_renderer(PageRenderer(doc, self._load_source, self._load_password))
         self.current_signatures = []
         self.signature_appearances = {}
         self._reset_document_caches()
@@ -168,8 +168,8 @@ class DocumentMixin(ReaderHostBase):
 
         if not self.is_preview:
             self.load_annotations()
-            self._load_external_comments_async(path)
-            QTimer.singleShot(500, lambda: self._detect_signatures(path))
+            self._load_external_comments_async(self.pdf_path())
+            QTimer.singleShot(500, self, lambda: self._detect_signatures(self.pdf_path()))
 
         initial_page = self.pending_initial_page
         self.pending_initial_page = None
@@ -380,10 +380,23 @@ class DocumentMixin(ReaderHostBase):
             sys.stderr.write(f"Markdown Load Error: {e}\n")
 
     def save_document(self) -> None:
-        """Saves a copy of the document, with its annotations embedded when it has any."""
+        """Saves a copy of the document, with its annotations embedded when it has any; with page edits waiting, offers to save them into the file."""
         if not self.current_path or not os.path.exists(self.current_path):
             QMessageBox.warning(self, "Save Error", "No document loaded.")
             return
+        if self.has_unsaved_page_edits():
+            box = QMessageBox(self)
+            box.setWindowTitle("Save")
+            box.setText(f"Save the page changes to {os.path.basename(self.current_path)}, or save the edited document as a copy?")
+            save = box.addButton("Save", QMessageBox.ButtonRole.AcceptRole)
+            box.addButton("Save a Copy…", QMessageBox.ButtonRole.ActionRole)
+            cancel = box.addButton(QMessageBox.StandardButton.Cancel)
+            box.exec()
+            if box.clickedButton() is save:
+                self.save_page_edits()
+                return
+            if box.clickedButton() is cancel:
+                return
 
         start_dir = get_dialog_directory(self.settings)
         dest, _ = QFileDialog.getSaveFileName(
@@ -400,12 +413,12 @@ class DocumentMixin(ReaderHostBase):
                 if any(self.annotations.values()) and self.current_path.lower().endswith(".pdf"):
                     try:
                         written = pdf_annotations.write_annotations(
-                            self.current_path, self._annotation_snapshot(), dest=dest
+                            self.pdf_path(), self._annotation_snapshot(), dest=dest
                         )
                     except Exception as e:
                         print(f"[Warning] Could not add annotations to the copy: {e}")
                 if not written:
-                    shutil.copy2(self.current_path, dest)
+                    shutil.copy2(self.pdf_path(), dest)
                 if self.form_values_cache and self.current_path.lower().endswith(".pdf"):
                     try:
                         pdf_forms.write_form_values(dest, dict(self.form_values_cache))
@@ -694,6 +707,7 @@ class DocumentMixin(ReaderHostBase):
 
         self.current_doc = None
         self.engine = None
+        self._drop_scratch()
 
         if self.web is not None:
             try:

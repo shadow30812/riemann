@@ -336,7 +336,7 @@ class AnnotationsMixin(ReaderHostBase):
                 anno.setdefault("id", pdf_annotations.new_annotation_id())
 
         if self.current_path.lower().endswith(".pdf") and store_in_pdf_enabled():
-            self._check_pdf_annotations_async(self.current_path)
+            self._check_pdf_annotations_async(self.pdf_path())
 
     def _pdf_store_bridge(self) -> "_PdfStoreBridge":
         bridge = self._store_bridge
@@ -367,7 +367,7 @@ class AnnotationsMixin(ReaderHostBase):
         threading.Thread(target=work, name="riemann-anno-read").start()
 
     def _on_pdf_annotations_read(self, path: str, stored, sig) -> None:
-        if path != self.current_path:
+        if path != self.pdf_path():
             return
         if stored is not None:
             before = self._annotation_snapshot()
@@ -426,7 +426,7 @@ class AnnotationsMixin(ReaderHostBase):
 
     def _store_annotations_in_pdf(self, blocking: bool = False) -> None:
         """Writes the annotations into the PDF on a worker thread (or inline when blocking)."""
-        path = self.current_path
+        path = self.pdf_path()
         if not path:
             return
         if self._pdf_store_busy and not blocking:
@@ -469,13 +469,13 @@ class AnnotationsMixin(ReaderHostBase):
 
     def _on_pdf_annotations_written(self, path: str, sig, error: str) -> None:
         self._pdf_store_busy = False
-        if path != self.current_path:
+        if path != self.pdf_path():
             return
         if sig is not None:
             self._anno_file_sig = sig
             self._anno_written = pdf_annotations.written_form((self._pdf_store_snapshot or {}))
             self._write_annotation_json()
-            if self._loaded_mtime == self._pdf_store_mtime_before:
+            if path == self.current_path and self._loaded_mtime == self._pdf_store_mtime_before:
                 try:
                     self._loaded_mtime = os.path.getmtime(path)
                 except OSError:
@@ -500,7 +500,7 @@ class AnnotationsMixin(ReaderHostBase):
         if timer is not None and timer.isActive():
             timer.stop()
             self._store_annotations_in_pdf(blocking=True)
-        path = self.current_path
+        path = self.pdf_path()
         if path and path.lower().endswith(".pdf") and self._anno_written is not None:
             threading.Thread(target=compact_if_needed, args=(path,), name="riemann-compact").start()
 
@@ -710,7 +710,7 @@ class AnnotationsMixin(ReaderHostBase):
         threading.Thread(target=work, name="riemann-comments").start()
 
     def _on_external_comments_loaded(self, path: str, comments: dict) -> None:
-        if path == self.current_path:
+        if path == self.pdf_path():
             self.external_comments = comments
 
     def _get_comment_at_pos(

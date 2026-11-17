@@ -55,6 +55,8 @@ class TabsMixin:
     def close_tab(self, index: int) -> None:
         """Closes a main tab, first checking for open web dialogs."""
         widget = self.tabs_main.widget(index)
+        if isinstance(widget, ReaderTab) and not widget.resolve_page_edits():
+            return
         if widget is not None and widget is getattr(self, "preview_tab_widget", None):
             self.preview_tab_widget = None
         if widget:
@@ -85,6 +87,8 @@ class TabsMixin:
     def close_side_tab(self, index: int) -> None:
         """Closes a side tab, first checking for open web dialogs."""
         widget = self.tabs_side.widget(index)
+        if isinstance(widget, ReaderTab) and not widget.resolve_page_edits():
+            return
         if widget is not None and widget is getattr(self, "preview_tab_widget", None):
             self.preview_tab_widget = None
         if widget:

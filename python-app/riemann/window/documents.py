@@ -380,6 +380,8 @@ class DocumentsMixin:
         path = getattr(old, "current_path", None) if old else None
         if not path or not os.path.exists(path):
             return None
+        if getattr(old, "edit_scratch", None):
+            return None
 
         page = getattr(old, "current_page_index", None)
         if not isinstance(page, int) or not getattr(old, "current_doc", None):

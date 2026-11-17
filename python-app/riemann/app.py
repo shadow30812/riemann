@@ -415,7 +415,13 @@ class RiemannWindow(
         QApplication.instance().quit()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """Saves the session unless the window is incognito."""
+        """Saves the session unless the window is incognito; asks first about page edits waiting for Save."""
+        for tabs in (self.tabs_main, self.tabs_side):
+            for i in range(tabs.count()):
+                widget = tabs.widget(i)
+                if isinstance(widget, ReaderTab) and not widget.resolve_page_edits():
+                    event.ignore()
+                    return
         if self.incognito:
             if self in RiemannWindow._all_open_windows:
                 RiemannWindow._all_open_windows.remove(self)
