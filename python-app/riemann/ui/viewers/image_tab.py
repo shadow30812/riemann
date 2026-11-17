@@ -34,7 +34,7 @@ from typing import Optional
 
 import shiboken6
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QIcon, QImage, QKeySequence, QMovie, QPainter, QPixmap, QShortcut, QTransform
+from PySide6.QtGui import QIcon, QImage, QKeySequence, QMovie, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
