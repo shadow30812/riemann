@@ -35,7 +35,7 @@ def child(doc):
     from PySide6.QtCore import QTimer
 
     import riemann.app as A
-    from _common import rss_mb
+    from _common import rss_mb, tree_pss_mb
 
     marks = {"imports_ms": (time.time() - t_start) * 1000}
     orig_show = A.RiemannWindow.show
@@ -52,6 +52,7 @@ def child(doc):
             if sharp:
                 marks["first_page_ms"] = (time.time() - t_start) * 1000
                 marks["rss_mb"] = rss_mb()
+                marks["tree_pss_mb"] = tree_pss_mb()
                 print("BENCH " + json.dumps(marks), flush=True)
                 os._exit(0)
             QTimer.singleShot(2, poll)
@@ -109,7 +110,8 @@ def main():
         label = "first launch" if i == 0 else f"run {i}"
         print(
             f"{label:12}: imports {marks['imports_ms']:6.0f} ms | window {marks['window_ms']:6.0f} ms | "
-            f"first sharp page {marks['first_page_ms']:6.0f} ms | RSS {marks['rss_mb']:5.0f} MB"
+            f"first sharp page {marks['first_page_ms']:6.0f} ms | RSS {marks['rss_mb']:5.0f} MB | "
+            f"with children (PSS) {marks['tree_pss_mb']:5.0f} MB"
         )
         if i == 0:
             first_launch = marks

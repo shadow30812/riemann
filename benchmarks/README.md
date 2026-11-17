@@ -29,22 +29,27 @@ env -u LD_LIBRARY_PATH riemann/bin/python benchmarks/bench_core.py
 |---|---|
 | `bench_core.py` | The Rust core against PyMuPDF on the same pages: open time, render time at 1x, 2x and 3x (72, 144 and 216 DPI), text extraction speed and full-document search. Up to 40 pages sampled per document, median of 3 runs per page. |
 | `bench_scroll.py` | A reader tab in a 1400x1000 window at Fit Width, scrolled at 2,000, 6,000 and 19,000 px/s with 60 ticks per second. After each tick it records whether the page in the middle of the viewport is sharp, a low-resolution stand-in, or blank, and how long the longest single pass of the Qt event loop took (how long the window froze). Median of 3 runs. |
-| `bench_startup.py` | Launches the full app with one PDF and times launch to window, and launch to a sharp first page, with memory use at that point. The first launch on empty data folders (which builds a private virtual environment) is reported separately. Median of 5 runs. |
+| `bench_startup.py` | Launches the full app with one PDF and times launch to window, and launch to a sharp first page, with memory use at that point. The first launch on empty data folders is reported separately. Median of 7 runs. |
 | `bench_memory.py` | Opens 1, 5 and 10 reader tabs, pages through 60 pages in each, and records resident memory and how much the shared page cache holds. |
+
+Memory is recorded two ways: `rss_mb`, the main process's resident memory, and `tree_pss_mb`, the proportional set size of the main process and all its children (the render process of each reader tab, the AI engine if it runs), which counts memory they share once. Results from before 2026-11-17 have only `rss_mb`, and come from versions without render processes.
 
 `bench_scroll.py`, `bench_startup.py` and `bench_memory.py` take `--app-path` (the `python-app` folder of another checkout) and `--core-path` (a folder holding a different `riemann_core` build), so an older version can be measured with the same script. `bench_core.py` takes `--core-path`. Every script takes `--label`, which names its output file.
 
-The results in `results/` compare three versions:
+The results in `results/` cover these versions:
 
 | Label | Version |
 |---|---|
-| `original` | commit `a2d54af` with the Rust core built from it |
-| `session1` | commit `4f65f07`, which added the background renderer |
-| `current` | `4f65f07` plus the uncommitted rendering, startup and memory work described in the main README |
+| `original` | commit `a2d54af` with the Rust core built from it (measured 2026-10-25) |
+| `session1` | commit `4f65f07`, which added the background renderer (2026-10-25) |
+| `current` | `4f65f07` plus the rendering, startup and memory work of October (2026-10-25) |
+| `2026-11-17` | commit `bc39d45` plus the uncommitted work of 17 November: render processes, page editing, redaction (2026-11-17) |
+| `2026-11-17-inprocess` | the same, scrolling with `RIEMANN_RENDER_PROCESS=0` |
 
 ## Method and caveats
 
-- Machine: Intel Core i5-13500H (16 logical cores), 13 GB RAM, Rocky Linux 10.2, Python 3.11.16, PySide6 6.10.1, PyMuPDF 1.28.2. Measured on 2026-10-25.
+- Machine: Intel Core i5-13500H (16 logical cores), 13 GB RAM, Rocky Linux 10.2, Python 3.11.16, PySide6 6.10.1, PyMuPDF 1.28.2.
+- On 2026-11-17 the same machine ran PyMuPDF (unchanged, 1.28.2) about 1.7 times faster than on 2026-10-25, so results from the two dates can't be compared directly. Compare within a date, or against PyMuPDF from the same run.
 - The scroll, startup and memory scripts use Qt's offscreen platform, so there is no compositor in the loop and the device pixel ratio is 1.
 - The OS file cache is warm. Startup times vary by about 0.3 s from run to run on this machine.
 - The source tree and virtual environment sit on an NTFS partition mounted through FUSE, which makes Python imports slower than on a native file system.

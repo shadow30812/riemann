@@ -1,0 +1,84 @@
+{
+  "label": "2026-11-17",
+  "machine": {
+    "date": "2026-11-17 08:30 UTC",
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13500H",
+    "logical_cores": 16,
+    "ram_gb": 13.1,
+    "os": "Rocky Linux 10.2 (Red Quartz) (kernel 6.12.0-211.74.1.el10_2.x86_64)",
+    "python": "3.11.16",
+    "commit": null,
+    "dirty": false,
+    "pyside6": "6.10.1"
+  },
+  "settings": {
+    "runs": 7,
+    "doc": "pdf17_spec.pdf",
+    "platform": "offscreen"
+  },
+  "median": {
+    "imports_ms": 343.5,
+    "window_ms": 640.9,
+    "first_page_ms": 1004.0,
+    "rss_mb": 285.5,
+    "tree_pss_mb": 304.0
+  },
+  "first_launch": {
+    "imports_ms": 336.4863395690918,
+    "window_ms": 685.11962890625,
+    "first_page_ms": 1006.5929889678955,
+    "rss_mb": 283.74609375,
+    "tree_pss_mb": 301.3701171875
+  },
+  "runs": [
+    {
+      "imports_ms": 355.532169342041,
+      "window_ms": 670.1347827911377,
+      "first_page_ms": 1009.3719959259033,
+      "rss_mb": 285.53515625,
+      "tree_pss_mb": 303.6591796875
+    },
+    {
+      "imports_ms": 341.3512706756592,
+      "window_ms": 640.9084796905518,
+      "first_page_ms": 968.3411121368408,
+      "rss_mb": 285.6875,
+      "tree_pss_mb": 304.0615234375
+    },
+    {
+      "imports_ms": 343.4634208679199,
+      "window_ms": 636.3081932067871,
+      "first_page_ms": 970.9110260009766,
+      "rss_mb": 285.28515625,
+      "tree_pss_mb": 304.0068359375
+    },
+    {
+      "imports_ms": 340.1684761047363,
+      "window_ms": 629.33349609375,
+      "first_page_ms": 1011.0492706298828,
+      "rss_mb": 294.6328125,
+      "tree_pss_mb": 312.912109375
+    },
+    {
+      "imports_ms": 366.6679859161377,
+      "window_ms": 724.5843410491943,
+      "first_page_ms": 1048.0246543884277,
+      "rss_mb": 284.1328125,
+      "tree_pss_mb": 302.064453125
+    },
+    {
+      "imports_ms": 359.24482345581055,
+      "window_ms": 683.0928325653076,
+      "first_page_ms": 1004.0233135223389,
+      "rss_mb": 283.9609375,
+      "tree_pss_mb": 301.9072265625
+    },
+    {
+      "imports_ms": 336.58790588378906,
+      "window_ms": 636.8789672851562,
+      "first_page_ms": 991.034746170044,
+      "rss_mb": 286.16796875,
+      "tree_pss_mb": 304.8876953125
+    }
+  ]
+}

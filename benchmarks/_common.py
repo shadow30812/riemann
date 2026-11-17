@@ -138,6 +138,46 @@ def rss_mb(pid=None):
     return psutil.Process(pid).memory_info().rss / 1024 / 1024
 
 
+def _descendants(pid):
+    found, todo = [], [pid]
+    while todo:
+        current = todo.pop()
+        try:
+            tasks = os.listdir(f"/proc/{current}/task")
+        except OSError:
+            continue
+        for tid in tasks:
+            try:
+                with open(f"/proc/{current}/task/{tid}/children") as f:
+                    kids = [int(k) for k in f.read().split()]
+            except OSError:
+                continue
+            found += kids
+            todo += kids
+    return found
+
+
+def tree_pss_mb(pid=None):
+    """
+    Proportional set size in MB of a process and all its descendants (the
+    render processes, the AI engine), so memory shared between them is
+    counted once. Linux only; NaN elsewhere.
+    """
+    root = pid or os.getpid()
+    total_kb = 0
+    for p in [root] + _descendants(root):
+        try:
+            with open(f"/proc/{p}/smaps_rollup") as f:
+                for line in f:
+                    if line.startswith("Pss:"):
+                        total_kb += int(line.split()[1])
+                        break
+        except OSError:
+            if p == root:
+                return float("nan")
+    return total_kb / 1024
+
+
 def write_results(name, payload):
     os.makedirs(RESULTS_DIR, exist_ok=True)
     path = os.path.join(RESULTS_DIR, f"{name}.json")

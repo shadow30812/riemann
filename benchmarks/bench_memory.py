@@ -3,8 +3,10 @@
 Opens up to --tabs reader tabs in one 1400x1000 window (Fit Width), cycling
 through the corpus. In each new tab it pages through the first --pages pages,
 waiting for every page to render sharply, so the shared image cache fills up.
-After 1, 5 and 10 tabs it records the process's resident memory and how many
-bytes of rendered pages the cache holds.
+After 1, 5 and 10 tabs it records the process's resident memory, the
+proportional memory of the process and its children together (each reader
+renders in a child process of its own), and how many bytes of rendered pages
+the cache holds.
 
     env -u LD_LIBRARY_PATH riemann/bin/python benchmarks/bench_memory.py
 """
@@ -14,7 +16,7 @@ import os
 import sys
 import time
 
-from _common import CORPUS, corpus_path, isolate_user_dirs, machine_info, rss_mb, use_checkout, write_results
+from _common import CORPUS, corpus_path, isolate_user_dirs, machine_info, rss_mb, tree_pss_mb, use_checkout, write_results
 
 ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 ap.add_argument("--tabs", type=int, default=10)
@@ -63,7 +65,7 @@ def main():
     pump(0.5)
 
     names = list(CORPUS)
-    samples = [{"tabs": 0, "rss_mb": round(rss_mb(), 1), "cache_mb": 0.0}]
+    samples = [{"tabs": 0, "rss_mb": round(rss_mb(), 1), "tree_pss_mb": round(tree_pss_mb(), 1), "cache_mb": 0.0}]
     print(f"baseline (Qt + app modules, no document): {samples[0]['rss_mb']:.0f} MB")
     for n in range(1, ARGS.tabs + 1):
         tab = ReaderTab()
@@ -83,12 +85,13 @@ def main():
             sample = {
                 "tabs": n,
                 "rss_mb": round(rss_mb(), 1),
+                "tree_pss_mb": round(tree_pss_mb(), 1),
                 "cache_mb": round(PAGE_CACHE.used / 1024 / 1024, 1),
                 "cache_budget_mb": round(PAGE_CACHE.budget / 1024 / 1024, 1),
             }
             samples.append(sample)
             print(
-                f"{n:2} tabs: RSS {sample['rss_mb']:6.0f} MB | page cache {sample['cache_mb']:5.0f} MB "
+                f"{n:2} tabs: RSS {sample['rss_mb']:6.0f} MB | with children (PSS) {sample['tree_pss_mb']:6.0f} MB | page cache {sample['cache_mb']:5.0f} MB "
                 f"of {sample['cache_budget_mb']:.0f} MB budget"
             )
 
