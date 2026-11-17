@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..palette import CONTENT
+from ..palette import CONTENT, dialog_icon
 
 SERIF_HINTS = ("times", "roman", "serif", "georgia", "garamond", "palatino", "minion", "cambria", "baskerville",
                "caslon", "charter", "utopia", "bookman", "century", "nimbusrom", "cmr", "lmroman", "book antiqua")
@@ -199,6 +199,7 @@ class ReplaceTextDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Replace text")
         layout = QVBoxLayout(self)
+        dialog_icon(self, "replace")
         self.editor = QPlainTextEdit(original)
         self.editor.selectAll()
         layout.addWidget(self.editor)

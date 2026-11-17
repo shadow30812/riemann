@@ -151,7 +151,7 @@ from PySide6.QtWidgets import (
 from ..core import permissions
 from ..core.captions_server import CaptionsServer
 from .browser_handlers import WHATSAPP_HEADER_UA, WHATSAPP_HOST, ScriptInjector
-from .palette import incognito_url_style, link_tip_style, toast_style, tokens
+from .palette import dialog_icon, incognito_url_style, link_tip_style, toast_style, tokens
 from .shortcuts import share_keys
 from .toast import Toast
 from ..core.log import log
@@ -490,6 +490,7 @@ class YtDlpSettingsDialog(QDialog):
         )
 
         layout = QVBoxLayout(self)
+        dialog_icon(self, "sliders-horizontal")
 
         layout.addWidget(QLabel("Video Quality:"))
         self.combo_video = QComboBox()

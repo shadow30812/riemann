@@ -25,6 +25,12 @@ outline of a redaction mark and the box a redaction leaves, and the glow of a
 tab playing media. qcolor turns any of these values into a QColor
 with alpha.
 
+dialog_icon puts a Lucide icon on a dialog, tinted for the theme of the
+window it belongs to (window_is_dark reads that window's dark_mode: the
+theme is a stylesheet on the window, so the application palette doesn't
+know it). The cog icons mark settings dialogs, so they read apart from
+document ones.
+
 The interface font is Inter, bundled in assets/fonts (SIL Open Font License,
 Inter-OFL.txt) so every machine renders the same face. load_ui_font registers it
 once at startup; FONT_STACK keeps system fallbacks for anything Inter lacks.
@@ -44,7 +50,7 @@ from PySide6.QtGui import (
     QRadialGradient,
 )
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QSizePolicy, QVBoxLayout, QWidget
 
 from ..core.assets import asset_path, icon_path
 
@@ -233,6 +239,31 @@ def tinted_pixmap(name: str, color: str, size: int, dpr: float = 2.0) -> QPixmap
 
 def tinted_icon(name: str, color: str, size: int = 24) -> QIcon:
     return QIcon(tinted_pixmap(name, color, size))
+
+
+def window_is_dark(widget: QWidget) -> bool:
+    """The theme of the Riemann window a dialog belongs to (its dark_mode), else the application's."""
+    parent = widget.parentWidget() if widget is not None else None
+    dark = getattr(parent.window() if parent is not None else None, "dark_mode", None)
+    return dark if isinstance(dark, bool) else app_is_dark()
+
+
+def dialog_icon(dialog: QWidget, name: str, tone: str = "accent") -> QPixmap:
+    """
+    Gives a dialog a Lucide icon in its window's theme, coloured by the token
+    tone: beside the text of a QMessageBox, otherwise above the dialog's
+    content (call it once the dialog's layout exists).
+    """
+    pm = tinted_pixmap(name, tokens(window_is_dark(dialog))[tone], 36)
+    dialog.setWindowIcon(QIcon(pm))
+    if isinstance(dialog, QMessageBox):
+        dialog.setIconPixmap(pm)
+    elif dialog.layout() is not None:
+        badge = QLabel()
+        badge.setObjectName("dialogIcon")
+        badge.setPixmap(pm)
+        dialog.layout().insertWidget(0, badge, 0, Qt.AlignmentFlag.AlignLeft)
+    return pm
 
 
 def _qcolor(value: str) -> QColor:

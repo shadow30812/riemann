@@ -82,12 +82,12 @@ class SettingsTab(SectionedSystemTab):
 
     def build_sections(self) -> None:
         self.settings = app_settings()
-        self._appearance(self.add_section("appearance", "Appearance", "palette"))
-        self._documents(self.add_section("documents", "Documents", "file-text"))
+        self._appearance(self.add_section("appearance", "Appearance", "monitor-cog"))
+        self._documents(self.add_section("documents", "Documents", "file-cog"))
         self._browser(self.add_section("browser", "Browser", "browser"))
-        self._permissions(self.add_section("permissions", "Site permissions", "shield"))
-        self._ai(self.add_section("ai", "AI and OCR", "sparkles"))
-        self._privacy(self.add_section("privacy", "Privacy and data", "lock"))
+        self._permissions(self.add_section("permissions", "Site permissions", "shield-cog-corner"))
+        self._ai(self.add_section("ai", "AI and OCR", "brain-cog"))
+        self._privacy(self.add_section("privacy", "Privacy and data", "database-cog"))
         self._about(self.add_section("about", "About", "circle-question-mark"))
 
     def _check(self, checked: bool, on_change) -> QCheckBox:

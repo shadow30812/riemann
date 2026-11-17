@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 from ..core.log import log
+from ..ui.palette import dialog_icon
 
 
 class ManageCookiesDialog(QDialog):
@@ -35,6 +36,7 @@ class ManageCookiesDialog(QDialog):
         self.resize(450, 500)
         self.parent_win = parent
         layout = QVBoxLayout(self)
+        dialog_icon(self, "cookie")
 
         layout.addWidget(QLabel("Select a website to clear its cookies:"))
         self.list_widget = QListWidget()

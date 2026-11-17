@@ -31,7 +31,7 @@ from ..render_worker import PAGE_IMAGE_FORMAT
 from ..workers import SignatureValidationWorker
 from ....core.log import log
 from ....core.settings import app_settings, get_dialog_directory, save_last_directory
-from ...palette import banner_style, tokens
+from ...palette import banner_style, dialog_icon, tokens
 from ....core.features import unused_path
 from ...threads import release, track
 from .host import ReaderHostBase
@@ -50,6 +50,7 @@ class CertificateViewerDialog(QDialog):
 
         self.setSizeGripEnabled(True)
         layout = QVBoxLayout(self)
+        dialog_icon(self, "file-badge")
         form = QFormLayout()
 
         form.addRow(

@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..ui.palette import app_is_dark, tokens
+from ..ui.palette import app_is_dark, dialog_icon, tokens
 
 
 class LibraryManager:
@@ -604,6 +604,7 @@ class PasswordDialog(QDialog):
         )
 
         layout = QVBoxLayout(self)
+        dialog_icon(self, "lock-keyhole")
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
 

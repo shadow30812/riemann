@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .palette import tinted_icon, tokens
+from .palette import dialog_icon, tinted_icon, tokens
 from .shortcuts import share_keys
 from .reader.utils import render_markdown_safely
 from ..core.log import log
@@ -399,6 +399,7 @@ class KeysDialog(QDialog):
         self.setWindowTitle("AI Assistant Keys")
         self.setMinimumWidth(460)
         layout = QVBoxLayout(self)
+        dialog_icon(self, "user-round-cog")
         note = QLabel(
             f"Keys are saved in {keys_file()}, readable only by your user account. "
             "An environment variable (for example ANTHROPIC_API_KEY) takes precedence."

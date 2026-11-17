@@ -52,7 +52,7 @@ from PySide6.QtWidgets import (
 from .log import log
 from .assets import asset_path, is_frozen
 from .processes import NO_WINDOW
-from ..ui.palette import app_is_dark, tokens
+from ..ui.palette import app_is_dark, dialog_icon, tokens
 
 
 _NO_WINDOW = NO_WINDOW
@@ -340,6 +340,7 @@ class DependenciesDialog(QDialog):
         self.setWindowTitle("External Dependency Manager")
         self.resize(550, 400)
         layout = QVBoxLayout(self)
+        dialog_icon(self, "package")
 
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Module (Feature)", "Status", "Action"])

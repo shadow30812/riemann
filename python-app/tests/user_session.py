@@ -454,7 +454,7 @@ def scenario_office_basic(files):
 
     first, second = files
     box = yield dialog(OfficePrompt)
-    notes["prompt"] = box.findChildren(QLabel)[0].text()
+    notes["prompt"] = next(label.text() for label in box.findChildren(QLabel) if label.text())
     press(box, "Use the basic view")
     yield lambda: getattr(current_tab(), "current_path", None) == first and current_tab().web is not None
     tab = current_tab()

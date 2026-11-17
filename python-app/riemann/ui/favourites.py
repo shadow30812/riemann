@@ -14,6 +14,7 @@ from ..core.settings import (
     favourites_settings,
     get_dialog_directory,
 )
+from .palette import dialog_icon
 
 
 class ManageFavoritesDialog(QDialog):
@@ -24,6 +25,7 @@ class ManageFavoritesDialog(QDialog):
         self.settings = favourites_settings()
 
         layout = QVBoxLayout(self)
+        dialog_icon(self, "folder-cog")
 
         self.list_widget = QListWidget()
         self.list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)

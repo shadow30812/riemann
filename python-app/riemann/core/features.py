@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (
 from .log import log
 from .processes import NO_WINDOW
 from .settings import app_settings, get_dialog_directory, save_last_directory
-from ..ui.palette import LIGHT
+from ..ui.palette import LIGHT, dialog_icon
 from .settings import DEFAULT_DIR_KEY, LAST_DIR_KEY
 
 
@@ -295,6 +295,7 @@ class ConvertDialog(QDialog):
         self.setMinimumSize(450, 200)
 
         layout = QVBoxLayout(self)
+        dialog_icon(self, "file-output")
 
         layout.addWidget(QLabel("Select Conversion Type:"))
         self.combo_type = QComboBox()
@@ -456,6 +457,7 @@ class CompressDialog(QDialog):
         self.resize(550, 350)
         self.setMinimumSize(500, 300)
         layout = QVBoxLayout(self)
+        dialog_icon(self, "file-archive")
 
         in_layout = QHBoxLayout()
         self.txt_input = QLineEdit()

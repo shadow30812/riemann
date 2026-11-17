@@ -49,6 +49,7 @@ from ..core.endpoints import LIBREOFFICE_DOWNLOAD
 from ..core.office_install import InstallPlan, install_env, install_plans
 from ..core.settings import OFFICE_ASK_KEY, OFFICE_PATH_KEY, app_settings
 from .threads import track
+from .palette import dialog_icon
 
 
 class OfficePrompt(QDialog):
@@ -57,6 +58,7 @@ class OfficePrompt(QDialog):
         self.setWindowTitle("LibreOffice")
         self.choice = "cancel"
         layout = QVBoxLayout(self)
+        dialog_icon(self, "file-cog")
         message = (
             f"Riemann shows {name} with LibreOffice, a free office suite, and it isn't installed.\n\n"
             "Once it is, Word, PowerPoint, Excel and OpenDocument files open here as pages, and "
@@ -115,6 +117,7 @@ class InstallDialog(QDialog):
         self.found = False
 
         layout = QVBoxLayout(self)
+        dialog_icon(self, "hard-drive-download")
         self.lbl_title = QLabel()
         self.lbl_title.setObjectName("dialogTitle")
         self.lbl_note = QLabel()

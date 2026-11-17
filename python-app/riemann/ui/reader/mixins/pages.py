@@ -39,6 +39,7 @@ from PySide6.QtWidgets import QFileDialog, QInputDialog, QMenu, QMessageBox
 
 from ....core import page_edit, pdf_annotations
 from ....core.settings import get_dialog_directory, save_last_directory
+from ...palette import dialog_icon
 from .host import ReaderHostBase
 
 
@@ -243,7 +244,7 @@ class PagesMixin(ReaderHostBase):
         if not self.document_signed or self._signed_edit_accepted:
             return True
         box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Warning)
+        dialog_icon(box, "shield-alert", "warning")
         box.setWindowTitle("Signed PDF")
         box.setText(f"{os.path.basename(self.current_path)} is digitally signed.")
         box.setInformativeText(
