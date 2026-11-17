@@ -21,6 +21,8 @@ from PySide6.QtWebEngineCore import (
     QWebEngineSettings,
 )
 from ..ui.browser import BrowserTab
+from ..ui.reader.tab import ReaderTab
+from ..ui.viewers import VIEWER_TABS
 from ..ui import tooltip
 from ..ui.palette import toast_style, tokens
 from ..ui.toast import Toast
@@ -209,6 +211,8 @@ class ChromeMixin:
                     tab_widget.setTabIcon(i, w.tab_icon(self.dark_mode))
                 if getattr(w, "is_preview", False):
                     tab_widget.setTabIcon(i, self._preview_icon())
+                elif isinstance(w, (ReaderTab,) + VIEWER_TABS):
+                    tab_widget.setTabIcon(i, self._document_icon(w.current_path or ""))
 
         self.refresh_signature_panel()
 

@@ -57,22 +57,36 @@ from ..ui.viewers import ImageTab, SpreadsheetTab, TableTab
 from ..core.assets import icon_path
 from ..core import office
 from ..core.office_basic import basic_format, packages_ready
-from ..core.doctypes import HTML_SUFFIXES, VIEWER_KINDS, dialog_filter, document_kind, is_reader_name, office_type
-from ..core.settings import OFFICE_ASK_KEY, OFFICE_PATH_KEY, get_dialog_directory, save_last_directory
+from ..core.doctypes import HTML_SUFFIXES, VIEWER_KINDS, dialog_filter, document_class, document_kind, is_reader_name, office_type
+from ..core.settings import AUTO_OPEN_DOWNLOADS_KEY, OFFICE_ASK_KEY, OFFICE_PATH_KEY, get_dialog_directory, save_last_directory
+
+
+DOCUMENT_ICONS = {
+    "pdf": "pdf.png",
+    "image": "file-image.svg",
+    "table": "file-spreadsheet.svg",
+    "spreadsheet": "file-spreadsheet.svg",
+    "ebook": "book-open.svg",
+}
 
 
 class DocumentsMixin:
+    def _shown_pdf(self) -> str:
+        """The PDF the current tab shows (an Office file's converted copy too), or ""."""
+        current = self.tabs_main.currentWidget()
+        if not isinstance(current, ReaderTab) or not current.current_doc:
+            return ""
+        shown = current.pdf_path()
+        return shown if shown and self._document_kind(shown) == "pdf" else ""
+
     def split_pdf(self) -> None:
         """
         Utility to extract specific pages into a new PDF using pypdf.
         """
-        current = self.tabs_main.currentWidget()
-        source_path = ""
+        source_path = self._shown_pdf()
         start_dir = get_dialog_directory(self.settings)
 
-        if isinstance(current, ReaderTab) and current.current_path:
-            source_path = current.current_path
-        else:
+        if not source_path:
             source_path, _ = QFileDialog.getOpenFileName(
                 self, "Select PDF to Split", start_dir, "PDF Files (*.pdf)"
             )
@@ -368,14 +382,26 @@ class DocumentsMixin:
         reader = self._create_reader(False)
         reader.load_document(table.current_path)
         idx = tab_widget.indexOf(table) + 1
-        tab_widget.insertTab(idx, reader, QIcon(icon_path("pdf.png")), os.path.basename(table.current_path))
+        tab_widget.insertTab(idx, reader, self._document_icon(table.current_path), os.path.basename(table.current_path))
         tab_widget.setCurrentIndex(idx)
         self._update_tab_tooltip(tab_widget, idx)
         return reader
 
-    @staticmethod
-    def _viewer_icon(kind: str) -> str:
-        return "image.svg" if kind == "image" else "file-text.svg"
+    def _document_icon_name(self, path: str = "", text: bool = False) -> str:
+        """The tab icon for path's kind of document; a page of text with text, a blank page without a path."""
+        if not path:
+            return "file.svg"
+        if text:
+            return "file-text.svg"
+        kind = self._viewer_kind(self._document_kind(path), path)
+        if kind == "office" and office_type(path) in ("presentation", "drawing"):
+            return "presentation.svg"
+        if kind in ("text", "markdown") and document_class(path) == "Code":
+            return "file-code.svg"
+        return DOCUMENT_ICONS.get(kind, "file-text.svg")
+
+    def _document_icon(self, path: str = "", text: bool = False) -> QIcon:
+        return QIcon(icon_path(self._document_icon_name(path, text), getattr(self, "dark_mode", False)))
 
     def open_as_text(self, table: QWidget) -> Optional[QWidget]:
         """Replaces a TableTab, in the same spot, by a reader showing its file as plain text."""
@@ -385,7 +411,7 @@ class DocumentsMixin:
         idx = tab_widget.indexOf(table)
         reader = self._create_reader(False)
         reader.load_document(table.current_path)
-        tab_widget.insertTab(idx, reader, QIcon(icon_path("pdf.png")), os.path.basename(table.current_path))
+        tab_widget.insertTab(idx, reader, self._document_icon(table.current_path, text=True), os.path.basename(table.current_path))
         tab_widget.removeTab(tab_widget.indexOf(table))
         if getattr(self, "preview_tab_widget", None) is table:
             self.preview_tab_widget = None
@@ -450,19 +476,13 @@ class DocumentsMixin:
         kind = self._viewer_kind(kind, path)
         if kind in VIEWER_KINDS or kind == "spreadsheet":
             widget = self._create_viewer(kind, path, preview)
-            icon = self._preview_icon() if preview else QIcon(icon_path(self._viewer_icon(kind), getattr(self, "dark_mode", False)))
+            icon = self._preview_icon() if preview else self._document_icon(path)
         elif kind in ("pdf", "ebook", "office") or (kind in ("markdown", "text") and not preview):
             widget = self._create_reader(preview)
             if page is not None:
                 widget.pending_initial_page = page
             widget.load_document(path)
-            icon = (
-                self._preview_icon()
-                if preview
-                else QIcon(
-                    icon_path("pdf.png")
-                )
-            )
+            icon = self._preview_icon() if preview else self._document_icon(path)
         else:
             widget = PreviewTextTab(path, getattr(self, "dark_mode", False))
             icon = self._preview_icon()
@@ -518,6 +538,8 @@ class DocumentsMixin:
                 return
             self.add_to_history(path, "web" if kind == "html" else "pdf")
             reader.load_document(path)
+            if tab_widget is not None and not getattr(reader, "is_preview", False):
+                tab_widget.setTabIcon(tab_widget.indexOf(reader), self._document_icon(path))
             return
         idx = tab_widget.indexOf(reader)
         was_current = tab_widget.currentIndex() == idx
@@ -609,11 +631,7 @@ class DocumentsMixin:
         else:
             preview = self._preview_mode_enabled()
             reader = self._create_reader(preview)
-            icon = (
-                self._preview_icon()
-                if preview
-                else QIcon(icon_path("pdf.png"))
-            )
+            icon = self._preview_icon() if preview else self._document_icon()
 
             current_idx = self.tabs_main.currentIndex()
             insert_idx = (
@@ -704,10 +722,10 @@ class DocumentsMixin:
                 self._open_document(path, self.tabs_main, preview=preview)
 
     def toggle_auto_pdf(self, checked: bool) -> None:
-        self.settings.setValue("browser/auto_open_pdf", checked)
+        self.settings.setValue(AUTO_OPEN_DOWNLOADS_KEY, checked)
 
     def open_pdf_in_new_tab(self, path: str) -> None:
-        """Opens a PDF in the side pane if it is active, otherwise the main one."""
+        """Opens a downloaded document in the side pane, which is shown for it if it is hidden."""
         target = self.tabs_side if (self.tabs_side.isVisible()) else self.tabs_main
 
         if target == self.tabs_main and self.tabs_side.isHidden():

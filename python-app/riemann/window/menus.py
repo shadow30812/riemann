@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QToolButton,
     QWidget,
 )
@@ -137,13 +138,11 @@ class MenusMixin:
         file_menu.addSeparator()
         file_actions = [
             ("Open file (Ctrl+O)", None, self.open_file_smart),
-            ("New PDF Tab (Ctrl+T)", None, lambda: self.new_pdf_tab()),
+            ("New Document Tab (Ctrl+T)", None, lambda: self.new_pdf_tab()),
             ("New Browser Page (Ctrl+B)", None, lambda: self.new_browser_tab()),
             ("New Folder Dashboard (Ctrl+Shift+E)", None, self.new_folder_home_tab),
             (None, None, None),
-            ("Split Current PDF", None, self.split_pdf),
-            ("Merge PDFs", None, self.join_pdfs),
-            (None, None, None),
+            ("PDF Tools", None, self._add_pdf_tools_menu),
             ("Convert Document...", None, self.show_convert_dialog),
             ("Compress Document...", None, self.show_compress_dialog),
             (
@@ -153,7 +152,7 @@ class MenusMixin:
             ),
             (None, None, None),
             ("New Window (Ctrl+N)", None, self.new_window),
-            ("New Incognito Tab (Ctrl+Shift+N)", None, self.new_incognito_window),
+            ("New Incognito Window (Ctrl+Shift+N)", None, self.new_incognito_window),
             (None, None, None),
             ("Exit (Ctrl+Q)", None, self.exit_application),
         ]
@@ -161,6 +160,8 @@ class MenusMixin:
         for name, shortcut, slot in file_actions:
             if name is None:
                 file_menu.addSeparator()
+            elif slot == self._add_pdf_tools_menu:
+                slot(file_menu.addMenu(name))
             else:
                 action = file_menu.addAction(name)
                 if shortcut:
@@ -319,6 +320,18 @@ class MenusMixin:
             self.btn_collapse_tabs,
         ):
             btn.setStyleSheet(style)
+
+    def _add_pdf_tools_menu(self, menu: QMenu) -> None:
+        self.pdf_tools_menu = menu
+        self.action_split_pdf = menu.addAction("Split a PDF...")
+        self.action_split_pdf.triggered.connect(self.split_pdf)
+        menu.addAction("Merge PDFs...").triggered.connect(self.join_pdfs)
+        menu.aboutToShow.connect(self._label_split_action)
+
+    def _label_split_action(self) -> None:
+        """Split works on the PDF the current tab shows, or asks for one."""
+        shown = self._shown_pdf()
+        self.action_split_pdf.setText(f"Split {os.path.basename(shown)}..." if shown else "Split a PDF...")
 
     def _populate_recent_menu(self) -> None:
         self.recent_menu.clear()
