@@ -396,7 +396,7 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_secure_export.setToolTip(
             "Export a password-protected copy of this PDF (Ctrl+Shift+S)"
         )
-        self.btn_secure_export.clicked.connect(self.export_secure_pdf)
+        self.btn_secure_export.clicked.connect(self.protect_or_unlock)
 
         self.btn_sign = QPushButton()
         self.btn_sign.setIcon(self._get_icon("signature.svg"))
@@ -595,7 +595,7 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_ocr.setIcon(self._get_icon("scan-text.svg"))
         self.btn_search.setIcon(self._get_icon("search.svg"))
         self.btn_ai_search.setIcon(self._get_icon("sparkles.svg"))
-        self.btn_secure_export.setIcon(self._get_icon("file-lock.svg"))
+        self._update_protect_button()
         self.btn_sign.setIcon(self._get_icon("signature.svg"))
 
         self.btn_find_prev.setIcon(self._get_icon("chevron-up.svg"))

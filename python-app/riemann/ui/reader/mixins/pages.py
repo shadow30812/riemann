@@ -15,6 +15,11 @@ edit rewrites the scratch copy (riemann.core.page_edit), renumbers Riemann's
 own annotation copy with the page mapping the edit returns, and reopens it at
 the page the reader was on.
 
+Encrypted files are edited with the password the reader opened them with
+(document_password) and stay encrypted. Rewriting a signed file invalidates
+its signatures, so the first edit of a signed document asks first
+(_confirm_signed_edit); the answer holds until another file is loaded.
+
 Save writes the scratch copy over the original in one rename, keeping its
 permissions, after asking if the original changed on disk meanwhile.
 Discard deletes the scratch copy, restores the annotations and reopens the
@@ -108,7 +113,7 @@ class PagesMixin(ReaderHostBase):
             shutil.rmtree(os.path.dirname(scratch), ignore_errors=True)
 
     def _reopen_at(self, page: int) -> None:
-        self.load_document(self.current_path)
+        self.load_document(self.current_path, self.document_password)
         QTimer.singleShot(300, self, lambda: self.jump_to_page(page))
 
     def _release_document(self) -> None:
@@ -233,8 +238,30 @@ class PagesMixin(ReaderHostBase):
             return False
         return True
 
+    def _confirm_signed_edit(self) -> bool:
+        """Warns once per document that rewriting a signed PDF breaks its signatures; True to go ahead."""
+        if not self.document_signed or self._signed_edit_accepted:
+            return True
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Signed PDF")
+        box.setText(f"{os.path.basename(self.current_path)} is digitally signed.")
+        box.setInformativeText(
+            "Editing it in any way rewrites the file, and its signatures will no longer be valid. "
+            "This isn't advisable. Annotations saved into a copy are added after the signed "
+            "content and leave the signatures intact, though a certified PDF that forbids "
+            "changes will still report them."
+        )
+        go = box.addButton("Edit anyway", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        if box.clickedButton() is not go:
+            return False
+        self._signed_edit_accepted = True
+        return True
+
     def _edit_pages(self, operation, *args, done: str = "") -> bool:
-        if not self._editable():
+        if not self._editable() or not self._confirm_signed_edit():
             return False
         current = self.current_page_index
         try:
@@ -245,7 +272,7 @@ class PagesMixin(ReaderHostBase):
         self.flush_annotations_to_pdf()
         self._release_document()
         try:
-            mapping = operation(path, *args)
+            mapping = operation(path, *args, password=self.document_password)
         except Exception as e:
             QMessageBox.warning(self, "Edit pages", str(e) or type(e).__name__)
             self._reopen_at(current)
@@ -301,7 +328,7 @@ class PagesMixin(ReaderHostBase):
             return
         save_last_directory(self.settings, dest)
         try:
-            page_edit.extract_pages(self.pdf_path(), chosen, dest)
+            page_edit.extract_pages(self.pdf_path(), chosen, dest, password=self.document_password)
         except Exception as e:
             QMessageBox.warning(self, "Extract pages", str(e))
             return

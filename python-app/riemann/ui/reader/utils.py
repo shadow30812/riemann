@@ -12,11 +12,13 @@ hash together.
 
 import html
 import re
+import urllib.parse
 
 import markdown
 import markdown.treeprocessors
 import markdown.util
 
+from ...core.assets import asset_path
 from ...core.endpoints import JSDELIVR_NPM
 from ..palette import tokens
 
@@ -124,26 +126,71 @@ def render_markdown_safely(markdown_text: str, extensions: tuple = ("fenced_code
     return md.convert(markdown_text)
 
 
-def generate_markdown_html(markdown_text: str, dark_mode: bool) -> str:
-    """Markdown rendered as an HTML page, with KaTeX for the maths."""
-    html_content = render_markdown_safely(markdown_text)
+def emoji_font_style() -> str:
+    """A style block that falls back to the bundled colour emoji font for characters the page font lacks."""
+    font_path = asset_path("fonts", "NotoColorEmoji.ttf")
+    font_uri = "file:///" + urllib.parse.quote(font_path.replace("\\", "/"))
+    return f"""<style>
+    @font-face {{ font-family: "Riemann Noto Emoji"; src: url("{font_uri}") format("truetype"); }}
+    body, p, span, div, h1, h2, h3, h4, h5, h6, table, th, td, li, pre, code {{
+        font-family: inherit, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Riemann Noto Emoji", "Twemoji Mozilla" !important;
+    }}
+</style>"""
 
+
+def _document_page(body: str, dark_mode: bool, head: str = "", extra_css: str = "") -> str:
     t = tokens(dark_mode)
     bg = t["canvas"] if dark_mode else t["surface"]
-    fg = t["text"]
-    pre_bg = t["raised"]
-    link = t["accent"]
-    border = t["border_strong"]
-
-    katex_cdn = KATEX_HEAD
-
     style = f"""
-    body {{ background:{bg}; color:{fg}; padding:40px; font-family: sans-serif; max-width: 800px; margin: 0 auto; line-height: 1.6; }}
-    pre {{ background: {pre_bg}; padding: 10px; border-radius: 5px; overflow-x: auto; }}
+    body {{ background:{bg}; color:{t["text"]}; padding:40px; font-family: sans-serif; max-width: 800px; margin: 0 auto; line-height: 1.6; }}
+    pre {{ background: {t["raised"]}; padding: 10px; border-radius: 5px; overflow-x: auto; }}
     code {{ font-family: monospace; }}
-    a {{ color: {link}; }}
+    a {{ color: {t["accent"]}; }}
     table {{ border-collapse: collapse; width: 100%; }}
-    th, td {{ border: 1px solid {border}; padding: 8px; text-align: left; }}
+    th, td {{ border: 1px solid {t["border_strong"]}; padding: 8px; text-align: left; }}
+    .riemann-note {{ color: {t["muted"]}; font-style: italic; }}
+    {extra_css}
     """
+    return f"<!DOCTYPE html><html><head><meta charset=\"utf-8\">{head}<style>{style}</style>{emoji_font_style()}</head><body>{body}</body></html>"
 
-    return f"<!DOCTYPE html><html><head>{katex_cdn}<style>{style}</style></head><body>{html_content}</body></html>"
+
+def generate_markdown_html(markdown_text: str, dark_mode: bool, note: str = "") -> str:
+    """Markdown rendered as an HTML page, with KaTeX for the maths; note is shown under it."""
+    body = render_markdown_safely(markdown_text)
+    if note:
+        body += f'<p class="riemann-note">{html.escape(note)}</p>'
+    return _document_page(body, dark_mode, head=KATEX_HEAD)
+
+
+HIGHLIGHT_LIMIT = 1024 * 1024
+
+
+def highlighted_code(text: str, path: str, dark_mode: bool) -> str:
+    """
+    text as a <pre> block, coloured by Pygments for path's language when
+    Pygments is installed and the text is under HIGHLIGHT_LIMIT characters
+    (highlighting runs on the UI thread), plain otherwise.
+    """
+    if len(text) <= HIGHLIGHT_LIMIT:
+        try:
+            from pygments import highlight
+            from pygments.formatters import HtmlFormatter
+            from pygments.lexers import TextLexer, get_lexer_for_filename
+        except ImportError:
+            pass
+        else:
+            try:
+                lexer = get_lexer_for_filename(path, stripnl=False)
+            except Exception:
+                lexer = TextLexer(stripnl=False)
+            formatter = HtmlFormatter(noclasses=True, nobackground=True, style="monokai" if dark_mode else "default")
+            return highlight(text, lexer, formatter)
+    return f"<pre>{html.escape(text)}</pre>"
+
+
+def generate_text_html(text: str, path: str, dark_mode: bool, note: str = "") -> str:
+    """A plain text or source file as an HTML page in the same frame as Markdown; note is shown under it."""
+    body = highlighted_code(text, path, dark_mode)
+    if note:
+        body += f'<p class="riemann-note">{html.escape(note)}</p>'
+    return _document_page(body, dark_mode, extra_css="pre { font-size: 13px; line-height: 1.45; }")

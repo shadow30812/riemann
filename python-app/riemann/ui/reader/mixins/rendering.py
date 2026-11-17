@@ -805,36 +805,11 @@ class RenderingMixin(ReaderHostBase):
                 html_content = generate_reflow_html(txt, self.theme_mode != 0)
                 self.web.setHtml(html_content)
 
-            elif getattr(
-                self, "current_path", None
-            ) and self.current_path.lower().endswith(".md"):
+            elif self.text_document and self.current_path:
                 try:
-                    with open(self.current_path, "r", encoding="utf-8") as f:
-                        text = f.read()
-                    full_html = generate_markdown_html(text, self.theme_mode != 0)
-
-                    font_path = asset_path("fonts", "NotoColorEmoji.ttf")
-
-                    font_uri = "file:///" + urllib.parse.quote(
-                        font_path.replace("\\", "/")
-                    )
-
-                    emoji_style = f"""
-                    <style>
-                        @font-face {{
-                            font-family: "Riemann Noto Emoji";
-                            src: url("{font_uri}") format("truetype");
-                        }}
-                        body, p, span, div, h1, h2, h3, h4, h5, h6, table, th, td, li, pre, code {{ 
-                            font-family: inherit, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Riemann Noto Emoji", "Twemoji Mozilla" !important; 
-                        }}
-                    </style>
-                    """
-
-                    full_html += emoji_style
-                    self.web.setHtml(full_html)
-                except Exception as e:
-                    sys.stderr.write(f"Markdown Reload Error: {e}\n")
+                    self._render_text_page()
+                except OSError as e:
+                    log.warning("Could not reload %s: %s", self.current_path, e)
 
     def _probe_base_page_size(self) -> None:
         """

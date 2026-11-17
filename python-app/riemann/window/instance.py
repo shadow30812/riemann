@@ -12,8 +12,10 @@ creates a socket with options set in a temporary folder and renames it into
 place, replacing whatever is there, so the probe comes before listen. The
 socket is created with UserAccessOption, so only the same user account can
 connect, and the running instance opens only what accepts_handoff allows:
-existing folders, and existing files of the types the desktop entry registers
-(PDF, Markdown, HTML) or that start with a PDF header.
+existing folders, and existing files that start with a PDF header or whose
+name is a PDF, Markdown, HTML or listed text or source file
+(core/doctypes.py). The list is explicit on purpose: a file is never accepted
+just because its content looks like text.
 """
 
 import os
@@ -22,6 +24,7 @@ from typing import List, Tuple
 from PySide6.QtCore import QUrl
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
+from ..core.doctypes import HTML_SUFFIXES, MARKDOWN_SUFFIXES, has_text_name
 from ..core.log import log
 
 
@@ -73,7 +76,7 @@ def hand_off_to_running_instance(server_name: str, payload: bytes, attempts: int
     return False
 
 
-HANDOFF_SUFFIXES = (".pdf", ".md", ".markdown", ".html", ".htm", ".xhtml")
+HANDOFF_SUFFIXES = (".pdf",) + MARKDOWN_SUFFIXES + HTML_SUFFIXES
 PROBE_TIMEOUT_MS = 500
 
 
@@ -82,7 +85,7 @@ def accepts_handoff(path: str) -> bool:
         return True
     if not os.path.isfile(path):
         return False
-    if path.lower().endswith(HANDOFF_SUFFIXES):
+    if path.lower().endswith(HANDOFF_SUFFIXES) or has_text_name(path):
         return True
     try:
         with open(path, "rb") as f:

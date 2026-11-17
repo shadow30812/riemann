@@ -36,8 +36,8 @@ from ..core.features import (
 from ..ui.browser import BrowserTab, PreviewTextTab
 from ..ui.palette import tinted_icon, tokens
 from ..ui.reader.tab import PreviewReaderTab, ReaderTab
-from ..core.log import log
 from ..core.assets import icon_path
+from ..core.doctypes import HTML_SUFFIXES, dialog_filter, document_kind, is_reader_name
 from ..core.settings import get_dialog_directory, save_last_directory
 
 
@@ -172,11 +172,11 @@ class DocumentsMixin:
         if clean_item.startswith("file://"):
             clean_item = QUrl(clean_item).toLocalFile()
 
-        if clean_item.lower().endswith((".pdf", ".md")):
+        if is_reader_name(clean_item):
             item_type = "pdf"
             if os.path.exists(clean_item):
                 clean_item = os.path.abspath(clean_item)
-        elif clean_item.lower().endswith((".html", ".css", ".js")):
+        elif clean_item.lower().endswith(HTML_SUFFIXES):
             item_type = "web"
             if os.path.exists(clean_item):
                 clean_item = os.path.abspath(clean_item)
@@ -261,21 +261,11 @@ class DocumentsMixin:
 
     @staticmethod
     def _document_kind(path: str) -> str:
-        """Classifies a file as 'pdf', 'markdown', 'html' or 'text'."""
-        lower = path.lower()
-        if lower.endswith(".pdf"):
-            return "pdf"
-        if lower.endswith((".md", ".markdown")):
-            return "markdown"
-        if lower.endswith((".html", ".htm", ".xhtml")):
-            return "html"
-        try:
-            with open(path, "rb") as f:
-                if f.read(5) == b"%PDF-":
-                    return "pdf"
-        except Exception:
-            log.debug("_document_kind failed", exc_info=True)
-        return "text"
+        """'pdf', 'markdown', 'html', 'text' or 'binary' (core/doctypes.py)."""
+        return document_kind(path)
+
+    def _refuse_binary(self, path: str) -> None:
+        self.show_toast(f"{os.path.basename(path)} isn't a PDF or a text file, so Riemann can't show it.")
 
     def _create_reader(self, preview: bool) -> "ReaderTab":
         """Creates an empty reader tab, lightweight when preview is True."""
@@ -301,10 +291,10 @@ class DocumentsMixin:
         activate: bool = True,
     ) -> Optional[QWidget]:
         """
-        Opens any supported file as a tab. PDFs and Markdown go to the reader; HTML and
-        other text files go to the browser. Preview tabs use the lightweight viewers
-        instead. When preview is None, the "Open Documents in Preview Mode" setting
-        decides. Returns the new tab, or None if nothing was opened.
+        Opens any supported file as a tab. PDFs, Markdown and other text files go to
+        the reader, HTML to the browser; binary files are refused. Preview tabs use the
+        lightweight viewers instead. When preview is None, the "Open Documents in
+        Preview Mode" setting decides. Returns the new tab, or None if nothing was opened.
         """
         if not path:
             return None
@@ -314,9 +304,12 @@ class DocumentsMixin:
             preview = self._preview_mode_enabled()
 
         kind = self._document_kind(path)
-        self.add_to_history(path, "web" if kind in ("html", "text") else "pdf")
+        if kind == "binary":
+            self._refuse_binary(path)
+            return None
+        self.add_to_history(path, "web" if kind == "html" else "pdf")
 
-        if not preview and kind in ("html", "text"):
+        if not preview and kind == "html":
             url = QUrl.fromLocalFile(os.path.abspath(path)).toString()
             browser = self._add_browser_tab(url, target_widget)
             idx = target_widget.indexOf(browser)
@@ -326,7 +319,7 @@ class DocumentsMixin:
                 target_widget.setCurrentWidget(browser)
             return browser
 
-        if kind == "pdf" or (kind == "markdown" and not preview):
+        if kind == "pdf" or (kind in ("markdown", "text") and not preview):
             widget = self._create_reader(preview)
             if page is not None:
                 widget.pending_initial_page = page
@@ -503,7 +496,7 @@ class DocumentsMixin:
     def open_file_smart(self) -> None:
         """
         Handles the "Open Document" action.
-        Routes PDFs/Markdown to ReaderTab and HTML/CSS/JS to BrowserTab.
+        Routes PDFs, Markdown and text to ReaderTab and HTML to BrowserTab.
         Opens in the current tab if it's an empty reader, otherwise opens a new tab.
         Supports selecting multiple files.
         """
@@ -512,7 +505,7 @@ class DocumentsMixin:
             self,
             "Open Document",
             start_dir,
-            "Supported Files (*.pdf *.PDF *.md *.html *.css *.js);;All Files (*)",
+            dialog_filter(),
         )
         if not paths:
             return
@@ -630,7 +623,10 @@ class DocumentsMixin:
             return
 
         kind = self._document_kind(path)
-        self.add_to_history(path, "web" if kind in ("html", "text") else "pdf")
+        if kind == "binary":
+            self._refuse_binary(path)
+            return
+        self.add_to_history(path, "web" if kind == "html" else "pdf")
 
         if kind == "pdf":
             new_preview = PreviewReaderTab()

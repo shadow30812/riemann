@@ -7,6 +7,10 @@ install_linux_integration: Running from source would point the menu entry at a
 .py file, so only packaged (PyInstaller/Nuitka) builds register themselves.
 Already registered (the usual case): skip the rewrite and the update-desktop-
 database run, which happened on every launch.
+
+MIME_TYPES: text/plain covers source files and logs too, since their own types
+(text/x-python, text/x-log...) derive from it. scripts/install_icon.sh writes
+the same list.
 """
 
 import os
@@ -16,6 +20,8 @@ import subprocess
 from pathlib import Path
 
 from ..core.assets import icon_path, is_frozen
+
+MIME_TYPES = ("application/pdf", "text/markdown", "text/plain", "text/html", "inode/directory")
 
 
 def install_linux_integration():
@@ -70,7 +76,7 @@ def install_linux_integration():
             "Terminal=false\n"
             "Categories=Office;Viewer;Utility;\n"
             f"StartupWMClass={app_name}\n"
-            "MimeType=application/pdf;text/markdown;text/html;inode/directory;\n"
+            f"MimeType={';'.join(MIME_TYPES)};\n"
             "Actions=NewWindow;\n\n"
             "[Desktop Action NewWindow]\n"
             "Name=New Window\n"

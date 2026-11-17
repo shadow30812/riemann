@@ -32,6 +32,11 @@ moves over the page reach no widget of the reader, so the cursor position is
 polled while in full screen. Outside full screen the pill stays visible: in
 layout D it holds controls the top bar no longer has.
 
+A button may carry the properties riemannLabel and riemannShort to replace
+its command's menu label and ribbon text while they apply (the Protect button
+reads "Remove password…" on an encrypted PDF); the reader calls apply() when
+they change.
+
 Layout changes from Settings reach every open reader through notifier().
 The rail can be hidden from its context menu (RAIL_HIDDEN_KEY); its buttons
 then go to the menus.
@@ -539,7 +544,8 @@ class ToolbarLayout:
         button = self.button(key)
         if button is None:
             return None
-        text = f"{c.label}\t{c.shortcut}" if c.shortcut else c.label
+        label = button.property("riemannLabel") or c.label
+        text = f"{label}\t{c.shortcut}" if c.shortcut else label
         action = menu.addAction(button.icon(), text)
         action.setCheckable(button.isCheckable())
         action.setChecked(button.isChecked())
@@ -573,7 +579,7 @@ class ToolbarLayout:
                 continue
             widget = self._item(key)
             if isinstance(widget, QPushButton):
-                widget.setText(" " + BY_KEY[key].short)
+                widget.setText(" " + (widget.property("riemannShort") or BY_KEY[key].short))
                 widget.setProperty("riemannLabelled", True)
             box.add(widget, [key], BY_KEY[key].fold)
         box.add_stretch()

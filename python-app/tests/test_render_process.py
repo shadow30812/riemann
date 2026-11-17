@@ -174,9 +174,9 @@ def test_page_edits_close_the_render_process_before_rewriting(qapp, qtbot, tmp_p
         proc = tab.page_renderer.process.proc
         seen = {}
 
-        def rotate(p, pages):
+        def rotate(p, pages, password=None):
             seen["exited"] = proc.poll() is not None
-            return page_edit.rotate_pages(p, pages, 90)
+            return page_edit.rotate_pages(p, pages, 90, password)
 
         assert tab._edit_pages(rotate, [0])
         assert seen["exited"]

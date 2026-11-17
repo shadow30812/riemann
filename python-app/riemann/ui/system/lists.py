@@ -5,7 +5,10 @@ History and Bookmarks read the window's managers each time the tab is shown,
 so they never go stale while open. Downloads hosts the window's two download
 managers (files and videos): they are long-lived dialogs that keep track of
 running downloads, so the tab borrows them while it is open and hands them
-back to the window in release(). Library searches the metadata Riemann keeps
+back to the window in release(). History's Documents list has a Type column
+and a filter by class (core.doctypes.document_class: PDF, Markdown, Code, Text);
+all three are stored together under history's "pdf" key, which installs
+already have on disk. Library searches the metadata Riemann keeps
 for papers it has opened, exports them as BibTeX or CSL-JSON, and can search
 inside all of them by meaning through the AI engine (MeaningSearch, a worker
 thread, since the first search reads every paper).
@@ -18,6 +21,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -35,6 +39,7 @@ from PySide6.QtWidgets import (
 
 from ...core import ai_engine
 from ...core.bibliography import to_bibtex, to_csl_json
+from ...core.doctypes import DOCUMENT_CLASSES, document_class
 from ..threads import release as release_thread
 from ..threads import track
 from .base import SystemTab
@@ -75,6 +80,12 @@ class HistoryTab(SystemTab):
     def build(self, body: QWidget) -> None:
         layout = _body_layout(body)
         self.search, row = _toolbar(layout, "Search history")
+        self.doc_class = QComboBox()
+        self.doc_class.addItem("All documents", "")
+        for name in DOCUMENT_CLASSES:
+            self.doc_class.addItem(name, name)
+        self.doc_class.setToolTip("Show one kind of document")
+        row.addWidget(self.doc_class)
         self.btn_open = QPushButton("Open")
         self.btn_remove = QPushButton("Remove")
         self.btn_clear = QPushButton("Clear this list")
@@ -94,6 +105,9 @@ class HistoryTab(SystemTab):
             self.tabs.addTab(tree, label)
         layout.addWidget(self.tabs, 1)
         self.search.textChanged.connect(self._filter)
+        self.doc_class.currentIndexChanged.connect(lambda _: self._filter(self.search.text()))
+        self.tabs.currentChanged.connect(self._show_class_filter)
+        self._show_class_filter()
         self.btn_open.clicked.connect(self.open_selected)
         self.btn_remove.clicked.connect(self.remove_selected)
         self.btn_clear.clicked.connect(self.clear_current)
@@ -106,7 +120,12 @@ class HistoryTab(SystemTab):
         manager = getattr(self.window_ref, "history_manager", None)
         for kind, _ in self.KINDS:
             tree = self.trees[kind]
-            headers = ["Address", "Last opened"] if kind == "web" else ["Name", "Folder", "Last opened"]
+            if kind == "web":
+                headers = ["Address", "Last opened"]
+            elif kind == "pdf":
+                headers = ["Name", "Type", "Folder", "Last opened"]
+            else:
+                headers = ["Name", "Folder", "Last opened"]
             tree.clear()
             tree.setHeaderLabels(headers)
             for entry in manager.get_entries(kind) if manager else []:
@@ -116,13 +135,17 @@ class HistoryTab(SystemTab):
                 else:
                     trimmed = path.rstrip("/\\") or path
                     columns = [os.path.basename(trimmed) or trimmed, os.path.dirname(trimmed)]
+                    if kind == "pdf":
+                        columns.insert(1, document_class(path))
                 item = QTreeWidgetItem(columns + [when(entry.get("timestamp", ""))])
                 item.setData(0, Qt.ItemDataRole.UserRole, path)
+                if kind == "pdf":
+                    item.setData(1, Qt.ItemDataRole.UserRole, columns[1])
                 item.setToolTip(0, path)
                 tree.addTopLevelItem(item)
             header = tree.header()
             header.setStretchLastSection(False)
-            stretch = 0 if kind == "web" else 1
+            stretch = 0 if kind == "web" else len(headers) - 2
             for col in range(len(headers)):
                 header.setSectionResizeMode(
                     col,
@@ -130,13 +153,20 @@ class HistoryTab(SystemTab):
                 )
         self._filter(self.search.text())
 
+    def _show_class_filter(self, *_) -> None:
+        self.doc_class.setVisible(self._kind() == "pdf")
+
     def _filter(self, text: str) -> None:
         needle = text.strip().lower()
-        for tree in self.trees.values():
+        wanted = self.doc_class.currentData()
+        for kind, tree in self.trees.items():
             for i in range(tree.topLevelItemCount()):
                 item = tree.topLevelItem(i)
                 hay = str(item.data(0, Qt.ItemDataRole.UserRole)).lower()
-                item.setHidden(bool(needle) and needle not in hay)
+                hidden = bool(needle) and needle not in hay
+                if kind == "pdf" and wanted:
+                    hidden = hidden or item.data(1, Qt.ItemDataRole.UserRole) != wanted
+                item.setHidden(hidden)
 
     def open_selected(self) -> None:
         kind = self._kind()

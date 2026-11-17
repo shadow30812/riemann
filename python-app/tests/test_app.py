@@ -714,6 +714,27 @@ def test_document_kind_by_extension_and_magic(tmp_path):
     assert RiemannWindow._document_kind(str(notes)) == "text"
 
 
+def test_text_files_are_told_from_binary_by_content(tmp_path):
+    from riemann.core.doctypes import SNIFF_BYTES, document_kind
+
+    makefile = tmp_path / "Makefile"
+    makefile.write_text("all:\n\tcc main.c\n")
+    source = tmp_path / "main.cpp"
+    source.write_text("int main() { return 0; }\n")
+    cut_char = tmp_path / "long.log"
+    cut_char.write_bytes(b"a" * (SNIFF_BYTES - 1) + "é".encode() + b"rest")
+    image = tmp_path / "photo.txt"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR")
+    latin1 = tmp_path / "old.txt"
+    latin1.write_bytes("caf\xe9 cr\xe8me".encode("latin-1"))
+
+    assert document_kind(str(makefile)) == "text"
+    assert document_kind(str(source)) == "text"
+    assert document_kind(str(cut_char)) == "text"
+    assert document_kind(str(image)) == "binary"
+    assert document_kind(str(latin1)) == "binary"
+
+
 def test_preview_mode_setting_applies_to_any_opened_document(qtbot, tmp_path):
     window = RiemannWindow(incognito=False, restore_session=False)
     qtbot.addWidget(window)
@@ -754,13 +775,17 @@ def test_folder_view_preview_is_added_to_history(qtbot, tmp_path):
     pdf.write_bytes(b"%PDF-1.7")
     notes = tmp_path / "notes.txt"
     notes.write_text("hi")
+    page = tmp_path / "page.html"
+    page.write_text("<p>hi</p>")
 
     with patch.object(window.history_manager, "add") as mock_add:
         window._on_file_single_clicked(str(pdf))
         window._on_file_single_clicked(str(notes))
+        window._on_file_single_clicked(str(page))
 
     assert mock_add.call_args_list[0].args == (str(pdf), "pdf")
-    assert mock_add.call_args_list[1].args == (str(notes), "web")
+    assert mock_add.call_args_list[1].args == (str(notes), "pdf")
+    assert mock_add.call_args_list[2].args == (str(page), "web")
 
 
 def test_double_clicking_a_file_in_the_folder_view_opens_full_mode(qtbot, tmp_path):
@@ -1018,11 +1043,17 @@ def test_running_instance_opens_only_files_it_can_show(tmp_path):
     unnamed.write_bytes(b"%PDF-1.7\n")
     script = tmp_path / "run.sh"
     script.write_text("echo hi")
+    makefile = tmp_path / "Makefile"
+    makefile.write_text("all:\n")
+    unlisted = tmp_path / "notes.unknownext"
+    unlisted.write_text("looks like text, but its name isn't listed")
     folder = tmp_path / "papers"
     folder.mkdir()
-    message = encode_ipc_paths([str(pdf), str(unnamed), str(script), str(folder), str(tmp_path / "missing.pdf")])
+    message = encode_ipc_paths(
+        [str(pdf), str(unnamed), str(script), str(makefile), str(unlisted), str(folder), str(tmp_path / "missing.pdf")]
+    )
     files, folders = handed_over_paths(message)
-    assert files == [str(pdf), str(unnamed)]
+    assert files == [str(pdf), str(unnamed), str(script), str(makefile)]
     assert folders == [str(folder)]
 
 
@@ -1057,3 +1088,31 @@ def test_windows_share_one_persistent_web_profile(qtbot, monkeypatch):
     for w in windows:
         qtbot.addWidget(w)
     assert windows[0].web_profile is windows[1].web_profile is first
+
+
+def test_document_history_sorts_files_into_classes(qtbot, tmp_path):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    names = ["paper.pdf", "README.md", "notes.txt", "build.py", "Makefile", "gone.pdf"]
+    window.history_manager.history = {"web": [], "pdf": [str(tmp_path / n) for n in names], "folder": []}
+    window.show_history()
+    tabs, index = window.find_system_tab("history")
+    page = tabs.widget(index)
+    tree = page.trees["pdf"]
+    types = {tree.topLevelItem(i).text(0): tree.topLevelItem(i).text(1) for i in range(tree.topLevelItemCount())}
+    assert types == {
+        "paper.pdf": "PDF", "README.md": "Markdown", "notes.txt": "Text",
+        "build.py": "Code", "Makefile": "Code", "gone.pdf": "PDF",
+    }
+
+    page.tabs.setCurrentIndex([k for k, _ in page.KINDS].index("pdf"))
+    assert not page.doc_class.isHidden()
+    page.doc_class.setCurrentIndex(page.doc_class.findData("Code"))
+    shown = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount()) if not tree.topLevelItem(i).isHidden()]
+    assert shown == ["build.py", "Makefile"]
+    page.search.setText("make")
+    shown = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount()) if not tree.topLevelItem(i).isHidden()]
+    assert shown == ["Makefile"]
+
+    page.tabs.setCurrentIndex([k for k, _ in page.KINDS].index("web"))
+    assert page.doc_class.isHidden()

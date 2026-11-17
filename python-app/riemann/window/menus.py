@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from ..core.features import (
     trigger_local_caption_generation,
 )
+from ..core.doctypes import dialog_filter
 from ..core.mini_player import MiniAudioPlayer
 from ..ui.browser import BrowserTab, PreviewTextTab
 from ..ui.components import (
@@ -420,7 +421,7 @@ class MenusMixin:
             self,
             "Open Document",
             path,
-            "Supported Files (*.pdf *.PDF *.md *.html *.css *.js);;All Files (*)",
+            dialog_filter(),
         )
         if paths:
             for p in paths:

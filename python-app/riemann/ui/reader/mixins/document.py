@@ -8,19 +8,35 @@ Notes:
 
 load_document: Edits waiting for the debounced save belong to the current file.
 
+open_here: The start page (recent list, path box, Browse), a file dropped
+on the tab and the Open dialog load through it. Inside a window it hands the
+path to the window's open_from_reader, which records it in history and, for a
+tab still on its start page, puts the file in a tab of the mode the preview
+setting asks for.
+
 _on_document_loaded: Preview tabs skip annotations, comments, signature checks
 and metadata extraction; that is what keeps them light.
+
+_show_text_document: Markdown and other text files (core/doctypes.py decides
+which) are shown as one HTML page in the web view: Markdown rendered, other
+text highlighted by Pygments when it is installed. Files over TEXT_VIEW_LIMIT
+are cut off with a note. QWebEngineView.setHtml refuses pages over 2 MB, so a
+bigger page is written to a file in the cache folder (one per tab, deleted
+with the tab) and loaded from there; such a page can't load KaTeX or the
+emoji font, since local pages may not reach remote or other local files.
 """
 
 import gc
 import os
 import shutil
 import sys
-import urllib.parse
+import tempfile
 from typing import Optional
 import shiboken6
 from PySide6.QtCore import (
+    QStandardPaths,
     QThread,
+    QUrl,
     Signal,
     Qt,
     QTimer,
@@ -44,11 +60,12 @@ from PySide6.QtWidgets import (
     QProgressDialog,
 )
 from ....core.constants import ViewMode
-from ....core import pdf_annotations, pdf_forms
+from ....core import page_edit, pdf_annotations, pdf_forms
 from ....core.managers import PasswordDialog
 from ..render_worker import PAGE_CACHE, PageRenderWorker
 from ....core.render_process import PageRenderer
-from ..utils import generate_markdown_html
+from ..utils import generate_markdown_html, generate_text_html
+from ....core.doctypes import MARKDOWN_SUFFIXES, dialog_filter, is_text_document
 from ...threads import release, track
 from ....core.log import log
 from ....core.settings import (
@@ -59,11 +76,14 @@ from ....core.settings import (
 )
 from ...palette import tokens
 from .host import ReaderHostBase
-from ....core.assets import asset_path
+
+TEXT_VIEW_LIMIT = 20 * 1024 * 1024
+SET_HTML_LIMIT = 1_900_000
+TEXT_VIEW_FOLDER = "text-view"
 
 
 class DocumentLoadWorker(QThread):
-    loaded = Signal(object)
+    loaded = Signal(object, object)
     error = Signal(str)
 
     def __init__(self, engine, path, password):
@@ -75,9 +95,10 @@ class DocumentLoadWorker(QThread):
     def run(self):
         try:
             doc = self.engine.load_document(self.path, self.password)
-            self.loaded.emit(doc)
         except Exception as e:
             self.error.emit(str(e))
+            return
+        self.loaded.emit(doc, page_edit.document_state(self.path, self.password))
 
 
 class DocumentMixin(ReaderHostBase):
@@ -86,6 +107,12 @@ class DocumentMixin(ReaderHostBase):
     _loaded_mtime = None
     pending_initial_page = None
     _char_geometry_cache = None
+    text_document = False
+    _text_page_file: Optional[str] = None
+    document_password: Optional[str] = None
+    document_encrypted = False
+    document_signed = False
+    _signed_edit_accepted = False
 
     def load_document(
         self,
@@ -93,15 +120,17 @@ class DocumentMixin(ReaderHostBase):
         password: Optional[str] = None,
         is_retry: bool = False,
     ) -> None:
-        """Loads a PDF or Markdown file on a background thread; set pending_initial_page first to open at a page."""
+        """Loads a PDF on a background thread, or shows a Markdown or text file; set pending_initial_page first to open at a page."""
         if self.has_unsaved_page_edits() and path != self.current_path:
             if not self.resolve_page_edits():
                 return
         if not is_retry and self.current_path:
             self.flush_annotations_to_pdf()
+        if path != self.current_path:
+            self._signed_edit_accepted = False
 
-        if path.lower().endswith(".md"):
-            self._load_markdown(path)
+        if is_text_document(path):
+            self._show_text_document(path)
             return
 
         self.load_progress = QProgressDialog(
@@ -122,10 +151,15 @@ class DocumentMixin(ReaderHostBase):
         self.load_worker.error.connect(self._on_document_load_error)
         track(self.load_worker).start()
 
-    def _on_document_loaded(self, doc):
-        """Callback for when the thread successfully returns the PDF."""
+    def _on_document_loaded(self, doc, state=(False, False)):
+        """Callback for when the thread returns the PDF; state is (encrypted, signed) from page_edit.document_state."""
         self.load_progress.accept()
         self.current_doc = doc
+        self.document_password = self._load_password
+        self.document_encrypted, self.document_signed = state
+        self.text_document = False
+        self._drop_text_page_file()
+        self._update_protect_button()
         self._replace_page_renderer(PageRenderer(doc, self._load_source, self._load_password))
         self.current_signatures = []
         self.signature_appearances = {}
@@ -328,56 +362,75 @@ class DocumentMixin(ReaderHostBase):
         QTimer.singleShot(350, self, _restore_pos)
         self.show_toast("Refreshed document 🔄")
 
-    def _load_markdown(self, path: str) -> None:
+    def _show_text_document(self, path: str) -> None:
+        """Shows a Markdown or plain text file as a page in the web view, in place of a PDF."""
+        if self.current_doc is not None:
+            self._release_document()
         self.current_path = path
+        self.text_document = True
         try:
             self._loaded_mtime = os.path.getmtime(path) if os.path.exists(path) else None
-        except Exception:
+        except OSError:
             self._loaded_mtime = None
         self._update_tab_title(os.path.basename(path))
-
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                text = f.read()
-            full_html = generate_markdown_html(text, self.theme_mode != 0)
+            self._render_text_page()
+        except OSError as e:
+            log.warning("Could not read %s: %s", path, e)
+            self.show_toast(f"Could not read {os.path.basename(path)}")
+        self.toolbar.show()
+        self.stack.setCurrentIndex(1)
+        self.view_mode = ViewMode.REFLOW
+        if hasattr(self.window(), "_update_window_title"):
+            self.window()._update_window_title()
+        self.btn_facing.setEnabled(False)
+        self.btn_ocr.setEnabled(False)
+        self._update_protect_button()
 
-            font_path = asset_path("fonts", "NotoColorEmoji.ttf")
+    def _text_page_html(self) -> str:
+        path = self.current_path
+        with open(path, "rb") as f:
+            data = f.read(TEXT_VIEW_LIMIT + 1)
+        note = ""
+        if len(data) > TEXT_VIEW_LIMIT:
+            data = data[:TEXT_VIEW_LIMIT]
+            size_mb = os.path.getsize(path) / (1024 * 1024)
+            note = f"Showing the first {TEXT_VIEW_LIMIT // (1024 * 1024)} MB of {size_mb:.0f} MB."
+        text = data.decode("utf-8", errors="replace")
+        dark = self.theme_mode != 0
+        if path.lower().endswith(MARKDOWN_SUFFIXES):
+            return generate_markdown_html(text, dark, note)
+        return generate_text_html(text, path, dark, note)
 
-            font_uri = "file:///" + urllib.parse.quote(font_path.replace("\\", "/"))
-
-            emoji_style = f"""
-            <style>
-                @font-face {{
-                    font-family: "Riemann Noto Emoji";
-                    src: url("{font_uri}") format("truetype");
-                }}
-                body, p, span, div, h1, h2, h3, h4, h5, h6, table, th, td, li, pre, code {{ 
-                    font-family: inherit, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Riemann Noto Emoji", "Twemoji Mozilla" !important; 
-                }}
-            </style>
-            """
-
-            full_html += emoji_style
-            web_view = self._get_or_create_web_view()
-
-            web_view.page().settings().setAttribute(
-                QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, False
+    def _render_text_page(self) -> None:
+        page = self._text_page_html().encode("utf-8")
+        web_view = self._get_or_create_web_view()
+        web_view.page().settings().setAttribute(
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, False
+        )
+        web_view.setZoomFactor(self.calculate_scale())
+        if len(page) <= SET_HTML_LIMIT:
+            self._drop_text_page_file()
+            web_view.setHtml(page.decode("utf-8"))
+            return
+        if not self._text_page_file:
+            folder = os.path.join(
+                QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation), TEXT_VIEW_FOLDER
             )
-            web_view.setZoomFactor(self.calculate_scale())
+            os.makedirs(folder, exist_ok=True)
+            handle, self._text_page_file = tempfile.mkstemp(suffix=".html", dir=folder)
+            os.close(handle)
+        with open(self._text_page_file, "wb") as f:
+            f.write(page)
+        web_view.load(QUrl.fromLocalFile(self._text_page_file))
 
-            web_view.setHtml(full_html)
-            self.toolbar.show()
-            self.stack.setCurrentIndex(1)
-            self.view_mode = ViewMode.REFLOW
-
-            if hasattr(self.window(), "_update_window_title"):
-                self.window()._update_window_title()
-
-            self.btn_facing.setEnabled(False)
-            self.btn_ocr.setEnabled(False)
-
-        except Exception as e:
-            sys.stderr.write(f"Markdown Load Error: {e}\n")
+    def _drop_text_page_file(self) -> None:
+        page_file, self._text_page_file = self._text_page_file, None
+        if page_file:
+            try:
+                os.remove(page_file)
+            except OSError:
+                pass
 
     def save_document(self) -> None:
         """Saves a copy of the document, with its annotations embedded when it has any; with page edits waiting, offers to save them into the file."""
@@ -487,23 +540,92 @@ class DocumentMixin(ReaderHostBase):
         start_dir = get_dialog_directory(self.settings)
         paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Open PDF",
+            "Open Document",
             start_dir,
-            "Supported Files (*.pdf *.PDF *.md);;All Files (*)",
+            dialog_filter(html=False),
         )
         if not paths:
             return
 
         save_last_directory(self.settings, paths[0])
-        self.load_document(paths[0])
+        main_win = self.window()
+        self.open_here(paths[0])
+        if hasattr(main_win, "new_pdf_tab"):
+            for path in paths[1:]:
+                main_win.new_pdf_tab(path)
 
-        if len(paths) > 1:
-            main_win = self.window()
-            if hasattr(main_win, "new_pdf_tab"):
-                for path in paths[1:]:
-                    if hasattr(main_win, "add_to_history"):
-                        main_win.add_to_history(path, "pdf")
-                    main_win.new_pdf_tab(path)
+    def open_here(self, path: str) -> None:
+        main_win = self.window()
+        if hasattr(main_win, "open_from_reader"):
+            main_win.open_from_reader(self, path)
+        else:
+            self.load_document(path)
+
+    def _update_protect_button(self) -> None:
+        """
+        The Protect button offers a password-protected copy, or, while an
+        encrypted PDF is shown, removing its password. The toolbar is laid out
+        again when that changes, so menus and the ribbon pick up the new label.
+        """
+        unlock = self.current_doc is not None and self.document_encrypted
+        button = self.btn_secure_export
+        button.setIcon(self._get_icon("file-key.svg" if unlock else "file-lock.svg"))
+        button.setToolTip(
+            "Remove the password from this PDF (Ctrl+Shift+S)"
+            if unlock
+            else "Export a password-protected copy of this PDF (Ctrl+Shift+S)"
+        )
+        if bool(button.property("riemannUnlock")) == unlock:
+            return
+        button.setProperty("riemannUnlock", unlock)
+        button.setProperty("riemannLabel", "Remove password…" if unlock else None)
+        button.setProperty("riemannShort", "Unlock" if unlock else None)
+        layout = getattr(self, "toolbar_layout", None)
+        if layout is not None:
+            layout.apply()
+
+    def protect_or_unlock(self) -> None:
+        if self.current_doc is not None and self.document_encrypted:
+            self.remove_password()
+        else:
+            self.export_secure_pdf()
+
+    def remove_password(self) -> None:
+        """Removes the password from this file (through the scratch copy, so on Save) or writes an unlocked copy."""
+        if self.current_doc is None or not self.document_encrypted:
+            return
+        name = os.path.basename(self.current_path)
+        box = QMessageBox(self)
+        box.setWindowTitle("Remove password")
+        box.setText(f"Remove the password from {name}?")
+        box.setInformativeText(
+            "Riemann uses the password you opened it with, and everything happens on this computer. "
+            "Removing it from this file takes effect when you save. An unlocked copy is written "
+            "straight away, and this file keeps its password."
+        )
+        in_file = box.addButton("Remove from this file", QMessageBox.ButtonRole.AcceptRole)
+        as_copy = box.addButton("Save an unlocked copy…", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        if box.clickedButton() is in_file:
+            self._edit_pages(page_edit.remove_password, done="Removed the password.")
+        elif box.clickedButton() is as_copy:
+            self._save_unlocked_copy()
+
+    def _save_unlocked_copy(self) -> None:
+        stem = os.path.splitext(os.path.basename(self.current_path))[0]
+        start = os.path.join(get_dialog_directory(self.settings), f"{stem}_unlocked.pdf")
+        dest, _ = QFileDialog.getSaveFileName(self, "Save an unlocked copy", start, "PDF Files (*.pdf)")
+        if not dest:
+            return
+        save_last_directory(self.settings, dest)
+        self.flush_annotations_to_pdf()
+        try:
+            page_edit.save_unlocked_copy(self.pdf_path(), dest, self.document_password)
+        except Exception as e:
+            QMessageBox.warning(self, "Remove password", str(e) or type(e).__name__)
+            return
+        self.show_toast(f"Saved an unlocked copy as {os.path.basename(dest)}")
 
     def export_secure_pdf(self) -> None:
         """Prompts the user for a password and saves an encrypted copy."""
@@ -659,6 +781,7 @@ class DocumentMixin(ReaderHostBase):
     def cleanup(self) -> None:
         """Explicitly severs references to heavy resources to trigger native destructors."""
         self.notes_panel.save()
+        self._drop_text_page_file()
         try:
             self.flush_forms_to_pdf()
         except Exception as e:

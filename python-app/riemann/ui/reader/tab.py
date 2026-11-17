@@ -216,7 +216,7 @@ class ReaderTab(
             ("Ctrl+Shift+Z", self.redo_annotation),
             ("Ctrl+R", self.rotate_document),
             ("Ctrl+Shift+R", self.rotate_document_ccw),
-            ("Ctrl+Shift+S", self.export_secure_pdf),
+            ("Ctrl+Shift+S", self.protect_or_unlock),
             ("Page Down", lambda: self.scroll_page_length(1)),
             ("Page Up", lambda: self.scroll_page_length(-1)),
             ("F5", self.reload_document),
@@ -356,11 +356,11 @@ class PreviewReaderTab(ReaderTab):
         self.current_path = path
         super().load_document(path, password, is_retry)
 
-    def _on_document_loaded(self, doc):
-        super()._on_document_loaded(doc)
+    def _on_document_loaded(self, doc, state=(False, False)):
+        super()._on_document_loaded(doc, state)
         self.preview_banner.setVisible(True)
 
-    def _load_markdown(self, path: str) -> None:
-        super()._load_markdown(path)
+    def _show_text_document(self, path: str) -> None:
+        super()._show_text_document(path)
         self.toolbar.setVisible(False)
         self.preview_banner.setVisible(True)

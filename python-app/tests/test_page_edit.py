@@ -59,14 +59,58 @@ def test_extract_and_insert(tmp_path):
     assert mapping == {0: 0, 1: 3, 2: 4, 3: 5}
 
 
-def test_signed_files_are_refused(tmp_path):
-    p = make(tmp_path / "a.pdf")
-    with pikepdf.open(p, allow_overwriting_input=True) as pdf:
+def sign(path):
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
         pdf.Root.AcroForm = pikepdf.Dictionary(SigFlags=3, Fields=pikepdf.Array())
-        pdf.save(p)
+        pdf.save(path)
+
+
+def lock(path, password="secret"):
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        pdf.save(path, encryption=pikepdf.Encryption(user=password, owner=password))
+
+
+def test_signed_files_can_be_edited_and_are_reported_as_signed(tmp_path):
+    p = make(tmp_path / "a.pdf")
+    sign(p)
+    assert page_edit.document_state(p) == (False, True)
+    page_edit.delete_pages(p, [0])
+    assert widths(p) == [200, 300, 400]
+
+
+def test_edits_to_an_encrypted_file_keep_its_password(tmp_path):
+    p = make(tmp_path / "a.pdf")
+    lock(p)
+    assert page_edit.document_state(p, "secret") == (True, False)
     with pytest.raises(page_edit.PageEditError):
-        page_edit.delete_pages(p, [0])
+        page_edit.rotate_pages(p, [0], 90)
+    page_edit.move_page(p, 0, 3, password="secret")
+    with pytest.raises(pikepdf.PasswordError):
+        pikepdf.open(p)
+    with pikepdf.open(p, password="secret") as pdf:
+        assert [int(float(pg.mediabox[2])) for pg in pdf.pages] == [200, 300, 400, 100]
+
+
+def test_remove_password_rewrites_the_file_without_encryption(tmp_path):
+    p = make(tmp_path / "a.pdf")
+    lock(p)
+    assert page_edit.remove_password(p, "secret") == {0: 0, 1: 1, 2: 2, 3: 3}
+    with pikepdf.open(p) as pdf:
+        assert not pdf.is_encrypted
     assert widths(p) == [100, 200, 300, 400]
+
+
+def test_an_unlocked_copy_leaves_the_original_locked(tmp_path):
+    p = make(tmp_path / "a.pdf")
+    lock(p)
+    out = str(tmp_path / "a_unlocked.pdf")
+    page_edit.save_unlocked_copy(p, out, "secret")
+    with pikepdf.open(out) as pdf:
+        assert not pdf.is_encrypted
+    with pytest.raises(pikepdf.PasswordError):
+        pikepdf.open(p)
+    with pytest.raises(page_edit.PageEditError):
+        page_edit.save_unlocked_copy(p, p, "secret")
 
 
 def test_remap_pages():

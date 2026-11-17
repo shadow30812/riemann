@@ -73,6 +73,11 @@ class ReaderHost(Protocol):
     web: Optional[Any]
     metadata_worker: Optional[Any]
     edit_scratch: Optional[str]
+    text_document: bool
+    document_password: Optional[str]
+    document_encrypted: bool
+    document_signed: bool
+    _signed_edit_accepted: bool
     sig_worker: Optional[Any]
     _rebuild_debounce_timer: Optional[QTimer]
     _zoom_debounce_timer: Optional[QTimer]
@@ -117,6 +122,8 @@ class ReaderHost(Protocol):
     def has_unsaved_page_edits(self) -> bool: ...
 
     def resolve_page_edits(self) -> bool: ...
+
+    def _render_text_page(self) -> None: ...
 
 
 if TYPE_CHECKING:

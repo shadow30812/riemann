@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 from ..ui.explorer import FolderHomeTab
 from ..core.assets import icon_path
+from ..core.doctypes import document_kind
 from ..core.settings import get_dialog_directory, save_last_directory
 
 
@@ -68,7 +69,7 @@ class FoldersMixin:
                 for i in range(self.tabs_side.count() - 1, -1, -1):
                     self.close_side_tab(i)
                 for u in urls:
-                    if u.endswith(".pdf") or u.endswith(".md"):
+                    if os.path.isfile(u) and document_kind(u) in ("pdf", "markdown", "text"):
                         self._new_window_ref.new_pdf_tab(u)
                     else:
                         self._new_window_ref.new_browser_tab(u)
