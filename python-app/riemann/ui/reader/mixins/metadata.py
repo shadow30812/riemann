@@ -8,6 +8,8 @@ from PDF documents, including automated file renaming and citation copying.
 import os
 import re
 
+import shiboken6
+
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from ....core import annotation_store
@@ -32,6 +34,12 @@ class MetadataMixin(ReaderHostBase):
     document_metadata = None
     metadata_worker = None
 
+    def _live_metadata_worker(self):
+        """The metadata worker, or None once it has finished and deleted itself."""
+        if self.metadata_worker is not None and not shiboken6.isValid(self.metadata_worker):
+            self.metadata_worker = None
+        return self.metadata_worker
+
     def extract_document_metadata(self) -> None:
         """
         Initiates the extraction of document metadata.
@@ -41,7 +49,8 @@ class MetadataMixin(ReaderHostBase):
         if not self.current_path or not self.current_doc:
             return
 
-        if self.metadata_worker is not None and self.metadata_worker.isRunning():
+        worker = self._live_metadata_worker()
+        if worker is not None and worker.isRunning():
             return
 
         self.document_metadata = {}

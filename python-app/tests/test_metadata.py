@@ -123,3 +123,35 @@ def test_rename_reports_existing_target(tmp_path, reader):
 
     assert reader.current_path == str(pdf)
     assert "already exists" in reader.last_toast
+
+
+def test_a_finished_and_deleted_worker_doesnt_break_the_next_extraction_or_closing(qapp, tmp_path, monkeypatch):
+    """The worker deletes itself when done; the tab used to call isRunning on it at the next load and on close."""
+    import sys
+    import time
+
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from riemann.core import annotation_store
+    from riemann.ui.reader.tab import ReaderTab
+    from riemann.ui.reader.workers import MetadataExtractionWorker
+
+    sys.path.insert(0, os.path.dirname(__file__))
+    from text_fixtures import make_text_pdf
+
+    monkeypatch.setattr(annotation_store, "_shared", annotation_store.AnnotationStore(str(tmp_path / "store")))
+    tab = ReaderTab()
+    tab.load_document(make_text_pdf(tmp_path / "a.pdf", [(72, 700, 12, "A paper title")]))
+    end = time.time() + 15
+    while time.time() < end and tab.current_doc is None:
+        qapp.processEvents()
+    gone = MetadataExtractionWorker("text")
+    gone.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    tab.metadata_worker = gone
+    with patch("riemann.ui.reader.mixins.metadata.MetadataExtractionWorker") as worker_class:
+        tab.extract_document_metadata()
+    worker_class.assert_called_once()
+    tab.metadata_worker = gone
+    tab.cleanup()
+    assert tab.metadata_worker is None
+    tab.deleteLater()

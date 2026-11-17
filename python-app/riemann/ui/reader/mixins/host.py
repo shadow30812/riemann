@@ -127,6 +127,8 @@ class ReaderHost(Protocol):
 
     def _render_text_page(self) -> None: ...
 
+    def _live_metadata_worker(self) -> Optional[Any]: ...
+
 
 if TYPE_CHECKING:
     ReaderHostBase = ReaderHost
