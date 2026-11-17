@@ -152,6 +152,7 @@ def window(qtbot, monkeypatch):
     app_settings().remove(OFFICE_ASK_KEY)
     win = RiemannWindow(incognito=False, restore_session=False)
     qtbot.addWidget(win)
+    win.show()
     yield win
     app_settings().remove(OFFICE_ASK_KEY)
 
@@ -185,6 +186,24 @@ def test_dont_ask_again_and_restored_tabs_never_ask(window, tmp_path):
     restored.cleanup()
     assert basic is not None
     basic.cleanup()
+
+
+def test_an_office_file_opened_before_the_window_shows_waits_for_it(qtbot, tmp_path, monkeypatch):
+    from riemann.app import RiemannWindow
+
+    monkeypatch.setattr(office, "find_office", lambda override="": None)
+    win = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(win)
+    shown = []
+    with patch("riemann.ui.office_install.offer_office", side_effect=lambda *a, **k: shown.append(win.isVisible()) or "basic"):
+        assert win._open_document(make_docx(tmp_path / "a.docx"), preview=False) is None
+        assert shown == []
+        win.show()
+        assert wait_for(lambda: shown)
+    assert shown == [True]
+    tab = win.tabs_main.currentWidget()
+    assert tab.current_path.endswith("a.docx")
+    tab.cleanup()
 
 
 def test_installing_from_the_prompt_opens_the_file(window, tmp_path, monkeypatch):

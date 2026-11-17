@@ -12,7 +12,9 @@ _office_ready: opening an Office file (not a preview) without LibreOffice
 asks to install it (ui/office_install.py), once per kind of Office file per
 session and only while Settings allows asking. Declined, the file isn't
 opened and a message says why. Tabs restored from a session never ask: they
-open and say in the page that LibreOffice is needed. When Riemann can read
+open and say in the page that LibreOffice is needed. An Office file opened
+before the window is shown (from the command line) waits until it is, so the
+prompt never comes up without a window behind it. When Riemann can read
 the file itself (core/office_basic.py), the prompt also offers the basic
 view, and once asked (or with asking turned off) the basic view opens
 without a prompt. When the basic view's packages are missing, choosing it
@@ -27,6 +29,7 @@ import os
 from typing import Optional, Tuple
 import shiboken6
 from PySide6.QtCore import (
+    QTimer,
     QUrl,
 )
 from PySide6.QtGui import (
@@ -416,8 +419,14 @@ class DocumentsMixin:
         if kind == "binary":
             self._refuse_binary(path)
             return None
-        if kind == "office" and not preview and not self._office_ready(path):
-            return None
+        if kind == "office" and not preview:
+            if not self.isVisible() and not getattr(self, "_restoring_tabs", False) and office.find_office(
+                self.settings.value(OFFICE_PATH_KEY, "", type=str)
+            ) is None:
+                QTimer.singleShot(0, self, lambda: self._open_document(path, target_widget, False, page, None, activate))
+                return None
+            if not self._office_ready(path):
+                return None
         self.add_to_history(path, "web" if kind == "html" else "pdf")
 
         if not preview and kind == "html":
