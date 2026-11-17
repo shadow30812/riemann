@@ -357,7 +357,7 @@ class SignaturesMixin(ReaderHostBase):
             from pyhanko.sign.fields import SigFieldSpec, append_signature_field
 
             signer = signers.SimpleSigner.load_pkcs12(cert_path, password.encode())
-            output_path = self.current_path.replace(".pdf", "_signed.pdf")
+            output_path = unused_path(os.path.splitext(self.current_path)[0] + "_signed.pdf")
 
             with open(self.current_path, "rb") as doc:
                 writer = IncrementalPdfFileWriter(doc)

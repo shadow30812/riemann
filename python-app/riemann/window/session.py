@@ -244,7 +244,7 @@ class SessionMixin:
 
         for item in items:
             if isinstance(item, str) and os.path.exists(item):
-                self._add_pdf_tab(item, target_widget, True)
+                self._add_pdf_tab(item, target_widget)
             elif isinstance(item, dict):
                 kind = item.get("type")
                 data = item.get("data")
@@ -258,7 +258,6 @@ class SessionMixin:
                         data,
                         target_widget,
                         preview=self._as_bool(item.get("preview")),
-                        restore_state=page is None,
                         page=page,
                     )
                 elif kind == "web" and data:
@@ -290,6 +289,7 @@ class SessionMixin:
                     "type": "pdf",
                     "data": widget.current_path,
                     "preview": bool(getattr(widget, "is_preview", False)),
+                    "page": widget.current_page_index if getattr(widget, "current_doc", None) else None,
                 }
             )
         elif getattr(widget, "is_system_tab", False):
@@ -317,7 +317,7 @@ class SessionMixin:
 
         if last["type"] == "pdf":
             self._open_document(
-                last["data"], target, preview=last.get("preview"), restore_state=True
+                last["data"], target, preview=last.get("preview"), page=last.get("page")
             )
         elif last["type"] == "web":
             self._add_browser_tab(last["data"], target)

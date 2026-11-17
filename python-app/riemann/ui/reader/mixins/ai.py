@@ -65,14 +65,14 @@ from ..workers import (
 from .pages import format_page_ranges, parse_page_ranges
 from .host import ReaderHostBase
 from ....core.assets import is_frozen
-from ....core.endpoints import loopback_url
+from ....core.endpoints import RELEASES, loopback_url
 
 AI_CONNECT_ATTEMPTS = 90
 AI_LOADING_ATTEMPTS = 1800
 _ORPHANED_THREADS: set = set()
 AI_INDEX_TIMEOUT_MS = 600_000
 AI_SEARCH_TIMEOUT_MS = 60_000
-LATEX_PACK_URL = "https://github.com/shadow30812/riemann/releases/download/v1.0/latex_ocr_modules.zip"
+LATEX_PACK_URL = f"{RELEASES}/v1.0/latex_ocr_modules.zip"
 LATEX_PACK_SHA256 = "b5ce63262da29e1532fc4809b3b0f9dce01a7b05e99c083a64bb9faff6252ac0"
 
 

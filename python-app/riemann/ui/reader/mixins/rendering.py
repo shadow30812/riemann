@@ -56,7 +56,6 @@ from ....core.log import log
 from ...palette import CONTENT, qcolor, tokens
 from .host import ReaderHostBase
 from ....core.assets import asset_path
-from ....core.settings import LAST_PAGE_KEY, LAST_SCROLL_KEY
 
 # Thumbnails are rendered at this fraction of the target resolution and shown
 # (upscaled) until the full-resolution page arrives.
@@ -354,6 +353,17 @@ class RenderingMixin(ReaderHostBase):
 
         except Exception as e:
             sys.stderr.write(f"Render error page {idx}: {e}\n")
+
+    def _on_page_failed(self, generation, idx: int, message: str) -> None:
+        """Says on the page that it could not be shown, unless an earlier render of it is there."""
+        if generation != self._render_owner():
+            return
+        widget = self.page_widgets.get(idx)
+        if widget is None or not shiboken6.isValid(widget) or not widget.pixmap().isNull():
+            return
+        widget.setText(f"Page {idx + 1} could not be shown.\n{message}")
+        widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        widget.setToolTip(message)
 
     def _on_page_rendered(
         self,
@@ -786,10 +796,6 @@ class RenderingMixin(ReaderHostBase):
             if self.current_doc:
                 self.txt_page.setText(str(self.current_page_index + 1))
                 self.lbl_total.setText(f"/ {self.current_doc.page_count}")
-            self.settings.setValue(LAST_PAGE_KEY, self.current_page_index)
-            self.settings.setValue(
-                LAST_SCROLL_KEY, self.scroll.verticalScrollBar().value()
-            )
         else:
             if self.web:
                 self.web.setZoomFactor(self.calculate_scale())

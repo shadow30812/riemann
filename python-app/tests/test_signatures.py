@@ -1,3 +1,4 @@
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -151,3 +152,28 @@ def test_execute_pyhanko_signing(
     mock_append.assert_called_once()
     mock_signers.sign_pdf.assert_called_once()
     assert "securely signed" in reader.last_toast
+
+
+@pytest.mark.parametrize("name", ["Paper.PDF", "paper.pdf"])
+def test_signing_writes_a_new_file_and_never_the_original(tmp_path, name):
+    from types import SimpleNamespace
+
+    from riemann.ui.reader.mixins.signatures import SignaturesMixin
+
+    original = tmp_path / name
+    original.write_bytes(b"%PDF-1.4 original")
+    existing = tmp_path / (os.path.splitext(name)[0] + "_signed.pdf")
+    existing.write_bytes(b"earlier signature")
+    host = SimpleNamespace(current_path=str(original), show_toast=lambda *a: None, loaded=[])
+    host.load_document = host.loaded.append
+
+    def sign_pdf(writer, meta, signer, out):
+        out.write(b"%PDF-1.4 signed")
+
+    with patch("pyhanko.sign.signers.SimpleSigner.load_pkcs12"), patch(
+        "pyhanko.pdf_utils.incremental_writer.IncrementalPdfFileWriter"
+    ), patch("pyhanko.sign.fields.append_signature_field"), patch("pyhanko.sign.signers.sign_pdf", sign_pdf):
+        SignaturesMixin.execute_pyhanko_signing(host, "cert.p12", "pw")
+    assert original.read_bytes() == b"%PDF-1.4 original"
+    assert existing.read_bytes() == b"earlier signature"
+    assert host.loaded and os.path.basename(host.loaded[0]) == os.path.splitext(name)[0] + "_signed (2).pdf"

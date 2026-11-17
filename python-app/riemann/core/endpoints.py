@@ -6,8 +6,10 @@ server) listen on and the app connects to; keep every local service on it (see
 the Security rules in AGENTS.md). loopback_url builds a request URL for one.
 
 The remote ones are the scholarly metadata APIs, the link formats written into
-citations and exports, the model host, and the AI providers of the assistant
-panel. The web search engine and the Ollama address are user settings
+citations and exports, the model host, the release downloads (the Snip-to-LaTeX
+module pack), the CDN KaTeX comes from, and the AI providers of the assistant
+panel. Whatever is fetched from these is pinned by version and hash where it is
+used. The web search engine and the Ollama address are user settings
 (core.settings.search_url, ui.sidecar.ollama_url); only their defaults are here.
 
 USER_AGENT identifies Riemann to the metadata APIs, which ask callers to.
@@ -24,6 +26,8 @@ OPENALEX_WORKS = "https://api.openalex.org/works"
 ARXIV_ABS = "https://arxiv.org/abs"
 DOI_RESOLVER = "https://doi.org"
 HUGGINGFACE = "https://huggingface.co"
+RELEASES = "https://github.com/shadow30812/riemann/releases/download"
+JSDELIVR_NPM = "https://cdn.jsdelivr.net/npm"
 
 ANTHROPIC_API = "https://api.anthropic.com/v1"
 OPENAI_API = "https://api.openai.com/v1"

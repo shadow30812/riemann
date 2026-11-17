@@ -61,13 +61,13 @@ def test_stored_names_never_change():
     names = [
         "DARK_MODE_KEY", "UI_SCALE_KEY", "DEFAULT_DIR_KEY", "LAST_DIR_KEY", "VERTICAL_TABS_KEY",
         "TABS_COLLAPSED_KEY", "AUTOSCROLL_SPEED_KEY", "CLEAN_EXIT_KEY", "HOMEPAGE_NAME_KEY",
-        "NOTES_VISIBLE_KEY", "SIDEBAR_VISIBLE_KEY", "LAST_PAGE_KEY", "LAST_SCROLL_KEY",
+        "NOTES_VISIBLE_KEY", "SIDEBAR_VISIBLE_KEY",
         "FAVOURITE_FOLDERS_KEY",
     ]
     stored = [
         "darkMode", "app/ui_scale", "app/default_dir", "app/last_dir", "app/vertical_tabs",
         "app/tabs_collapsed", "app/autoscroll_speed", "session/clean_exit", "homepage/custom_name",
-        "reader/notes_visible", "reader/sidebar_visible", "lastPage", "lastScrollY",
+        "reader/notes_visible", "reader/sidebar_visible",
         "folders",
     ]
     assert [getattr(settings, name) for name in names] == stored

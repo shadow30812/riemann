@@ -76,3 +76,17 @@ def test_katex_tags_carry_their_hashes():
         for tag in tags:
             assert 'integrity="sha384-' in tag and 'crossorigin="anonymous"' in tag
             assert f"katex@{utils.KATEX_VERSION}/" in tag
+
+
+def test_remote_addresses_are_written_only_in_core_endpoints():
+    allowed = {"http://www.idpf.org/2007/opf", "https://example.com"}
+    offenders = []
+    for path in sorted(ROOT.rglob("*.py")):
+        if "__pycache__" in path.parts or path.name == "endpoints.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                for url in re.findall(r"https?://[^\s\"'<>]+", node.value):
+                    if url not in allowed and not re.match(r"https?://(127\.0\.0\.1|localhost)", url):
+                        offenders.append(f"{path.relative_to(ROOT)}:{node.lineno} {url}")
+    assert offenders == []

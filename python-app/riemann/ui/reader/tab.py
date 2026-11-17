@@ -350,12 +350,11 @@ class PreviewReaderTab(ReaderTab):
     def load_document(
         self,
         path: str,
-        restore_state: bool = False,
         password: Optional[str] = None,
         is_retry: bool = False,
     ) -> None:
         self.current_path = path
-        super().load_document(path, restore_state, password, is_retry)
+        super().load_document(path, password, is_retry)
 
     def _on_document_loaded(self, doc):
         super()._on_document_loaded(doc)

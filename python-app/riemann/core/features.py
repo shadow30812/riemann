@@ -54,7 +54,7 @@ class DocumentConverter:
         """Renders each page to a PNG at dpi; returns the files written."""
         doc = _open_pdf(pdf_path)
         os.makedirs(output_dir, exist_ok=True)
-        base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+        base_name = unused_image_base(output_dir, os.path.splitext(os.path.basename(pdf_path))[0], doc.page_count)
         saved_paths = []
         for page_num in range(doc.page_count):
             res = doc.render_page(page_num, dpi / 72.0, 0)
@@ -556,8 +556,8 @@ class CompressDialog(QDialog):
         start_dir = self._get_start_dir()
 
         if in_path:
-            ext = os.path.splitext(in_path)[1]
-            default_out = in_path.replace(ext, f"_compressed{ext}")
+            stem, ext = os.path.splitext(in_path)
+            default_out = unused_path(f"{stem}_compressed{ext}")
         else:
             default_out = start_dir
             ext = ".*"
@@ -755,6 +755,15 @@ def unused_path(path: str) -> str:
     while os.path.exists(f"{stem} ({n}){ext}"):
         n += 1
     return f"{stem} ({n}){ext}"
+
+
+def unused_image_base(folder: str, base: str, pages: int) -> str:
+    """base, or "base (2)", "base (3)"... so that none of the page images base_page_N.png exists in folder yet."""
+    candidate, n = base, 2
+    while any(os.path.exists(os.path.join(folder, f"{candidate}_page_{i}.png")) for i in range(1, pages + 1)):
+        candidate = f"{base} ({n})"
+        n += 1
+    return candidate
 
 
 def trigger_local_caption_generation(parent_window):

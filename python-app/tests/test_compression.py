@@ -126,3 +126,30 @@ def test_pdf_to_images_text_and_html(tmp_path, qapp):
     page = open(out, encoding="utf-8").read()
     assert page.count("<div class='page'") == doc.page_count
     assert "Attention" in page and "<script" not in page
+
+
+def test_pdf_to_images_never_replaces_existing_images(tmp_path, qapp):
+    out = tmp_path / "png"
+    out.mkdir()
+    keep = out / "attention_page_1.png"
+    keep.write_bytes(b"mine")
+    pngs = DocumentConverter.pdf_to_images(ATTENTION, str(out), dpi=18)
+    assert keep.read_bytes() == b"mine"
+    assert all(os.path.basename(p).startswith("attention (2)_page_") for p in pngs)
+
+
+def test_compression_default_output_changes_only_the_file_name(tmp_path, qapp, monkeypatch):
+    from riemann.core import features
+
+    folder = tmp_path / "my.pdf.files"
+    folder.mkdir()
+    src = folder / "report.pdf"
+    src.write_bytes(b"%PDF-1.4\n")
+    (folder / "report_compressed.pdf").write_bytes(b"older")
+    seen = []
+    monkeypatch.setattr(features.QFileDialog, "getSaveFileName", lambda parent, title, default, flt: (seen.append(default), ("", ""))[1])
+    dialog = features.CompressDialog()
+    dialog.txt_input.setText(str(src))
+    dialog.browse_output()
+    dialog.deleteLater()
+    assert seen == [str(folder / "report_compressed (2).pdf")]

@@ -247,7 +247,6 @@ class DocumentsMixin:
         self,
         path: str,
         target_widget: QTabWidget,
-        restore_state: bool = False,
         is_preview: Optional[bool] = None,
     ) -> None:
         """
@@ -255,9 +254,7 @@ class DocumentsMixin:
         _open_document, which handles every supported file type). is_preview, if given,
         forces preview or full mode.
         """
-        self._open_document(
-            path, target_widget, preview=is_preview, restore_state=restore_state
-        )
+        self._open_document(path, target_widget, preview=is_preview)
 
     def _preview_mode_enabled(self) -> bool:
         return self.settings.value("reader/open_in_preview_mode", False, type=bool)
@@ -299,7 +296,6 @@ class DocumentsMixin:
         path: str,
         target_widget: Optional[QTabWidget] = None,
         preview: Optional[bool] = None,
-        restore_state: bool = False,
         page: Optional[int] = None,
         insert_idx: Optional[int] = None,
         activate: bool = True,
@@ -334,7 +330,7 @@ class DocumentsMixin:
             widget = self._create_reader(preview)
             if page is not None:
                 widget.pending_initial_page = page
-            widget.load_document(path, restore_state=restore_state)
+            widget.load_document(path)
             icon = (
                 self._preview_icon()
                 if preview
@@ -439,12 +435,10 @@ class DocumentsMixin:
         browser.web.titleChanged.connect(lambda title: self._update_tab_title(browser))
         return browser
 
-    def new_pdf_tab(
-        self, path: Optional[str] = None, restore_state: bool = False
-    ) -> None:
+    def new_pdf_tab(self, path: Optional[str] = None) -> None:
         """With no path, opens an empty reader tab."""
         if path:
-            self._open_document(path, self.tabs_main, restore_state=restore_state)
+            self._open_document(path, self.tabs_main)
         else:
             preview = self._preview_mode_enabled()
             reader = self._create_reader(preview)

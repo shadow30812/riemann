@@ -141,3 +141,49 @@ def test_update_view_reflow(mock_generate, reader):
     reader.update_view()
 
     reader.web.setHtml.assert_called_with("<html>reflowed</html>")
+
+
+def test_a_page_that_fails_to_render_is_logged_once_and_reported(qapp, caplog):
+    import time
+
+    from PySide6.QtCore import QCoreApplication
+
+    from riemann.ui.reader.render_worker import PageRenderWorker
+
+    class BrokenDoc:
+        def render_page(self, idx, scale, theme):
+            raise RuntimeError("damaged content stream")
+
+    worker = PageRenderWorker()
+    failures = []
+    worker.page_failed.connect(lambda gen, idx, msg: failures.append((gen, idx, msg)))
+    worker.set_document(BrokenDoc(), "gen-1")
+    worker.start()
+    try:
+        with caplog.at_level("WARNING", logger="riemann"):
+            for _ in range(2):
+                worker.request(4, 1.0, 0, False)
+                deadline = time.monotonic() + 5
+                while not failures and time.monotonic() < deadline:
+                    QCoreApplication.processEvents()
+                    time.sleep(0.01)
+            time.sleep(0.1)
+            QCoreApplication.processEvents()
+    finally:
+        worker.stop()
+        worker.wait(3000)
+    assert failures == [("gen-1", 4, "damaged content stream")]
+    assert sum("Could not render page 5" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_failed_page_says_so_on_its_tile(qapp):
+    from types import SimpleNamespace
+
+    from riemann.ui.reader.mixins.rendering import RenderingMixin
+    from riemann.ui.reader.widgets import PageWidget
+
+    tile = PageWidget()
+    host = SimpleNamespace(page_widgets={2: tile}, _render_owner=lambda: "g")
+    RenderingMixin._on_page_failed(host, "g", 2, "damaged content stream")
+    assert "Page 3 could not be shown" in tile.text()
+    tile.deleteLater()

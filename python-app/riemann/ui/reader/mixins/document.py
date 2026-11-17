@@ -90,14 +90,13 @@ class DocumentMixin(ReaderHostBase):
     def load_document(
         self,
         path: str,
-        restore_state: bool = False,
         password: Optional[str] = None,
         is_retry: bool = False,
     ) -> None:
-        """
-        Loads a PDF or Markdown file on a background thread. restore_state goes back to
-        where it was last read.
-        """
+        """Loads a PDF or Markdown file on a background thread; set pending_initial_page first to open at a page."""
+        if self.has_unsaved_page_edits() and path != self.current_path:
+            if not self.resolve_page_edits():
+                return
         if not is_retry and self.current_path:
             self.flush_annotations_to_pdf()
 
@@ -141,7 +140,6 @@ class DocumentMixin(ReaderHostBase):
         self._start_render_worker()
 
         path = self._load_path
-        restore_state = self._load_restore_state
         is_retry = self._load_is_retry
 
         self._probe_base_page_size()
@@ -154,7 +152,7 @@ class DocumentMixin(ReaderHostBase):
 
         if is_retry:
             QTimer.singleShot(
-                50, lambda: self.show_toast("Document unlocked successfully.")
+                50, self, lambda: self.show_toast("Document unlocked successfully.")
             )
 
         if not self.is_preview:
@@ -181,22 +179,13 @@ class DocumentMixin(ReaderHostBase):
             )
             self.rebuild_layout()
             self.jump_to_page(self.current_page_index)
-        elif restore_state:
-            saved_page = self.settings.value(LAST_PAGE_KEY, 0, type=int)
-            saved_scroll = self.settings.value(LAST_SCROLL_KEY, 0, type=int)
-            self.current_page_index = min(saved_page, self.current_doc.page_count - 1)
-            self.rebuild_layout()
-            self.update_view()
-            QTimer.singleShot(
-                100, lambda: self.scroll.verticalScrollBar().setValue(saved_scroll)
-            )
         else:
             self.current_page_index = 0
             self.rebuild_layout()
             self.update_view()
 
         if not self.is_preview:
-            QTimer.singleShot(2000, self.extract_document_metadata)
+            QTimer.singleShot(2000, self, self.extract_document_metadata)
 
     def _reset_document_caches(self) -> None:
         """Drops everything derived from the previously loaded document."""
@@ -215,6 +204,7 @@ class DocumentMixin(ReaderHostBase):
         if self._render_worker is None:
             self._render_worker = PageRenderWorker()
             self._render_worker.page_rendered.connect(self._on_page_rendered)
+            self._render_worker.page_failed.connect(self._on_page_failed)
             self._render_worker.start()
         self._render_worker.set_document(self.page_renderer, self._render_owner())
 
@@ -230,6 +220,7 @@ class DocumentMixin(ReaderHostBase):
             return
         try:
             worker.page_rendered.disconnect(self._on_page_rendered)
+            worker.page_failed.disconnect(self._on_page_failed)
         except (RuntimeError, TypeError):
             pass
         worker.stop()
@@ -242,7 +233,6 @@ class DocumentMixin(ReaderHostBase):
         """Callback if the background thread encounters a loading exception."""
         self.load_progress.accept()
         path = self._load_path
-        restore_state = self._load_restore_state
         is_retry = self._load_is_retry
 
         err_str_lower = err_str.lower()
@@ -252,7 +242,7 @@ class DocumentMixin(ReaderHostBase):
             if dialog.exec():
                 pw = dialog.get_password()
                 if pw:
-                    self.load_document(path, restore_state, pw, is_retry=True)
+                    self.load_document(path, pw, is_retry=True)
             return
 
         QMessageBox.critical(
@@ -325,7 +315,7 @@ class DocumentMixin(ReaderHostBase):
         saved_page = self.current_page_index
         saved_scroll = self.scroll.verticalScrollBar().value()
         self._loaded_mtime = current_mtime
-        self.load_document(self.current_path, restore_state=False)
+        self.load_document(self.current_path)
 
         def _restore_pos():
             if self.current_doc:
@@ -335,7 +325,7 @@ class DocumentMixin(ReaderHostBase):
                 self.ensure_visible(self.current_page_index)
             self.scroll.verticalScrollBar().setValue(saved_scroll)
 
-        QTimer.singleShot(350, _restore_pos)
+        QTimer.singleShot(350, self, _restore_pos)
         self.show_toast("Refreshed document 🔄")
 
     def _load_markdown(self, path: str) -> None:
@@ -523,7 +513,7 @@ class DocumentMixin(ReaderHostBase):
             "Save Encrypted PDF",
             os.path.join(
                 start_dir,
-                os.path.basename(self.current_path).replace(".pdf", "_secure.pdf"),
+                os.path.splitext(os.path.basename(self.current_path))[0] + "_secure.pdf",
             ),
             "PDF Files (*.pdf)",
         )

@@ -546,27 +546,12 @@ def write_annotations(
 
         objects: Dict[Tuple[int, int], Any] = {}
 
-        def collect(obj):
-            if not isinstance(obj, (pikepdf.Dictionary, pikepdf.Array, pikepdf.Stream)):
-                return
-            if obj.is_indirect:
-                key = obj.objgen
-                if key in objects:
-                    return
-                objects[key] = obj
-            items = obj.values() if isinstance(obj, (pikepdf.Dictionary, pikepdf.Stream)) else obj
-            for child in items:
-                if isinstance(child, (pikepdf.Dictionary, pikepdf.Array, pikepdf.Stream)):
-                    if child.is_indirect and child.objgen[0] < first_new:
-                        continue
-                    collect(child)
-
         original_size = int(pdf.trailer.get("/Size", 0))
         for page_obj in changed_pages:
             objects[page_obj.objgen] = page_obj
             for annot in page_obj.Annots:
                 if annot.is_indirect and annot.objgen[0] >= first_new:
-                    collect(annot)
+                    collect_new_objects(objects, annot, first_new)
 
         serialized = serialize_objects(objects)
 

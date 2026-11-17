@@ -62,8 +62,6 @@ CLEAN_EXIT_KEY = "session/clean_exit"
 HOMEPAGE_NAME_KEY = "homepage/custom_name"
 NOTES_VISIBLE_KEY = "reader/notes_visible"
 SIDEBAR_VISIBLE_KEY = "reader/sidebar_visible"
-LAST_PAGE_KEY = "lastPage"
-LAST_SCROLL_KEY = "lastScrollY"
 
 SEARCH_URL_KEY = "browser/search_url"
 

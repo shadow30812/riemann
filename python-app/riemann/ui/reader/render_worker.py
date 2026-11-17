@@ -27,7 +27,9 @@ metadata) where metadata is (links, form widgets) the first time a page is
 seen.
 
 run: Links and form fields are fetched here too, so the UI thread never has to
-wait on the PDFium lock while this thread renders.
+wait on the PDFium lock while this thread renders. A page that fails to render
+is logged once per document with the error and reported through page_failed,
+so the reader can say so on the page instead of leaving it blank.
 """
 
 import atexit
@@ -40,6 +42,7 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
 
 from ...core import render_process
+from ...core.log import log
 
 
 # Rendered pages are always opaque (PDFium draws onto a white background), so
@@ -142,6 +145,7 @@ class PageRenderWorker(QThread):
     """
 
     page_rendered = Signal(object, int, float, int, bool, QImage, object)
+    page_failed = Signal(object, int, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -152,6 +156,7 @@ class PageRenderWorker(QThread):
         self._generation = None
         self._stopped = False
         self._meta_sent = set()
+        self._failed = set()
         _LIVE_WORKERS.add(self)
 
     def set_document(self, doc, generation) -> None:
@@ -160,6 +165,7 @@ class PageRenderWorker(QThread):
             self._generation = generation
             self._jobs.clear()
             self._meta_sent = set()
+            self._failed = set()
 
     def set_focus(self, page_idx: int) -> None:
         with self._cond:
@@ -213,7 +219,11 @@ class PageRenderWorker(QThread):
             try:
                 res = doc.render_page(page_idx, render_scale, theme)
                 img = page_image(res, render_scale)
-            except Exception:
+            except Exception as error:
+                if page_idx not in self._failed:
+                    self._failed.add(page_idx)
+                    log.warning("Could not render page %d", page_idx + 1, exc_info=True)
+                    self.page_failed.emit(generation, page_idx, str(error) or type(error).__name__)
                 continue
 
             meta = None
