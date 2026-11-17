@@ -101,12 +101,12 @@ def install_linux_integration():
         )
 
         try:
-            if desktop_file_path.read_text() == desktop_entry:
+            if desktop_file_path.read_text(encoding="utf-8") == desktop_entry:
                 return
         except OSError:
             pass
 
-        with open(desktop_file_path, "w") as f:
+        with open(desktop_file_path, "w", encoding="utf-8") as f:
             f.write(desktop_entry)
 
         os.chmod(desktop_file_path, 0o755)

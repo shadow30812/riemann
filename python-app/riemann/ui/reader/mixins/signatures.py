@@ -102,7 +102,7 @@ class CertificateViewerDialog(QDialog):
         if path:
             save_last_directory(settings, path)
             try:
-                with open(path, "w") as f:
+                with open(path, "w", encoding="utf-8") as f:
                     f.write(self.cert_details.get("cert_pem", ""))
                 if hasattr(self.parent(), "show_toast"):
                     self.parent().show_toast("Certificate exported successfully!")

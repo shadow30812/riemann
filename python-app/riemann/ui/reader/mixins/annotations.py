@@ -367,7 +367,7 @@ class AnnotationsMixin(ReaderHostBase):
         p = self._get_annotation_path()
         if os.path.exists(p):
             try:
-                with open(p, "r") as f:
+                with open(p, "r", encoding="utf-8") as f:
                     data = json.load(f)
             except (OSError, ValueError):
                 data = {}

@@ -105,7 +105,7 @@ def ensure_started() -> Optional[Tuple[int, str]]:
     try:
         if _log_file is None or _log_file.closed:
             try:
-                _log_file = open(_log_path(), "w")
+                _log_file = open(_log_path(), "w", encoding="utf-8")
             except OSError:
                 _log_file = None
         kwargs = {}
