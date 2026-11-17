@@ -2654,7 +2654,30 @@ class PreviewTextTab(QWidget):
             import html as html_lib
 
             body = f"<pre>{html_lib.escape(text)}</pre>"
-        return f"<html><head><style>{self._page_css()}</style></head><body>{body}</body></html>"
+        return f"<html><head><style>{self._page_css()}</style></head><body>{self._qt_blocks(body)}</body></html>"
+
+    def _qt_blocks(self, body: str) -> str:
+        """
+        Qt's rich text pads and borders table cells only, so code blocks become
+        a padded cell and quotes a cell beside a narrow bar. Opening and closing
+        tags are replaced one by one, which keeps nested quotes nested.
+        """
+        t = tokens(self.dark_mode)
+        body = re.sub(
+            r"<pre\b",
+            f'<table width="100%" cellspacing="0" cellpadding="10" bgcolor="{t["raised"]}"'
+            ' style="margin: 6px 0; border-style: none;"><tr><td><pre',
+            body,
+        )
+        body = re.sub(r"\n?(</code>)?</pre>", lambda m: (m.group(1) or "") + "</pre></td></tr></table>", body)
+        body = re.sub(
+            r"<blockquote\b[^>]*>",
+            f'<table cellspacing="0" cellpadding="0" style="margin: 6px 0; border-style: none;"><tr>'
+            f'<td style="border-style: none none none solid; border-width: 3px; border-color: {t["border_strong"]};'
+            f' padding-left: 12px; color: {t["muted"]};">',
+            body,
+        )
+        return body.replace("</blockquote>", "</td></tr></table>")
 
     @staticmethod
     def _strip_active_content(content: str) -> str:

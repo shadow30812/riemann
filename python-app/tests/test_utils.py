@@ -95,6 +95,28 @@ def test_text_preview_markdown_drops_raw_html_and_script_links(qapp, tmp_path):
     assert "javascript" not in html_out and "file:///etc" not in html_out
 
 
+def test_text_preview_pads_code_and_marks_quotes_in_table_cells(qapp, tmp_path):
+    from PySide6.QtGui import QTextTable
+
+    from riemann.ui.browser import PreviewTextTab
+
+    note = tmp_path / "note.md"
+    note.write_text("```\ncode line\n```\n\n> said\n>\n> > replied\n")
+    tab = PreviewTextTab(str(note))
+    tables = []
+    frames = [tab.editor.document().rootFrame()]
+    while frames:
+        frame = frames.pop()
+        frames.extend(frame.childFrames())
+        if isinstance(frame, QTextTable):
+            tables.append(frame)
+    tab.deleteLater()
+    assert len(tables) == 3
+    assert sorted(table.format().cellPadding() for table in tables) == [0, 0, 10]
+    assert "code line" in tab._markdown_html(note.read_text())
+    assert "\n</code></pre>" not in tab._markdown_html(note.read_text())
+
+
 def test_text_preview_opens_only_relative_local_links(qapp, tmp_path):
     from unittest.mock import MagicMock
 
