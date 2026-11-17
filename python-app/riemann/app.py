@@ -10,6 +10,12 @@ Notes:
 __init__: Opening, closing or switching tabs also saves soon after, so a crash
 right after opening a document can still bring it back.
 
+CHROMIUM_FLAGS: Chromium keeps both its sandboxes, and renderers are not
+capped: one renderer per site (--process-per-site, which saves memory over
+one per tab), so a crash or a compromised renderer stays within that site's
+tabs. --disable-setuid-sandbox and --renderer-process-limit=2 were dropped on
+16 November 2026; with the cap, every site shared one of two renderers.
+
 run: CI starts the packaged build with this set to check that it gets as far as
 an open window, then quits cleanly.
 """
@@ -181,19 +187,7 @@ class RiemannWindow(
             self.web_profile = QWebEngineProfile()
         else:
             self.setWindowTitle("Riemann")
-            self.web_profile = QWebEngineProfile("RiemannPersistentProfile", self)
-
-            base_path = QStandardPaths.writableLocation(
-                QStandardPaths.StandardLocation.AppDataLocation
-            )
-            storage_path = os.path.join(base_path, "web_profile")
-            os.makedirs(storage_path, exist_ok=True)
-
-            self.web_profile.setPersistentStoragePath(storage_path)
-            self.web_profile.setCachePath(storage_path)
-            self.web_profile.setPersistentCookiesPolicy(
-                QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
-            )
+            self.web_profile = persistent_profile()
 
         self.resize(1200, 900)
         self.settings = app_settings()
@@ -455,6 +449,31 @@ class RiemannWindow(
         super().closeEvent(event)
 
 
+PERSISTENT_PROFILE_NAME = "RiemannPersistentProfile"
+_persistent = None
+
+
+def persistent_profile() -> QWebEngineProfile:
+    """
+    The one persistent web profile, shared by every non-incognito window. Two
+    profiles with the same name would open the same cookie and cache files
+    twice, which Qt does not support. It belongs to the application, so it
+    outlives every window and the pages in them.
+    """
+    global _persistent
+    if isinstance(_persistent, QObject) and shiboken6.isValid(_persistent):
+        return _persistent
+    profile = _persistent = QWebEngineProfile(PERSISTENT_PROFILE_NAME, QApplication.instance())
+    storage_path = os.path.join(
+        QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation), "web_profile"
+    )
+    os.makedirs(storage_path, exist_ok=True)
+    profile.setPersistentStoragePath(storage_path)
+    profile.setCachePath(storage_path)
+    profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies)
+    return profile
+
+
 class ButtonIconFreeStyle(QProxyStyle):
     """The platform style without the stock icons (a red X, a green tick) that some
     desktop themes put on OK/Cancel/Yes/No buttons; they clash with the app theme."""
@@ -463,6 +482,16 @@ class ButtonIconFreeStyle(QProxyStyle):
         if hint == QStyle.StyleHint.SH_DialogButtonBox_ButtonsHaveIcons:
             return 0
         return super().styleHint(hint, option, widget, returnData)
+
+
+CHROMIUM_FLAGS = (
+    "--autoplay-policy=no-user-gesture-required "
+    "--disable-features=AudioServiceOutOfProcess "
+    "--referrer-policy=no-referrer-when-downgrade "
+    "--enable-features=WebEngineProprietaryCodecs "
+    "--process-per-site "
+    "--disk-cache-size=52428800 "
+)
 
 
 def run() -> None:
@@ -474,16 +503,7 @@ def run() -> None:
     and starts the main event loop.
     """
 
-    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
-        "--autoplay-policy=no-user-gesture-required "
-        "--disable-setuid-sandbox "
-        "--disable-features=AudioServiceOutOfProcess "
-        "--referrer-policy=no-referrer-when-downgrade "
-        "--enable-features=WebEngineProprietaryCodecs "
-        "--renderer-process-limit=2 "
-        "--process-per-site "
-        "--disk-cache-size=52428800 "
-    )
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = CHROMIUM_FLAGS
     sys.argv.append("--autoplay-policy=no-user-gesture-required")
 
     install_linux_integration()

@@ -110,6 +110,9 @@ class DummyReaderTab(QWidget):
     def cleanup(self):
         pass
 
+    def resolve_page_edits(self):
+        return True
+
 
 
 class DummyPreviewReaderTab(DummyReaderTab):
@@ -171,8 +174,8 @@ def isolated_app_environment(qtbot):
 
 
 def test_asset_path():
-    path = asset_path("icons", "icon.ico")
-    assert path.endswith(os.path.join("assets", "icons", "icon.ico"))
+    path = asset_path("icons", "windows-icon.ico")
+    assert path.endswith(os.path.join("assets", "icons", "windows-icon.ico"))
     assert os.path.isfile(path)
 
 
