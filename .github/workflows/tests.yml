@@ -1,7 +1,9 @@
 # Runs every test suite on pushes and pull requests: the Python app (offscreen
 # Qt), the start page's JavaScript (Jest, versions from package-lock.json), the
-# Rust OCR worker and the Rust core, plus a lint for undefined and unused names. PDFium and the benchmark PDFs are downloaded by their own
-# scripts, each pinned by SHA-256. The AI model's tests download it the way
+# Rust OCR worker and the Rust core, plus a lint for undefined and unused names.
+# LibreOffice comes from Ubuntu's packages, so the Office conversion tests run.
+# PDFium and the benchmark PDFs are downloaded by their own scripts, each
+# pinned by SHA-256. The AI model's tests download it the way
 # the app does (pinned commit, SHA-256 per file) into a folder kept in the
 # Actions cache, keyed by that commit, so it is fetched once per model version.
 name: Tests
@@ -47,10 +49,11 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-tests-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: System packages (Qt offscreen, Tesseract)
+      - name: System packages (Qt offscreen, Tesseract, LibreOffice without its interface)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui \
             tesseract-ocr libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 \
             libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libasound2t64 \
             libpulse0 libxkbfile1 libxshmfence1 libgbm1 libxcb-dri3-0 libxi6 libatomic1
