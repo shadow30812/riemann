@@ -345,6 +345,10 @@ def test_the_tab_updates_when_the_file_is_saved_elsewhere(window, tmp_path, fake
     docx(source, "Changed")
     os.utime(source, (time.time() + 5, time.time() + 5))
     assert wait_for(lambda: tab.converted_pdf not in (None, first) and tab.current_doc is not None)
+    loads = []
+    tab.load_document = lambda *args, **kwargs: loads.append(args)
+    wait_for(lambda: False, 0.5)
+    assert loads == []
     assert len(fake.calls()) == 2
     with patch.object(office, "open_in_office") as opened:
         with patch("riemann.ui.reader.mixins.document.open_in_office", opened):

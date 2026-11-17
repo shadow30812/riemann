@@ -559,6 +559,8 @@ class DocumentMixin(ReaderHostBase):
     def _check_office_source(self) -> None:
         if not self.converted_pdf or self.convert_worker is not None or not self.current_path:
             return
+        if self.load_worker is not None and shiboken6.isValid(self.load_worker) and self.load_worker.isRunning():
+            return
         try:
             mtime = os.path.getmtime(self.current_path)
         except OSError:
@@ -569,6 +571,7 @@ class DocumentMixin(ReaderHostBase):
         if mtime != self._office_seen_mtime:
             self._office_seen_mtime = mtime
             return
+        self._loaded_mtime = mtime
         self.pending_initial_page = self.current_page_index
         self.show_toast(f"{os.path.basename(self.current_path)} changed, updating…")
         self.load_document(self.current_path)
