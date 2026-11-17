@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
 
 from ...core import ai_engine
 from ...core.bibliography import to_bibtex, to_csl_json
+from ..threads import release as release_thread
+from ..threads import track
 from .base import SystemTab
 
 
@@ -369,8 +371,16 @@ class LibraryTab(SystemTab):
         self.status.setText(f"Searching {len(paths)} papers… The first search reads each paper, which takes a while.")
         self._worker = MeaningSearch(query, paths)
         self._worker.done.connect(self._show_passages)
-        self._worker.failed.connect(lambda msg: self.status.setText(f"AI search failed: {msg}"))
-        self._worker.start()
+        self._worker.failed.connect(self._show_search_failure)
+        track(self._worker).start()
+
+    def _show_search_failure(self, message: str) -> None:
+        self.status.setText(f"AI search failed: {message}")
+
+    def release(self) -> None:
+        if self._worker is not None:
+            release_thread(self._worker, self._worker.done, self._worker.failed)
+            self._worker = None
 
     def _show_passages(self, data: dict) -> None:
         titles = {}

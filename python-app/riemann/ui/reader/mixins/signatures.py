@@ -32,6 +32,8 @@ from ..workers import SignatureValidationWorker
 from ....core.log import log
 from ....core.settings import app_settings, get_dialog_directory, save_last_directory
 from ...palette import banner_style, tokens
+from ....core.features import unused_path
+from ...threads import release, track
 from .host import ReaderHostBase
 
 
@@ -114,6 +116,7 @@ class SignaturesMixin(ReaderHostBase):
     signature_appearances = None
     current_untrusted_pem = None
     tree_signatures = None
+    sig_worker = None
 
     _signature_banner_kind = "neutral"
 
@@ -179,9 +182,11 @@ class SignaturesMixin(ReaderHostBase):
         except Exception as e:
             print(f"Failed to load Mozilla Root CAs: {e}")
 
+        if self.sig_worker is not None and self.sig_worker.isRunning():
+            release(self.sig_worker, self.sig_worker.finished_validation)
         self.sig_worker = SignatureValidationWorker(path, trusted_pems)
         self.sig_worker.finished_validation.connect(self._on_signatures_validated)
-        self.sig_worker.start()
+        track(self.sig_worker).start()
 
     def _on_signatures_validated(
         self, status: str, message: str, signatures: list

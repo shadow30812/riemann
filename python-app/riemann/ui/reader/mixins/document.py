@@ -49,10 +49,9 @@ from ....core.managers import PasswordDialog
 from ..render_worker import PAGE_CACHE, PageRenderWorker
 from ....core.render_process import PageRenderer
 from ..utils import generate_markdown_html
+from ...threads import release, track
 from ....core.log import log
 from ....core.settings import (
-    LAST_PAGE_KEY,
-    LAST_SCROLL_KEY,
     NOTES_VISIBLE_KEY,
     SIDEBAR_VISIBLE_KEY,
     get_dialog_directory,
@@ -64,7 +63,7 @@ from ....core.assets import asset_path
 
 
 class DocumentLoadWorker(QThread):
-    finished = Signal(object)
+    loaded = Signal(object)
     error = Signal(str)
 
     def __init__(self, engine, path, password):
@@ -76,7 +75,7 @@ class DocumentLoadWorker(QThread):
     def run(self):
         try:
             doc = self.engine.load_document(self.path, self.password)
-            self.finished.emit(doc)
+            self.loaded.emit(doc)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -677,26 +676,15 @@ class DocumentMixin(ReaderHostBase):
             self._rebuild_debounce_timer.stop()
 
         if self.load_worker:
-            try:
-                self.load_worker.finished.disconnect()
-                self.load_worker.error.disconnect()
-            except Exception:
-                log.debug("cleanup failed", exc_info=True)
             self.load_worker.engine = None
-            if self.load_worker.isRunning():
-                self.load_worker.requestInterruption()
-                self.load_worker.quit()
-
-                if not self.load_worker.wait(1000):
-                    print("Worker thread stuck! Forcing termination...")
-                    self.load_worker.terminate()
-                    self.load_worker.wait()
-
-            try:
-                self.load_worker.deleteLater()
-            except RuntimeError:
-                pass
+            release(self.load_worker, self.load_worker.loaded, self.load_worker.error)
             self.load_worker = None
+        if self.metadata_worker is not None:
+            release(self.metadata_worker, self.metadata_worker.finished_extraction)
+            self.metadata_worker = None
+        if self.sig_worker is not None:
+            release(self.sig_worker, self.sig_worker.finished_validation)
+            self.sig_worker = None
 
         self.rendered_pages.clear()
         self.text_segments_cache.clear()

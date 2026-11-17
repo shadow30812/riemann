@@ -499,6 +499,8 @@ class MetadataExtractionWorker(QThread):
                 except Exception:
                     log.debug("run failed", exc_info=True)
 
+            if self.isInterruptionRequested():
+                return
             arxiv_match = re.search(
                 r"arXiv:(\d{4}\.\d{4,5})", self.text_chunk, re.IGNORECASE
             )
@@ -531,6 +533,8 @@ class MetadataExtractionWorker(QThread):
             metadata["title"] = lines[0]
             metadata["authors"] = lines[1]
 
+        if self.isInterruptionRequested():
+            return
         engine = ai_engine.connection()
         if engine is not None:
             try:

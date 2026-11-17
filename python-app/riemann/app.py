@@ -109,6 +109,8 @@ from .ui.components import (
 from .ui.explorer import FileExplorerPanel
 from .ui.palette import UI_FONT
 from .ui.reader.render_worker import stop_all_render_workers
+from .ui.reader.tab import ReaderTab
+from .ui.threads import wait_for_released
 from .ui.sidecar import AiSidecarPanel
 from .ui.tooltip import TooltipSkin
 from .core.log import log
@@ -599,6 +601,7 @@ def run() -> None:
 
     app.aboutToQuit.connect(RiemannWindow._save_all_windows_session)
     app.aboutToQuit.connect(stop_all_render_workers)
+    app.aboutToQuit.connect(wait_for_released)
     window.show()
     smoke_ms = os.environ.get("RIEMANN_SMOKE_TEST")
 

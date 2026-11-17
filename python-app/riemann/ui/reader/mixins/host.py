@@ -71,6 +71,9 @@ class ReaderHost(Protocol):
     _virtual_range: Tuple[int, int]
     rotation: int
     web: Optional[Any]
+    metadata_worker: Optional[Any]
+    edit_scratch: Optional[str]
+    sig_worker: Optional[Any]
     _rebuild_debounce_timer: Optional[QTimer]
     _zoom_debounce_timer: Optional[QTimer]
     _char_geometry_cache: Optional[Dict[Any, Any]]

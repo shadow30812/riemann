@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from ....core import annotation_store
 from ..notes import notes_path_for
 from ..workers import MetadataExtractionWorker
+from ...threads import track
 from .host import ReaderHostBase
 
 
@@ -64,7 +65,7 @@ class MetadataMixin(ReaderHostBase):
                 self._on_metadata_extracted
             )
             self.metadata_worker.finished.connect(self.metadata_worker.deleteLater)
-            self.metadata_worker.start()
+            track(self.metadata_worker).start()
         except Exception as e:
             print(f"Failed to start metadata extraction: {e}")
 
