@@ -59,38 +59,19 @@ if [ ! -d "$PYSIDE6_QT_LIB" ]; then
     exit 1
 fi
 
-# ── Stage only the Qt6 shared libraries that Nuitka's PySide6 plugin misses ──
-# Nuitka automatically detects and bundles Core, Gui, Widgets, Network, DBus, Svg, Pdf,
-# Qml, Quick, and all Qt plugins. Including them as data causes duplicate/conflict errors.
-# We ONLY stage the transitive libraries that Nuitka's static analysis overlooks:
-# - Qml transitive deps: libQt6QmlMeta, libQt6QmlModels, libQt6QmlWorkerScript
-# - Platform support:    libQt6WaylandClient, libQt6XcbQpa, libQt6EglFSDeviceIntegration
-# - Widgets/Concurrent:  libQt6QuickWidgets, libQt6Concurrent
-# - Multimedia stubs:    libQt6FFmpegStub*
+# ── Stage the Qt6 libraries Nuitka can't see ──
+# Nuitka follows the links of every Qt library and plugin it includes, as ldd
+# resolves them. LD_LIBRARY_PATH can point those links at another Qt build
+# (on the main dev machine it names /opt/plecs), and then Nuitka leaves out
+# PySide6's own copies. Unsetting it keeps the build the same in any shell;
+# staging those libraries by hand as well makes Nuitka stop on a data file
+# that clashes with a DLL. Only the FFmpeg stubs, which Qt Multimedia loads
+# at run time rather than links, are staged.
+unset LD_LIBRARY_PATH
 QT_STAGING=$(mktemp -d)
 trap "rm -rf '$QT_STAGING'" EXIT
 mkdir -p "${QT_STAGING}/lib"
-
-NEEDED_LIBS="
-  libQt6Concurrent.so.6
-  libQt6EglFSDeviceIntegration.so.6
-  libQt6QmlMeta.so.6
-  libQt6QmlModels.so.6
-  libQt6QmlWorkerScript.so.6
-  libQt6QuickWidgets.so.6
-  libQt6WaylandClient.so.6
-  libQt6XcbQpa.so.6
-"
 copied=0
-for lib in $NEEDED_LIBS; do
-  src="${PYSIDE6_QT_LIB}/${lib}"
-  if [ -f "$src" ]; then
-    cp "$src" "${QT_STAGING}/lib/"
-    copied=$((copied + 1))
-  else
-    echo "WARNING: Expected Qt lib not found: $lib"
-  fi
-done
 
 # Copy multimedia FFmpeg stubs if present
 for f in "${PYSIDE6_QT_LIB}"/libQt6FFmpegStub*; do
@@ -99,7 +80,7 @@ for f in "${PYSIDE6_QT_LIB}"/libQt6FFmpegStub*; do
     copied=$((copied + 1))
   fi
 done
-echo "   Staged ${copied} missing Qt6 shared libraries into onefile root"
+echo "   Staged ${copied} Qt6 FFmpeg stubs into onefile root"
 
 EXCLUDES=$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' -e 's/^[[:space:]]*/--nofollow-import-to=/' scripts/build-excludes.txt | tr '\n' ' ')
 
