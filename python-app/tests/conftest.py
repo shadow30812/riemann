@@ -9,6 +9,11 @@ qapp: BrowserTab attaches a CaptionsServer to the app; it is normally stopped
 on aboutToQuit, which never fires under pytest. Its running QThread would
 otherwise abort the interpreter on exit.
 
+_delete_leftover_widgets: at the end of the session every top-level widget
+still alive (windows, reader tabs made on their own) is deleted while the
+application still runs. A reader's web page left alive until Qt WebEngine
+releases its profile at exit crashed the interpreter after the tests passed.
+
 qtbot (fallback when pytest-qt is missing): addWidget remembers the widget, and
 teardown stops its timers and hides it. Windows left polling (the mini player
 checks every top-level widget twice a second) crashed later tests that were
@@ -23,7 +28,7 @@ import sys
 import tempfile
 import pytest
 import shiboken6
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QTimer
 from PySide6.QtWidgets import QApplication
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -45,6 +50,29 @@ def qapp():
     if server is not None:
         server.stop()
         del app.captions_server
+
+@pytest.fixture(scope="session", autouse=True)
+def _delete_leftover_widgets():
+    yield
+    app = QApplication.instance()
+    if app is None:
+        return
+    for widget in app.topLevelWidgets():
+        if not shiboken6.isValid(widget):
+            continue
+        for timer in widget.findChildren(QTimer):
+            timer.stop()
+        cleanup = getattr(widget, "cleanup", None)
+        if callable(cleanup) and getattr(widget, "current_path", None) is not None:
+            try:
+                cleanup()
+            except Exception:
+                pass
+        widget.deleteLater()
+    for _ in range(3):
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+
 
 if importlib.util.find_spec("pytestqt") is None:
     @pytest.fixture
