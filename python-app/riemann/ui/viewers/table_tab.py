@@ -22,6 +22,11 @@ or reaches the end; Return finds the next match and Shift+Return the one
 before. Ctrl+C copies the selected cells as tab-separated text, which pastes
 into a spreadsheet as cells.
 
+A sheet whose rows stop with a read error keeps the error (TableSheet.error)
+and is never saved, since the rows after it would be lost. Bytes the file's
+encoding couldn't decode show as U+FFFD but stay in the rows as they were read
+(core.tables), so they reach the file again unless their cell is changed.
+
 The status line shows the selected cell's name and content, or its formula
 when the sheet has one for it (TableSheet.formulas, filled by spreadsheets).
 Several sheets get tabs along the bottom.
@@ -45,6 +50,7 @@ Ctrl+C in either of them copies their text.
 
 import dataclasses
 import os
+import re
 from typing import Callable, Iterator, Optional
 
 import shiboken6
@@ -81,6 +87,11 @@ LOAD_STEP_ROWS = 5000
 SORT_LIMIT_ROWS = 500_000
 MAX_CELL_CHARS = 2000
 EDIT_LIMIT_BYTES = 32 * 1024 * 1024
+ESCAPED_BYTE = re.compile("[\udc80-\udcff]")
+
+
+def shown(text: str) -> str:
+    return ESCAPED_BYTE.sub("\ufffd", text)
 
 
 class TableSheet:
@@ -93,6 +104,7 @@ class TableSheet:
         self.formulas: dict = {}
         self.spans: list = []
         self.delimited = None
+        self.error = ""
         self._source = rows
         self._next_number = first_row
 
@@ -105,7 +117,8 @@ class TableSheet:
             except StopIteration:
                 self.exhausted = True
                 break
-            except Exception:
+            except Exception as error:
+                self.error = str(error) or type(error).__name__
                 self.exhausted = True
                 break
             added.append((self._next_number, ["" if c is None else str(c) for c in cells]))
@@ -162,12 +175,12 @@ class TableModel(QAbstractTableModel):
         if not index.isValid():
             return None
         if role == Qt.ItemDataRole.DisplayRole:
-            text = self.cell(index.row(), index.column())
+            text = shown(self.cell(index.row(), index.column()))
             return text if len(text) <= MAX_CELL_CHARS else text[:MAX_CELL_CHARS] + "…"
         if role == Qt.ItemDataRole.EditRole:
-            return self.cell(index.row(), index.column())
+            return shown(self.cell(index.row(), index.column()))
         if role == Qt.ItemDataRole.ToolTipRole:
-            text = self.cell(index.row(), index.column())
+            text = shown(self.cell(index.row(), index.column()))
             return text[:MAX_CELL_CHARS] if len(text) > 40 or "\n" in text else None
         if role == Qt.ItemDataRole.TextAlignmentRole:
             if number_value(self.cell(index.row(), index.column())) is not None:
@@ -184,7 +197,10 @@ class TableModel(QAbstractTableModel):
     def setData(self, index: QModelIndex, value, role: int = Qt.ItemDataRole.EditRole) -> bool:
         if role != Qt.ItemDataRole.EditRole or not index.isValid() or not self.editable:
             return False
-        change = self._write(index.row(), index.column(), "" if value is None else str(value))
+        text = "" if value is None else str(value)
+        if text == shown(self.cell(index.row(), index.column())):
+            return True
+        change = self._write(index.row(), index.column(), text)
         if change is not None:
             self._push([change])
         return True
@@ -462,7 +478,7 @@ class TableTab(QWidget):
         number = model.sheet.rows[index.row()][0]
         name = f"{column_name(index.column())}{number}"
         formula = model.sheet.formulas.get((number, index.column()))
-        text = formula or model.cell(index.row(), index.column())
+        text = formula or shown(model.cell(index.row(), index.column()))
         self.status.setText(f"{name}   {text[:MAX_CELL_CHARS]}".replace("\n", " ⏎ "))
 
     def sort_by(self, column: int) -> None:
@@ -605,7 +621,7 @@ class TableTab(QWidget):
         columns = sorted({i.column() for i in indexes})
         chosen = {(i.row(), i.column()) for i in indexes}
         lines = [
-            "\t".join(model.cell(r, c).replace("\t", " ").replace("\n", " ") if (r, c) in chosen else "" for c in columns)
+            "\t".join(shown(model.cell(r, c)).replace("\t", " ").replace("\n", " ") if (r, c) in chosen else "" for c in columns)
             for r in rows
         ]
         QApplication.clipboard().setText("\n".join(lines))
@@ -700,6 +716,14 @@ class TableTab(QWidget):
         self._stop_loading()
         while not sheet.exhausted:
             model.fetchMore(count=LOAD_STEP_ROWS)
+        if sheet.error:
+            QMessageBox.warning(
+                self,
+                "Save changes",
+                f"{os.path.basename(self.current_path)} couldn't be read to the end ({sheet.error}), "
+                "so saving it would lose the rows after that point.",
+            )
+            return False
         rows = [cells for _, cells in sorted(sheet.rows, key=lambda row: row[0])]
         if sheet.header is not None:
             rows.insert(0, ["" if c is None else str(c) for c in sheet.header])

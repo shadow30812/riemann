@@ -6,6 +6,7 @@ reaches back to the saved state, and closing a tab with changes asks.
 """
 
 import codecs
+import csv
 import os
 import stat
 import time
@@ -13,7 +14,7 @@ import time
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFileDialog
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from riemann.app import RiemannWindow
 from riemann.core import tables
@@ -227,4 +228,45 @@ def test_save_as_moves_the_tab_to_the_new_file(window, tmp_path, monkeypatch):
     assert open(target, "rb").read() == b"a,b\n1,20\n"
     assert tab.current_path == target
     assert window.tabs_main.tabText(window.tabs_main.indexOf(tab)) == "second.csv"
+    tab.cleanup()
+
+
+def test_bytes_the_encoding_cant_decode_survive_a_save(qtbot, tmp_path, monkeypatch):
+    original = b"name,note\nZo\xeb,\x81 odd\nBob,1\n"
+    path = write(tmp_path / "odd.csv", original)
+    odd = TableTab(path)
+    qtbot.addWidget(odd)
+    odd.show()
+    assert odd.model.data(odd.model.index(0, 1)) == "� odd"
+    odd.view.setCurrentIndex(odd.model.index(0, 1))
+    QTest.keyClick(odd.view, Qt.Key.Key_F2)
+    QTest.keyClick(odd.cell_editor(), Qt.Key.Key_Return)
+    QApplication.processEvents()
+    assert not odd.modified
+    odd.model.setData(odd.model.index(1, 1), "2")
+    monkeypatch.setattr(odd, "_ask", lambda closing: "save")
+    assert odd.save()
+    assert open(path, "rb").read() == original.replace(b"Bob,1", b"Bob,2")
+    odd.cleanup()
+
+
+def test_a_table_that_stops_on_a_read_error_is_not_saved(qtbot, tmp_path, monkeypatch):
+    data = b"a,b\n" + b"".join(b"%d,%d\n" % (i, i) for i in range(CHUNK_ROWS + 10)) + b"x," + b"y" * 200 + b"\n5,6\n"
+    path = write(tmp_path / "long.csv", data)
+    tab = TableTab(path)
+    qtbot.addWidget(tab)
+    limit = csv.field_size_limit(100)
+    try:
+        while not tab.model.sheet.exhausted:
+            tab.model.fetchMore()
+    finally:
+        csv.field_size_limit(limit)
+    assert tab.model.sheet.error
+    tab.model.setData(tab.model.index(0, 0), "9")
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a: warned.append(a[2]))
+    monkeypatch.setattr(tab, "_ask", lambda closing: "save")
+    assert tab.save() is False
+    assert "read to the end" in warned[0]
+    assert open(path, "rb").read() == data
     tab.cleanup()

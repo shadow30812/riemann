@@ -7,7 +7,10 @@ DelimitedFile: the encoding, the dialect and whether the first row is a header.
 - Encoding: a byte-order mark decides (UTF-8, UTF-16 as Excel's "Unicode
   text" writes it); otherwise UTF-8 when the sample decodes as UTF-8 (a
   character cut off at the end of the sample is allowed), else Windows-1252,
-  which decodes any byte, so old Excel exports open with their accents.
+  so old Excel exports open with their accents. Bytes the encoding can't
+  decode (five bytes Windows-1252 leaves undefined, or a stray byte past the
+  sample of a UTF-8 file) are read with surrogateescape and written back the
+  same way, so saving an edit to one cell leaves every other byte as it was.
 - Dialect: csv.Sniffer, limited to comma, semicolon, tab and bar. When it
   can't tell, the name decides: tab for .tsv and .tab, comma otherwise.
 - Header: csv.Sniffer.has_header, which compares the first row's types with
@@ -61,7 +64,7 @@ class DelimitedFile:
     has_header: bool
 
     def rows(self) -> Iterator[list]:
-        with open(self.path, "r", encoding=self.encoding, errors="replace", newline="") as handle:
+        with open(self.path, "r", encoding=self.encoding, errors="surrogateescape", newline="") as handle:
             yield from csv.reader(handle, self.dialect)
 
 
@@ -184,7 +187,7 @@ def write_delimited(path: str, source: DelimitedFile, rows: Iterable[list]) -> s
     for encoding in (source.encoding, "utf-8"):
         handle, temp = tempfile.mkstemp(prefix=".~", suffix=".tmp", dir=folder)
         try:
-            with os.fdopen(handle, "w", encoding=encoding, newline="") as out:
+            with os.fdopen(handle, "w", encoding=encoding, errors="surrogateescape", newline="") as out:
                 csv.writer(out, Written).writerows(rows)
         except UnicodeEncodeError:
             os.unlink(temp)
