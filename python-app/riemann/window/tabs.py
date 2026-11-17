@@ -236,7 +236,7 @@ class TabsMixin:
                 else:
                     tooltip = f"{filename}\nLocation: {abs_path}"
             else:
-                tooltip = "New PDF Document"
+                tooltip = "New Tab"
 
         elif isinstance(widget, BrowserTab) or hasattr(widget, "web"):
             title = widget.web.title() if hasattr(widget, "web") else ""

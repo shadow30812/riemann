@@ -30,7 +30,7 @@ TOPICS = [
             (
                 "What Riemann is",
                 [
-                    "Riemann is a PDF reader and a web browser in one window. PDFs, web pages, Office "
+                    "Riemann is a document reader and a web browser in one window. PDFs, web pages, Office "
                     "files, pictures, EPUB books, CSV tables, Markdown, text files and source code each "
                     "open in a tab of their own.",
                 ],
@@ -41,8 +41,8 @@ TOPICS = [
                     "Press Ctrl+O to open a file, or drag files onto the window. A new tab (Ctrl+T) shows "
                     "a start page with your recent files and a box for typing a file's location.",
                     "Ctrl+B opens a browser tab. Type a web address, or a few words to search the web.",
-                    "On Linux, \"Open with Riemann\" also appears for PDFs, pictures, text files and folders in "
-                    "your file manager.",
+                    "On Linux, \"Open with Riemann\" also appears in your file manager for the files Riemann "
+                    "opens, and for folders.",
                 ],
             ),
             (
@@ -127,7 +127,7 @@ TOPICS = [
                     "Presentation mode (Shift+F5) shows one page at a time on black. L turns the pointer "
                     "into a laser dot, B and W blank the screen, and Esc leaves.",
                     "Notes (Ctrl+Alt+N) opens a notes panel for the document. The notes are kept in a "
-                    "Markdown file next to the PDF.",
+                    "Markdown file next to the document's file.",
                 ],
             ),
         ],
@@ -357,7 +357,8 @@ TOPICS = [
                 [
                     "The bookmark button in the address bar saves the page. Ctrl+K then K lists your "
                     "bookmarks, Ctrl+H your history and Ctrl+J your downloads.",
-                    "A PDF you download opens in a reader tab when it finishes.",
+                    "A PDF, e-book or Office file you download opens in a tab when it finishes. Turn that off "
+                    "in Settings, under Downloads.",
                 ],
             ),
             (
@@ -415,7 +416,8 @@ TOPICS = [
             (
                 "Asking about a document",
                 [
-                    "Ctrl+Alt+A opens a panel where you can ask questions about the open PDF. Answers "
+                    "Ctrl+Alt+A opens a panel where you can ask questions about the open PDF, or an Office file "
+                    "shown as pages. Answers "
                     "name the pages they come from, and clicking a page number jumps there.",
                     "It needs an account with an AI provider (Claude, OpenAI, Gemini or OpenRouter) and "
                     "its API key, which you add with the key button in the panel. A local Ollama server "

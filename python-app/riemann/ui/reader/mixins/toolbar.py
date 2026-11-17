@@ -225,13 +225,13 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_rotate = QPushButton()
         self.btn_rotate.setIcon(self._get_icon("rotate-cw.svg"))
         self.btn_rotate.setIconSize(icon_size)
-        self.btn_rotate.setToolTip("Rotate PDF 90°")
+        self.btn_rotate.setToolTip("Rotate pages 90°")
         self.btn_rotate.clicked.connect(self.rotate_document)
 
         self.btn_rotate_ccw = QPushButton()
         self.btn_rotate_ccw.setIcon(self._get_icon("rotate-ccw.svg"))
         self.btn_rotate_ccw.setIconSize(icon_size)
-        self.btn_rotate_ccw.setToolTip("Rotate PDF -90°")
+        self.btn_rotate_ccw.setToolTip("Rotate pages -90°")
         self.btn_rotate_ccw.clicked.connect(self.rotate_document_ccw)
 
         self.btn_read_aloud = QPushButton()
@@ -245,7 +245,7 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_notes.setCheckable(True)
         self.btn_notes.setIcon(self._get_icon("sticky-note.svg"))
         self.btn_notes.setIconSize(icon_size)
-        self.btn_notes.setToolTip("Notes on this paper (Ctrl+Alt+N)\nSaved as Markdown next to the PDF.")
+        self.btn_notes.setToolTip("Notes on this document (Ctrl+Alt+N)\nSaved as Markdown next to the file.")
         self.btn_notes.clicked.connect(self.toggle_notes)
 
         self.btn_present = QPushButton()

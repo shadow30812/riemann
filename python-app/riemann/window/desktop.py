@@ -86,8 +86,8 @@ def install_linux_integration():
             "[Desktop Entry]\n"
             "Type=Application\n"
             f"Name={app_name}\n"
-            "GenericName=PDF Reader\n"
-            "Comment=A standalone PDF reader and manager\n"
+            "GenericName=Document Reader\n"
+            "Comment=Read PDFs, Office files, e-books and more, and browse the web\n"
             f'Exec="{exe_path}" %F\n'
             f"Icon={persistent_icon_path}\n"
             "Terminal=false\n"

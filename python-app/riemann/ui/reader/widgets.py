@@ -27,7 +27,7 @@ class DropZoneLabel(QLabel):
 
     file_dropped = Signal(str)
 
-    def __init__(self, text: str = "Drop PDF Here", parent=None) -> None:
+    def __init__(self, text: str = "Drop a document here", parent=None) -> None:
         super().__init__(text, parent)
         self.setAcceptDrops(True)
         self.setProperty("dragActive", False)

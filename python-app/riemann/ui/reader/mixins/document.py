@@ -393,7 +393,7 @@ class DocumentMixin(ReaderHostBase):
         QMessageBox.critical(
             self,
             "Document Load Error",
-            f"Could not load the document. Please ensure it is a valid PDF format.\n\nDetails: {err_str}",
+            f"Could not load the document. The file may be damaged or not what its name says.\n\nDetails: {err_str}",
         )
         sys.stderr.write(f"Load error: {err_str}\n")
 

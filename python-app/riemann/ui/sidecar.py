@@ -625,7 +625,7 @@ class AiSidecarPanel(QWidget):
         path = getattr(reader, "current_path", "") or ""
         has_doc = bool(path) and getattr(reader, "current_doc", None) is not None
         self.lbl_doc.setText(
-            f"About: {os.path.basename(path)}" if has_doc else "Open a PDF to ask about it."
+            f"About: {os.path.basename(path)}" if has_doc else "Open a PDF, or an Office file shown as pages, to ask about it."
         )
         self.lbl_doc.setToolTip(path)
 
@@ -732,7 +732,7 @@ class AiSidecarPanel(QWidget):
         reader = self.reader
         doc = getattr(reader, "current_doc", None)
         if doc is None or not getattr(reader, "current_path", None):
-            self._notice("Open a PDF first; the assistant answers questions about it.")
+            self._notice("Open a PDF, or an Office file shown as pages, first; the assistant answers questions about it.")
             return
         if PROVIDERS[provider].needs_key and not key:
             self._notice(

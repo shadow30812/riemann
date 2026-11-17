@@ -1,6 +1,6 @@
 # Riemann
 
-Riemann is a desktop PDF reader and web browser in one window. PDFs, Word, PowerPoint and Excel files, OpenDocument files, EPUB books, Markdown, CSV tables, pictures, plain text, source code and web pages open as tabs. Two tabs can sit side by side, so a paper and the page it came from share one screen. The interface is Python with PySide6 (Qt 6). Rendering, text extraction, search and annotation reading run in a Rust extension built on PDFium, Google's PDF engine.
+Riemann is a desktop document reader and web browser in one window. PDFs, Word, PowerPoint and Excel files, OpenDocument files, EPUB books, Markdown, CSV tables, pictures, plain text, source code and web pages open as tabs. Two tabs can sit side by side, so a paper and the page it came from share one screen. The interface is Python with PySide6 (Qt 6). Rendering, text extraction, search and annotation reading run in a Rust extension built on PDFium, Google's PDF engine.
 
 It runs on Linux and Windows. Version 6.1.0, MIT licensed.
 

@@ -68,7 +68,7 @@ class NotesPanel(QWidget):
         layout.addLayout(head)
         self.stack = QStackedWidget()
         self.editor = QPlainTextEdit()
-        self.editor.setPlaceholderText("Notes on this paper, in Markdown. They are saved next to the PDF.")
+        self.editor.setPlaceholderText("Notes on this document, in Markdown. They are saved next to the file.")
         self.preview = QTextBrowser()
         self.preview.setOpenLinks(False)
         self.preview.anchorClicked.connect(self._on_link)

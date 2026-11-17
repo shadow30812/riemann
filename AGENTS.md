@@ -4,7 +4,7 @@ Guide for anyone (person or AI agent) changing Riemann. Read it before editing. 
 
 ## What Riemann is
 
-A desktop PDF reader and web browser in one window, written in Python (PySide6 6.10, Qt 6, Python 3.11) with a Rust extension for PDF work and an optional AI sidecar.
+A desktop document reader and web browser in one window, written in Python (PySide6 6.10, Qt 6, Python 3.11) with a Rust extension for PDF work and an optional AI sidecar.
 
 | Part | Path | Notes |
 | --- | --- | --- |

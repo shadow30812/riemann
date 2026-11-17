@@ -249,9 +249,9 @@ class AppearanceMixin(ReaderHostBase):
         dz.setContentsMargins(16, 24, 16, 24)
         dz.setSpacing(6)
         self.lbl_drop_icon = QLabel()
-        drop_title = QLabel("Drop a PDF here")
+        drop_title = QLabel("Drop a document here")
         drop_title.setObjectName("dropTitle")
-        drop_sub = QLabel("Markdown files work too")
+        drop_sub = QLabel("PDFs, Office files, e-books, pictures, tables and text")
         drop_sub.setObjectName("dropSub")
         dz.addStretch()
         for w in (self.lbl_drop_icon, drop_title, drop_sub):

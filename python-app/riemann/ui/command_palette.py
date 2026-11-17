@@ -8,7 +8,7 @@ registered by hand:
 - every action in the window's menus (submenus filled on demand, such as
   Open Recent, are left out),
 - every enabled button with a tooltip in the current tab's toolbar, named by
-  the tooltip's first line ("Rotate PDF 90°", "OCR Current Page"...),
+  the tooltip's first line ("Rotate pages 90°", "OCR Current Page"...),
   including reader buttons the toolbar layout has folded into a menu or
   hidden (they carry the "riemannCommand" property),
 - the System pages and the sections of Settings.
