@@ -1,5 +1,5 @@
 """
-Opening System tabs (Settings, History, Bookmarks, Downloads, Library) in the
+Opening System tabs (Settings, History, Bookmarks, Downloads, Library, Help) in the
 window. Each page has at most one tab per window; asking for it again brings
 that tab to the front, optionally at a given section ("permissions" in
 Settings, "videos" in Downloads).
@@ -58,3 +58,6 @@ class SystemMixin:
 
     def show_library_search(self) -> None:
         self.open_system_page("library")
+
+    def show_help(self, section: str = "") -> None:
+        self.open_system_page("help", section)

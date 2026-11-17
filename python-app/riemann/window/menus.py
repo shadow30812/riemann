@@ -77,6 +77,7 @@ class MenusMixin:
             ("Ctrl+,", self.show_settings),
             ("Ctrl+D", self.toggle_ui_theme),
             ("Ctrl+Shift+P", self.show_command_palette),
+            ("F1", self.show_help),
         ]
 
         for seq, slot in shortcuts:
@@ -200,6 +201,11 @@ class MenusMixin:
         self.action_collapse_tabs.setCheckable(True)
         self.action_collapse_tabs.setChecked(self._tabs_collapsed)
         self.action_collapse_tabs.toggled.connect(self.set_tabs_collapsed)
+
+        help_menu = menubar.addMenu("Help")
+        help_menu.addAction("Help and Keyboard Shortcuts (F1)").triggered.connect(lambda: self.show_help())
+        help_menu.addAction("Keyboard Shortcuts").triggered.connect(lambda: self.show_help("shortcuts"))
+        help_menu.addAction("About Riemann").triggered.connect(lambda: self.show_settings("about"))
 
         if psutil:
             self._last_net_io = psutil.net_io_counters()
