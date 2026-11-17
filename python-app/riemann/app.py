@@ -94,6 +94,7 @@ from .ui.palette import UI_FONT
 from .ui.reader.render_worker import stop_all_render_workers
 from .ui.shortcuts import share_keys
 from .ui.reader.tab import ReaderTab
+from .ui.viewers import TableTab
 from .ui.threads import wait_for_released
 from .ui.sidecar import AiSidecarPanel
 from .ui.tooltip import TooltipSkin
@@ -416,14 +417,19 @@ class RiemannWindow(
 
     def confirm_close(self) -> bool:
         """
-        Asks about each reader's page edits waiting for Save and lets each web
-        page with unsaved changes ask; False if the user cancelled one.
+        Asks about each reader's page edits and each table's cell changes
+        waiting for Save and lets each web page with unsaved changes ask;
+        False if the user cancelled one.
         """
         for tabs in (self.tabs_main, self.tabs_side):
             for widget in [tabs.widget(i) for i in range(tabs.count())]:
                 if isinstance(widget, ReaderTab) and getattr(widget, "edit_scratch", None):
                     tabs.setCurrentWidget(widget)
                     if not widget.resolve_page_edits():
+                        return False
+                elif isinstance(widget, TableTab) and widget.modified:
+                    tabs.setCurrentWidget(widget)
+                    if not widget.resolve_edits():
                         return False
                 elif isinstance(widget, BrowserTab) and not widget.confirm_leave():
                     return False

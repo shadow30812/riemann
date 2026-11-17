@@ -28,22 +28,39 @@ Several sheets get tabs along the bottom.
 
 "Open as text" (CSV and TSV only) asks the window to show the file in a reader
 tab as plain text, as Riemann did before this view existed.
+
+Editing (CSV and TSV only, not in previews, files up to EDIT_LIMIT_BYTES):
+double-click a cell or press F2 to change it, Delete empties the selected
+cells, Ctrl+Z undoes the last change. The header row stays as it is. Changes
+live in the loaded rows until Ctrl+S (or Save in the toolbar), which asks
+before it replaces the file: Save, Save As or Cancel. Saving reads the rows not
+loaded yet, puts every row back in the file's order (a sorted view saves
+unsorted) and writes them with core.tables.write_delimited. Save As moves the
+tab to the new file (renamed tells the window). Closing the tab or the window,
+or Open as text, with changes not saved asks Save, Don't Save or Cancel
+(resolve_edits). Delete and Ctrl+Z are read by the view itself, not as
+window-wide shortcuts, so the cell editor and the find box keep those keys;
+Ctrl+C in either of them copies their text.
 """
 
+import dataclasses
 import os
 from typing import Callable, Iterator, Optional
 
 import shiboken6
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSize, Qt, QTimer
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractItemDelegate,
     QAbstractItemView,
     QApplication,
     QHBoxLayout,
     QHeaderView,
+    QFileDialog,
     QLabel,
     QLineEdit,
     QMenu,
+    QMessageBox,
     QTabBar,
     QTableView,
     QToolButton,
@@ -52,7 +69,8 @@ from PySide6.QtWidgets import (
 )
 
 from ...core.assets import icon_path
-from ...core.tables import column_name, number_value, open_delimited, sort_key
+from ...core.settings import app_settings, get_dialog_directory, save_last_directory
+from ...core.tables import column_name, number_value, open_delimited, sort_key, write_delimited
 from ..components import populate_open_with_menu
 from ..palette import scrollbar_style, toast_style, tokens
 from ..shortcuts import share_keys
@@ -62,6 +80,7 @@ CHUNK_ROWS = 1000
 LOAD_STEP_ROWS = 5000
 SORT_LIMIT_ROWS = 500_000
 MAX_CELL_CHARS = 2000
+EDIT_LIMIT_BYTES = 32 * 1024 * 1024
 
 
 class TableSheet:
@@ -73,6 +92,7 @@ class TableSheet:
         self.exhausted = False
         self.formulas: dict = {}
         self.spans: list = []
+        self.delimited = None
         self._source = rows
         self._next_number = first_row
 
@@ -111,14 +131,22 @@ def csv_sheets(path: str) -> list:
     header = None
     if source.has_header:
         header = next(rows, None)
-    return [TableSheet(os.path.basename(path), rows, header, first_row=2 if header else 1)]
+    sheet = TableSheet(os.path.basename(path), rows, header, first_row=2 if header else 1)
+    sheet.delimited = source
+    return [sheet]
 
 
 class TableModel(QAbstractTableModel):
+    edited = Signal()
+
     def __init__(self, sheet: TableSheet, parent=None):
         super().__init__(parent)
         self.sheet = sheet
         self.sort_state: Optional[tuple] = None
+        self.editable = False
+        self.modified = False
+        self.undo_stack: list = []
+        self.saved_depth = 0
 
     def rowCount(self, parent=QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self.sheet.rows)
@@ -136,6 +164,8 @@ class TableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             text = self.cell(index.row(), index.column())
             return text if len(text) <= MAX_CELL_CHARS else text[:MAX_CELL_CHARS] + "…"
+        if role == Qt.ItemDataRole.EditRole:
+            return self.cell(index.row(), index.column())
         if role == Qt.ItemDataRole.ToolTipRole:
             text = self.cell(index.row(), index.column())
             return text[:MAX_CELL_CHARS] if len(text) > 40 or "\n" in text else None
@@ -144,6 +174,64 @@ class TableModel(QAbstractTableModel):
                 return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             return int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         return None
+
+    def flags(self, index: QModelIndex):
+        flags = super().flags(index)
+        if self.editable and index.isValid():
+            flags |= Qt.ItemFlag.ItemIsEditable
+        return flags
+
+    def setData(self, index: QModelIndex, value, role: int = Qt.ItemDataRole.EditRole) -> bool:
+        if role != Qt.ItemDataRole.EditRole or not index.isValid() or not self.editable:
+            return False
+        change = self._write(index.row(), index.column(), "" if value is None else str(value))
+        if change is not None:
+            self._push([change])
+        return True
+
+    def _push(self, changes: list) -> None:
+        if len(self.undo_stack) < self.saved_depth:
+            self.saved_depth = -1
+        self.undo_stack.append(changes)
+        self.modified = True
+        self.edited.emit()
+
+    def mark_saved(self) -> None:
+        self.saved_depth = len(self.undo_stack)
+        self.modified = False
+        self.edited.emit()
+
+    def _write(self, row: int, column: int, text: str) -> Optional[tuple]:
+        """Sets one cell; returns (row entry, column, old text) for undo, or None when nothing changed."""
+        entry = self.sheet.rows[row]
+        cells = entry[1]
+        old = cells[column] if column < len(cells) else ""
+        if old == text:
+            return None
+        if column >= len(cells):
+            cells.extend([""] * (column + 1 - len(cells)))
+        cells[column] = text
+        index = self.index(row, column)
+        self.dataChanged.emit(index, index)
+        return entry, column, old
+
+    def clear_cells(self, indexes: list) -> int:
+        changes = [c for c in (self._write(i.row(), i.column(), "") for i in indexes if i.isValid()) if c]
+        if changes:
+            self._push(changes)
+        return len(changes)
+
+    def undo(self) -> bool:
+        if not self.undo_stack:
+            return False
+        positions = {id(entry): row for row, entry in enumerate(self.sheet.rows)}
+        for entry, column, old in reversed(self.undo_stack.pop()):
+            row = positions.get(id(entry))
+            if row is not None:
+                self._write(row, column, old)
+        self.modified = len(self.undo_stack) != self.saved_depth
+        self.edited.emit()
+        return True
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):
         if role != Qt.ItemDataRole.DisplayRole:
@@ -194,6 +282,8 @@ class TableModel(QAbstractTableModel):
 
 
 class TableTab(QWidget):
+    renamed = Signal()
+
     is_preview = False
 
     def __init__(
@@ -212,6 +302,7 @@ class TableTab(QWidget):
         self.lbl_toast: Optional[Toast] = None
         self.models: list = []
         self.error = ""
+        self.editable = False
         self._pending: Optional[Callable[[], bool]] = None
         self._step_timer = QTimer(self)
         self._step_timer.setInterval(0)
@@ -229,6 +320,10 @@ class TableTab(QWidget):
         self.lbl_size = QLabel()
         bar.addWidget(self.lbl_size)
         bar.addStretch(1)
+        self.btn_save = self._button(bar, "save.svg", "Save the changes to the file (Ctrl+S)", self.save)
+        self.btn_save.setText("Save")
+        self.btn_save.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.btn_save.setVisible(False)
         self.btn_find = self._button(bar, "search.svg", "Find (Ctrl+F)", self.show_find)
         self.btn_text = self._button(bar, "file-text.svg", "Open as text", self.open_as_text)
         self.btn_text.setText("Open as text")
@@ -267,6 +362,7 @@ class TableTab(QWidget):
         self.view.horizontalHeader().setDefaultSectionSize(120)
         self.view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.view.verticalHeader().setDefaultSectionSize(24)
+        self.view.installEventFilter(self)
         layout.addWidget(self.view, 1)
 
         self.sheet_tabs = QTabBar()
@@ -279,12 +375,21 @@ class TableTab(QWidget):
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.status)
 
-        for seq, slot in (("Ctrl+F", self.show_find), ("Ctrl+C", self.copy_cells)):
+        for seq, slot in (("Ctrl+F", self.show_find), ("Ctrl+C", self.copy_cells), ("Ctrl+S", self.save)):
             QShortcut(QKeySequence(seq), self).activated.connect(slot)
         share_keys(self)
 
         self.apply_ui_theme(dark_mode)
         delimited = sheets is None and loader is None
+        try:
+            size = os.path.getsize(self.current_path)
+        except OSError:
+            size = EDIT_LIMIT_BYTES + 1
+        self.editable = delimited and not preview and size <= EDIT_LIMIT_BYTES
+        if self.editable:
+            self.view.setEditTriggers(
+                QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed
+            )
         try:
             sheets = sheets if sheets is not None else (loader or csv_sheets)(self.current_path)
         except Exception as error:
@@ -306,6 +411,8 @@ class TableTab(QWidget):
     def set_sheets(self, sheets: list) -> None:
         self.models = [TableModel(sheet, self) for sheet in sheets]
         for model in self.models:
+            model.editable = self.editable and model.sheet.delimited is not None
+            model.edited.connect(self._update_save)
             model.rowsInserted.connect(self._update_size)
             model.columnsInserted.connect(self._update_size)
             if model.canFetchMore():
@@ -418,6 +525,17 @@ class TableTab(QWidget):
         self.view.setFocus()
 
     def eventFilter(self, obj, event) -> bool:
+        view = getattr(self, "view", None)
+        if view is not None and obj is view and event.type() == event.Type.KeyPress and self.model and self.model.editable:
+            if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and not event.modifiers():
+                count = self.model.clear_cells(self.view.selectionModel().selectedIndexes())
+                if count > 1:
+                    self.show_toast(f"Emptied {count:,} cells")
+                return True
+            if event.matches(QKeySequence.StandardKey.Undo):
+                if not self.model.undo():
+                    self.show_toast("Nothing to undo")
+                return True
         if obj is self.txt_find and event.type() == event.Type.KeyPress:
             if event.key() == Qt.Key.Key_Escape:
                 self.hide_find()
@@ -475,6 +593,10 @@ class TableTab(QWidget):
         self.lbl_find.setText("")
 
     def copy_cells(self) -> None:
+        focused = self.cell_editor() or (self.txt_find if self.txt_find.hasFocus() else None)
+        if focused is not None:
+            focused.copy()
+            return
         model = self.model
         indexes = self.view.selectionModel().selectedIndexes() if model is not None else []
         if not indexes:
@@ -489,7 +611,119 @@ class TableTab(QWidget):
         QApplication.clipboard().setText("\n".join(lines))
         self.show_toast(f"Copied {len(indexes):,} cells" if len(indexes) > 1 else "Copied the cell")
 
+    @property
+    def modified(self) -> bool:
+        return any(model.modified for model in self.models)
+
+    def _update_save(self) -> None:
+        self.btn_save.setVisible(self.modified)
+
+    def cell_editor(self) -> Optional[QLineEdit]:
+        """The editor of the cell being changed, if one is open."""
+        if self.view.state() != QAbstractItemView.State.EditingState:
+            return None
+        editors = [e for e in self.view.viewport().findChildren(QLineEdit) if e.isVisible()]
+        return editors[0] if editors else None
+
+    def _commit_editor(self) -> None:
+        editor = self.cell_editor()
+        if editor is not None:
+            self.view.commitData(editor)
+            self.view.closeEditor(editor, QAbstractItemDelegate.EndEditHint.NoHint)
+
+    def _ask(self, closing: bool) -> str:
+        name = os.path.basename(self.current_path)
+        box = QMessageBox(self)
+        box.setWindowTitle("Save changes")
+        box.setIcon(QMessageBox.Icon.Question)
+        if closing:
+            box.setText(f"{name} has changes that aren't saved. Save them? Saving replaces the file.")
+        else:
+            box.setText(f"Save your changes to {name}? This replaces the file.")
+        save = box.addButton("Save", QMessageBox.ButtonRole.AcceptRole)
+        save_as = box.addButton("Save As…", QMessageBox.ButtonRole.ActionRole)
+        discard = box.addButton("Don't Save", QMessageBox.ButtonRole.DestructiveRole) if closing else None
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(save)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is save:
+            return "save"
+        if clicked is save_as:
+            return "save_as"
+        if discard is not None and clicked is discard:
+            return "discard"
+        return ""
+
+    def save(self) -> bool:
+        """Asks, then writes the changes; True when they were saved."""
+        if not self.editable:
+            return False
+        self._commit_editor()
+        if not self.modified:
+            self.show_toast("There are no changes to save")
+            return False
+        return self._save_as_chosen(self._ask(closing=False))
+
+    def _save_as_chosen(self, choice: str) -> bool:
+        if choice == "save":
+            return self._write_file(self.current_path)
+        if choice == "save_as":
+            suffix = os.path.splitext(self.current_path)[1]
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save As",
+                os.path.join(get_dialog_directory(app_settings()), os.path.basename(self.current_path)),
+                f"Table (*{suffix})" if suffix else "",
+            )
+            if not path:
+                return False
+            save_last_directory(app_settings(), path)
+            return self._write_file(path)
+        return False
+
+    def resolve_edits(self) -> bool:
+        """Before the tab closes: asks about changes not saved; False when the person cancelled."""
+        self._commit_editor()
+        if not self.modified:
+            return True
+        choice = self._ask(closing=True)
+        if choice == "discard":
+            for model in self.models:
+                model.modified = False
+            return True
+        return self._save_as_chosen(choice)
+
+    def _write_file(self, path: str) -> bool:
+        model = self.models[0]
+        sheet = model.sheet
+        self._stop_loading()
+        while not sheet.exhausted:
+            model.fetchMore(count=LOAD_STEP_ROWS)
+        rows = [cells for _, cells in sorted(sheet.rows, key=lambda row: row[0])]
+        if sheet.header is not None:
+            rows.insert(0, ["" if c is None else str(c) for c in sheet.header])
+        try:
+            encoding = write_delimited(path, sheet.delimited, rows)
+        except (OSError, UnicodeError) as error:
+            QMessageBox.warning(self, "Save changes", f"{os.path.basename(path)} couldn't be saved: {error}")
+            return False
+        changed_encoding = encoding != sheet.delimited.encoding
+        sheet.delimited = dataclasses.replace(sheet.delimited, path=os.path.abspath(path), encoding=encoding)
+        model.mark_saved()
+        if os.path.abspath(path) != self.current_path:
+            self.current_path = os.path.abspath(path)
+            sheet.name = os.path.basename(path)
+            self.renamed.emit()
+        if changed_encoding:
+            self.show_toast("Saved as UTF-8, since the file's old encoding can't hold some of the text")
+        else:
+            self.show_toast(f"Saved {os.path.basename(path)}")
+        return True
+
     def open_as_text(self) -> None:
+        if not self.resolve_edits():
+            return
         window = self.window()
         if hasattr(window, "open_as_text"):
             window.open_as_text(self)

@@ -294,6 +294,18 @@ TOPICS = [
                     "Select cells and press Ctrl+C to copy them. They paste into a spreadsheet as cells.",
                 ],
             ),
+            (
+                "Changing a CSV or TSV file",
+                [
+                    "Double-click a cell, or press F2, to change it, and Return to keep the change. Delete "
+                    "empties the selected cells, and Ctrl+Z undoes the last change.",
+                    "Ctrl+S (or Save in the toolbar) saves the changes. Riemann asks first: Save replaces "
+                    "the file, and Save As writes a new one. The file keeps its separators and text "
+                    "encoding, and a sorted table is saved in the file's own order.",
+                    "Closing the tab with changes that aren't saved asks whether to save them. Previews "
+                    "and files over 32 MB can't be changed, and the row of column names stays as it is.",
+                ],
+            ),
         ],
     ),
     (
@@ -510,6 +522,10 @@ SHORTCUTS = [
             (("Ctrl+F",), "Find text in the table"),
             (("Return", "Shift+Return"), "Next or previous match"),
             (("Ctrl+C",), "Copy the selected cells"),
+            (("F2",), "Change the selected cell (CSV and TSV)"),
+            (("Delete",), "Empty the selected cells"),
+            (("Ctrl+Z",), "Undo the last change to the cells"),
+            (("Ctrl+S",), "Save the changes to the file (it asks first)"),
             (("Esc",), "Close the find bar"),
         ],
     ),

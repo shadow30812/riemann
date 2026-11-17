@@ -333,7 +333,19 @@ class DocumentsMixin:
     def _create_viewer(self, kind: str, path: str, preview: bool) -> QWidget:
         """The ImageTab, TableTab or SpreadsheetTab for path."""
         viewer = {"image": ImageTab, "spreadsheet": SpreadsheetTab}.get(kind, TableTab)
-        return viewer(path, getattr(self, "dark_mode", False), preview=preview)
+        widget = viewer(path, getattr(self, "dark_mode", False), preview=preview)
+        if isinstance(widget, TableTab):
+            widget.renamed.connect(lambda w=widget: self._retitle_tab(w))
+        return widget
+
+    def _retitle_tab(self, widget: QWidget) -> None:
+        """Shows a tab's new file name after Save As."""
+        for tab_widget in (self.tabs_main, self.tabs_side):
+            idx = tab_widget.indexOf(widget)
+            if idx != -1:
+                tab_widget.setTabText(idx, os.path.basename(widget.current_path))
+                self._update_tab_tooltip(tab_widget, idx)
+                self._auto_save_session()
 
     def show_as_pages(self, table: QWidget) -> Optional[QWidget]:
         """Opens a reader tab next to a SpreadsheetTab, showing its workbook as LibreOffice prints it."""
@@ -515,6 +527,8 @@ class DocumentsMixin:
         if not path or not os.path.exists(path):
             return None
         if getattr(old, "edit_scratch", None):
+            return None
+        if isinstance(old, TableTab) and not old.resolve_edits():
             return None
 
         page = getattr(old, "current_page_index", None)

@@ -31,7 +31,7 @@ from ..ui.components import (
 )
 from ..ui.explorer import FolderHomeTab
 from ..ui.reader.tab import ReaderTab
-from ..ui.viewers import VIEWER_TABS
+from ..ui.viewers import VIEWER_TABS, TableTab
 
 
 class TabsMixin:
@@ -56,9 +56,11 @@ class TabsMixin:
             self.tabs_main.setCurrentIndex(self.tabs_main.count() - 1)
 
     def may_close(self, widget) -> bool:
-        """Asks about a reader's page edits waiting for Save, or lets a web page with unsaved changes ask."""
+        """Asks about a reader's page edits or a table's cell changes waiting for Save, or lets a web page with unsaved changes ask."""
         if isinstance(widget, ReaderTab):
             return widget.resolve_page_edits()
+        if isinstance(widget, TableTab):
+            return widget.resolve_edits()
         if isinstance(widget, BrowserTab):
             return widget.confirm_leave() and shiboken6.isValid(widget)
         return True
