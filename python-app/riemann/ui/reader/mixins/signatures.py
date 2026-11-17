@@ -155,7 +155,7 @@ class SignaturesMixin(ReaderHostBase):
                 log.debug("_detect_signatures failed", exc_info=True)
 
             self.btn_trust_cert.clicked.connect(
-                lambda: self._validate_signatures(self.current_path)
+                lambda: self._validate_signatures(self.converted_pdf or self.current_path)
             )
         except Exception as e:
             print(f"Fast signature detection failed: {e}")
@@ -238,7 +238,7 @@ class SignaturesMixin(ReaderHostBase):
             self.show_toast("Certificate added to Trust Store.")
 
         if self.current_path:
-            self._validate_signatures(self.current_path)
+            self._validate_signatures(self.converted_pdf or self.current_path)
 
     def view_certificate(self) -> None:
         if not self.current_signatures:
@@ -331,6 +331,9 @@ class SignaturesMixin(ReaderHostBase):
         """
         if not self.current_path:
             QMessageBox.warning(self, "Sign Error", "No document loaded.")
+            return
+        if self.converted_pdf:
+            self.show_toast("Save as PDF first to sign it.")
             return
 
         start_dir = get_dialog_directory(self.settings)

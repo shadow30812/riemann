@@ -27,9 +27,18 @@ IMAGE_MIME_TYPES = (
     "image/svg+xml", "image/vnd.microsoft.icon", "image/vnd.adobe.photoshop", "image/jp2",
     "image/x-portable-anymap", "image/x-tga", "image/x-pcx", "image/apng"
 )
+OFFICE_MIME_TYPES = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel",
+    "application/vnd.oasis.opendocument.text", "application/vnd.oasis.opendocument.presentation",
+    "application/vnd.oasis.opendocument.spreadsheet", "application/vnd.oasis.opendocument.graphics",
+    "application/rtf", "text/rtf"
+)
 MIME_TYPES = (
-    "application/pdf", "text/markdown", "text/plain", "text/html", "inode/directory", "application/epub+zip"
-) + IMAGE_MIME_TYPES
+    "application/pdf", "text/markdown", "text/plain", "text/html", "inode/directory", "application/epub+zip",
+    "text/csv", "text/tab-separated-values"
+) + OFFICE_MIME_TYPES + IMAGE_MIME_TYPES
 
 
 def install_linux_integration():

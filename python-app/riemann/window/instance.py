@@ -13,7 +13,7 @@ place, replacing whatever is there, so the probe comes before listen. The
 socket is created with UserAccessOption, so only the same user account can
 connect, and the running instance opens only what accepts_handoff allows:
 existing folders, and existing files that start with a PDF header or whose
-name is a PDF, Markdown, HTML, EPUB, CSV, TSV, image or listed text or source file
+name is a PDF, Markdown, HTML, EPUB, Office, CSV, TSV, image or listed text or source file
 (core/doctypes.py). The list is explicit on purpose: a file is never accepted
 just because its content looks like text.
 """
@@ -29,6 +29,7 @@ from ..core.doctypes import (
     HTML_SUFFIXES,
     IMAGE_SUFFIXES,
     MARKDOWN_SUFFIXES,
+    OFFICE_SUFFIXES,
     TABLE_SUFFIXES,
     has_text_name,
 )
@@ -83,7 +84,9 @@ def hand_off_to_running_instance(server_name: str, payload: bytes, attempts: int
     return False
 
 
-HANDOFF_SUFFIXES = (".pdf",) + MARKDOWN_SUFFIXES + HTML_SUFFIXES + EBOOK_SUFFIXES + TABLE_SUFFIXES + IMAGE_SUFFIXES
+HANDOFF_SUFFIXES = (
+    (".pdf",) + MARKDOWN_SUFFIXES + HTML_SUFFIXES + EBOOK_SUFFIXES + OFFICE_SUFFIXES + TABLE_SUFFIXES + IMAGE_SUFFIXES
+)
 PROBE_TIMEOUT_MS = 500
 
 

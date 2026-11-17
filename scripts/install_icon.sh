@@ -49,7 +49,7 @@ Terminal=false
 Categories=Office;Viewer;Utility;
 Keywords=pdf;reader;document;
 StartupWMClass=$APP_NAME
-MimeType=application/pdf;text/markdown;text/plain;text/html;inode/directory;application/epub+zip;image/png;image/jpeg;image/gif;image/webp;image/avif;image/tiff;image/bmp;image/svg+xml;image/vnd.microsoft.icon;image/vnd.adobe.photoshop;image/jp2;image/x-portable-anymap;image/x-tga;image/x-pcx;image/apng;
+MimeType=application/pdf;text/markdown;text/plain;text/html;inode/directory;application/epub+zip;text/csv;text/tab-separated-values;application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/msword;application/vnd.openxmlformats-officedocument.presentationml.presentation;application/vnd.ms-powerpoint;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.ms-excel;application/vnd.oasis.opendocument.text;application/vnd.oasis.opendocument.presentation;application/vnd.oasis.opendocument.spreadsheet;application/vnd.oasis.opendocument.graphics;application/rtf;text/rtf;image/png;image/jpeg;image/gif;image/webp;image/avif;image/tiff;image/bmp;image/svg+xml;image/vnd.microsoft.icon;image/vnd.adobe.photoshop;image/jp2;image/x-portable-anymap;image/x-tga;image/x-pcx;image/apng;
 Actions=NewWindow;
 
 [Desktop Action NewWindow]

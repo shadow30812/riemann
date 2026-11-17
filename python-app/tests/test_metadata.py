@@ -8,6 +8,7 @@ from riemann.ui.reader.mixins.metadata import MetadataMixin
 class DummyMetadataReader(MetadataMixin):
     def __init__(self):
         self.current_path = "/fake/docs/doc.pdf"
+        self.converted_pdf = None
         self.current_doc = MagicMock()
         self.document_metadata = {}
         self._get_annotation_path = MagicMock()

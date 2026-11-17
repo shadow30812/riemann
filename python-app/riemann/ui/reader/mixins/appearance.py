@@ -65,6 +65,14 @@ class AppearanceMixin(ReaderHostBase):
         t = tokens(is_dark)
         if self.signature_banner is not None:
             self._style_signature_banner(self._signature_banner_kind)
+        if self.converted_banner is not None:
+            self.converted_banner.setStyleSheet(
+                f"#convertedBanner {{ background: {t['raised']}; border-bottom: 1px solid {t['border']}; }}"
+                f"#convertedBanner QLabel {{ color: {t['muted']}; font-size: 12px; }}"
+                f"#convertedBanner QPushButton {{ color: {t['accent']}; background: transparent; border: none;"
+                f" font-size: 12px; padding: 2px 6px; }}"
+                f"#convertedBanner QPushButton:hover {{ text-decoration: underline; }}"
+            )
         pal = self.palette()
         color = QColor(t["surface"])
         pal.setColor(QPalette.ColorRole.Window, color)

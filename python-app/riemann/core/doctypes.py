@@ -1,8 +1,8 @@
 """
 What kind of document a file is, decided in one place for the whole app.
 
-document_kind(path) returns "pdf", "markdown", "html", "ebook", "image",
-"table", "text" or "binary":
+document_kind(path) returns "pdf", "markdown", "html", "ebook", "office",
+"image", "table", "text" or "binary":
 
 - a name ending in .pdf, or a file starting with %PDF-, is a PDF;
 - .md and .markdown are Markdown; .html, .htm and .xhtml are HTML, which opens
@@ -10,6 +10,12 @@ document_kind(path) returns "pdf", "markdown", "html", "ebook", "image",
 - .csv and .tsv (TABLE_SUFFIXES) are tables, shown as a grid;
 - .epub is an e-book, and so is a zip whose first entry is a mimetype file
   saying application/epub+zip, as the EPUB format requires;
+- a name in OFFICE_SUFFIXES is an Office file (Word, PowerPoint, Excel,
+  OpenDocument, RTF, Apple iWork), and so is a file that starts with {\rtf, a
+  zip holding Office Open XML parts (word/, ppt/ or xl/), or a zip whose
+  mimetype entry names an OpenDocument type. office_type(path) says which:
+  document, presentation, spreadsheet or drawing. .dot and .pot are left out:
+  those names are far more often Graphviz graphs and gettext templates;
 - a name in IMAGE_SUFFIXES is an image: the formats Pillow reads, less those
   that need outside programs or only identify a file (EPS, WMF and EMF, GRIB,
   BUFR, HDF5, MPEG, IPTC), plus SVG and WBMP, which only Qt reads;
@@ -43,14 +49,32 @@ import os
 SNIFF_BYTES = 8192
 MARKDOWN_SUFFIXES = (".md", ".markdown")
 HTML_SUFFIXES = (".html", ".htm", ".xhtml")
-DOCUMENT_CLASSES = ("PDF", "Markdown", "E-book", "Spreadsheet", "Code", "Text", "Image")
-READER_KINDS = ("pdf", "markdown", "text", "ebook")
+DOCUMENT_CLASSES = ("PDF", "Word", "Slides", "Spreadsheet", "Markdown", "E-book", "Code", "Text", "Image")
+READER_KINDS = ("pdf", "markdown", "text", "ebook", "office")
 CONVERTED_KINDS = ("ebook",)
 VIEWER_KINDS = ("image", "table")
 TAB_KINDS = READER_KINDS + VIEWER_KINDS
 TABLE_SUFFIXES = (".csv", ".tsv")
 EBOOK_SUFFIXES = (".epub",)
 EPUB_MIMETYPE = b"mimetypeapplication/epub+zip"
+
+OFFICE_TYPES = {
+    "document": (
+        ".doc", ".docx", ".docm", ".dotx", ".dotm", ".odt", ".ott", ".fodt", ".rtf", ".wpd", ".pages",
+    ),
+    "presentation": (".ppt", ".pptx", ".pptm", ".pps", ".ppsx", ".potx", ".odp", ".otp", ".fodp", ".key"),
+    "spreadsheet": (".xls", ".xlsx", ".xlsm", ".xlsb", ".xltx", ".ods", ".ots", ".fods", ".numbers"),
+    "drawing": (".odg", ".otg", ".fodg"),
+}
+OFFICE_SUFFIXES = tuple(s for suffixes in OFFICE_TYPES.values() for s in suffixes)
+OFFICE_CLASSES = {"document": "Word", "presentation": "Slides", "spreadsheet": "Spreadsheet", "drawing": "Slides"}
+ODF_MIMETYPES = {
+    b"application/vnd.oasis.opendocument.text": "document",
+    b"application/vnd.oasis.opendocument.presentation": "presentation",
+    b"application/vnd.oasis.opendocument.spreadsheet": "spreadsheet",
+    b"application/vnd.oasis.opendocument.graphics": "drawing",
+}
+OOXML_PARTS = (("word/document.xml", "document"), ("ppt/presentation.xml", "presentation"), ("xl/workbook.xml", "spreadsheet"))
 
 IMAGE_SUFFIXES = (
     ".apng", ".avif", ".avifs", ".blp", ".bmp", ".bw", ".cur", ".dcx", ".dds", ".dib", ".fit",
@@ -130,6 +154,49 @@ def has_table_name(path: str) -> bool:
     return path.lower().endswith(TABLE_SUFFIXES)
 
 
+def has_office_name(path: str) -> bool:
+    return path.lower().endswith(OFFICE_SUFFIXES)
+
+
+def _office_type_by_name(path: str):
+    lower = path.lower()
+    return next((kind for kind, suffixes in OFFICE_TYPES.items() if lower.endswith(suffixes)), None)
+
+
+def _office_type_by_content(path: str, sample: bytes):
+    if sample.startswith(b"{\\rtf"):
+        return "document"
+    if not sample.startswith(b"PK\x03\x04"):
+        return None
+    if sample[30:38] == b"mimetype":
+        for mimetype, kind in ODF_MIMETYPES.items():
+            if sample[38:38 + len(mimetype)] == mimetype:
+                return kind
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = set(archive.namelist())
+    except (zipfile.BadZipFile, OSError, ValueError):
+        return None
+    if "[Content_Types].xml" not in names:
+        return None
+    return next((kind for part, kind in OOXML_PARTS if part in names), None)
+
+
+def office_type(path: str):
+    """document, presentation, spreadsheet or drawing for an Office file, else None."""
+    kind = _office_type_by_name(path)
+    if kind is not None:
+        return kind
+    try:
+        with open(path, "rb") as f:
+            sample = f.read(SNIFF_BYTES)
+    except OSError:
+        return None
+    return _office_type_by_content(path, sample)
+
+
 def is_reader_name(path: str) -> bool:
     """True when the name alone says a document tab shows this file (PDF, Markdown, listed text, a table or an image)."""
     lower = path.lower()
@@ -139,6 +206,7 @@ def is_reader_name(path: str) -> bool:
         or has_text_name(path)
         or has_table_name(path)
         or lower.endswith(EBOOK_SUFFIXES)
+        or has_office_name(path)
         or has_image_name(path)
     )
 
@@ -169,6 +237,8 @@ def document_kind(path: str) -> str:
         return "table"
     if lower.endswith(EBOOK_SUFFIXES):
         return "ebook"
+    if lower.endswith(OFFICE_SUFFIXES):
+        return "office"
     if lower.endswith(IMAGE_SUFFIXES):
         return "image"
     try:
@@ -178,10 +248,14 @@ def document_kind(path: str) -> str:
         return "text" if has_text_name(path) else "binary"
     if sample.startswith(b"%PDF-"):
         return "pdf"
+    if sample.startswith(b"{\\rtf"):
+        return "office"
     if looks_like_text(sample):
         return "text"
     if sample.startswith(b"PK\x03\x04") and sample[30:30 + len(EPUB_MIMETYPE)] == EPUB_MIMETYPE:
         return "ebook"
+    if _office_type_by_content(path, sample):
+        return "office"
     return "image" if has_image_signature(sample) else "binary"
 
 
@@ -198,11 +272,17 @@ def document_class(path: str) -> str:
         return "Spreadsheet"
     if path.lower().endswith(EBOOK_SUFFIXES):
         return "E-book"
+    office = _office_type_by_name(path)
+    if office:
+        return OFFICE_CLASSES[office]
     if has_text_name(path):
         return "Text"
     if has_image_name(path):
         return "Image"
-    return {"pdf": "PDF", "markdown": "Markdown", "image": "Image", "ebook": "E-book"}.get(document_kind(path), "Text")
+    kind = document_kind(path)
+    if kind == "office":
+        return OFFICE_CLASSES.get(office_type(path) or "document", "Word")
+    return {"pdf": "PDF", "markdown": "Markdown", "image": "Image", "ebook": "E-book"}.get(kind, "Text")
 
 
 def _patterns(suffixes, upper: bool = False) -> str:
@@ -217,11 +297,13 @@ def dialog_filter(html: bool = True) -> str:
     """
     suffixes = MARKDOWN_SUFFIXES + (HTML_SUFFIXES if html else ()) + EBOOK_SUFFIXES + TABLE_SUFFIXES + TEXT_SUFFIXES
     images = _patterns(IMAGE_SUFFIXES, upper=True)
-    supported = f"*.pdf *.PDF {_patterns(suffixes)} {images} {' '.join(TEXT_NAMES)}"
+    office = _patterns(OFFICE_SUFFIXES, upper=True)
+    supported = f"*.pdf *.PDF {office} {_patterns(suffixes)} {images} {' '.join(TEXT_NAMES)}"
     return ";;".join(
         (
             f"Supported Files ({supported})",
             "PDF Files (*.pdf *.PDF)",
+            f"Office Files ({office})",
             f"Images ({images})",
             "All Files (*)",
         )

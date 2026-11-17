@@ -32,6 +32,23 @@ re-renders without converting again; reload converts again. The book's table
 of contents goes to the sections sidebar (_document_sections), whose entries
 scroll the page to their anchor. Closing the tab, or opening another file in
 it, kills a conversion still running.
+
+Office files (kind "office") are converted to PDF by LibreOffice
+(core/office.py) on an OfficeWorker thread, then loaded like any PDF from
+the converted copy: current_path stays the Office file, so the title,
+history, session, notes and "changed on disk" refer to it, while pdf_path()
+returns converted_pdf. Such a tab is read-only: annotations, page edits
+(_editable wants a .pdf), forms, passwords, signing and metadata are off, and
+a banner says so. Save as PDF (Ctrl+S) copies the converted PDF where the
+person chooses and opens that file in the tab, where all of it works. In an
+incognito window the conversion goes to a temporary folder of the tab's own,
+removed when the tab closes, instead of the cache.
+
+While a converted file is shown, a timer checks its modification time every
+OFFICE_POLL_MS (it may be edited in LibreOffice through "Edit in LibreOffice",
+or in Word). Once a new time has held for two checks, so a save still being
+written isn't caught halfway, the file is converted again and the tab
+reloads at the same page without asking: the view holds nothing to lose.
 """
 
 import gc
@@ -75,11 +92,13 @@ from ..render_worker import PAGE_CACHE, PageRenderWorker
 from ....core.render_process import PageRenderer
 from ..utils import generate_document_html, generate_markdown_html, generate_text_html
 from ....core.convert_process import Conversion, ConvertError
+from ....core.office import OfficeConversion, OfficeError, find_office, open_in_office
 from ....core.doctypes import CONVERTED_KINDS, MARKDOWN_SUFFIXES, dialog_filter, document_kind, is_text_document
 from ...threads import release, track
 from ....core.log import log
 from ....core.settings import (
     NOTES_VISIBLE_KEY,
+    OFFICE_PATH_KEY,
     SIDEBAR_MODE_KEY,
     SIDEBAR_VISIBLE_KEY,
     get_dialog_directory,
@@ -91,6 +110,7 @@ from .host import ReaderHostBase
 TEXT_VIEW_LIMIT = 20 * 1024 * 1024
 SET_HTML_LIMIT = 1_900_000
 TEXT_VIEW_FOLDER = "text-view"
+OFFICE_POLL_MS = 2000
 
 
 class DocumentLoadWorker(QThread):
@@ -134,6 +154,30 @@ class ConvertWorker(QThread):
         self.converted.emit(self.path, result)
 
 
+class OfficeWorker(QThread):
+    converted = Signal(str, object)
+    failed = Signal(str, str)
+
+    def __init__(self, path: str, override: str = "", folder: Optional[str] = None):
+        super().__init__()
+        self.path = path
+        self.override = override
+        self.conversion = OfficeConversion(path, folder=folder)
+
+    def run(self):
+        try:
+            self.conversion.office = find_office(self.override)
+            result = self.conversion.run()
+        except OfficeError as e:
+            self.failed.emit(self.path, str(e))
+            return
+        except Exception as e:
+            log.warning("Converting %s failed: %s", self.path, e)
+            self.failed.emit(self.path, str(e) or type(e).__name__)
+            return
+        self.converted.emit(self.path, result)
+
+
 class DocumentMixin(ReaderHostBase):
     web = None
     load_worker = None
@@ -146,6 +190,12 @@ class DocumentMixin(ReaderHostBase):
     _converted: Optional[dict] = None
     _convert_error = ""
     _document_sections: tuple = ()
+    converted_pdf: Optional[str] = None
+    converted_banner = None
+    _office_folder: Optional[str] = None
+    incognito = False
+    _office_timer: Optional[QTimer] = None
+    _office_seen_mtime: Optional[float] = None
     document_password: Optional[str] = None
     document_encrypted = False
     document_signed = False
@@ -169,7 +219,15 @@ class DocumentMixin(ReaderHostBase):
         if is_text_document(path):
             self._show_text_document(path)
             return
+        if document_kind(path) == "office":
+            self._convert_office(path)
+            return
 
+        self.converted_pdf = None
+        source = self.edit_scratch if self.edit_scratch and path == self.current_path else path
+        self._load_pdf(path, source, password, is_retry)
+
+    def _load_pdf(self, path: str, source: str, password: Optional[str], is_retry: bool) -> None:
         self.load_progress = QProgressDialog(
             f"Loading {os.path.basename(path)}...", None, 0, 0, self
         )
@@ -179,7 +237,7 @@ class DocumentMixin(ReaderHostBase):
         self.load_progress.show()
 
         self._load_path = path
-        self._load_source = self.edit_scratch if self.edit_scratch and path == self.current_path else path
+        self._load_source = source
         self._load_password = password
         self._load_is_retry = is_retry
 
@@ -203,8 +261,9 @@ class DocumentMixin(ReaderHostBase):
         self.signature_appearances = {}
         self._reset_document_caches()
         self.reset_navigation_history()
-        self._forms_blocked = False
         self._reference_cache = {}
+        self._forms_blocked = bool(self.converted_pdf)
+        self._show_converted_banner()
         if self.notes_panel.isVisible() or self.settings.value(NOTES_VISIBLE_KEY, False, type=bool):
             self.notes_panel.load(self.current_path)
             self.notes_panel.show()
@@ -413,6 +472,8 @@ class DocumentMixin(ReaderHostBase):
             self._loaded_mtime = None
         self._update_tab_title(os.path.basename(path))
         self._forget_conversion()
+        self.converted_pdf = None
+        self._show_converted_banner()
         self.sidebar_nav.load_document("", None, self.theme_mode)
         self._set_sidebar_visible(False)
         kind = document_kind(path)
@@ -434,6 +495,124 @@ class DocumentMixin(ReaderHostBase):
         self.btn_facing.setEnabled(False)
         self.btn_ocr.setEnabled(False)
         self._update_protect_button()
+
+    def _convert_office(self, path: str) -> None:
+        """Starts converting an Office file; the tab shows a message until the PDF loads, or keeps the old pages on reload."""
+        self._forget_conversion()
+        reloading = path == self.current_path and self.current_doc is not None
+        self.current_path = path
+        self._update_tab_title(os.path.basename(path))
+        if not reloading:
+            self._show_message_page(f"Converting {os.path.basename(path)} with LibreOffice…")
+        folder = None
+        if self.incognito or getattr(self.window(), "incognito", False):
+            if not self._office_folder:
+                self._office_folder = tempfile.mkdtemp(prefix="riemann-office-")
+            folder = self._office_folder
+        self.convert_worker = OfficeWorker(path, self.settings.value(OFFICE_PATH_KEY, "", type=str), folder)
+        self.convert_worker.converted.connect(self._on_office_converted)
+        self.convert_worker.failed.connect(self._on_office_failed)
+        track(self.convert_worker).start()
+
+    def _show_message_page(self, message: str) -> None:
+        if self.current_doc is not None:
+            self._release_document()
+        self.converted_pdf = None
+        self._show_converted_banner()
+        self.text_document = False
+        web_view = self._get_or_create_web_view()
+        self._drop_text_page_file()
+        web_view.setHtml(generate_document_html("", self.theme_mode != 0, message))
+        self.stack.setCurrentIndex(1)
+        self.view_mode = ViewMode.REFLOW
+        if hasattr(self.window(), "_update_window_title"):
+            self.window()._update_window_title()
+
+    def _on_office_converted(self, path: str, pdf: str) -> None:
+        if path != self.current_path:
+            return
+        self.convert_worker = None
+        self.converted_pdf = pdf
+        self._load_pdf(path, pdf, None, False)
+
+    def _on_office_failed(self, path: str, message: str) -> None:
+        if path != self.current_path:
+            return
+        self.convert_worker = None
+        self._show_message_page(message)
+        self.show_toast(f"Could not open {os.path.basename(path)}")
+
+    def _show_converted_banner(self) -> None:
+        watching = bool(self.converted_pdf) and not self.is_preview
+        if self.converted_banner is not None:
+            self.converted_banner.setVisible(watching)
+        if watching:
+            if self._office_timer is None:
+                self._office_timer = QTimer(self)
+                self._office_timer.setInterval(OFFICE_POLL_MS)
+                self._office_timer.timeout.connect(self._check_office_source)
+            self._office_seen_mtime = self._loaded_mtime
+            self._office_timer.start()
+        elif self._office_timer is not None:
+            self._office_timer.stop()
+
+    def _check_office_source(self) -> None:
+        if not self.converted_pdf or self.convert_worker is not None or not self.current_path:
+            return
+        try:
+            mtime = os.path.getmtime(self.current_path)
+        except OSError:
+            return
+        if mtime == self._loaded_mtime:
+            self._office_seen_mtime = mtime
+            return
+        if mtime != self._office_seen_mtime:
+            self._office_seen_mtime = mtime
+            return
+        self.pending_initial_page = self.current_page_index
+        self.show_toast(f"{os.path.basename(self.current_path)} changed, updating…")
+        self.load_document(self.current_path)
+
+    def edit_in_office(self) -> None:
+        """Opens the Office file in LibreOffice's editor; the tab follows its saves."""
+        office = find_office(self.settings.value(OFFICE_PATH_KEY, "", type=str))
+        if office is None or not self.current_path:
+            self.show_toast("LibreOffice isn't installed.")
+            return
+        try:
+            open_in_office(self.current_path, office)
+        except OSError as e:
+            self.show_toast(f"Could not start LibreOffice: {e}")
+            return
+        self.show_toast("Opening in LibreOffice. This tab updates when you save there.")
+
+    def save_converted_pdf(self) -> None:
+        """Saves the converted PDF of an Office file where the person chooses, then shows that file here."""
+        stem = os.path.splitext(os.path.basename(self.current_path))[0]
+        dest, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save as PDF",
+            os.path.join(get_dialog_directory(self.settings), stem + ".pdf"),
+            "PDF Files (*.pdf)",
+        )
+        if not dest:
+            return
+        if not dest.lower().endswith(".pdf"):
+            dest += ".pdf"
+            if os.path.exists(dest):
+                answer = QMessageBox.question(
+                    self, "Save as PDF", f"{os.path.basename(dest)} already exists. Replace it?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+        save_last_directory(self.settings, dest)
+        try:
+            shutil.copyfile(self.converted_pdf, dest)
+        except OSError as e:
+            QMessageBox.critical(self, "Save as PDF", f"Could not save the PDF:\n{e}")
+            return
+        self.open_here(dest)
 
     def _forget_conversion(self) -> None:
         worker, self.convert_worker = self.convert_worker, None
@@ -530,6 +709,9 @@ class DocumentMixin(ReaderHostBase):
         """Saves a copy of the document, with its annotations embedded when it has any; with page edits waiting, offers to save them into the file."""
         if not self.current_path or not os.path.exists(self.current_path):
             QMessageBox.warning(self, "Save Error", "No document loaded.")
+            return
+        if self.converted_pdf:
+            self.save_converted_pdf()
             return
         if self.has_unsaved_page_edits():
             box = QMessageBox(self)
@@ -679,6 +861,9 @@ class DocumentMixin(ReaderHostBase):
             layout.apply()
 
     def protect_or_unlock(self) -> None:
+        if self.converted_pdf:
+            self.show_toast("Save as PDF (Ctrl+S) first to protect it.")
+            return
         if self.current_doc is not None and self.document_encrypted:
             self.remove_password()
         else:
@@ -877,6 +1062,11 @@ class DocumentMixin(ReaderHostBase):
         self.notes_panel.save()
         self._drop_text_page_file()
         self._forget_conversion()
+        if self._office_timer is not None:
+            self._office_timer.stop()
+        if self._office_folder:
+            shutil.rmtree(self._office_folder, ignore_errors=True)
+            self._office_folder = None
         try:
             self.flush_forms_to_pdf()
         except Exception as e:

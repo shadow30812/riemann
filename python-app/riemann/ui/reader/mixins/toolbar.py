@@ -104,6 +104,20 @@ class ToolbarMixin(ReaderHostBase):
         banner_layout.addWidget(self.btn_close_banner)
         layout.addWidget(self.signature_banner)
 
+        self.converted_banner = QWidget()
+        self.converted_banner.setObjectName("convertedBanner")
+        self.converted_banner.setVisible(False)
+        converted_row = QHBoxLayout(self.converted_banner)
+        converted_row.setContentsMargins(12, 3, 12, 3)
+        converted_row.addStretch()
+        converted_row.addWidget(QLabel("Converted by LibreOffice, read-only. Save as PDF (Ctrl+S) to mark it up."))
+        self.btn_edit_in_office = QPushButton("Edit in LibreOffice")
+        self.btn_edit_in_office.setToolTip("Opens the file in LibreOffice; this tab updates when you save it there")
+        self.btn_edit_in_office.clicked.connect(self.edit_in_office)
+        converted_row.addWidget(self.btn_edit_in_office)
+        converted_row.addStretch()
+        layout.addWidget(self.converted_banner)
+
         self._setup_search_bar()
         layout.addWidget(self.search_bar)
 

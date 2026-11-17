@@ -17,6 +17,7 @@ class DummyAnnotationReader(AnnotationsMixin):
 
     def __init__(self):
         self.current_path = "/fake/path/doc.pdf"
+        self.converted_pdf = None
         self.annotations = {}
         self._map_to_unrotated = lambda rx, ry: (rx, ry)
         self.undo_stack = []

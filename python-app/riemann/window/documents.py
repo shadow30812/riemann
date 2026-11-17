@@ -262,17 +262,18 @@ class DocumentsMixin:
 
     @staticmethod
     def _document_kind(path: str) -> str:
-        """'pdf', 'markdown', 'html', 'image', 'table', 'text' or 'binary' (core/doctypes.py)."""
+        """'pdf', 'markdown', 'html', 'ebook', 'office', 'image', 'table', 'text' or 'binary' (core/doctypes.py)."""
         return document_kind(path)
 
     def _refuse_binary(self, path: str) -> None:
         self.show_toast(f"{os.path.basename(path)} isn't a document, image or text file, so Riemann can't show it.")
 
     def _create_reader(self, preview: bool) -> "ReaderTab":
-        """Creates an empty reader tab, lightweight when preview is True."""
+        """Creates an empty reader tab, lightweight when preview is True; it knows whether this window is incognito."""
+        reader = PreviewReaderTab() if preview else ReaderTab()
+        reader.incognito = bool(getattr(self, "incognito", False))
         if preview:
-            return PreviewReaderTab()
-        reader = ReaderTab()
+            return reader
         reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
         return reader
 
@@ -319,8 +320,9 @@ class DocumentsMixin:
         activate: bool = True,
     ) -> Optional[QWidget]:
         """
-        Opens any supported file as a tab. PDFs, Markdown and other text files go to
-        the reader, images to an ImageTab, CSV and TSV to a TableTab, HTML to the browser;
+        Opens any supported file as a tab. PDFs, Office files, e-books, Markdown and
+        other text files go to the reader, images to an ImageTab, CSV and TSV to a
+        TableTab, HTML to the browser;
         binary files are refused. Preview tabs use the
         lightweight viewers instead. When preview is None, the "Open Documents in
         Preview Mode" setting decides. Returns the new tab, or None if nothing was opened.
@@ -351,7 +353,7 @@ class DocumentsMixin:
         if kind in VIEWER_KINDS:
             widget = self._create_viewer(kind, path, preview)
             icon = self._preview_icon() if preview else QIcon(icon_path(self._viewer_icon(kind), getattr(self, "dark_mode", False)))
-        elif kind in ("pdf", "ebook") or (kind in ("markdown", "text") and not preview):
+        elif kind in ("pdf", "ebook", "office") or (kind in ("markdown", "text") and not preview):
             widget = self._create_reader(preview)
             if page is not None:
                 widget.pending_initial_page = page
@@ -696,8 +698,8 @@ class DocumentsMixin:
             return
         self.add_to_history(path, "web" if kind == "html" else "pdf")
 
-        if kind in ("pdf", "ebook"):
-            new_preview = PreviewReaderTab()
+        if kind in ("pdf", "ebook", "office"):
+            new_preview = self._create_reader(preview=True)
             new_preview.load_document(path)
         elif kind in VIEWER_KINDS:
             new_preview = self._create_viewer(kind, path, preview=True)

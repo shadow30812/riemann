@@ -79,7 +79,13 @@ def test_katex_tags_carry_their_hashes():
 
 
 def test_remote_addresses_are_written_only_in_core_endpoints():
-    allowed = {"http://www.idpf.org/2007/opf", "https://example.com"}
+    allowed = {
+        "http://www.idpf.org/2007/opf",
+        "https://example.com",
+        "http://openoffice.org/2001/registry",
+        "http://www.w3.org/2001/XMLSchema",
+        "http://www.w3.org/2001/XMLSchema-instance",
+    }
     offenders = []
     for path in sorted(ROOT.rglob("*.py")):
         if "__pycache__" in path.parts or path.name == "endpoints.py":

@@ -356,6 +356,8 @@ class AnnotationsMixin(ReaderHostBase):
         if not self.current_path:
             return
         self.annotations = {}
+        if self.converted_pdf:
+            return
         self._anno_file_sig = None
         self._anno_written = None
         self._pdf_store_blocked = False
@@ -448,7 +450,7 @@ class AnnotationsMixin(ReaderHostBase):
         Saves the annotations to Riemann's JSON copy right away and, shortly
         after the last change, into the PDF itself so other apps see them.
         """
-        if not self.current_path:
+        if not self.current_path or self.converted_pdf:
             return
         self._write_annotation_json()
         if (
@@ -549,6 +551,9 @@ class AnnotationsMixin(ReaderHostBase):
             threading.Thread(target=compact_if_needed, args=(path,), name="riemann-compact").start()
 
     def toggle_annotation_mode(self, checked: bool) -> None:
+        if checked and self.converted_pdf:
+            self.show_toast("Save as PDF (Ctrl+S) to mark it up.")
+            checked = False
         self.anno_toolbar.setVisible(checked)
         self.btn_annotate.setChecked(checked)
         if not checked:
@@ -651,6 +656,9 @@ class AnnotationsMixin(ReaderHostBase):
 
     def _add_anno_data(self, page_idx: int, data: Dict) -> None:
         """Appends an annotation, records it for undo and saves."""
+        if self.converted_pdf:
+            self.show_toast("Save as PDF (Ctrl+S) to mark it up.")
+            return
         pid = str(page_idx)
         if pid not in self.annotations:
             self.annotations[pid] = []

@@ -87,8 +87,8 @@ class PagesMixin(ReaderHostBase):
     _edit_snapshot = None
 
     def pdf_path(self) -> str:
-        """The file the reader shows and writes: the scratch copy while page edits wait for Save."""
-        return self.edit_scratch or self.current_path or ""
+        """The file the reader shows and writes: the scratch copy while page edits wait for Save, the converted PDF of an Office file."""
+        return self.edit_scratch or self.converted_pdf or self.current_path or ""
 
     def has_unsaved_page_edits(self) -> bool:
         return bool(self.edit_scratch)

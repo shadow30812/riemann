@@ -74,6 +74,8 @@ class ReaderHost(Protocol):
     metadata_worker: Optional[Any]
     edit_scratch: Optional[str]
     text_document: bool
+    converted_pdf: Optional[str]
+    converted_banner: Optional[QWidget]
     _document_sections: Tuple[Any, ...]
     document_password: Optional[str]
     document_encrypted: bool

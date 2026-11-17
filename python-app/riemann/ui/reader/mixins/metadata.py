@@ -46,7 +46,7 @@ class MetadataMixin(ReaderHostBase):
         Checks the local library database first for cached metadata. If not found,
         spins up a background worker to extract metadata from the first page's text.
         """
-        if not self.current_path or not self.current_doc:
+        if not self.current_path or not self.current_doc or self.converted_pdf:
             return
 
         worker = self._live_metadata_worker()

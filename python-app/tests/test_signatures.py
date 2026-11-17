@@ -9,6 +9,7 @@ from riemann.ui.reader.mixins.signatures import SignaturesMixin
 class DummySignaturesReader(SignaturesMixin):
     def __init__(self):
         self.current_path = "/fake/doc.pdf"
+        self.converted_pdf = None
         self.theme_mode = 1
         self.current_signatures = []
         self.current_untrusted_pem = None

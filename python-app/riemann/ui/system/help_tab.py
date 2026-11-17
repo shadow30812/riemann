@@ -30,9 +30,9 @@ TOPICS = [
             (
                 "What Riemann is",
                 [
-                    "Riemann is a PDF reader and a web browser in one window. PDFs, web pages, pictures, "
-                    "EPUB books, CSV tables, Markdown, text files and source code each open in a tab of "
-                    "their own.",
+                    "Riemann is a PDF reader and a web browser in one window. PDFs, web pages, Office "
+                    "files, pictures, EPUB books, CSV tables, Markdown, text files and source code each "
+                    "open in a tab of their own.",
                 ],
             ),
             (
@@ -196,6 +196,28 @@ TOPICS = [
                     "open in the same kind of tab. Code is shown in colour when the optional Pygments "
                     "component is installed.",
                     "HTML files open in the browser. Files Riemann can't show are refused with a message.",
+                ],
+            ),
+        ],
+    ),
+    (
+        "office",
+        "Office files",
+        "file-text",
+        [
+            (
+                "Word, PowerPoint, Excel and OpenDocument",
+                [
+                    "When LibreOffice is installed, Riemann uses it to show Word, PowerPoint, Excel, "
+                    "OpenDocument and RTF files as pages, the way they print. The first time takes a few "
+                    "seconds; after that the file opens straight away.",
+                    "These tabs are read-only, and your file is never changed. To mark one up, use Save as "
+                    "PDF (Ctrl+S): the PDF opens in the tab, and highlights and notes work there.",
+                    "To change the file itself, click Edit in LibreOffice above the pages. When you save "
+                    "it there, the tab updates on its own and stays on the same page.",
+                    "Riemann's copy of LibreOffice runs no macros and loads no pictures from the web, so "
+                    "opening a file never tells its sender. Settings > Documents shows where LibreOffice "
+                    "was found, and Settings > Privacy deletes the converted copies.",
                 ],
             ),
         ],

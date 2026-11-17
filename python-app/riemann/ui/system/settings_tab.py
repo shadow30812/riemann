@@ -10,11 +10,15 @@ from a menu or shortcut behave the same.
 
 Sections: Appearance, Documents, Browser, Site permissions, AI and OCR,
 Privacy and data, About.
+
+The Office files card looks for LibreOffice on a plain thread (the Flatpak
+check runs a program), and reports back through _OfficeBridge.
 """
 
 import importlib.metadata
+import threading
 
-from PySide6.QtCore import QStandardPaths, Qt, QUrl
+from PySide6.QtCore import QObject, QStandardPaths, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -29,7 +33,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
 )
 
-from ...core import permissions
+from ...core import office, permissions
 from ...core.dependencies import DependenciesDialog
 from ...core.log import log_folder
 from ...core.settings import (
@@ -41,6 +45,7 @@ from ...core.settings import (
     DEFAULT_UI_SCALE,
     HOMEPAGE_NAME_KEY,
     OCR_LANGUAGES_KEY,
+    OFFICE_PATH_KEY,
     POPULAR_SITES_KEY,
     SEARCH_URL_KEY,
     UI_SCALE_KEY,
@@ -61,6 +66,10 @@ def app_version() -> str:
         return importlib.metadata.version("riemann")
     except importlib.metadata.PackageNotFoundError:
         return ""
+
+
+class _OfficeBridge(QObject):
+    found = Signal(str)
 
 
 class SettingsTab(SectionedSystemTab):
@@ -194,6 +203,38 @@ class SettingsTab(SectionedSystemTab):
         row.addWidget(browse)
         setting_row(c, "Folder file dialogs open in", folder)
 
+        c = card(
+            layout,
+            "Office files",
+            "Word, PowerPoint, Excel and OpenDocument files are shown through LibreOffice when it is installed.",
+        )
+        status = row_container()
+        status_row = QHBoxLayout(status)
+        status_row.setContentsMargins(0, 0, 0, 0)
+        self.lbl_office = QLabel("Looking…")
+        self.lbl_office.setObjectName("hint")
+        self.lbl_office.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        check = QPushButton("Check again")
+        check.clicked.connect(lambda: self._find_office(again=True))
+        status_row.addWidget(self.lbl_office, 1)
+        status_row.addWidget(check)
+        setting_row(c, "LibreOffice", status)
+        program = row_container()
+        program_row = QHBoxLayout(program)
+        program_row.setContentsMargins(0, 0, 0, 0)
+        self.txt_office_path = QLineEdit(self.settings.value(OFFICE_PATH_KEY, "", type=str))
+        self.txt_office_path.setPlaceholderText("Found automatically")
+        self.txt_office_path.setMinimumWidth(260)
+        self.txt_office_path.editingFinished.connect(self._set_office_path)
+        browse_office = QPushButton("Browse")
+        browse_office.clicked.connect(self._browse_office)
+        program_row.addWidget(self.txt_office_path, 1)
+        program_row.addWidget(browse_office)
+        setting_row(c, "LibreOffice program", program, "Only needed when it is installed somewhere unusual.")
+        self._office_bridge = _OfficeBridge(self)
+        self._office_bridge.found.connect(self.lbl_office.setText)
+        self._find_office()
+
         c = card(layout, "Reading")
         self.spin_autoscroll = QSpinBox()
         self.spin_autoscroll.setRange(1, 100)
@@ -306,6 +347,14 @@ class SettingsTab(SectionedSystemTab):
             self.data_buttons[label] = btn
             grid.addWidget(btn, i // 2, i % 2)
         c.addLayout(grid)
+        c = card(
+            layout,
+            "Converted documents",
+            "Office files are converted to PDF to be shown, and the copies are kept so they open quickly next time.",
+        )
+        clear_office = QPushButton("Delete converted copies")
+        clear_office.clicked.connect(self.clear_converted)
+        c.addWidget(clear_office, 0, Qt.AlignmentFlag.AlignLeft)
         c = card(layout, "Optional components", "Extra Python packages for snipping maths to LaTeX, captions and video downloads.")
         deps = QPushButton("Manage optional components")
         deps.clicked.connect(lambda: DependenciesDialog(self).exec())
@@ -443,6 +492,37 @@ class SettingsTab(SectionedSystemTab):
     def _set_ocr_languages(self) -> None:
         chosen = [lang for lang, box in self.ocr_boxes.items() if box.isChecked()]
         self._set_value(OCR_LANGUAGES_KEY, "+".join(chosen) or "eng")
+
+    def _find_office(self, again: bool = False) -> None:
+        self.lbl_office.setText("Looking…")
+        override = self.settings.value(OFFICE_PATH_KEY, "", type=str)
+        bridge = self._office_bridge
+
+        def work():
+            if again:
+                office.refresh()
+            found = office.find_office(override)
+            text = found.label if found is not None else "Not installed"
+            try:
+                bridge.found.emit(text)
+            except RuntimeError:
+                pass
+
+        threading.Thread(target=work, name="riemann-find-office", daemon=True).start()
+
+    def _set_office_path(self) -> None:
+        self._set_value(OFFICE_PATH_KEY, self.txt_office_path.text().strip())
+        self._find_office(again=True)
+
+    def _browse_office(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "LibreOffice program", self.txt_office_path.text())
+        if path:
+            self.txt_office_path.setText(path)
+            self._set_office_path()
+
+    def clear_converted(self) -> None:
+        office.clear_cache()
+        self._done("Converted copies deleted.")
 
     def _done(self, message: str) -> None:
         show = getattr(self.window_ref, "show_toast", None)
