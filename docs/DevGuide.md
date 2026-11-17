@@ -76,7 +76,7 @@ Python should not perform large-scale rasterization or heavy synchronous compute
 Responsible for:
 
 * PDF rendering
-* text extraction, including per-character glyph boxes (`get_char_boxes`)
+* text extraction, including per-character glyph boxes (`get_char_boxes`) and, for Replace text, each character's style (`get_char_styles`: box, scaled font size, font name, serif, fixed-pitch, bold and italic flags, and fill colour as `#RRGGBB`)
 * the document outline (`get_outline`)
 * OCR delegation: `ocr_page` for one page; `ocr_pages` renders a list of pages under the PDFium lock, encodes them as PNG, and reads them all with one Tesseract run outside the lock (`recognize_pngs` in `rust-ocr-worker`, a list file in a private temporary folder; pages come back separated by form feeds). The reader's "Recognise text in pages…" entry in the Pages menu runs it eight pages at a time in `OcrPagesThread`, with progress and Cancel, and shows the text in a window with "Save as text…".
 * search indexing
@@ -121,7 +121,7 @@ Semantic search runs in a separate FastAPI process started by the app (`core/ai_
 
 * `documents.py`: opening PDFs and other files, preview versus extended tabs, the signature dock.
 * `session.py`: saving and restoring tabs, crash recovery, the clean-exit flag.
-* `system.py`: System tabs (Settings, History, Bookmarks, Downloads, Library). `open_system_page(page, section)` opens each page at most once and focuses it if it is already open.
+* `system.py`: System tabs (Settings, History, Bookmarks, Downloads, Library, Help). `open_system_page(page, section)` opens each page at most once and focuses it if it is already open.
 * `menus.py`: the menu bar, the command palette (Ctrl+Shift+P), the mini player in the menu corner.
 * `panes.py`: split view and `open_url_beside`.
 * `tabs.py`: tab creation, closing, the closed-tab stack.
@@ -188,7 +188,8 @@ To ensure seamless desktop integration on Linux distributions (GNOME, KDE, Ubunt
 * **Instance Tracking**: When a non-incognito `RiemannWindow` is instantiated, it registers itself into `RiemannWindow._all_open_windows`. On `closeEvent()`, it unregisters cleanly.
 * **Multi-Window Session Serialization (`_save_all_windows_session()`)**: Iterates through all open windows in `_all_open_windows`, capturing window geometry, main tab paths/types, side tab paths/types, active tab indices, and split-view orientation states into a list serialized under the `sessions/multi_window` key in `QSettings`.
 * **Sequential Close Grace Window**: When multiple windows are open, closing one window sets a 20-second timestamp threshold (`_multi_window_save_time`). Subsequent windows closed within this window avoid overwriting the multi-window session with a single-window state, protecting session restoration if the user closes windows sequentially prior to exiting.
-* **Clean Application Exit (`exit_application()`)**: Forces a clean serialization of all active windows and issues `QApplication.quit()`.
+* **Asking Before Closing (`confirm_close()`)**: Before a window closes, each reader with page edits waiting for Save asks what to do, and each browser tab lets its page ask about unsaved changes (`BrowserTab.confirm_leave`, see Leaving Web Pages). Cancelling either keeps the window open.
+* **Clean Application Exit (`exit_application()`)**: Runs `confirm_close()` in every window, then serializes all of them and issues `QApplication.quit()`. In Qt 6, `quit()` sends each window a close event, so `exit_application` sets `close_confirmed` on every window first and `closeEvent` doesn't ask a second time.
 * **Multi-Window Restoration**: On startup with `restore_session=True`, if `sessions/multi_window` exists and contains multiple window records, the primary window restores its own layout and dynamically spawns subsequent `RiemannWindow(restore_session=False)` instances, populating their tabs and geometries.
 
 ---
@@ -288,6 +289,16 @@ The Settings tab's Documents section has a checkbox controlling `reader/open_in_
   * Safely reads the old widget's scroll state (`hasattr(old_widget.scroll, "verticalScrollBar")`), page index, tab title, and file path.
   * Inserts the new tab at the exact same index, transfers focus, calls `cleanup()` on the old tab, and schedules it for deferred deletion.
 
+
+### Opening From Inside a Reader
+A reader tab can also open files itself: the start page's recent list, path box and Browse button, a file dropped on the tab, and the reader's Open dialog. All of them call `open_here(path)` (`mixins/document.py`), which hands the path to the window's `open_from_reader(reader, path)` (`window/documents.py`):
+
+* A reader still on its start page is replaced, at the same tab index, by the tab `_open_document` makes. The file therefore opens in the mode `reader/open_in_preview_mode` asks for, with that mode's tab icon (the eye for previews), and goes into history.
+* A reader that already shows a document loads the file in place, after recording it in history.
+* Outside a window (tests, a bare `ReaderTab`), `open_here` just calls `load_document`.
+
+New ways of opening a file from inside a reader should go through `open_here`, or they skip history and ignore preview mode.
+
 ---
 
 ## Theme Palette
@@ -340,6 +351,12 @@ Other pieces of the theming:
 
 * **Page Scrolling**: `Page Up` and `Page Down` trigger `scroll_page_length(-1)` and `scroll_page_length(1)` to jump viewport by one full visible page height.
 * **F5 Document Refresh**: Calls `reload_document()`. Compares file modification times and content hashes. If modified or deleted on disk, prompts the user with an option dialog to reload the new document or keep the active cached view.
+
+---
+
+## Shortcuts in Split View
+
+Reader and browser tabs register their shortcuts at window scope (`QShortcut` parented to the tab, `WindowShortcut` context), so they work wherever the focus is in the window. In split view two tabs are visible, and both own keys such as Ctrl+F, F5 and Alt+Left. Qt counts such a key as ambiguous: it emits `activatedAmbiguously` and runs neither. `ui/shortcuts.py` handles this. Every widget that owns shortcuts (the window, `ReaderTab`, `BrowserTab`, the AI panel) calls `share_keys(self)` after creating them. An ambiguous press then runs the copy whose widget holds the focus. When a window-wide shortcut shares the keys, the innermost copy wins: the AI panel's Ctrl+L beats Library while the panel has the focus. A widget that registers new shortcuts must call `share_keys` too. `tests/test_shortcuts.py` also checks that the window registers each of its own key sequences once.
 
 ---
 
@@ -398,6 +415,27 @@ When adding features:
 * search logic belongs in SearchMixin
 
 Do not continuously expand `ReaderTab` itself.
+
+
+## Document Types and the Text View
+
+`core/doctypes.py` decides what a file is, for the whole app. `document_kind(path)` returns `pdf`, `markdown`, `html`, `text` or `binary`. Names come first (`.pdf`, `.md`, `.html` and so on); any other file is text when its first 8 KB hold no NUL byte and decode as UTF-8, so source files, logs and extension-less files such as `Makefile` all count. Binary files are refused with a toast everywhere (the window, the explorer, drops). Where reading a file is too slow or not trusted, the name lists decide alone: `TEXT_SUFFIXES` and `TEXT_NAMES` (the union of `PROSE_*` and `CODE_*`) drive the explorer's icons, the open dialogs' filter (`dialog_filter`) and the single-instance handoff, which never sniffs content.
+
+PDFs, Markdown and text open in the reader; HTML opens in the browser. In full mode a reader shows Markdown and text as one HTML page in its web view (`_show_text_document`): Markdown rendered through `generate_markdown_html`, other text highlighted by Pygments when it is installed (`generate_text_html`, up to `HIGHLIGHT_LIMIT`, 1 MB). Files over `TEXT_VIEW_LIMIT` (20 MB) are cut off with a note. `QWebEngineView.setHtml` refuses pages over 2 MB, so a bigger page is written to a per-tab file in the cache folder and loaded from there; such a page can't load KaTeX or the emoji font. In preview mode text and Markdown use the lightweight `PreviewTextTab` instead.
+
+## Page Editing and the Scratch Copy
+
+Page edits (rotate, delete, move, extract, insert, OCR of a range, redaction, Remove password) never touch the file on disk until Save. The first edit writes pending annotations into the PDF, records Riemann's annotation copy so Discard can restore it, and copies the file to a private cache folder (`edit_scratch`). From then on `pdf_path()` is the scratch copy, which the reader loads and renders and into which annotations, form entries and further edits go; `current_path` stays the document's identity for notes, the session, history and the library.
+
+Every edit runs through `_edit_pages(operation, *args, done=None)`, which calls `operation(path, *args, password=self.document_password)` from `core/page_edit.py`. Each operation rewrites the whole file into a temporary file next to it and renames it over the target, so a failure leaves the target untouched. It returns a page mapping that `remap_pages` uses to move Riemann's per-page annotation copy. Save writes the scratch copy over the original in one rename, keeping its permissions, after asking if the original changed on disk meanwhile. Discard deletes the scratch copy, restores the annotations and reopens the original. Closing the tab, or loading another file into it, asks which (`resolve_page_edits`).
+
+## Encrypted and Signed PDFs
+
+`page_edit.document_state(path, password)` reports whether a file is encrypted and whether it is signed; `DocumentLoadWorker` emits it with the loaded document, and `_on_document_loaded` stores it in `document_encrypted` and `document_signed`.
+
+* **Encrypted files** are edited with the password the reader opened them with and saved encrypted again (pikepdf drops encryption unless `save(encryption=True)`). `page_edit._open` tries without a password first, because pikepdf warns when given one for a file that has none.
+* **Remove password**: while an encrypted PDF is shown, the Protect button (Ctrl+Shift+S) turns from `file-lock.svg` into `file-key.svg` and offers Remove password instead of a protected copy (`_update_protect_button`). "Remove from this file" runs `page_edit.remove_password` through the scratch copy, so the file stays locked until Save. "Save an unlocked copy…" writes `save_unlocked_copy` at once and refuses to write over the source. The button's menu and ribbon labels come from its `riemannLabel` and `riemannShort` properties, and the toolbar is laid out again when they change (`toolbar_layout.py`).
+* **Signed files** can be edited, but rewriting one invalidates its signatures. The first edit asks (`_confirm_signed_edit`, "Edit anyway" or Cancel); the answer holds until another file is loaded. Annotation writing still leaves signed and encrypted files alone (see Annotation Storage).
 
 ---
 
@@ -680,6 +718,32 @@ Beyond native Riemann annotation overlays, `AnnotationsMixin` supports discoveri
   * In `ReaderTab.eventFilter`, mouse hover events set `Qt.CursorShape.PointingHandCursor` and show the comment preview as a tooltip.
   * Clicking on the comment opens `CommentViewDialog`, displaying author, timestamp, and the complete scrollable comment text.
 
+
+## Redaction
+
+Redaction marks are annotations of type `redact`: the Redact tool on the annotation toolbar drags a box (a click without a drag marks nothing), and "Mark for Redaction" in the context menu marks the selected text. They are drawn as a red outline with a faint fill (`CONTENT["redact_mark"]`) and written to the PDF as standard `/Redact` annotations with QuadPoints, so other editors see them as pending redactions too.
+
+"Apply redactions" (`AnnotationsMixin.apply_redactions`) confirms first, listing what is and isn't covered, then runs `core/redaction.apply_redactions(path, marks, keep, password)` through `_edit_pages`, so it works on the scratch copy and the file changes only on Save. The engine is Python on pikepdf, because PDFium's editing API can set a text object's character codes but never read them, and rebuilding text from Unicode breaks subset fonts.
+
+* It interprets each marked page's content stream (graphics and text state, fonts, Form XObjects) to find every glyph. A glyph whose box overlaps a mark is cut out of its string and replaced by the TJ spacing it took up, so the other glyphs keep their exact position, codes, font, size and colour. Invisible OCR text goes the same way.
+* Images are blacked out pixel by pixel under the mark (an image entirely inside a mark is dropped); vector paths are dropped only when they lie entirely inside one. Annotations, links and form fields touching a mark are removed, except the ids in `keep` (a Replace text overlay over its own mark). A black box is painted over each mark, and `/Thumb` is dropped.
+* A Form XObject or image that needs changing is copied for this page under a new name, and the page's XObject dictionary is pruned to what its content still draws; a stale entry would keep the unredacted original in the file.
+* Where removal can't be exact (unusual CMaps, vertical writing, missing widths, text used as a clip, partly covered inline images or image masks, nesting deeper than `MAX_DEPTH`), the whole Apply stops with a `RedactionError` naming the page, and nothing changes.
+* The result is saved in full, never as an incremental update, so old streams don't survive. Before it replaces the source, `verify_redaction` checks it with PDFium: no character may remain mostly inside a mark, and every character clear of the marks must still be there within `POSITION_TOLERANCE` (0.01 pt).
+
+Not covered, as the dialog says: XMP metadata, bookmarks, attachments, `/ActualText` in the structure tree, and font subsets (which keep the outlines of removed glyphs). Tests: `tests/test_redaction.py`, with fixtures from `tests/text_fixtures.py`.
+
+## Replace Text
+
+"Replace Text…" in the context menu (`replace_selected_text`, `ui/reader/replace_text.py`) draws new words over a selection as a `replace` annotation: a FreeText box whose appearance stream fills the background first and then writes the text in a PDF standard font (`/RmF`).
+
+* The box comes from the selection's line boxes, widened or deepened if the new text needs more room; nothing reflows.
+* The font is the standard font closest to the original (`standard_font`): Helvetica, Times or Courier, bold or italic to match, from the PDFium flags and, because those are often wrong for built-in fonts, the font name. Size, colour, baseline and line pitch come from the original characters (`get_char_styles`).
+* The background is the most common colour in a thin ring around the selection (`ring_colour`), sampled from the page rendered in the light theme, so tinted paper doesn't get a white patch.
+* On rotated pages the appearance gets a `/Matrix` turn so the text stays upright on screen. In the dark page themes the overlay's colours are mapped the way the Rust core maps the page (`themed`).
+
+The old text stays in the file under the box. The dialog's "Remove the original text too" adds a redaction mark under the same selection, which Apply redactions then removes while keeping the overlay. Tests: `tests/test_replace_text.py`.
+
 ---
 
 # 6. Search & Text Extraction Systems
@@ -749,6 +813,14 @@ Responsibilities:
 * caption integration
 * WebAudio integration
 * browser homepage logic
+
+---
+
+## Leaving Web Pages
+
+A site that wants to warn before it is left (unsaved form text, a draft) registers a `beforeunload` handler. Chromium then asks through `QWebEnginePage.javaScriptConfirm` with Qt's fixed `LEAVE_PROMPT` text, and `WebPage` shows that question as Leave or Stay (`ask_to_leave`) on the tab it belongs to, brought to the front. Other `confirm()` calls go to Qt's default dialog. Navigating away, reloading and closing all go through this.
+
+Closing a tab, a window or the app calls `BrowserTab.confirm_leave()` first. It sends the page `WebAction.RequestClose` and waits in a local event loop for Chromium's answer: `windowCloseRequested` (no handler, or Leave), or `WebPage.leave_refused` (Stay). A page without a handler answers within a millisecond or two. A page whose renderer never answers is let go after `LEAVE_WAIT_MS`. Chromium asks only on pages the person has interacted with. Closing a tab no longer blanks the page with `setHtml("")`, which was a navigation of its own.
 
 ---
 
@@ -1108,6 +1180,7 @@ Features:
 * **Crash Recovery State**: Tracks session exit state using a `_session_cleanly_closed` flag. If an unclean shutdown is detected on startup (e.g. system power outage or crash), the application prompts the user with a recovery dialog to restore all previously open tabs.
 * **Autocomplete Engine**: Powers address bar and file path suggestions across all viewports.
 * **Format Migration**: Automatically upgrades legacy JSON history formats.
+* **Document classes**: PDFs, Markdown, code and text files are all stored under the `pdf` key (installs have it on disk). The History tab's Documents list shows a Type column and a filter by class, from `core.doctypes.document_class` (PDF, Markdown, Code, Text), which goes by name and reads only a file whose name says nothing. HTML files are web history.
 
 ---
 
@@ -1202,6 +1275,12 @@ In split view each pane's `QTabWidget::pane` gets a rounded 2 px outline: the ac
 
 ---
 
+## Help Page
+
+`ui/system/help_tab.py` is the Help System tab (F1, the Help menu, or the command palette). Its text is data: `TOPICS` (sections of titled cards) and `SHORTCUTS` (key tables per place: everywhere, in a document, on a web page, in presentation mode, in the AI panel). It is written for someone opening Riemann for the first time, so keep new entries in plain words. `tests/test_help.py` fails when the window, a reader, a browser tab or the AI panel registers a `QShortcut` that `SHORTCUTS` doesn't list. Keys read in a `keyPressEvent` (A, W, H, R, C, D, F, the presentation keys) aren't checked and must be added by hand.
+
+---
+
 ## AI Assistant
 
 `AiSidecarPanel` (`ui/sidecar.py`) docks at the right of `main_splitter`. Providers: Anthropic, OpenAI, Google Gemini, OpenRouter and Ollama. Model lists are fetched from each provider (`list_models()`), so there is no hard-coded list to go stale; only Anthropic has a fallback list for when the request fails. Requests stream through `urllib` (`stream_chat()`: SSE for the hosted APIs, NDJSON for Ollama) on a worker thread. The system prompt carries the document text with `[Page N]` markers (`document_context()`, at most 150,000 characters, nearest pages first) and asks for `[p. N]` citations, which `link_citations()` turns into `page:N` links that jump the reader.
@@ -1239,7 +1318,7 @@ Scrollbars are 16 px wide with a 2 px margin around the handle (`modern_dark.css
 When all document tabs are closed, `RiemannWindow` displays a centered drag-and-drop placeholder:
 
 * Visual target: prominent "Drop PDF here" banner styled to match the active theme.
-* Event Routing: intercepts `QDragEnterEvent`, `QDragMoveEvent`, and `QDropEvent` globally, opening dropped PDF files immediately into new reader tabs and persisting them to history.
+* Event Routing: a file dropped on an empty reader goes through `open_here` (see Opening From Inside a Reader), so it opens in the current open mode and is recorded in history; dropped on a reader showing a document, it opens in a new tab.
 
 ---
 
@@ -1451,6 +1530,14 @@ Always use:
 
 A page rendered at Fit Width is about 10 MB. glibc serves allocations that size with `mmap` until the first one is freed, then raises its dynamic threshold and serves later ones from per-thread arenas, which rarely hand memory back to the OS. `_return_page_buffers_to_os()` in `render_worker.py` runs once at import on Linux and calls `mallopt(M_MMAP_THRESHOLD, 1 MB)`, which fixes the threshold so page buffers always come from `mmap` and are released when freed. With ten PDF tabs open this halved resident memory (3.5 GB to 1.8 GB in `benchmarks/bench_memory.py`).
 
+## Whole-App Session Tests
+
+`python-app/tests/test_user_sessions.py` starts Riemann the way the desktop launcher does (`riemann.app.run`), in a child process with throwaway home and XDG folders. It passes `--new-window`, so files never reach a Riemann the developer has open. Each test plays a scenario from `tests/user_session.py`: reading and copying, redacting and saving, opening files through the file dialog, quitting with page edits waiting, and leaving pages with unsaved changes. A scenario is a generator that acts through real input (QTest keys and clicks, menus, dialog buttons) and yields the conditions it waits for. Anything that opens a modal dialog or menu starts with `later()`, because the dialog runs its own event loop. Two offscreen limits shape the scenarios. QTest mouse moves never arrive, so text is selected by double-clicking a word. A window may be left inactive after a dialog closes, so `key()` activates the window before pressing. If the app hangs, the driver's watchdog writes the error and prints every thread's stack.
+
+The Rust core has unit tests of its own in `rust-core/src/lib.rs` (`just test-rust`). They write small PDFs with a correct cross-reference table and check rendering, the page themes, text and character boxes, links, the outline, comments and signatures.
+
+---
+
 ## Benchmarks
 
 `benchmarks/` holds the scripts behind the numbers in the README: `bench_core.py` (Rust core against PyMuPDF), `bench_scroll.py`, `bench_startup.py` and `bench_memory.py`. They run against the checkout by default; `--app-path` and `--core-path` point them at another checkout or core build for before/after comparisons. Run the relevant one before and after changing the render path, the page cache or startup. See `benchmarks/README.md`.
@@ -1569,6 +1656,8 @@ riemann/
 │   │   │   ├── pdf_annotations.py
 │   │   │   ├── pdf_forms.py
 │   │   │   ├── page_edit.py
+│   │   │   ├── redaction.py
+│   │   │   ├── doctypes.py
 │   │   │   ├── citations.py
 │   │   │   ├── bibliography.py
 │   │   │   └── ai_engine.py
@@ -1587,7 +1676,7 @@ riemann/
 
 Subsystem overview:
 
-* `core/` — persistence, settings, logging, site permissions, PDF writing (annotations, forms, page edits), citations, the AI engine client
+* `core/` — persistence, settings, logging, site permissions, document types, PDF writing (annotations, forms, page edits, redaction), citations, the AI engine client
 * `window/` — the main window's mixins and helpers
 * `ui/` — browser and reader UI systems, System tabs (`ui/system/`), tooltips, the command palette
 * `mixins/` — modular reader logic

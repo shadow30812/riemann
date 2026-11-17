@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guide for anyone (person or AI agent) changing Riemann. Read it before editing. The open backlog lives in `docs/review-2026-11-14.md`; architecture detail lives in `docs/DevGuide.md`. Update this file whenever the layout, commands or rules below change.
+Guide for anyone (person or AI agent) changing Riemann. Read it before editing. Architecture detail lives in `docs/DevGuide.md`. Update this file whenever the layout, commands or rules below change.
 
 ## What Riemann is
 
@@ -9,18 +9,16 @@ A desktop PDF reader and web browser in one window, written in Python (PySide6 6
 | Part | Path | Notes |
 | --- | --- | --- |
 | Desktop app | `python-app/riemann/` | Entry `app.py` (`RiemannWindow`, `run()`). The window's behaviour is split into mixins in `window/` (documents, session, system, menus, panes, tabs, chrome, folders). |
-| Reader tab | `python-app/riemann/ui/reader/` | `tab.py` (`ReaderTab`) plus behaviour split into `mixins/` (toolbar, navigation, selection, input, appearance, document, pages, read_aloud, forms, citations, rendering, annotations, ai, ...). State and widgets that more than one mixin uses are declared in `mixins/host.py` (`ReaderHost`); a test checks `ReaderTab` has them all. Rendering runs in `render_worker.py`. |
+| Reader tab | `python-app/riemann/ui/reader/` | `tab.py` (`ReaderTab`) plus behaviour split into `mixins/` (toolbar, navigation, selection, input, appearance, document, pages, read_aloud, forms, citations, rendering, annotations, ai, ...). State and widgets that more than one mixin uses are declared in `mixins/host.py` (`ReaderHost`); a test checks `ReaderTab` has them all. Rendering runs in `render_worker.py`. Markdown and text files open here too, as one HTML page in the tab's web view; `replace_text.py` is Replace text. |
 | Reader toolbar layouts | `python-app/riemann/ui/reader/toolbar_layout.py` | The buttons are created once in `mixins/toolbar.py`; `ToolbarLayout` only places them (top bar, side rail, ribbon, floating pill, menus, hidden) per the layout chosen in Settings. Add a new button to `COMMANDS` there, or it shows nowhere. |
-| System tabs | `python-app/riemann/ui/system/` | Settings, history, bookmarks, downloads, library open as tabs (`window/system.py`). |
+| System tabs | `python-app/riemann/ui/system/` | Settings, history, bookmarks, downloads, library and help open as tabs (`window/system.py`). Help (`help_tab.py`, F1) is plain-words text for new users plus every keyboard shortcut. |
 | Browser tab | `python-app/riemann/ui/browser.py` | Qt WebEngine. Start page is a local file in `assets/homepage/`. |
-| Core services | `python-app/riemann/core/` | `ai_engine.py` (shared sidecar), `storage.py` (atomic JSON), `managers.py` (history, bookmarks, downloads, library), `pdf_annotations.py` (writes annotations into PDFs), `captions_server.py`. |
+| Core services | `python-app/riemann/core/` | `ai_engine.py` (shared sidecar), `storage.py` (atomic JSON), `managers.py` (history, bookmarks, downloads, library), `doctypes.py` (what kind of document a file is), `pdf_annotations.py` (writes annotations into PDFs), `page_edit.py` (page edits, passwords), `redaction.py` (applies redaction marks), `captions_server.py`. |
 | Theme | `python-app/riemann/ui/palette.py`, `assets/theme/modern_dark.css`, `modern_light.css`, `assets/homepage/homepage.css` | Colour tokens are duplicated in all of these. Change them together. |
 | Rust core | `rust-core/` | PyO3 0.30 module `riemann_core` on PDFium (pdfium-render 0.9, bindings for chromium/7543). Page indices are `u32` from Python. Typed in `python-app/riemann/riemann_core.pyi`. |
 | OCR worker | `rust-ocr-worker/` | Separate crate. `recognize_pngs` reads many pages with one Tesseract run. |
 | AI engine | `python-app/riemann/core/ai_server.py` | FastAPI on a random localhost port, per-run token, run as a child of the app (`python -m riemann.core.ai_server`, or the frozen exe with `--riemann-ai-sidecar`). ONNX MiniLM on onnxruntime; the model is downloaded on first use, pinned by commit and SHA-256. It never opens PDFs: the app sends page text. Client side: `core/ai_engine.py`. |
 | PDFium | `libs/` | `libpdfium.so`, `pdfium.dll`, not in git: `just fetch-pdfium` (or `python scripts/fetch_pdfium.py`) downloads them, pinned by SHA-256. |
-
-An old checkout may still hold `python-app/riemann/assets/riemann_ai_engine/`, the 8 GB packed environment of the old AI sidecar. Nothing uses or builds it; delete it.
 
 ## Commands
 
@@ -87,6 +85,10 @@ env -u LD_LIBRARY_PATH QT_QPA_PLATFORM=offscreen ./riemann/bin/python -m pytest 
 
 ### Data safety
 
+- Decide what a file is with `core.doctypes` (`document_kind`, `is_reader_name`, `has_text_name`), not with suffix checks of your own. Binary files are refused, not opened.
+- Code in a reader that opens a file (start page, drops, dialogs) calls `open_here`, so the file follows the preview setting and reaches history.
+- Page edits, redaction and Remove password go through `_edit_pages`, which changes a scratch copy; the user's file changes only on Save. Encrypted files stay encrypted unless the user removes the password; editing a signed file asks first.
+- Redaction saves the file in full (never an incremental update) and replaces the source only after `verify_redaction` passes. Where it can't remove exactly what is marked, it stops and names the page.
 - Write Riemann's own JSON files with `core.storage.write_json_atomic`; get the data folder with `core.storage.app_data_dir()`.
 - Never overwrite a user's file without asking (PDF, `.srt`, video).
 - Annotation writing appends an incremental update with pikepdf. New object numbers start after the highest existing object, not at the trailer `/Size`; see the module docstring of `core/pdf_annotations.py`.
@@ -106,6 +108,8 @@ env -u LD_LIBRARY_PATH QT_QPA_PLATFORM=offscreen ./riemann/bin/python -m pytest 
 - Mixins that override Qt event handlers must come before `QWidget`/`QMainWindow` in the class bases.
 - Tie delayed callbacks to the widget they touch (`QTimer.singleShot(ms, widget, fn)`), so they are dropped if the widget is deleted first.
 - Every browser tab on a profile receives its `downloadRequested`; `_handle_download` claims each request once. Don't connect another handler to it.
+- A widget that registers `QShortcut`s calls `ui/shortcuts.share_keys(self)` after creating them; otherwise the keys stop working in split view, where two tabs own the same shortcut. Describe every new shortcut in `SHORTCUTS` in `ui/system/help_tab.py` (`tests/test_help.py` fails otherwise), in plain words.
+- Code that closes a browser tab or a window asks first: `close_tab`/`close_side_tab` (through `may_close`) or `confirm_close`, which let a page with unsaved changes ask Leave or Stay (`BrowserTab.confirm_leave`). Don't blank or delete a page before that.
 
 ### Threads and processes
 
@@ -122,21 +126,11 @@ env -u LD_LIBRARY_PATH QT_QPA_PLATFORM=offscreen ./riemann/bin/python -m pytest 
 - pytest-qt is not installed here; `conftest.py` supplies a fallback `qtbot` whose `addWidget` stops the widget's timers at teardown. Pass every window a test creates to `qtbot.addWidget`, or its timers keep running into later tests.
 - Every bug fix gets a test that fails without the fix. Prefer tests on behaviour (files on disk, real sockets, real PDFs in `benchmarks/corpus/`) over mocks of `open` or `json.dump`.
 - Any script that launches Riemann must set `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and `HOME` to throwaway folders, plus `QT_QPA_PLATFORM=offscreen`. Never touch the real `~/.config/Riemann` or `~/.local/share/Riemann`.
+- `tests/test_user_sessions.py` drives the whole app in a child process through real keys, clicks and dialogs (scenarios in `tests/user_session.py`). Add a scenario there for a flow that spans several parts of the app.
+- The Rust core's tests are unit tests inside `rust-core/src/lib.rs` (the crate is a `cdylib`); `just test-rust` runs them with PDFium from `libs/`.
 - Performance-sensitive changes to rendering: run the scroll benchmark in `benchmarks/` with a temporary label so the stored baseline isn't overwritten.
 
 ### Git
 
 - Commit only when the owner asks. One logical change per commit.
 - Don't commit binaries, logs or scratch files.
-
-## Planned work
-
-Tracked in `docs/review-2026-11-14.md`. Agreed with the owner on 2026-11-14:
-
-- All items under security, data integrity, reliability and code quality.
-- All ten feature ideas.
-- Split `app.py` and `ui/reader/tab.py` into smaller modules, and remove in-body comments everywhere.
-- A `System` tab type: Settings, history, downloads, bookmarks and site permissions open as tabs in the same window (one tab per page, re-opening focuses it), with its own tab colour.
-- Per-site browser permissions in Settings (camera, microphone, screen sharing, location, notifications, clipboard read and write, autoplay, pop-ups), with safe defaults: ask for capture devices, location, notifications and clipboard read; allow clipboard write; block pop-ups.
-- Redesigned tooltips: keycap style, done (`ui/tooltip.py`).
-- Reader toolbar layouts (2026-11-15): Default (side rail, floating page controls in pure full screen), A (grouped menus), B (ribbon), C (side rail), D (floating pill), and Custom, chosen in Settings → Appearance.
