@@ -1053,3 +1053,376 @@ fn riemann_core(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<RenderResult>()?;
     Ok(())
 }
+
+/// Tests of the pixel themes and the display frame, and of the document
+/// methods on small PDFs written by `pdf_file` (PDFium is loaded from `libs/`,
+/// where `just fetch-pdfium` puts it). They call the Python-facing methods
+/// directly, so they cover the same code paths Python does.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT_FILE: AtomicUsize = AtomicUsize::new(0);
+
+    /// A test PDF on disk, deleted when dropped. Each has its own name, since
+    /// the tests run in parallel.
+    struct TempPdf(String);
+
+    impl Drop for TempPdf {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    /// A PDF from objects numbered 1, 2, ... in order, with a correct xref
+    /// table, written to a fresh file in the temporary folder.
+    fn pdf_file(name: &str, objects: &[String]) -> TempPdf {
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend(format!("{} 0 obj\n{}\nendobj\n", i + 1, body).as_bytes());
+        }
+        let xref = out.len();
+        out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        for offset in offsets {
+            out.extend(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        out.extend(
+            format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes(),
+        );
+        let n = NEXT_FILE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("riemann-core-{}-{n}-{name}.pdf", std::process::id()));
+        std::fs::File::create(&path).unwrap().write_all(&out).unwrap();
+        TempPdf(path.to_string_lossy().into_owned())
+    }
+
+    fn stream(content: &str) -> String {
+        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len())
+    }
+
+    /// Two pages. Page 1 (612 x 792) has "Hello Riemann" in red Helvetica 24 at
+    /// (72, 700), a web link, a link to page 2, a sticky note from "Ana", and
+    /// two black squares: one Riemann's own (`/NM (riemann:1)`) at the
+    /// bottom-left, one from another application at the bottom-right. Page 2
+    /// is turned with `/Rotate 90` and has "Turned" at (72, 700). The outline
+    /// has one entry, for page 2.
+    fn sample() -> TempPdf {
+        let square = |nm: &str, x: u32| {
+            format!("<< /Type /Annot /Subtype /Square /NM ({nm}) /Rect [{x} 50 {} 150] /AP << /N 13 0 R >> >>", x + 100)
+        };
+        pdf_file(
+            "sample",
+            &[
+                "<< /Type /Catalog /Pages 2 0 R /Outlines 11 0 R >>".into(),
+                "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".into(),
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R /Annots [7 0 R 8 0 R 9 0 R 14 0 R 15 0 R] >>".into(),
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Rotate 90 /Resources << /Font << /F1 5 0 R >> >> /Contents 10 0 R >>".into(),
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+                stream("BT 1 0 0 rg /F1 24 Tf 72 700 Td (Hello Riemann) Tj ET"),
+                "<< /Type /Annot /Subtype /Link /Rect [72 600 272 620] /Border [0 0 0] /A << /S /URI /URI (https://example.org/paper) >> >>".into(),
+                "<< /Type /Annot /Subtype /Link /Rect [72 500 272 520] /Border [0 0 0] /Dest [4 0 R /XYZ 0 500 0] >>".into(),
+                "<< /Type /Annot /Subtype /Text /Rect [400 700 420 720] /Contents (Looks good) /T (Ana) /M (D:20261117120000Z) >>".into(),
+                stream("BT /F1 24 Tf 72 700 Td (Turned) Tj ET"),
+                "<< /Type /Outlines /First 12 0 R /Last 12 0 R /Count 1 >>".into(),
+                "<< /Title (Second page) /Parent 11 0 R /Dest [4 0 R /XYZ 0 792 0] >>".into(),
+                "<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Length 21 >>\nstream\n0 0 0 rg 0 0 100 100 re f\nendstream".into(),
+                square("riemann:1", 50),
+                square("other-app", 450),
+            ],
+        )
+    }
+
+    fn open(py: Python, path: &str, password: Option<&str>) -> PyResult<RiemannDocument> {
+        {
+            let _guard = pdfium_guard();
+            get_pdfium(&[])?;
+        }
+        PdfEngine.load_document(py, path, password.map(str::to_owned))
+    }
+
+    fn with_sample<T>(f: impl FnOnce(Python, &RiemannDocument) -> T) -> T {
+        Python::initialize();
+        Python::attach(|py| {
+            let file = sample();
+            let doc = open(py, &file.0, None).expect("load the sample PDF");
+            let result = f(py, &doc);
+            drop(doc);
+            result
+        })
+    }
+
+    fn pixel(result: &RenderResult, py: Python, x: u32, y: u32) -> [u8; 4] {
+        let data = result.data.bind(py).as_bytes();
+        let i = ((y * result.width + x) * 4) as usize;
+        [data[i], data[i + 1], data[i + 2], data[i + 3]]
+    }
+
+    #[test]
+    fn light_theme_leaves_pixels_alone() {
+        let mut buffer = vec![10, 20, 30, 255, 200, 100, 50, 128];
+        convert_pixels(&mut buffer, 0);
+        assert_eq!(buffer, vec![10, 20, 30, 255, 200, 100, 50, 128]);
+    }
+
+    #[test]
+    fn inverted_theme_inverts_colour_and_keeps_alpha() {
+        let mut buffer = vec![0, 128, 255, 200];
+        convert_pixels(&mut buffer, 1);
+        assert_eq!(buffer, vec![255, 127, 0, 200]);
+    }
+
+    #[test]
+    fn smart_dark_turns_paper_black_and_ink_white() {
+        let mut buffer = vec![255, 255, 255, 255, 0, 0, 0, 255];
+        convert_pixels(&mut buffer, 2);
+        assert_eq!(buffer, vec![0, 0, 0, 255, 255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn smart_dark_keeps_the_hue_of_a_colour() {
+        let mut buffer = vec![120, 30, 20, 255];
+        convert_pixels(&mut buffer, 2);
+        let [b, g, r, a] = [buffer[0], buffer[1], buffer[2], buffer[3]];
+        assert_eq!(a, 255);
+        assert!(b > g && g > r, "dark blue should stay blue, got BGR {b} {g} {r}");
+        assert!(b as u32 + g as u32 + r as u32 > 120 + 30 + 20, "dark blue should get lighter");
+    }
+
+    #[test]
+    fn smart_dark_matches_inverting_hsl_lightness() {
+        for &(r, g, b) in &[(255u8, 0u8, 0u8), (30, 200, 90), (250, 240, 200), (12, 12, 40)] {
+            let (rf, gf, bf) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
+            let (max, min) = (rf.max(gf).max(bf), rf.min(gf).min(bf));
+            let lightness = (max + min) / 2.0;
+            let (nb, ng, nr) = smart_dark(r, g, b);
+            let (nr, ng, nb) = (nr as f32 / 255.0, ng as f32 / 255.0, nb as f32 / 255.0);
+            let new_lightness = (nr.max(ng).max(nb) + nr.min(ng).min(nb)) / 2.0;
+            assert!((new_lightness - (1.0 - lightness)).abs() < 0.01, "({r}, {g}, {b})");
+        }
+    }
+
+    fn frame(rotation: u16) -> DisplayFrame {
+        DisplayFrame { rotation, left: 0.0, bottom: 0.0, right: 612.0, top: 792.0 }
+    }
+
+    #[test]
+    fn display_frame_turns_the_page_size_with_the_rotation() {
+        assert_eq!((frame(0).width(), frame(0).height()), (612.0, 792.0));
+        assert_eq!((frame(90).width(), frame(90).height()), (792.0, 612.0));
+        assert_eq!((frame(180).width(), frame(180).height()), (612.0, 792.0));
+        assert_eq!((frame(270).width(), frame(270).height()), (792.0, 612.0));
+    }
+
+    #[test]
+    fn display_frame_maps_the_user_space_top_left_corner() {
+        assert_eq!(frame(0).point(0.0, 792.0), (0.0, 792.0));
+        assert_eq!(frame(90).point(0.0, 792.0), (792.0, 612.0));
+        assert_eq!(frame(180).point(0.0, 792.0), (612.0, 0.0));
+        assert_eq!(frame(270).point(0.0, 792.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn display_frame_measures_from_a_cropped_origin() {
+        let cropped = DisplayFrame { rotation: 0, left: 50.0, bottom: 100.0, right: 562.0, top: 692.0 };
+        assert_eq!(cropped.point(50.0, 100.0), (0.0, 0.0));
+        assert_eq!((cropped.width(), cropped.height()), (512.0, 592.0));
+    }
+
+    #[test]
+    fn display_frame_boxes_come_out_left_top_right_bottom() {
+        let user = PdfRect::new_from_values(100.0, 50.0, 200.0, 150.0);
+        for rotation in [0, 90, 180, 270] {
+            let f = frame(rotation);
+            let (l, t, r, b) = f.rect(&user);
+            assert!(l < r && t > b, "rotation {rotation}: {:?}", (l, t, r, b));
+            assert!(l >= 0.0 && r <= f.width() && b >= 0.0 && t <= f.height(), "rotation {rotation}");
+            assert!(((r - l) * (t - b) - 100.0 * 100.0).abs() < 0.01, "rotation {rotation}");
+        }
+    }
+
+    #[test]
+    fn page_indices_beyond_pdfium_are_value_errors() {
+        assert!(page_at(7).is_ok());
+        Python::initialize();
+        Python::attach(|py| {
+            let err = page_at(u32::MAX).unwrap_err();
+            assert!(err.is_instance_of::<pyo3::exceptions::PyValueError>(py));
+        });
+    }
+
+    #[test]
+    fn a_document_reports_its_pages_and_their_displayed_size() {
+        with_sample(|py, doc| {
+            assert_eq!(doc.page_count, 2);
+            assert_eq!(doc.get_page_size(py, 0).unwrap(), (612.0, 792.0));
+            assert_eq!(doc.get_page_size(py, 1).unwrap(), (792.0, 612.0));
+        });
+    }
+
+    #[test]
+    fn a_missing_file_is_an_io_error() {
+        Python::initialize();
+        Python::attach(|py| {
+            let err = open(py, "/nonexistent/riemann.pdf", None).err().expect("loading should fail");
+            assert!(err.is_instance_of::<pyo3::exceptions::PyIOError>(py));
+        });
+    }
+
+    #[test]
+    fn a_password_with_a_nul_is_refused() {
+        Python::initialize();
+        Python::attach(|py| {
+            let file = sample();
+            let err = open(py, &file.0, Some("a\0b")).err().expect("loading should fail");
+            assert!(err.is_instance_of::<pyo3::exceptions::PyValueError>(py));
+        });
+    }
+
+    #[test]
+    fn rendering_gives_bgra_pixels_at_the_requested_scale() {
+        with_sample(|py, doc| {
+            let result = doc.render_page(py, 0, 0.5, 0).unwrap();
+            assert_eq!((result.width, result.height, result.scale), (306, 396, 0.5));
+            assert_eq!(result.data.bind(py).as_bytes().len(), 306 * 396 * 4);
+            assert_eq!(pixel(&result, py, 150, 10), [255, 255, 255, 255]);
+            let ink = (0..result.width).flat_map(|x| (40..56).map(move |y| (x, y))).any(|(x, y)| {
+                let [b, g, r, _] = pixel(&result, py, x, y);
+                r > 150 && g < 100 && b < 100
+            });
+            assert!(ink, "the red text should be drawn near the top");
+        });
+    }
+
+    #[test]
+    fn rendering_applies_the_page_theme() {
+        with_sample(|py, doc| {
+            let inverted = doc.render_page(py, 0, 0.5, 1).unwrap();
+            assert_eq!(pixel(&inverted, py, 150, 10), [0, 0, 0, 255]);
+            let smart = doc.render_page(py, 0, 0.5, 2).unwrap();
+            assert_eq!(pixel(&smart, py, 150, 10), [0, 0, 0, 255]);
+        });
+    }
+
+    #[test]
+    fn rendering_hides_riemanns_own_annotations_but_not_others() {
+        with_sample(|py, doc| {
+            let result = doc.render_page(py, 0, 1.0, 0).unwrap();
+            assert_eq!(pixel(&result, py, 100, 692), [255, 255, 255, 255], "Riemann draws its own");
+            assert_eq!(pixel(&result, py, 500, 692), [0, 0, 0, 255], "another app's square is rendered");
+        });
+    }
+
+    #[test]
+    fn a_huge_render_is_scaled_down_to_the_pixel_budget() {
+        Python::initialize();
+        Python::attach(|py| {
+            let path = pdf_file(
+                "poster",
+                &[
+                    "<< /Type /Catalog /Pages 2 0 R >>".into(),
+                    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+                    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 3000 3000] >>".into(),
+                ],
+            );
+            let doc = open(py, &path.0, None).unwrap();
+            let result = doc.render_page(py, 0, 4.0, 0).unwrap();
+            assert!(result.scale < 4.0);
+            assert!((result.width as f64) * (result.height as f64) <= MAX_RENDER_PIXELS);
+            assert!(result.width > 7_900, "scaled to fit, not further: {}", result.width);
+        });
+    }
+
+    #[test]
+    fn page_text_and_search_find_the_words() {
+        with_sample(|py, doc| {
+            assert!(doc.get_page_text(py, 0).unwrap().contains("Hello Riemann"));
+            assert_eq!(doc.get_page_text(py, 9).unwrap(), "");
+            let hits = doc.search_page(py, 0, "Riemann".into()).unwrap();
+            assert_eq!(hits.len(), 1);
+            let (l, t, r, b) = hits[0];
+            assert!(l > 72.0 && r < 300.0 && b > 690.0 && t < 730.0, "{:?}", hits[0]);
+            assert!(doc.search_page(py, 0, "absent".into()).unwrap().is_empty());
+        });
+    }
+
+    #[test]
+    fn char_boxes_run_left_to_right_along_the_line() {
+        with_sample(|py, doc| {
+            let boxes: Vec<_> = doc.get_char_boxes(py, 0).unwrap().into_iter().filter(|(c, _)| c.trim() != "").collect();
+            let text: String = boxes.iter().map(|(c, _)| c.as_str()).collect();
+            assert_eq!(text, "HelloRiemann");
+            assert!(boxes.windows(2).all(|w| w[0].1 .0 < w[1].1 .0));
+            assert!(boxes.iter().all(|(_, (_, t, _, b))| *b < 710.0 && *t > 700.0));
+        });
+    }
+
+    #[test]
+    fn char_boxes_on_a_rotated_page_are_in_the_displayed_page() {
+        with_sample(|py, doc| {
+            let boxes = doc.get_char_boxes(py, 1).unwrap();
+            assert!(!boxes.is_empty());
+            for (c, (l, t, r, b)) in boxes {
+                assert!(l >= 0.0 && r <= 792.0 && b >= 0.0 && t <= 612.0, "{c}: {:?}", (l, t, r, b));
+            }
+        });
+    }
+
+    #[test]
+    fn char_styles_report_font_size_and_colour() {
+        with_sample(|py, doc| {
+            let styles = doc.get_char_styles(py, 0).unwrap();
+            assert_eq!(styles.len(), doc.get_char_boxes(py, 0).unwrap().len());
+            let h = styles.iter().find(|s| s.0 == "H").expect("an H");
+            assert!((h.2 - 24.0).abs() < 0.01, "size {}", h.2);
+            assert!(h.3.contains("Helvetica"), "font {}", h.3);
+            assert!(!h.5, "Helvetica is not fixed-pitch");
+            assert_eq!(h.8.to_uppercase(), "#FF0000");
+        });
+    }
+
+    #[test]
+    fn links_report_web_addresses_and_pages() {
+        with_sample(|py, doc| {
+            let mut targets: Vec<String> = doc.get_links(py, 0).unwrap().into_iter().map(|(t, _)| t).collect();
+            targets.sort();
+            assert_eq!(targets, vec!["#page=2&top=500.00".to_string(), "https://example.org/paper".to_string()]);
+        });
+    }
+
+    #[test]
+    fn the_outline_is_flattened_with_page_indices() {
+        with_sample(|py, doc| {
+            assert_eq!(doc.get_outline(py).unwrap(), vec![(0, "Second page".to_string(), 1)]);
+        });
+    }
+
+    #[test]
+    fn comments_leave_out_links_and_riemanns_own_annotations() {
+        with_sample(|py, doc| {
+            let (page, comments) = doc.get_comments(py, 0).unwrap();
+            assert_eq!(page, (0.0, 0.0, 612.0, 792.0));
+            assert_eq!(comments.len(), 1, "{comments:?}");
+            let (kind, contents, author, date, _) = &comments[0];
+            assert_eq!((kind.as_str(), contents.as_str(), author.as_str()), ("Text", "Looks good", "Ana"));
+            assert!(date.starts_with("D:2026"));
+        });
+    }
+
+    #[test]
+    fn a_document_without_signatures_or_forms_reports_none() {
+        with_sample(|py, doc| {
+            assert_eq!(doc.signature_count(py), 0);
+            assert!(doc.get_form_widgets(py, 0).unwrap().is_empty());
+        });
+    }
+
+    #[test]
+    fn subtype_names_follow_the_pdf_spelling() {
+        assert_eq!(annotation_subtype_name(PdfPageAnnotationType::Strikeout), "StrikeOut");
+        assert_eq!(annotation_subtype_name(PdfPageAnnotationType::Redacted), "Redact");
+        assert_eq!(annotation_subtype_name(PdfPageAnnotationType::Highlight), "Highlight");
+    }
+}
