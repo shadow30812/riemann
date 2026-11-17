@@ -17,7 +17,12 @@ into a folder of its own and returns the converted file, moved into the
 cache. Only one conversion runs at a time (_RUN_LOCK): LibreOffice can't share
 a profile between two processes. run() blocks, so callers use a worker
 thread; cancel() from another thread kills the process, and so does the
-TIMEOUT. The user's file is only read.
+TIMEOUT. The soffice Riemann starts is a launcher that starts soffice.bin
+(and a Flatpak runs it in a sandbox), so the conversion runs in a process
+group of its own and the whole group is killed (taskkill /T on Windows):
+killing only the launcher would leave soffice.bin holding the profile, and
+the next conversion would hand its work to it and find nothing. The user's
+file is only read.
 
 Riemann's own LibreOffice profile (profile_dir) means conversion works while
 the person has LibreOffice open, and lets Riemann lock it down. Before every
@@ -51,6 +56,7 @@ import hashlib
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -236,6 +242,22 @@ def _child_env() -> dict:
     return env
 
 
+def _kill(proc: subprocess.Popen) -> None:
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **NO_WINDOW,
+        )
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    proc.kill()
+
+
 def open_in_office(path: str, office: Office) -> None:
     env = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
     detach = {"start_new_session": True} if os.name != "nt" else {}
@@ -343,12 +365,12 @@ class OfficeConversion:
             self._proc = subprocess.Popen(
                 self.command(outdir),
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                env=_child_env(), **NO_WINDOW,
+                env=_child_env(), **NO_WINDOW, **({"start_new_session": True} if os.name != "nt" else {}),
             )
         try:
             self._proc.wait(self.timeout)
         except subprocess.TimeoutExpired:
-            self._proc.kill()
+            _kill(self._proc)
             self._proc.wait()
             raise OfficeError(f"LibreOffice took more than {int(self.timeout)} seconds to convert {name}, so Riemann stopped it.")
         if self._cancelled:
@@ -366,5 +388,5 @@ class OfficeConversion:
     def cancel(self) -> None:
         with self._lock:
             self._cancelled = True
-            if self._proc is not None and self._proc.poll() is None:
-                self._proc.kill()
+            if self._proc is not None:
+                _kill(self._proc)

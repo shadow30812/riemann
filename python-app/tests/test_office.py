@@ -35,6 +35,12 @@ with open(os.environ["FAKE_SOFFICE_LOG"], "a") as log:
 mode = os.environ.get("FAKE_SOFFICE_MODE", "ok")
 if mode == "sleep":
     time.sleep(60)
+if mode == "child":
+    import subprocess
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    with open(os.environ["FAKE_SOFFICE_CHILD"], "w") as f:
+        f.write(str(child.pid))
+    child.wait()
 if mode == "ok" and "--convert-to" in args:
     out = args[args.index("--outdir") + 1]
     stem = os.path.splitext(os.path.basename(args[-1]))[0]
@@ -241,6 +247,30 @@ def test_a_failed_slow_or_cancelled_conversion_says_so(fake, tmp_path, monkeypat
     assert str(errors[0]) == "Cancelled."
     with pytest.raises(OfficeError, match="isn't installed"):
         OfficeConversion(source, office=None).run()
+
+
+def alive(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().split(")")[-1].split()[0] != "Z"
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc")
+def test_cancelling_stops_the_process_libreoffice_starts(fake, tmp_path, monkeypatch):
+    source = docx(tmp_path / "report.docx")
+    pid_file = tmp_path / "child.pid"
+    monkeypatch.setenv("FAKE_SOFFICE_MODE", "child")
+    monkeypatch.setenv("FAKE_SOFFICE_CHILD", str(pid_file))
+    conversion = OfficeConversion(source, office=fake.found)
+    thread = threading.Thread(target=lambda: pytest.raises(OfficeError, conversion.run))
+    thread.start()
+    assert wait_for(lambda: pid_file.exists() and pid_file.read_text(), 10)
+    child = int(pid_file.read_text())
+    conversion.cancel()
+    thread.join(10)
+    assert wait_for(lambda: not alive(child), 5)
 
 
 def test_the_cache_is_trimmed_oldest_first_and_can_be_cleared(fake, tmp_path):
