@@ -6,13 +6,16 @@ order would delete the profile first. Detach it and release it after the tab
 (and its page) are gone.
 """
 
+import http.server
 import json
+import threading
+import time
 import urllib.parse
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 import shiboken6
-from PySide6.QtCore import QCoreApplication, QEvent, QUrl
+from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QUrl
 from PySide6.QtGui import QFocusEvent
 from PySide6.QtWebEngineCore import (
     QWebEnginePage,
@@ -474,19 +477,109 @@ def test_browser_tab_music_mode(mock_exists, mock_file, mock_injector, qtbot, we
     )
 
 
+def _wait_until(predicate, timeout_ms=15000):
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        QCoreApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
+@pytest.fixture
+def download_server():
+    files = {"/report.pdf": (b"%PDF-1.4\n%%EOF\n", "application/pdf"), "/bundle.zip": (b"PK\x05\x06" + bytes(18), "application/zip")}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body, mime = files[self.path]
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Disposition", f"attachment; filename={self.path[1:]}")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+
+
+def _download(webengine, qtbot, tmp_path, url, tabs=1):
+    """Downloads url from the first of tabs browser tabs sharing one profile, through the real QWebEngineDownloadRequest."""
+    profile = webengine.profile()
+    profile.setDownloadPath(str(tmp_path))
+    opened, toasts, dialogs = [], [], []
+    made = []
+    for _ in range(tabs):
+        tab = webengine.tab(profile=profile)
+        qtbot.addWidget(tab)
+        tab.show_toast = toasts.append
+        made.append(tab)
+    made[0]._on_pdf_downloaded = opened.append
+    target = tmp_path / url.rsplit("/", 1)[1]
+
+    def save_dialog(*args, **kwargs):
+        dialogs.append(args)
+        return str(target), ""
+
+    with patch("riemann.ui.browser.QFileDialog.getSaveFileName", side_effect=save_dialog), patch(
+        "riemann.ui.browser.save_last_directory"
+    ):
+        made[0].web.setUrl(QUrl(url))
+        assert _wait_until(lambda: "Download complete!" in toasts or "Download failed." in toasts)
+    return target, opened, toasts, dialogs
+
+
 @patch("riemann.ui.browser.ScriptInjector")
-@patch(
-    "PySide6.QtWidgets.QFileDialog.getSaveFileName", return_value=("/fake/path.pdf", "")
-)
-def test_browser_tab_download_handler(mock_dialog, mock_injector, qtbot, webengine):
+def test_download_completes_and_opens_the_pdf(mock_injector, qtbot, webengine, tmp_path, download_server):
+    target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/report.pdf")
+    assert "Download complete!" in toasts
+    assert target.read_bytes().startswith(b"%PDF")
+    assert opened == [str(target)]
+
+
+@patch("riemann.ui.browser.ScriptInjector")
+def test_one_download_asks_once_with_several_tabs_open(mock_injector, qtbot, webengine, tmp_path, download_server):
+    target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/report.pdf", tabs=3)
+    assert len(dialogs) == 1
+    assert toasts.count("Download complete!") == 1
+
+
+@patch("riemann.ui.browser.ScriptInjector")
+def test_finished_download_that_is_not_a_pdf_is_not_opened(mock_injector, qtbot, webengine, tmp_path, download_server):
+    target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/bundle.zip")
+    assert "Download complete!" in toasts
+    assert target.exists()
+    assert opened == []
+
+
+@patch("riemann.ui.browser.ScriptInjector")
+def test_print_to_pdf_reports_success_and_failure_once(mock_injector, qtbot, webengine, tmp_path):
     tab = webengine.tab()
     qtbot.addWidget(tab)
-    mock_item = MagicMock()
-
-    tab._handle_download(mock_item)
-    mock_item.setDownloadDirectory.assert_called_with("/fake")
-    mock_item.setDownloadFileName.assert_called_with("path.pdf")
-    mock_item.accept.assert_called_once()
+    toasts = []
+    tab.show_toast = toasts.append
+    page = tab.web.page()
+    target = tmp_path / "page.pdf"
+    with patch("riemann.ui.browser.QFileDialog.getSaveFileName", return_value=(str(target), "")), patch(
+        "riemann.ui.browser.save_last_directory"
+    ), patch.object(page, "printToPdf", lambda path: page.pdfPrintingFinished.emit(path, True)):
+        tab.print_to_pdf()
+    assert toasts[-1] == "PDF saved successfully!"
+    toasts.clear()
+    with patch("riemann.ui.browser.QFileDialog.getSaveFileName", return_value=(str(target), "")), patch(
+        "riemann.ui.browser.save_last_directory"
+    ), patch.object(page, "printToPdf", lambda path: page.pdfPrintingFinished.emit(path, False)):
+        tab.print_to_pdf()
+    assert toasts[-1] == "Failed to render PDF."
 
 
 @patch("riemann.ui.browser.YtDlpSettingsDialog")
@@ -642,3 +735,92 @@ def test_whatsapp_user_agent_script_is_valid_javascript(webengine):
     assert WHATSAPP_NAVIGATOR_UA in source
     result = QJSEngine().evaluate(f"(function () {{ {source} }})")
     assert not result.isError(), result.toString()
+
+
+@pytest.mark.parametrize("url, blocked", [
+    ("https://doubleclick.net/ad", True),
+    ("https://stats.g.doubleclick.net/x", True),
+    ("https://www.youtube.com/pagead/conversion", True),
+    ("https://www.youtube.com/watch?v=pagead", False),
+    ("https://loads.example.org/ads.example.org", False),
+    ("https://notdoubleclick.net/", False),
+    ("https://example.com/?ref=google-analytics.com", False),
+])
+def test_ad_blocker_matches_hosts_not_substrings(url, blocked):
+    from riemann.ui.browser import BLOCKED_DOMAINS, is_blocked
+
+    assert is_blocked(QUrl(url), BLOCKED_DOMAINS) is blocked
+
+
+def test_blocked_requests_are_counted_without_touching_settings(qapp):
+    interceptor = RequestInterceptor()
+    info = MagicMock(spec=QWebEngineUrlRequestInfo)
+    info.requestUrl.return_value = QUrl("https://doubleclick.net/ad")
+    info.firstPartyUrl.return_value = QUrl("https://news.example/")
+    with patch("riemann.ui.browser.app_settings") as settings:
+        for _ in range(3):
+            interceptor.interceptRequest(info)
+        settings.assert_not_called()
+        settings.return_value.value.return_value = 10
+        interceptor.flush_block_count()
+        settings.return_value.setValue.assert_called_once_with("browser/ads_blocked", 13)
+
+
+def test_cancelled_download_removes_only_its_own_partial_files(tmp_path):
+    ours = tmp_path / "Talk.f137.mp4"
+    for suffix in (".part", ".ytdl"):
+        (tmp_path / (ours.name + suffix)).write_bytes(b"x")
+    theirs = [tmp_path / "Other.mp4.part", tmp_path / "Other.mp4.ytdl"]
+    for f in theirs:
+        f.write_bytes(b"resume data")
+    worker = YtDlpWorker("https://example.org/v", str(tmp_path))
+    worker.progress_hook({"status": "downloading", "filename": str(ours), "tmpfilename": str(ours) + ".part"})
+    worker.cleanup_remnants()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["Other.mp4.part", "Other.mp4.ytdl"]
+
+
+def _run_js(page, script, world):
+    out = []
+    page.runJavaScript(script, world, out.append)
+    assert _wait_until(lambda: out, 5000)
+    return out[0]
+
+
+@patch("riemann.ui.browser.ScriptInjector")
+def test_captions_token_is_hidden_from_page_scripts(mock_injector, qtbot, webengine, download_server):
+    from PySide6.QtWebEngineCore import QWebEngineScript
+
+    from riemann.ui.browser import CAPTIONS_WORLD
+
+    tab = webengine.tab(profile=webengine.profile())
+    qtbot.addWidget(tab)
+    tab.show_toast = lambda *a: None
+    loaded = []
+    tab.web.page().loadFinished.connect(loaded.append)
+    tab.web.setHtml("<html><body><p>page</p></body></html>", QUrl(download_server + "/"))
+    assert _wait_until(lambda: loaded)
+    tab.captions_server = MagicMock(port=4321, token="secret-token")
+    tab.btn_captions.setChecked(True)
+    tab.toggle_captions()
+    main = QWebEngineScript.ScriptWorldId.MainWorld
+    assert _run_js(tab.web.page(), "typeof window.RIEMANN_CAPTIONS_TOKEN", main) == "undefined"
+    assert _run_js(tab.web.page(), "typeof window.RiemannCaptions", main) == "undefined"
+    assert _run_js(tab.web.page(), "window.RIEMANN_CAPTIONS_TOKEN", CAPTIONS_WORLD) == "secret-token"
+    assert _run_js(tab.web.page(), "document.body.innerText.trim().slice(0, 4)", CAPTIONS_WORLD) == "page"
+
+
+def test_yt_dlp_runs_the_pinned_deno_from_the_venv(tmp_path, monkeypatch):
+    import os
+
+    from riemann.ui import browser
+
+    python = tmp_path / "bin" / "python"
+    python.parent.mkdir()
+    python.write_text("")
+    monkeypatch.setattr(browser, "venv_python", lambda: str(python))
+    assert browser.js_runtimes() == {"deno": {}}
+    deno = tmp_path / "bin" / ("deno.exe" if os.name == "nt" else "deno")
+    deno.write_text("")
+    assert browser.js_runtimes() == {"deno": {"path": str(deno)}}
+    monkeypatch.setattr(browser, "venv_python", lambda: "")
+    assert browser.js_runtimes() == {"deno": {}}

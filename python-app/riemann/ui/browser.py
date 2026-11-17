@@ -26,6 +26,21 @@ else, so a local page cannot send what it reads to a server with fetch().
 Each profile owns one RequestInterceptor, shared by its tabs: the profile only
 keeps a weak pointer, so an interceptor owned by a tab vanished when that tab
 closed and left every other tab on the profile unfiltered.
+The ad blocker matches hosts by suffix (ads.example.org blocks
+x.ads.example.org, not loads.example.org). interceptRequest runs on
+Chromium's IO thread, so it only counts blocked requests; the count is added
+to the stored total from the UI thread every BLOCK_COUNT_FLUSH_MS, since a
+QSettings store must not be written from two threads.
+
+Downloads: every tab on a profile is connected to its downloadRequested
+signal, so each request is claimed once (a dynamic property on the request)
+and answered by the tab whose page started it; a pop-up's download goes to the
+first tab that sees it. Only PDFs are opened in a reader when they finish.
+
+The caption engine runs in Chromium's ApplicationWorld, an isolated world
+that shares the page's DOM but not its JavaScript globals, so the captions
+server's port and per-run token are invisible to the site's own scripts.
+
 Clipboard access goes through the site permissions in riemann.core.permissions
 instead of JavascriptCanAccessClipboard, which granted it to every page.
 
@@ -64,6 +79,7 @@ import shiboken6
 from PySide6.QtCore import (
     QBuffer,
     QByteArray,
+    QCoreApplication,
     QEvent,
     QIODevice,
     QObject,
@@ -89,6 +105,7 @@ from PySide6.QtWebEngineCore import (
     QWebEngineDownloadRequest,
     QWebEnginePage,
     QWebEngineProfile,
+    QWebEngineScript,
     QWebEngineSettings,
     QWebEngineUrlRequestInfo,
     QWebEngineUrlRequestInterceptor,
@@ -278,6 +295,7 @@ class YtDlpWorker(QThread):
         self.dl_opts = dl_opts if dl_opts is not None else {}
         self.is_cancelled = False
         self._last_emit_time = 0.0
+        self._files: set = set()
 
     def run(self) -> None:
         """Runs the yt-dlp download with the options the user chose."""
@@ -362,6 +380,9 @@ class YtDlpWorker(QThread):
         Internal hook called by yt-dlp to report download progress.
         Also acts as our cancellation trigger by throwing an exception if the user aborts.
         """
+        for key in ("filename", "tmpfilename"):
+            if d.get(key):
+                self._files.add(str(d[key]))
         if self.is_cancelled:
             raise KeyboardInterrupt("Download aborted by user.")
 
@@ -429,19 +450,18 @@ class YtDlpWorker(QThread):
         self.is_cancelled = True
 
     def cleanup_remnants(self) -> None:
-        """Deletes dangling .part and .ytdl files left behind after a cancellation."""
-        try:
-            if not os.path.exists(self.download_dir):
-                return
-            for f in os.listdir(self.download_dir):
-                if f.endswith(".ytdl"):
-                    file_path = os.path.join(self.download_dir, f)
-                    try:
-                        os.remove(file_path)
-                    except Exception:
-                        log.debug("cleanup_remnants failed", exc_info=True)
-        except Exception:
-            log.debug("cleanup_remnants failed", exc_info=True)
+        """Deletes the .part and .ytdl files of this download; files of other downloads in the folder stay."""
+        doomed = set()
+        for name in self._files:
+            doomed.update((name + ".part", name + ".ytdl"))
+            if name.endswith((".part", ".ytdl")):
+                doomed.add(name)
+        for path in doomed:
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+            except OSError:
+                log.debug("cleanup_remnants failed", exc_info=True)
 
 
 class YtDlpSettingsDialog(QDialog):
@@ -549,6 +569,22 @@ class YtDlpSettingsDialog(QDialog):
             "playlist_end": self.txt_pl_end.text().strip(),
             "cookies": self.combo_cookies.currentText().lower(),
         }
+
+
+DOWNLOAD_CLAIMED = "riemannDownloadClaimed"
+CAPTIONS_WORLD = QWebEngineScript.ScriptWorldId.ApplicationWorld
+
+
+def owning_tab(page: Optional[QObject]) -> Optional["BrowserTab"]:
+    """The BrowserTab whose view shows page, or None for pop-ups and pages outside a tab."""
+    obj = page.parent() if page is not None else None
+    while obj is not None and not isinstance(obj, BrowserTab):
+        obj = obj.parent()
+    return obj
+
+
+def is_pdf_download(path: str, mime_type: str = "") -> bool:
+    return mime_type == "application/pdf" or path.lower().endswith(".pdf")
 
 
 class WebPage(QWebEnginePage):
@@ -738,6 +774,25 @@ BLOCKED_DOMAINS = (
 )
 
 
+ADS_BLOCKED_KEY = "browser/ads_blocked"
+BLOCK_COUNT_FLUSH_MS = 5000
+
+
+def host_matches(host: str, domain: str) -> bool:
+    host = host.lower().rstrip(".")
+    return host == domain or host.endswith("." + domain)
+
+
+def is_blocked(url: QUrl, rules) -> bool:
+    """True when url's host is a listed domain or below it; a rule with a path ("youtube.com/pagead") also needs that path prefix."""
+    host, path = url.host(), url.path()
+    for rule in rules:
+        domain, _, prefix = rule.partition("/")
+        if host_matches(host, domain) and (not prefix or path.startswith("/" + prefix)):
+            return True
+    return False
+
+
 class RequestInterceptor(QWebEngineUrlRequestInterceptor):
     """
     Handles AdBlocking by intercepting network requests to known advertising
@@ -749,6 +804,25 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
         super().__init__(parent)
         self.blocked_domains = list(BLOCKED_DOMAINS)
         self.spoofed_ua = WHATSAPP_HEADER_UA.encode()
+        self.blocked_count = 0
+        self._flushed_count = 0
+        self._flush_timer = QTimer(self)
+        self._flush_timer.setInterval(BLOCK_COUNT_FLUSH_MS)
+        self._flush_timer.timeout.connect(self.flush_block_count)
+        self._flush_timer.start()
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self.flush_block_count)
+
+    def flush_block_count(self) -> None:
+        """Adds the requests blocked since the last flush to the stored total; runs on the UI thread."""
+        count = self.blocked_count
+        delta = count - self._flushed_count
+        if delta <= 0:
+            return
+        self._flushed_count = count
+        settings = app_settings()
+        settings.setValue(ADS_BLOCKED_KEY, settings.value(ADS_BLOCKED_KEY, 0, type=int) + delta)
 
     def interceptRequest(self, info: QWebEngineUrlRequestInfo) -> None:
         """Blocks requests to listed domains and adjusts headers where a site needs it."""
@@ -763,15 +837,13 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
             info.block(True)
             return
 
-        url = info.requestUrl().toString().lower()
-        if any(domain in url for domain in self.blocked_domains):
+        url = info.requestUrl()
+        if is_blocked(url, self.blocked_domains):
             info.block(True)
-            settings = app_settings()
-            current_blocks = settings.value("browser/ads_blocked", 0, type=int)
-            settings.setValue("browser/ads_blocked", current_blocks + 1)
+            self.blocked_count += 1
             return
 
-        if WHATSAPP_HOST in url:
+        if host_matches(url.host(), WHATSAPP_HOST):
             info.setHttpHeader(b"User-Agent", self.spoofed_ua)
 
 
@@ -1658,11 +1730,11 @@ class BrowserTab(QWidget):
                 window.RIEMANN_CAPTIONS_TOKEN = {json.dumps(token)};
                 {js_payload}
                 if (window.RiemannCaptions) window.RiemannCaptions.enable();
-            """)
+            """, CAPTIONS_WORLD)
             self.show_toast("Live Captions Enabled")
         else:
             self.web.page().runJavaScript(
-                "if (window.RiemannCaptions) window.RiemannCaptions.disable();"
+                "if (window.RiemannCaptions) window.RiemannCaptions.disable();", CAPTIONS_WORLD
             )
             self.show_toast("Live Captions Disabled")
 
@@ -1808,6 +1880,13 @@ class BrowserTab(QWidget):
             QTimer.singleShot(1000, self.toggle_music_mode)
 
     def _handle_download(self, download_item: QWebEngineDownloadRequest) -> None:
+        """Asks where to save a download started on this profile; only one tab answers each request."""
+        if download_item.property(DOWNLOAD_CLAIMED):
+            return
+        owner = owning_tab(download_item.page())
+        if owner is not None and owner is not self:
+            return
+        download_item.setProperty(DOWNLOAD_CLAIMED, True)
         store = app_settings()
         start_dir = get_dialog_directory(store)
 
@@ -1826,13 +1905,13 @@ class BrowserTab(QWidget):
 
         self.show_toast(f"Starting: {download_item.downloadFileName()}")
 
-        def update_prog(received: int, total: int):
+        def update_prog():
             total = download_item.totalBytes()
-            received = download_item.receivedBytes()
             if total > 0:
-                self.progress.setValue(int((received / total) * 100))
+                self.progress.setValue(int((download_item.receivedBytes() / total) * 100))
 
-        download_item.downloadProgress.connect(update_prog)
+        download_item.receivedBytesChanged.connect(update_prog)
+        download_item.totalBytesChanged.connect(update_prog)
 
         def on_state_changed(state):
             if state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
@@ -1857,7 +1936,8 @@ class BrowserTab(QWidget):
     ) -> None:
         if state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
             full_path = os.path.join(temp_folder, item.downloadFileName())
-            self._on_pdf_downloaded(full_path)
+            if is_pdf_download(full_path, item.mimeType()):
+                self._on_pdf_downloaded(full_path)
 
     def _on_pdf_downloaded(self, path: str) -> None:
         if (
@@ -1957,6 +2037,7 @@ class BrowserTab(QWidget):
                     self.show_toast("PDF saved successfully!")
                     if self.window() and hasattr(self.window(), "new_pdf_tab"):
                         self.window().new_pdf_tab(file_path)
+                else:
                     self.show_toast("Failed to render PDF.")
 
             self.web.page().pdfPrintingFinished.connect(handle_pdf_print)
