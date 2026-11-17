@@ -49,7 +49,7 @@ import threading
 import weakref
 from typing import Any, Optional
 
-from .assets import PACKAGE_DIR, is_frozen
+from .assets import PACKAGE_DIR, executable, is_frozen
 from .processes import NO_WINDOW
 
 log = logging.getLogger("riemann")
@@ -153,7 +153,7 @@ class RenderedPage:
 def child_command() -> list:
     """How to start a render child from this interpreter or frozen executable."""
     if is_frozen():
-        return [sys.executable, CHILD_FLAG]
+        return [executable(), CHILD_FLAG]
     return [sys.executable, "-m", "riemann.core.render_process"]
 
 

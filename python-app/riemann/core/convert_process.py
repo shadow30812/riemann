@@ -32,7 +32,7 @@ import tempfile
 import threading
 from typing import Optional
 
-from .assets import PACKAGE_DIR, is_frozen
+from .assets import PACKAGE_DIR, executable, is_frozen
 from .processes import NO_WINDOW
 
 CHILD_FLAG = "--riemann-convert"
@@ -55,7 +55,7 @@ def _converter(kind: str):
 
 def child_command(kind: str, path: str, out: str) -> list:
     if is_frozen():
-        return [sys.executable, CHILD_FLAG, kind, path, out]
+        return [executable(), CHILD_FLAG, kind, path, out]
     return [sys.executable, "-m", "riemann.core.convert_process", kind, path, out]
 
 

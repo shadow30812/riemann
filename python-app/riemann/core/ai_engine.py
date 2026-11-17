@@ -32,7 +32,7 @@ import time
 from typing import List, Optional, Tuple
 
 from .log import log
-from .assets import PACKAGE_DIR, is_frozen
+from .assets import PACKAGE_DIR, executable, is_frozen
 from .endpoints import LOOPBACK, loopback_url
 
 _process: Optional[subprocess.Popen] = None
@@ -63,7 +63,7 @@ SERVER_FLAG = "--riemann-ai-sidecar"
 def _command() -> Tuple[List[str], str]:
     """The command that starts the engine, and its working directory."""
     if is_frozen():
-        return [sys.executable, SERVER_FLAG], os.path.dirname(sys.executable)
+        return [executable(), SERVER_FLAG], os.path.dirname(executable())
     package_root = os.path.dirname(PACKAGE_DIR)
     return [sys.executable, "-m", "riemann.core.ai_server"], package_root
 

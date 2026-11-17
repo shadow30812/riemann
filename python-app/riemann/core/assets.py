@@ -8,6 +8,14 @@ sys._MEIPASS/riemann/assets, as Riemann.spec collects them. is_frozen is true
 for both builds: PyInstaller sets sys.frozen, Nuitka defines __compiled__ in
 every compiled module.
 
+executable is the program that starts Riemann's own child processes (render,
+convert, AI). In a Nuitka build sys.executable is made up: the dist folder
+joined with the build machine's interpreter name ("python3", "python.exe"),
+which doesn't exist, so the running binary is asked for its own path instead.
+In a onefile build that is the unpacked binary, which exits with the app
+(Nuitka hands it the launcher's process id), and starting it again doesn't
+unpack the whole app a second time.
+
 icon_path picks the -white variant of an SVG for dark backgrounds and falls back
 to the plain icon when there is no white one.
 
@@ -23,6 +31,18 @@ PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False)) or "__compiled__" in globals()
+
+
+def executable() -> str:
+    if "__compiled__" not in globals():
+        return sys.executable
+    if os.name == "nt":
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(32768)
+        ctypes.windll.kernel32.GetModuleFileNameW(None, buffer, len(buffer))
+        return buffer.value
+    return os.path.realpath("/proc/self/exe")
 
 
 def bundle_dir() -> Optional[str]:

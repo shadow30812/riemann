@@ -76,3 +76,18 @@ def _literal_asset_calls():
 def test_every_literal_asset_exists(name, parts):
     path = assets.icon_path(parts[0]) if name == "icon_path" else assets.asset_path(*parts)
     assert os.path.exists(path), path
+
+
+def test_child_processes_start_from_the_running_binary_in_a_nuitka_build(monkeypatch, tmp_path):
+    from riemann.core import ai_engine, convert_process, render_process
+
+    monkeypatch.setitem(assets.__dict__, "__compiled__", object())
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "python3"))
+    commands = [
+        render_process.child_command(),
+        convert_process.child_command("office", "in.docx", "out.json"),
+        ai_engine._command()[0],
+    ]
+    for command in commands:
+        assert os.path.isfile(command[0]) and os.access(command[0], os.X_OK)
+        assert command[1].startswith("--riemann-")
