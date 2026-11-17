@@ -11,9 +11,10 @@ DelimitedFile: the encoding, the dialect and whether the first row is a header.
 - Dialect: csv.Sniffer, limited to comma, semicolon, tab and bar. When it
   can't tell, the name decides: tab for .tsv and .tab, comma otherwise.
 - Header: csv.Sniffer.has_header, which compares the first row's types with
-  the rows under it. When the Sniffer can't read the file at all (a single
-  column, say), a first row of words over a column of mostly numbers counts
-  as a header. A file of one row has none.
+  the rows under it. It says no when many cells are empty (a results table
+  with gaps), and it can't read some files at all (a single column, say), so
+  a first row of words over a column of mostly numbers counts as a header
+  too. A file of one row has none.
 
 DelimitedFile.rows() reads rows lazily, so the view can load a large file in
 chunks as the person scrolls; a quoted field may hold line breaks. Rows are
@@ -106,7 +107,8 @@ def open_delimited(path: str) -> DelimitedFile:
     try:
         header = text.count("\n") > 1 and sniffer.has_header(text)
     except csv.Error:
-        header = _numbers_under_names(text, dialect)
+        header = False
+    header = header or _numbers_under_names(text, dialect)
     return DelimitedFile(path, encoding, dialect, bool(header))
 
 

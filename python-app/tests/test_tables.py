@@ -59,6 +59,16 @@ def test_the_delimiter_and_header_are_detected(tmp_path, text, delimiter):
     assert list(source.rows())[1] == ["Ada", "36"]
 
 
+def test_a_header_over_columns_with_gaps_is_found(tmp_path):
+    text = "model,params,BLEU\nbase,65,27.3\nbig,213,28.4\nByteNet,,23.75\nMoE,,26.03\nPosUnk,,\n"
+    source = open_delimited(write(tmp_path / "results.csv", text))
+    assert source.has_header
+    one_row = open_delimited(write(tmp_path / "one.csv", "model,params\n"))
+    assert not one_row.has_header
+    numbers = open_delimited(write(tmp_path / "numbers.csv", "1,2\n3,4\n5,\n"))
+    assert not numbers.has_header
+
+
 def test_encodings(tmp_path):
     assert detect_encoding(codecs.BOM_UTF8 + b"a") == "utf-8-sig"
     assert detect_encoding(codecs.BOM_UTF16_LE + "a".encode("utf-16-le")) == "utf-16"
