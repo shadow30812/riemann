@@ -40,7 +40,6 @@ def test_every_single_shot_names_its_context():
     assert loose == []
 
 
-
 def mode_of(node) -> str:
     mode = node.args[1] if len(node.args) > 1 else next((k.value for k in node.keywords if k.arg == "mode"), None)
     return mode.value if isinstance(mode, ast.Constant) else "r"
@@ -58,3 +57,46 @@ def test_text_files_are_opened_with_an_encoding():
             if not any(k.arg == "encoding" for k in node.keywords):
                 loose.append(f"{path}:{node.lineno}")
     assert loose == []
+
+
+def test_a_render_worker_stuck_in_a_page_is_released_not_killed(qapp):
+    from PySide6.QtCore import QThread, Signal
+
+    from riemann.ui.reader.mixins.document import DocumentMixin
+    from riemann.ui.threads import released_count, wait_for_released
+
+    class Stuck(QThread):
+        page_rendered = Signal()
+        page_failed = Signal()
+        killed = False
+
+        def run(self):
+            while not self.isInterruptionRequested():
+                self.msleep(5)
+
+        def stop(self):
+            pass
+
+        def wait(self, *args):
+            return False if args == (3000,) else super().wait(*args)
+
+        def terminate(self):
+            Stuck.killed = True
+            self.requestInterruption()
+
+    class Host:
+        def _on_page_rendered(self, *args):
+            pass
+
+        def _on_page_failed(self, *args):
+            pass
+
+    host = Host()
+    host._render_worker = worker = Stuck()
+    worker.page_rendered.connect(host._on_page_rendered)
+    worker.page_failed.connect(host._on_page_failed)
+    worker.start()
+    DocumentMixin._stop_render_worker(host)
+    assert not Stuck.killed and host._render_worker is None
+    assert released_count() >= 1
+    wait_for_released(2000)

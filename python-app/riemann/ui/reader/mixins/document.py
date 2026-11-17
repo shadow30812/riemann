@@ -369,10 +369,10 @@ class DocumentMixin(ReaderHostBase):
         except (RuntimeError, TypeError):
             pass
         worker.stop()
-        if not worker.wait(3000):
-            worker.terminate()
-            worker.wait()
-        worker.deleteLater()
+        if worker.wait(3000):
+            worker.deleteLater()
+        else:
+            release(worker)
 
     def _on_document_load_error(self, err_str):
         """Callback if the background thread encounters a loading exception."""
