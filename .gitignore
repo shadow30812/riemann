@@ -37,3 +37,4 @@ libs/*.dll
 libs/*.dylib
 libs/*.part
 cmd.txt
+review-*.md
