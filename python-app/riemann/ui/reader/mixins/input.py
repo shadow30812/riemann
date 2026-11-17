@@ -854,9 +854,9 @@ class InputMixin(ReaderHostBase):
             return
         clean = QUrl(path).toLocalFile() if path.startswith("file://") else path
         abs_p = os.path.abspath(clean)
-        if abs_p.lower().endswith(".pdf") or abs_p.lower().endswith(".md"):
+        if document_kind(abs_p) in ("pdf", "markdown", "text"):
             if not self.current_path:
-                self.load_document(abs_p)
+                self.open_here(abs_p)
             else:
                 main_win = self.window()
                 if hasattr(main_win, "new_pdf_tab"):

@@ -407,14 +407,14 @@ class AppearanceMixin(ReaderHostBase):
     def _on_home_path_entered(self) -> None:
         path = self.txt_open_path.text().strip().strip('"').strip("'")
         if os.path.exists(path) and os.path.isfile(path):
-            self.load_document(path)
+            self.open_here(path)
         else:
             self.show_toast("File not found on disk.")
 
     def _on_recent_item_clicked(self, item) -> None:
         path = item.data(Qt.ItemDataRole.UserRole)
         if os.path.exists(path):
-            self.load_document(path)
+            self.open_here(path)
         else:
             self.show_toast("File no longer exists at this location.")
 

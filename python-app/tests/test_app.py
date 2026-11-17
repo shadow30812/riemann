@@ -1090,6 +1090,59 @@ def test_windows_share_one_persistent_web_profile(qtbot, monkeypatch):
     assert windows[0].web_profile is windows[1].web_profile is first
 
 
+def real_reader(window, qtbot):
+    """An empty full-mode reader (the real class, not the dummy) as the window's current tab."""
+    from riemann.ui.reader.tab import ReaderTab as RealReaderTab
+
+    reader = RealReaderTab()
+    idx = window.tabs_main.addTab(reader, "New Tab")
+    window.tabs_main.setCurrentIndex(idx)
+    return reader, idx
+
+
+def test_a_file_opened_from_an_empty_readers_start_page_follows_preview_mode(qtbot, tmp_path):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    window.settings.setValue("reader/open_in_preview_mode", True)
+    window.history_manager.add = MagicMock()
+    path = str(tmp_path / "paper.pdf")
+    with open(path, "wb") as f:
+        f.write(b"%PDF-1.7\n")
+    reader, idx = real_reader(window, qtbot)
+
+    reader.txt_open_path.setText(path)
+    reader._on_home_path_entered()
+
+    tab = window.tabs_main.widget(idx)
+    assert tab is not reader and tab.is_preview and tab.current_path == path
+    eye = window._preview_icon().pixmap(16).toImage()
+    assert window.tabs_main.tabIcon(idx).pixmap(16).toImage() == eye
+    assert window.tabs_main.currentIndex() == idx
+    window.history_manager.add.assert_called_with(os.path.abspath(path), "pdf")
+
+
+def test_a_file_opened_from_a_readers_open_dialog_is_recorded_in_history(qtbot, tmp_path):
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    window.history_manager.add = MagicMock()
+    path = str(tmp_path / "notes.txt")
+    with open(path, "w") as f:
+        f.write("plain text\n")
+    reader, _ = real_reader(window, qtbot)
+    reader.current_path = str(tmp_path / "shown.pdf")
+
+    with (
+        patch("riemann.ui.reader.mixins.document.QFileDialog.getOpenFileNames", return_value=([path], "")),
+        patch.object(reader, "load_document") as load,
+    ):
+        reader.open_pdf_dialog()
+
+    load.assert_called_once_with(path)
+    window.history_manager.add.assert_called_with(os.path.abspath(path), "pdf")
+    reader.current_path = None
+    reader.cleanup()
+
+
 def test_document_history_sorts_files_into_classes(qtbot, tmp_path):
     window = RiemannWindow(incognito=False, restore_session=False)
     qtbot.addWidget(window)

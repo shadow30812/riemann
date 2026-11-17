@@ -362,6 +362,39 @@ class DocumentsMixin:
                     return
         self.new_pdf_tab(target)
 
+    def open_from_reader(self, reader: QWidget, path: str) -> None:
+        """
+        Opens path from inside reader (its start page, Open dialog or a file
+        dropped on it). A reader that shows a document loads path in place; one
+        still on its start page is replaced, in the same spot, by the tab
+        _open_document makes, so the file opens in the mode the preview setting
+        asks for, with that mode's icon.
+        """
+        tab_widget = next(
+            (tw for tw in (self.tabs_main, self.tabs_side) if tw.indexOf(reader) != -1),
+            None,
+        )
+        if tab_widget is None or getattr(reader, "current_path", None):
+            kind = self._document_kind(path)
+            if kind == "binary":
+                self._refuse_binary(path)
+                return
+            self.add_to_history(path, "web" if kind == "html" else "pdf")
+            reader.load_document(path)
+            return
+        idx = tab_widget.indexOf(reader)
+        was_current = tab_widget.currentIndex() == idx
+        widget = self._open_document(path, tab_widget, insert_idx=idx, activate=False)
+        if widget is None:
+            return
+        tab_widget.removeTab(tab_widget.indexOf(reader))
+        if hasattr(reader, "cleanup"):
+            reader.cleanup()
+        reader.deleteLater()
+        if was_current:
+            tab_widget.setCurrentWidget(widget)
+        self._auto_save_session()
+
     def _replace_tab_document(
         self, tab_widget: QTabWidget, idx: int, preview: bool
     ) -> Optional[QWidget]:
