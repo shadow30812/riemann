@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QRubberBand,
 )
 from ....core.constants import ViewMode, ZoomMode, clamp_zoom
-from ....core.doctypes import document_kind
+from ....core.doctypes import TAB_KINDS, document_kind
 from ...palette import CONTENT
 from ..widgets import PageWidget
 from .host import ReaderHostBase
@@ -854,7 +854,7 @@ class InputMixin(ReaderHostBase):
             return
         clean = QUrl(path).toLocalFile() if path.startswith("file://") else path
         abs_p = os.path.abspath(clean)
-        if document_kind(abs_p) in ("pdf", "markdown", "text"):
+        if document_kind(abs_p) in TAB_KINDS:
             if not self.current_path:
                 self.open_here(abs_p)
             else:

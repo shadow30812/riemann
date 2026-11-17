@@ -264,15 +264,22 @@ def scenario_redact(files):
 
 
 def scenario_open_text(files):
-    """Opens a text file through Ctrl+O, tries an image the same way, then looks the text file up in History."""
-    text_file, image = files
+    """
+    Opens a text file through Ctrl+O, then an image the same way, steps to the
+    next image in its folder with Right, then looks both files up in History.
+    """
+    text_file, image, next_image = files
     yield from open_with_dialog(text_file)
     yield lambda: getattr(current_tab(), "text_document", False) and current_tab().current_path == text_file
     notes["text_view"] = True
-    tabs_before = window().tabs_main.count()
     notes["image_offered"] = yield from open_with_dialog(image)
-    yield 0.5
-    notes["tab_count_unchanged"] = window().tabs_main.count() == tabs_before
+    yield lambda: getattr(current_tab(), "decoded", None) is not None
+    tab = current_tab()
+    notes["image_size"] = [tab.decoded.width, tab.decoded.height]
+    key("Right", tab)
+    yield lambda: tab.current_path == next_image and tab.decoded is not None
+    tabs = window().tabs_main
+    notes["stepped_title"] = tabs.tabText(tabs.indexOf(tab))
     key("Ctrl+H", window())
     yield lambda: getattr(current_tab(), "page", None) == "history"
     page = current_tab()

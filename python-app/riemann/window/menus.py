@@ -37,6 +37,7 @@ from ..core.features import (
 from ..core.doctypes import dialog_filter
 from ..core.mini_player import MiniAudioPlayer
 from ..ui.browser import BrowserTab, PreviewTextTab
+from ..ui.viewers import VIEWER_TABS
 from ..ui.components import (
     populate_open_with_menu,
 )
@@ -379,7 +380,7 @@ class MenusMixin:
                 widget = tab_widget.widget(i)
                 if widget is getattr(self, "preview_tab_widget", None):
                     continue
-                is_doc = isinstance(widget, (ReaderTab, PreviewTextTab))
+                is_doc = isinstance(widget, (ReaderTab, PreviewTextTab) + VIEWER_TABS)
                 if (
                     is_doc
                     and getattr(widget, "current_path", None)

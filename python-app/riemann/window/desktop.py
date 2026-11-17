@@ -9,8 +9,9 @@ Already registered (the usual case): skip the rewrite and the update-desktop-
 database run, which happened on every launch.
 
 MIME_TYPES: text/plain covers source files and logs too, since their own types
-(text/x-python, text/x-log...) derive from it. scripts/install_icon.sh writes
-the same list.
+(text/x-python, text/x-log...) derive from it. IMAGE_MIME_TYPES are the
+common picture types; registering them adds Riemann to "Open with" without
+making it the default. scripts/install_icon.sh writes the same list.
 """
 
 import os
@@ -21,7 +22,12 @@ from pathlib import Path
 
 from ..core.assets import icon_path, is_frozen
 
-MIME_TYPES = ("application/pdf", "text/markdown", "text/plain", "text/html", "inode/directory")
+IMAGE_MIME_TYPES = (
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/tiff", "image/bmp",
+    "image/svg+xml", "image/vnd.microsoft.icon", "image/vnd.adobe.photoshop", "image/jp2",
+    "image/x-portable-anymap", "image/x-tga", "image/x-pcx", "image/apng"
+)
+MIME_TYPES = ("application/pdf", "text/markdown", "text/plain", "text/html", "inode/directory") + IMAGE_MIME_TYPES
 
 
 def install_linux_integration():

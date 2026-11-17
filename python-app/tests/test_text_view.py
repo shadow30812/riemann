@@ -139,7 +139,7 @@ def test_the_window_routes_text_to_the_reader_and_refuses_binaries(qtbot, tmp_pa
     assert isinstance(opened, ReaderTab) and opened.text_document is True
 
     binary = tmp_path / "photo.dat"
-    binary.write_bytes(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR")
+    binary.write_bytes(b"\0\1\2\3 neither text nor a picture")
     count = window.tabs_main.count()
     with patch.object(window, "show_toast") as toast:
         assert window._open_document(str(binary), preview=False) is None

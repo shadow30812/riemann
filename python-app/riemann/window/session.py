@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from ..ui.browser import BrowserTab, PreviewTextTab, is_local_homepage
+from ..ui.viewers import VIEWER_TABS
 from ..ui.explorer import FolderHomeTab
 from ..ui.reader.tab import ReaderTab
 from ..core.log import log
@@ -283,7 +284,7 @@ class SessionMixin:
 
     def _record_closed_tab(self, widget: QWidget) -> None:
         """Remembers a closed tab so it can be reopened."""
-        if isinstance(widget, (ReaderTab, PreviewTextTab)) and widget.current_path:
+        if isinstance(widget, (ReaderTab, PreviewTextTab) + VIEWER_TABS) and widget.current_path:
             self.closed_tabs_stack.append(
                 {
                     "type": "pdf",
@@ -356,12 +357,12 @@ class SessionMixin:
                 if isinstance(page, int) and getattr(wid, "current_doc", None):
                     entry["page"] = page
                 tabs_data.append(entry)
-            elif isinstance(wid, PreviewTextTab) and getattr(wid, "current_path", None):
+            elif isinstance(wid, (PreviewTextTab,) + VIEWER_TABS) and getattr(wid, "current_path", None):
                 tabs_data.append(
                     {
                         "type": "doc",
                         "data": os.path.abspath(wid.current_path),
-                        "preview": True,
+                        "preview": bool(getattr(wid, "is_preview", True)),
                     }
                 )
 

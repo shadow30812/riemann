@@ -62,16 +62,22 @@ def test_redacting_a_word_and_saving_on_close(tmp_path):
     assert b"KEEP" in all_stream_bytes(pdf)
 
 
-def test_the_open_dialog_opens_text_but_wont_offer_an_image(tmp_path):
+def test_the_open_dialog_opens_text_and_images_and_right_steps_to_the_next_image(tmp_path):
+    from PIL import Image
+
     text_file = tmp_path / "notes.txt"
     text_file.write_text("Shopping list\n")
-    image = tmp_path / "photo.png"
-    image.write_bytes(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR" + bytes(64))
-    notes, env = run_session(tmp_path, "open_text", text_file, image)
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    image, next_image = photos / "photo 2.png", photos / "photo 10.jpg"
+    Image.new("RGB", (120, 80), "teal").save(image)
+    Image.new("RGB", (60, 40), "orange").save(next_image)
+    notes, env = run_session(tmp_path, "open_text", text_file, image, next_image)
     assert notes["text_view"]
-    assert not notes["image_offered"]
-    assert notes["tab_count_unchanged"]
-    assert notes["history"] == {"notes.txt": "Text"}
+    assert notes["image_offered"]
+    assert notes["image_size"] == [120, 80]
+    assert notes["stepped_title"] == "photo 10.jpg"
+    assert notes["history"] == {"photo 2.png": "Image", "notes.txt": "Text"}
 
 
 def test_quitting_with_page_edits_waiting_asks_first(tmp_path):

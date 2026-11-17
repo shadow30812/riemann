@@ -1,17 +1,25 @@
 """
 What kind of document a file is, decided in one place for the whole app.
 
-document_kind(path) returns "pdf", "markdown", "html", "text" or "binary":
+document_kind(path) returns "pdf", "markdown", "html", "image", "text" or
+"binary":
 
 - a name ending in .pdf, or a file starting with %PDF-, is a PDF;
 - .md and .markdown are Markdown; .html, .htm and .xhtml are HTML, which opens
   in the browser;
+- a name in IMAGE_SUFFIXES is an image: the formats Pillow reads, less those
+  that need outside programs or only identify a file (EPS, WMF and EMF, GRIB,
+  BUFR, HDF5, MPEG, IPTC), plus SVG and WBMP, which only Qt reads;
 - any other file is text when its first SNIFF_BYTES hold no NUL byte and decode
   as UTF-8 (a character cut off at the end of the sample is allowed), so .py,
-  .cpp, .log, Makefile and files with no extension all count. Everything else
-  is binary, and the app refuses to open it.
+  .cpp, .log, Makefile and files with no extension all count;
+- a file that isn't text but starts with one of IMAGE_SIGNATURES is an image
+  whatever its name. Text is tested first, so a text file that happens to
+  start with "BM" stays text. Everything else is binary, and the app refuses
+  to open it.
 
-The reader shows PDFs, Markdown and text. TEXT_SUFFIXES and TEXT_NAMES (the
+The reader shows PDFs, Markdown and text (READER_KINDS); an image opens in
+ui/viewers/image_tab.py. TAB_KINDS are the kinds that open in a document tab. TEXT_SUFFIXES and TEXT_NAMES (the
 prose and code lists together) name the common text and source-code files.
 They are used where reading the file is too slow or not trusted: the explorer's icons, the open dialogs'
 filter, and window/instance.py, which decides what a running Riemann opens
@@ -19,7 +27,7 @@ when another process hands it a path (a security boundary, so it never
 sniffs content).
 
 document_class(path) sorts the Documents history into DOCUMENT_CLASSES (PDF,
-Markdown, Code, Text): CODE_SUFFIXES and CODE_NAMES are source, build and
+Markdown, Code, Text, Image): CODE_SUFFIXES and CODE_NAMES are source, build and
 style files; PROSE_SUFFIXES and PROSE_NAMES are prose, data, configuration
 and logs, which count as Text. It goes by name first, since history lists
 files that may be gone, and reads only a file whose name says nothing.
@@ -30,12 +38,30 @@ import os
 SNIFF_BYTES = 8192
 MARKDOWN_SUFFIXES = (".md", ".markdown")
 HTML_SUFFIXES = (".html", ".htm", ".xhtml")
-DOCUMENT_CLASSES = ("PDF", "Markdown", "Code", "Text")
+DOCUMENT_CLASSES = ("PDF", "Markdown", "Code", "Text", "Image")
+READER_KINDS = ("pdf", "markdown", "text")
+TAB_KINDS = READER_KINDS + ("image",)
+
+IMAGE_SUFFIXES = (
+    ".apng", ".avif", ".avifs", ".blp", ".bmp", ".bw", ".cur", ".dcx", ".dds", ".dib", ".fit",
+    ".fits", ".flc", ".fli", ".ftc", ".ftu", ".gbr", ".gif", ".icb", ".icns", ".ico", ".im",
+    ".j2c", ".j2k", ".jfif", ".jp2", ".jpc", ".jpe", ".jpeg", ".jpf", ".jpg", ".jpx", ".msp",
+    ".pbm", ".pcd", ".pcx", ".pfm", ".pgm", ".png", ".pnm", ".ppm", ".psd", ".pxr", ".qoi",
+    ".ras", ".rgb", ".rgba", ".sgi", ".svg", ".svgz", ".tga", ".tif", ".tiff", ".vda", ".vst",
+    ".wbmp", ".webp", ".xbm", ".xpm"
+)
+
+IMAGE_SIGNATURES = (
+    (0, b"\x89PNG\r\n\x1a\n"), (0, b"\xff\xd8\xff"), (0, b"GIF87a"), (0, b"GIF89a"),
+    (0, b"BM"), (0, b"II*\0"), (0, b"MM\0*"), (0, b"8BPS"), (0, b"qoif"), (0, b"DDS "),
+    (0, b"icns"), (0, b"\0\0\0\x0cjP  \r\n\x87\n"), (0, b"\xffO\xffQ"), (4, b"ftypavif"),
+    (4, b"ftypavis"), (8, b"WEBP")
+)
 
 PROSE_SUFFIXES = (
     ".txt", ".text", ".log", ".out", ".err", ".nfo", ".rst", ".adoc", ".asciidoc", ".org", ".tex",
     ".ltx", ".sty", ".cls", ".bib", ".bst", ".srt", ".vtt", ".sub", ".csv", ".tsv", ".psv", ".json",
-    ".jsonl", ".ndjson", ".json5", ".geojson", ".xml", ".xsd", ".xsl", ".xslt", ".svg", ".rss",
+    ".jsonl", ".ndjson", ".json5", ".geojson", ".xml", ".xsd", ".xsl", ".xslt", ".rss",
     ".atom", ".plist", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".config", ".properties",
     ".env", ".editorconfig", ".gitignore", ".gitattributes", ".gitmodules", ".dockerignore",
     ".npmrc", ".lock", ".man", ".1", ".2", ".3", ".4", ".5", ".6", ".7", ".8", ".po", ".pot",
@@ -86,10 +112,20 @@ def has_text_name(path: str) -> bool:
     return name in TEXT_NAMES or name.endswith(TEXT_SUFFIXES)
 
 
+def has_image_name(path: str) -> bool:
+    return path.lower().endswith(IMAGE_SUFFIXES)
+
+
 def is_reader_name(path: str) -> bool:
-    """True when the name alone says the reader shows this file (PDF, Markdown or listed text)."""
+    """True when the name alone says a document tab shows this file (PDF, Markdown, listed text or an image)."""
     lower = path.lower()
-    return lower.endswith(".pdf") or lower.endswith(MARKDOWN_SUFFIXES) or has_text_name(path)
+    return (
+        lower.endswith(".pdf") or lower.endswith(MARKDOWN_SUFFIXES) or has_text_name(path) or has_image_name(path)
+    )
+
+
+def has_image_signature(sample: bytes) -> bool:
+    return any(sample[offset:offset + len(magic)] == magic for offset, magic in IMAGE_SIGNATURES)
 
 
 def looks_like_text(sample: bytes) -> bool:
@@ -110,6 +146,8 @@ def document_kind(path: str) -> str:
         return "markdown"
     if lower.endswith(HTML_SUFFIXES):
         return "html"
+    if lower.endswith(IMAGE_SUFFIXES):
+        return "image"
     try:
         with open(path, "rb") as f:
             sample = f.read(SNIFF_BYTES)
@@ -117,7 +155,9 @@ def document_kind(path: str) -> str:
         return "text" if has_text_name(path) else "binary"
     if sample.startswith(b"%PDF-"):
         return "pdf"
-    return "text" if looks_like_text(sample) else "binary"
+    if looks_like_text(sample):
+        return "text"
+    return "image" if has_image_signature(sample) else "binary"
 
 
 def is_text_document(path: str) -> bool:
@@ -131,11 +171,29 @@ def document_class(path: str) -> str:
         return "Code"
     if has_text_name(path):
         return "Text"
-    return {"pdf": "PDF", "markdown": "Markdown"}.get(document_kind(path), "Text")
+    if has_image_name(path):
+        return "Image"
+    return {"pdf": "PDF", "markdown": "Markdown", "image": "Image"}.get(document_kind(path), "Text")
+
+
+def _patterns(suffixes, upper: bool = False) -> str:
+    return " ".join(f"*{s} *{s.upper()}" if upper else f"*{s}" for s in suffixes)
 
 
 def dialog_filter(html: bool = True) -> str:
-    """The open dialogs' filter: every PDF, Markdown and listed text file (and HTML when html), then everything."""
+    """
+    The open dialogs' filter: every supported file (HTML only when html), then
+    PDFs, images and everything. Image and PDF names are listed in capitals
+    too, since cameras write IMG_0001.JPG and the Linux dialog matches case.
+    """
     suffixes = MARKDOWN_SUFFIXES + (HTML_SUFFIXES if html else ()) + TEXT_SUFFIXES
-    patterns = ["*.pdf", "*.PDF"] + [f"*{s}" for s in suffixes] + list(TEXT_NAMES)
-    return f"Supported Files ({' '.join(patterns)});;All Files (*)"
+    images = _patterns(IMAGE_SUFFIXES, upper=True)
+    supported = f"*.pdf *.PDF {_patterns(suffixes)} {images} {' '.join(TEXT_NAMES)}"
+    return ";;".join(
+        (
+            f"Supported Files ({supported})",
+            "PDF Files (*.pdf *.PDF)",
+            f"Images ({images})",
+            "All Files (*)",
+        )
+    )

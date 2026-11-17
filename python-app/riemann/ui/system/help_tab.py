@@ -8,7 +8,7 @@ place the keys work. A row is (keys, what they do); keys lists alternatives
 for the same action, written as QKeySequence text ("Ctrl+K, K" is shown as
 "Ctrl+K then K") or, for keys that are not one sequence, in words
 ("Shift+arrow keys"). tests/test_help.py fails when a QShortcut that the
-window, a reader, a browser tab or the AI panel registers is missing here, so
+window, a reader, an image tab, a browser tab or the AI panel registers is missing here, so
 a new shortcut has to be described before it ships. Keys a widget reads in
 its keyPressEvent (A, W, H, the presentation keys) can't be listed that way
 and are kept in step by hand.
@@ -30,8 +30,8 @@ TOPICS = [
             (
                 "What Riemann is",
                 [
-                    "Riemann is a PDF reader and a web browser in one window. PDFs, web pages, Markdown, "
-                    "text files and source code each open in a tab of their own.",
+                    "Riemann is a PDF reader and a web browser in one window. PDFs, web pages, pictures, "
+                    "Markdown, text files and source code each open in a tab of their own.",
                 ],
             ),
             (
@@ -40,7 +40,8 @@ TOPICS = [
                     "Press Ctrl+O to open a file, or drag files onto the window. A new tab (Ctrl+T) shows "
                     "a start page with your recent files and a box for typing a file's location.",
                     "Ctrl+B opens a browser tab. Type a web address, or a few words to search the web.",
-                    "On Linux, \"Open with Riemann\" also appears for PDFs, text files and folders in your file manager.",
+                    "On Linux, \"Open with Riemann\" also appears for PDFs, pictures, text files and folders in "
+                    "your file manager.",
                 ],
             ),
             (
@@ -193,8 +194,38 @@ TOPICS = [
                     "Markdown files open formatted, with maths typeset. Text files, logs and source code "
                     "open in the same kind of tab. Code is shown in colour when the optional Pygments "
                     "component is installed.",
-                    "HTML files open in the browser. Pictures and other files that aren't text are "
-                    "refused with a message.",
+                    "HTML files open in the browser. Files Riemann can't show are refused with a message.",
+                ],
+            ),
+        ],
+    ),
+    (
+        "images",
+        "Pictures",
+        "image",
+        [
+            (
+                "Looking at a picture",
+                [
+                    "Pictures open in a tab of their own: PNG, JPEG, GIF, WebP, AVIF, TIFF, SVG, "
+                    "Photoshop files and many older formats. Photos taken on their side are turned the "
+                    "right way up.",
+                    "A fits the whole picture, W its width and H its height. Ctrl+= and Ctrl+- zoom, or "
+                    "hold Ctrl and turn the mouse wheel. Drag to move around, and double-click to switch "
+                    "between fitting and actual size.",
+                    "Left and Right show the previous or next picture in the same folder. A TIFF with "
+                    "several pages has Page Up and Page Down for its pages, and Space pauses a moving GIF.",
+                ],
+            ),
+            (
+                "Turning, copying and saving",
+                [
+                    "Ctrl+R turns the view clockwise and Ctrl+Shift+R the other way. The file itself is "
+                    "never changed.",
+                    "N changes the background: dark, light, or a checkerboard that shows the see-through "
+                    "parts of a picture.",
+                    "Ctrl+C copies the picture. \"Save as PDF\" in the toolbar makes a PDF of it, one page "
+                    "per page of the picture.",
                 ],
             ),
         ],
@@ -374,6 +405,22 @@ SHORTCUTS = [
             (("Ctrl+G",), "Video speed control"),
             (("Ctrl+M",), "Music mode"),
             (("F12", "Ctrl+Shift+I"), "Developer tools"),
+        ],
+    ),
+    (
+        "In a picture",
+        [
+            (("Right", "Left"), "Next or previous picture in the folder"),
+            (("Page Down", "Page Up"), "Next or previous page of the picture"),
+            (("A",), "Fit the whole picture"),
+            (("W", "H"), "Fit the width or the height"),
+            (("Ctrl+=", "Ctrl++", "Ctrl+-"), "Zoom in or out"),
+            (("Ctrl+0",), "Actual size"),
+            (("Ctrl+R", "Ctrl+Shift+R"), "Turn the view clockwise or anticlockwise"),
+            (("Ctrl+C",), "Copy the picture"),
+            (("Space",), "Pause or play a moving picture"),
+            (("N",), "Dark, light or checkerboard background"),
+            (("F",), "Full screen"),
         ],
     ),
     (

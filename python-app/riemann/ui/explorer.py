@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 from .palette import FONT_STACK, GridCanvas, path_row, short_folder, tinted_icon, tinted_pixmap, tokens
 from ..core.settings import FAVOURITE_FOLDERS_KEY, favourites_settings
 from ..core.assets import icon_path
-from ..core.doctypes import HTML_SUFFIXES, is_reader_name
+from ..core.doctypes import HTML_SUFFIXES, has_image_name, is_reader_name
 
 
 
@@ -67,6 +67,8 @@ class FileIconProxyModel(QSortFilterProxyModel):
 
             name = model.fileInfo(source_index).fileName()
 
+            if has_image_name(name):
+                return self._get_icon("image")
             if is_reader_name(name):
                 return self._get_icon("pdf")
             elif name.lower().endswith(HTML_SUFFIXES):

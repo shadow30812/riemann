@@ -728,13 +728,16 @@ def test_text_files_are_told_from_binary_by_content(tmp_path):
     cut_char.write_bytes(b"a" * (SNIFF_BYTES - 1) + "é".encode() + b"rest")
     image = tmp_path / "photo.txt"
     image.write_bytes(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR")
+    blob = tmp_path / "data.txt"
+    blob.write_bytes(b"\0\1\2 not text")
     latin1 = tmp_path / "old.txt"
     latin1.write_bytes("caf\xe9 cr\xe8me".encode("latin-1"))
 
     assert document_kind(str(makefile)) == "text"
     assert document_kind(str(source)) == "text"
     assert document_kind(str(cut_char)) == "text"
-    assert document_kind(str(image)) == "binary"
+    assert document_kind(str(image)) == "image"
+    assert document_kind(str(blob)) == "binary"
     assert document_kind(str(latin1)) == "binary"
 
 

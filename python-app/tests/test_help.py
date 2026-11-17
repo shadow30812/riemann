@@ -1,7 +1,7 @@
 """
 The Help page: it opens from F1 and the Help menu, and its shortcut tables
-list every QShortcut the window, a reader, a browser tab and the AI panel
-register, so a new shortcut can't ship undescribed.
+list every QShortcut the window, a reader, an image tab, a browser tab and
+the AI panel register, so a new shortcut can't ship undescribed.
 """
 
 from unittest.mock import MagicMock, patch
@@ -15,6 +15,7 @@ from riemann.app import RiemannWindow
 from riemann.ui.reader.tab import ReaderTab
 from riemann.ui.system import PAGES
 from riemann.ui.system.help_tab import SHORTCUTS, TOPICS, HelpTab, shown_keys
+from riemann.ui.viewers import ImageTab
 from test_browser import _WebEngineTracker
 
 
@@ -37,7 +38,7 @@ def documented_keys():
     return {QKeySequence(keys).toString() for _, rows in SHORTCUTS for alternatives, _ in rows for keys in alternatives}
 
 
-def test_every_shortcut_the_app_registers_is_on_the_help_page(qtbot, webengine):
+def test_every_shortcut_the_app_registers_is_on_the_help_page(qtbot, webengine, tmp_path):
     from riemann.ui.sidecar import AiSidecarPanel
 
     window = RiemannWindow(incognito=False, restore_session=False)
@@ -51,10 +52,14 @@ def test_every_shortcut_the_app_registers_is_on_the_help_page(qtbot, webengine):
     panel = AiSidecarPanel(window)
     qtbot.addWidget(panel)
 
-    registered = own_keys(window) | own_keys(reader) | own_keys(browser) | own_keys(panel)
+    image = ImageTab(str(tmp_path / "picture.png"))
+    qtbot.addWidget(image)
+
+    registered = own_keys(window) | own_keys(reader) | own_keys(image) | own_keys(browser) | own_keys(panel)
     missing = registered - documented_keys()
     assert not missing, f"describe these in riemann/ui/system/help_tab.py SHORTCUTS: {sorted(missing)}"
     reader.cleanup()
+    image.cleanup()
 
 
 def test_f1_and_the_help_menu_open_the_help_page_once(qtbot):

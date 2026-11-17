@@ -31,6 +31,7 @@ from ..ui.components import (
 )
 from ..ui.explorer import FolderHomeTab
 from ..ui.reader.tab import ReaderTab
+from ..ui.viewers import VIEWER_TABS
 
 
 class TabsMixin:
@@ -81,7 +82,7 @@ class TabsMixin:
                     widget.web.page().setAudioMuted(True)
                     widget.web.page().deleteLater()
                 widget.web.deleteLater()
-            elif isinstance(widget, ReaderTab):
+            elif isinstance(widget, (ReaderTab,) + VIEWER_TABS):
                 widget.cleanup()
             elif getattr(widget, "is_system_tab", False):
                 widget.release()
@@ -113,7 +114,7 @@ class TabsMixin:
                 if widget.web.page():
                     widget.web.page().setAudioMuted(True)
                     widget.web.page().deleteLater()
-            elif isinstance(widget, ReaderTab):
+            elif isinstance(widget, (ReaderTab,) + VIEWER_TABS):
                 widget.cleanup()
             elif getattr(widget, "is_system_tab", False):
                 widget.release()

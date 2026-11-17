@@ -49,7 +49,7 @@ Terminal=false
 Categories=Office;Viewer;Utility;
 Keywords=pdf;reader;document;
 StartupWMClass=$APP_NAME
-MimeType=application/pdf;text/markdown;text/plain;text/html;inode/directory;
+MimeType=application/pdf;text/markdown;text/plain;text/html;inode/directory;image/png;image/jpeg;image/gif;image/webp;image/avif;image/tiff;image/bmp;image/svg+xml;image/vnd.microsoft.icon;image/vnd.adobe.photoshop;image/jp2;image/x-portable-anymap;image/x-tga;image/x-pcx;image/apng;
 Actions=NewWindow;
 
 [Desktop Action NewWindow]
