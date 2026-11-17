@@ -15,14 +15,16 @@ any other file gets a plain note. The file is never written.
 
 Like the other viewers it has current_path, is_preview, cleanup(),
 toggle_theme() (N switches the bytes between dark and light) and a toolbar
-the window hides in full screen.
+the window hides in full screen. The table takes letters for type-to-search,
+so a filter on it (not on the application) passes F (full screen) and Esc
+(leave it) to the tab, as the picture viewer has them.
 """
 
 import os
 from collections import OrderedDict
 from typing import Optional
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSize, Qt
+from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QSize, Qt
 from PySide6.QtGui import QFontDatabase, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -182,6 +184,7 @@ class HexTab(QWidget):
         header.resizeSection(1, width("0" * (ROW_BYTES * 3 + 1)) + 24)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setStretchLastSection(True)
+        self.view.installEventFilter(self)
         layout.addWidget(self.view, 1)
         self.view.setVisible(not self.error)
         if self.error:
@@ -248,6 +251,20 @@ class HexTab(QWidget):
         window = self.window()
         if hasattr(window, "toggle_reader_fullscreen"):
             window.toggle_reader_fullscreen()
+
+    def _leave_fullscreen(self) -> None:
+        window = self.window()
+        if getattr(window, "_reader_fullscreen", False) and hasattr(window, "exit_fullscreen"):
+            window.exit_fullscreen()
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self.view and event.type() == QEvent.Type.KeyPress:
+            if not event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier:
+                action = {Qt.Key.Key_F: self.toggle_reader_fullscreen, Qt.Key.Key_Escape: self._leave_fullscreen}.get(event.key())
+                if action is not None:
+                    action()
+                    return True
+        return super().eventFilter(obj, event)
 
     def update_fullscreen_icon(self, state: int) -> None:
         self.btn_fullscreen.setProperty("icon_name", "minimize.svg" if state == 2 else "maximize.svg")

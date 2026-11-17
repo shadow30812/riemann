@@ -105,3 +105,15 @@ def test_the_n_key_switches_the_bytes_between_dark_and_light(qtbot, tmp_path):
     assert tab.bytes_dark is False and tab.dark_mode is True
     QApplication.processEvents()
     assert tab.model.data(tab.model.index(0, 2), Qt.ItemDataRole.DisplayRole) == ".."
+
+
+def test_f_goes_full_screen_although_the_table_takes_letters(qtbot, tmp_path):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+
+    tab = HexTab(write(tmp_path / "blob.dat", b"\x00\x01"))
+    qtbot.addWidget(tab)
+    calls = []
+    tab.toggle_reader_fullscreen = lambda: calls.append("f")
+    QApplication.sendEvent(tab.view, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_F, Qt.KeyboardModifier.NoModifier, "f"))
+    assert calls == ["f"]
