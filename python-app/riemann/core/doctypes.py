@@ -51,7 +51,6 @@ MARKDOWN_SUFFIXES = (".md", ".markdown")
 HTML_SUFFIXES = (".html", ".htm", ".xhtml")
 DOCUMENT_CLASSES = ("PDF", "Word", "Slides", "Spreadsheet", "Markdown", "E-book", "Code", "Text", "Image")
 READER_KINDS = ("pdf", "markdown", "text", "ebook", "office")
-CONVERTED_KINDS = ("ebook",)
 VIEWER_KINDS = ("image", "table")
 TAB_KINDS = READER_KINDS + VIEWER_KINDS
 TABLE_SUFFIXES = (".csv", ".tsv")

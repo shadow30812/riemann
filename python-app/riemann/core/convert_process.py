@@ -39,6 +39,8 @@ CHILD_FLAG = "--riemann-convert"
 TIMEOUT = 120.0
 CONVERTERS = {
     "ebook": "riemann.core.epub:read_epub",
+    "office": "riemann.core.office_basic:read_document",
+    "spreadsheet": "riemann.core.office_basic:read_spreadsheet",
 }
 
 

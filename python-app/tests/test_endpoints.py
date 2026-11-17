@@ -85,6 +85,7 @@ def test_remote_addresses_are_written_only_in_core_endpoints():
         "http://openoffice.org/2001/registry",
         "http://www.w3.org/2001/XMLSchema",
         "http://www.w3.org/2001/XMLSchema-instance",
+        "http://www.w3.org/1999/xlink",
     }
     offenders = []
     for path in sorted(ROOT.rglob("*.py")):

@@ -12,7 +12,15 @@ _office_ready: opening an Office file (not a preview) without LibreOffice
 asks to install it (ui/office_install.py), once per kind of Office file per
 session and only while Settings allows asking. Declined, the file isn't
 opened and a message says why. Tabs restored from a session never ask: they
-open and say in the page that LibreOffice is needed.
+open and say in the page that LibreOffice is needed. When Riemann can read
+the file itself (core/office_basic.py), the prompt also offers the basic
+view, and once asked (or with asking turned off) the basic view opens
+without a prompt. When the basic view's packages are missing, choosing it
+offers to install them (ui/office_install.py, offer_basic_packages).
+
+Spreadsheets open in a SpreadsheetTab (the table view, _viewer_kind gives
+them the kind "spreadsheet"); show_as_pages adds a reader tab next to one,
+which shows the workbook as LibreOffice prints it.
 """
 
 import os
@@ -42,9 +50,10 @@ from ..core.features import (
 from ..ui.browser import BrowserTab, PreviewTextTab
 from ..ui.palette import tinted_icon, tokens
 from ..ui.reader.tab import PreviewReaderTab, ReaderTab
-from ..ui.viewers import ImageTab, TableTab
+from ..ui.viewers import ImageTab, SpreadsheetTab, TableTab
 from ..core.assets import icon_path
 from ..core import office
+from ..core.office_basic import basic_format, packages_ready
 from ..core.doctypes import HTML_SUFFIXES, VIEWER_KINDS, dialog_filter, document_kind, is_reader_name, office_type
 from ..core.settings import OFFICE_ASK_KEY, OFFICE_PATH_KEY, get_dialog_directory, save_last_directory
 
@@ -277,15 +286,31 @@ class DocumentsMixin:
             return True
         if office.find_office(self.settings.value(OFFICE_PATH_KEY, "", type=str)) is not None:
             return True
+        fmt = basic_format(path)
         asked = self.__dict__.setdefault("_office_asked", set())
         kind = office_type(path) or "document"
         if self.settings.value(OFFICE_ASK_KEY, True, type=bool) and kind not in asked:
             asked.add(kind)
             from ..ui.office_install import offer_office
 
-            if offer_office(self, path):
+            choice = offer_office(self, path, basic=fmt is not None)
+            if choice == "office":
                 return True
+            if choice == "basic":
+                return self._basic_view_ready(path, fmt)
+        elif fmt is not None and packages_ready(fmt):
+            return True
         self.show_toast(f"{os.path.basename(path)} needs LibreOffice. Settings > Documents can install it.")
+        return False
+
+    def _basic_view_ready(self, path: str, fmt: str) -> bool:
+        if packages_ready(fmt):
+            return True
+        from ..ui.office_install import offer_basic_packages
+
+        if offer_basic_packages(self) and packages_ready(fmt):
+            return True
+        self.show_toast(f"{os.path.basename(path)} can't be shown without LibreOffice or the basic-view packages.")
         return False
 
     def _refuse_binary(self, path: str) -> None:
@@ -300,10 +325,28 @@ class DocumentsMixin:
         reader.signatures_detected.connect(lambda _: self.refresh_signature_panel())
         return reader
 
+    @staticmethod
+    def _viewer_kind(kind: str, path: str) -> str:
+        """kind, or "spreadsheet" for an Office spreadsheet, which opens in the table view."""
+        return "spreadsheet" if kind == "office" and office_type(path) == "spreadsheet" else kind
+
     def _create_viewer(self, kind: str, path: str, preview: bool) -> QWidget:
-        """The ImageTab or TableTab for path."""
-        viewer = ImageTab if kind == "image" else TableTab
+        """The ImageTab, TableTab or SpreadsheetTab for path."""
+        viewer = {"image": ImageTab, "spreadsheet": SpreadsheetTab}.get(kind, TableTab)
         return viewer(path, getattr(self, "dark_mode", False), preview=preview)
+
+    def show_as_pages(self, table: QWidget) -> Optional[QWidget]:
+        """Opens a reader tab next to a SpreadsheetTab, showing its workbook as LibreOffice prints it."""
+        tab_widget = next((tw for tw in (self.tabs_main, self.tabs_side) if tw.indexOf(table) != -1), None)
+        if tab_widget is None:
+            return None
+        reader = self._create_reader(False)
+        reader.load_document(table.current_path)
+        idx = tab_widget.indexOf(table) + 1
+        tab_widget.insertTab(idx, reader, QIcon(icon_path("pdf.png")), os.path.basename(table.current_path))
+        tab_widget.setCurrentIndex(idx)
+        self._update_tab_tooltip(tab_widget, idx)
+        return reader
 
     @staticmethod
     def _viewer_icon(kind: str) -> str:
@@ -345,7 +388,7 @@ class DocumentsMixin:
         """
         Opens any supported file as a tab. PDFs, Office files, e-books, Markdown and
         other text files go to the reader, images to an ImageTab, CSV and TSV to a
-        TableTab, HTML to the browser;
+        TableTab, spreadsheets to a SpreadsheetTab, HTML to the browser;
         binary files are refused. Preview tabs use the
         lightweight viewers instead. When preview is None, the "Open Documents in
         Preview Mode" setting decides. Returns the new tab, or None if nothing was opened.
@@ -375,7 +418,8 @@ class DocumentsMixin:
                 target_widget.setCurrentWidget(browser)
             return browser
 
-        if kind in VIEWER_KINDS:
+        kind = self._viewer_kind(kind, path)
+        if kind in VIEWER_KINDS or kind == "spreadsheet":
             widget = self._create_viewer(kind, path, preview)
             icon = self._preview_icon() if preview else QIcon(icon_path(self._viewer_icon(kind), getattr(self, "dark_mode", False)))
         elif kind in ("pdf", "ebook", "office") or (kind in ("markdown", "text") and not preview):
@@ -438,7 +482,7 @@ class DocumentsMixin:
             if kind == "binary":
                 self._refuse_binary(path)
                 return
-            if kind in VIEWER_KINDS:
+            if kind in VIEWER_KINDS or self._viewer_kind(kind, path) == "spreadsheet":
                 self._open_document(path, tab_widget)
                 return
             if kind == "office" and not getattr(reader, "is_preview", False) and not self._office_ready(path):
@@ -725,10 +769,11 @@ class DocumentsMixin:
             return
         self.add_to_history(path, "web" if kind == "html" else "pdf")
 
+        kind = self._viewer_kind(kind, path)
         if kind in ("pdf", "ebook", "office"):
             new_preview = self._create_reader(preview=True)
             new_preview.load_document(path)
-        elif kind in VIEWER_KINDS:
+        elif kind in VIEWER_KINDS or kind == "spreadsheet":
             new_preview = self._create_viewer(kind, path, preview=True)
         else:
             new_preview = PreviewTextTab(path, getattr(self, "dark_mode", False))

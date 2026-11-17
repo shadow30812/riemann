@@ -1,10 +1,18 @@
 """
 Asking to install LibreOffice, and installing it.
 
-offer_office(parent, path) is what the window calls when an Office file is
-opened and LibreOffice isn't found. OfficePrompt explains what LibreOffice is
-for and offers Install LibreOffice or Cancel, with "Don't ask again"
-(OFFICE_ASK_KEY; Settings turns it back on). Install opens InstallDialog.
+offer_office(parent, path, basic) is what the window calls when an Office
+file is opened and LibreOffice isn't found. OfficePrompt explains what
+LibreOffice is for and offers Install LibreOffice or Cancel, plus "Use the
+basic view" when Riemann can read the file itself (basic is True), with
+"Don't ask again" (OFFICE_ASK_KEY; Settings turns it back on). Install opens
+InstallDialog. It returns "office" once LibreOffice is installed, "basic"
+for the basic view, and "" otherwise.
+
+offer_basic_packages asks to install the basic view's packages when they are
+missing (a source install without them). They come from the hashed lock
+OFFICE_VIEWERS_LOCK through the same DependencyWorker as the optional
+packages in Settings, with a progress dialog, and the call waits for it.
 
 InstallDialog shows the first plan from core/office_install.py: what it does
 and the exact commands, with Copy for people who would rather use a
@@ -17,10 +25,11 @@ download page is always one click away. Closing the dialog while a command
 runs kills it.
 """
 
+import importlib
 import os
 from typing import List, Optional
 
-from PySide6.QtCore import QProcess, QProcessEnvironment, QUrl
+from PySide6.QtCore import QEventLoop, QProcess, QProcessEnvironment, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QFontDatabase
 from PySide6.QtWidgets import (
     QApplication,
@@ -28,7 +37,9 @@ from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPlainTextEdit,
+    QProgressDialog,
     QPushButton,
     QVBoxLayout,
 )
@@ -37,19 +48,26 @@ from ..core import office
 from ..core.endpoints import LIBREOFFICE_DOWNLOAD
 from ..core.office_install import InstallPlan, install_env, install_plans
 from ..core.settings import OFFICE_ASK_KEY, OFFICE_PATH_KEY, app_settings
+from .threads import track
 
 
 class OfficePrompt(QDialog):
-    def __init__(self, parent, name: str):
+    def __init__(self, parent, name: str, basic: bool = False):
         super().__init__(parent)
         self.setWindowTitle("LibreOffice")
         self.choice = "cancel"
         layout = QVBoxLayout(self)
-        text = QLabel(
+        message = (
             f"Riemann shows {name} with LibreOffice, a free office suite, and it isn't installed.\n\n"
             "Once it is, Word, PowerPoint, Excel and OpenDocument files open here as pages, and "
             "\"Edit in LibreOffice\" lets you change them."
         )
+        if basic:
+            message += (
+                "\n\nWithout it, Riemann can show a basic view: the text, tables and pictures, "
+                "without the page layout."
+            )
+        text = QLabel(message)
         text.setWordWrap(True)
         text.setMinimumWidth(420)
         layout.addWidget(text)
@@ -59,15 +77,24 @@ class OfficePrompt(QDialog):
         buttons.addStretch()
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
+        buttons.addWidget(cancel)
+        self.btn_basic = None
+        if basic:
+            self.btn_basic = QPushButton("Use the basic view")
+            self.btn_basic.clicked.connect(self._basic)
+            buttons.addWidget(self.btn_basic)
         install = QPushButton("Install LibreOffice…")
         install.setDefault(True)
         install.clicked.connect(self._install)
-        buttons.addWidget(cancel)
         buttons.addWidget(install)
         layout.addLayout(buttons)
 
     def _install(self) -> None:
         self.choice = "install"
+        self.accept()
+
+    def _basic(self) -> None:
+        self.choice = "basic"
         self.accept()
 
     def done(self, result: int) -> None:
@@ -221,11 +248,58 @@ class InstallDialog(QDialog):
         super().done(result)
 
 
-def offer_office(parent, path: str) -> bool:
-    """Asks to install LibreOffice for path; True when it is installed afterwards."""
-    prompt = OfficePrompt(parent, os.path.basename(path))
-    if prompt.exec() != QDialog.DialogCode.Accepted or prompt.choice != "install":
-        return False
+def offer_office(parent, path: str, basic: bool = False) -> str:
+    prompt = OfficePrompt(parent, os.path.basename(path), basic)
+    if prompt.exec() != QDialog.DialogCode.Accepted:
+        return ""
+    if prompt.choice == "basic":
+        return "basic"
+    if prompt.choice != "install":
+        return ""
     dialog = InstallDialog(parent)
     dialog.exec()
-    return dialog.found
+    return "office" if dialog.found else ""
+
+
+def offer_basic_packages(parent) -> bool:
+    """Asks to install the basic view's packages, and installs them; True when that worked."""
+    from ..core.dependencies import OFFICE_VIEWERS_LOCK, OFFICE_VIEWERS_REQUIREMENTS, DependencyWorker
+
+    answer = QMessageBox.question(
+        parent,
+        "Basic view",
+        "The basic view needs a few Python packages that aren't installed: "
+        + ", ".join(OFFICE_VIEWERS_REQUIREMENTS)
+        + ". Riemann installs the versions it was tested with, checked by their hashes. Install them now?",
+    )
+    if answer != QMessageBox.StandardButton.Yes:
+        return False
+    progress = QProgressDialog("Installing the basic-view packages…", None, 0, 0, parent)
+    progress.setWindowTitle("Basic view")
+    progress.setWindowModality(Qt.WindowModality.WindowModal)
+    progress.setCancelButton(None)
+    progress.setMinimumDuration(0)
+    worker = DependencyWorker("install", OFFICE_VIEWERS_LOCK)
+    loop = QEventLoop()
+    outcome = {"ok": False, "error": ""}
+
+    def finished(_name: str, _action: str, ok: bool) -> None:
+        outcome["ok"] = ok
+        loop.quit()
+
+    def failed(_name: str, _action: str, error: str) -> None:
+        outcome["error"] = error
+        loop.quit()
+
+    worker.progress_update.connect(lambda text: progress.setLabelText(f"Installing the basic-view packages…\n{text[:70]}"))
+    worker.finished_task.connect(finished)
+    worker.error_occurred.connect(failed)
+    progress.show()
+    track(worker).start()
+    loop.exec()
+    worker.wait()
+    progress.close()
+    importlib.invalidate_caches()
+    if not outcome["ok"]:
+        QMessageBox.warning(parent, "Basic view", outcome["error"] or "The packages couldn't be installed.")
+    return outcome["ok"]

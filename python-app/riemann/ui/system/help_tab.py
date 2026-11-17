@@ -208,9 +208,9 @@ TOPICS = [
             (
                 "Word, PowerPoint, Excel and OpenDocument",
                 [
-                    "When LibreOffice is installed, Riemann uses it to show Word, PowerPoint, Excel, "
-                    "OpenDocument and RTF files as pages, the way they print. The first time takes a few "
-                    "seconds; after that the file opens straight away.",
+                    "When LibreOffice is installed, Riemann uses it to show Word, PowerPoint, OpenDocument "
+                    "and RTF files as pages, the way they print. The first time takes a few seconds; after "
+                    "that the file opens straight away.",
                     "These tabs are read-only, and your file is never changed. To mark one up, use Save as "
                     "PDF (Ctrl+S): the PDF opens in the tab, and highlights and notes work there.",
                     "To change the file itself, click Edit in LibreOffice above the pages. When you save "
@@ -221,6 +221,29 @@ TOPICS = [
                     "Riemann's copy of LibreOffice runs no macros and loads no pictures from the web, so "
                     "opening a file never tells its sender. Settings > Documents shows where LibreOffice "
                     "was found, and Settings > Privacy deletes the converted copies.",
+                ],
+            ),
+            (
+                "Without LibreOffice",
+                [
+                    "Riemann can still show Word (.docx), PowerPoint (.pptx), OpenDocument and RTF files in "
+                    "a basic view: the text, headings, tables and pictures, without the page layout. A note "
+                    "at the top says so, and the sidebar lists the headings or slides.",
+                    "When Riemann asks to install LibreOffice, \"Use the basic view\" opens the file this "
+                    "way. After that, files of the same kind open in the basic view without asking.",
+                    "Older formats (.doc, .ppt) and drawings need LibreOffice.",
+                ],
+            ),
+            (
+                "Spreadsheets",
+                [
+                    "Excel and OpenDocument spreadsheets open as a table, with a tab for each sheet along "
+                    "the bottom. Click a cell to see its formula in the line under the table.",
+                    "With LibreOffice, the formulas are worked out again first, so files saved by other "
+                    "programs show their results. \"Show as pages\" opens the workbook as it prints, "
+                    "charts and pictures included.",
+                    "Spreadsheets are read-only here. Open with in the toolbar opens one in Excel or "
+                    "LibreOffice to change it.",
                 ],
             ),
         ],

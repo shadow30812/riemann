@@ -25,7 +25,8 @@ bigger page is written to a file in the cache folder (one per tab, deleted
 with the tab) and loaded from there; such a page can't load KaTeX or the
 emoji font, since local pages may not reach remote or other local files.
 
-Kinds in CONVERTED_KINDS (EPUB books) are turned into clean HTML first, in a
+Kinds with a converter in core.convert_process.CONVERTERS (EPUB books, the
+basic views of Office files) are turned into clean HTML first, in a
 child process (core/convert_process.py) driven by a ConvertWorker, while the
 page says the file is opening. The result is kept for the tab, so the N key
 re-renders without converting again; reload converts again. The book's table
@@ -49,6 +50,12 @@ OFFICE_POLL_MS (it may be edited in LibreOffice through "Edit in LibreOffice",
 or in Word). Once a new time has held for two checks, so a save still being
 written isn't caught halfway, the file is converted again and the tab
 reloads at the same page without asking: the view holds nothing to lose.
+
+Without LibreOffice, an Office file with a basic view (core/office_basic.py:
+Word, PowerPoint, OpenDocument text and slides, RTF) is shown like an
+e-book, converted to one HTML page by the "office" converter, with a note
+that the layout is simplified. Save as PDF of any page shown in the web view
+(Markdown, text, e-books, basic views) prints that page to a PDF.
 """
 
 import gc
@@ -91,9 +98,10 @@ from ....core.managers import PasswordDialog
 from ..render_worker import PAGE_CACHE, PageRenderWorker
 from ....core.render_process import PageRenderer
 from ..utils import generate_document_html, generate_markdown_html, generate_text_html
-from ....core.convert_process import Conversion, ConvertError
+from ....core.convert_process import CONVERTERS, Conversion, ConvertError
+from ....core.office_basic import basic_format, is_spreadsheet, packages_ready
 from ....core.office import OfficeConversion, OfficeError, find_office, open_in_office
-from ....core.doctypes import CONVERTED_KINDS, MARKDOWN_SUFFIXES, dialog_filter, document_kind, is_text_document
+from ....core.doctypes import MARKDOWN_SUFFIXES, dialog_filter, document_kind, is_text_document
 from ...threads import release, track
 from ....core.log import log
 from ....core.settings import (
@@ -157,6 +165,7 @@ class ConvertWorker(QThread):
 class OfficeWorker(QThread):
     converted = Signal(str, object)
     failed = Signal(str, str)
+    missing = Signal(str)
 
     def __init__(self, path: str, override: str = "", folder: Optional[str] = None):
         super().__init__()
@@ -167,6 +176,9 @@ class OfficeWorker(QThread):
     def run(self):
         try:
             self.conversion.office = find_office(self.override)
+            if self.conversion.office is None:
+                self.missing.emit(self.path)
+                return
             result = self.conversion.run()
         except OfficeError as e:
             self.failed.emit(self.path, str(e))
@@ -190,6 +202,7 @@ class DocumentMixin(ReaderHostBase):
     _converted: Optional[dict] = None
     _convert_error = ""
     _document_sections: tuple = ()
+    _converter_kind = ""
     converted_pdf: Optional[str] = None
     converted_banner = None
     _office_folder: Optional[str] = None
@@ -460,8 +473,8 @@ class DocumentMixin(ReaderHostBase):
         QTimer.singleShot(350, self, _restore_pos)
         self.show_toast("Refreshed document 🔄")
 
-    def _show_text_document(self, path: str) -> None:
-        """Shows a Markdown or plain text file as a page in the web view, in place of a PDF."""
+    def _show_text_document(self, path: str, converter: str = "") -> None:
+        """Shows a Markdown or plain text file as a page in the web view, in place of a PDF; converter names a CONVERTERS kind to turn it into HTML first."""
         if self.current_doc is not None:
             self._release_document()
         self.current_path = path
@@ -476,8 +489,9 @@ class DocumentMixin(ReaderHostBase):
         self._show_converted_banner()
         self.sidebar_nav.load_document("", None, self.theme_mode)
         self._set_sidebar_visible(False)
-        kind = document_kind(path)
-        if kind in CONVERTED_KINDS:
+        kind = converter or document_kind(path)
+        self._converter_kind = kind if kind in CONVERTERS else ""
+        if self._converter_kind:
             self.convert_worker = ConvertWorker(kind, path)
             self.convert_worker.converted.connect(self._on_converted)
             self.convert_worker.failed.connect(self._on_convert_failed)
@@ -512,6 +526,7 @@ class DocumentMixin(ReaderHostBase):
         self.convert_worker = OfficeWorker(path, self.settings.value(OFFICE_PATH_KEY, "", type=str), folder)
         self.convert_worker.converted.connect(self._on_office_converted)
         self.convert_worker.failed.connect(self._on_office_failed)
+        self.convert_worker.missing.connect(self._on_office_missing)
         track(self.convert_worker).start()
 
     def _show_message_page(self, message: str) -> None:
@@ -541,6 +556,23 @@ class DocumentMixin(ReaderHostBase):
         self.convert_worker = None
         self._show_message_page(message)
         self.show_toast(f"Could not open {os.path.basename(path)}")
+
+    def _on_office_missing(self, path: str) -> None:
+        if path != self.current_path:
+            return
+        self.convert_worker = None
+        fmt = basic_format(path)
+        name = os.path.basename(path)
+        if fmt and not is_spreadsheet(fmt) and packages_ready(fmt):
+            self._show_text_document(path, converter="office")
+            return
+        if fmt and not is_spreadsheet(fmt):
+            self._show_message_page(
+                f"Riemann needs LibreOffice, or the basic-view packages, to show {name}. "
+                "Settings > Documents can install LibreOffice."
+            )
+            return
+        self._show_message_page(f"Riemann needs LibreOffice to show {name}, and it isn't installed.")
 
     def _show_converted_banner(self) -> None:
         watching = bool(self.converted_pdf) and not self.is_preview
@@ -617,6 +649,42 @@ class DocumentMixin(ReaderHostBase):
             return
         self.open_here(dest)
 
+    def save_page_as_pdf(self) -> None:
+        """Prints the page shown in the web view (a text file, e-book or basic view) to a PDF the person names."""
+        if self.web is None:
+            return
+        stem = os.path.splitext(os.path.basename(self.current_path))[0]
+        dest, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save as PDF",
+            os.path.join(get_dialog_directory(self.settings), stem + ".pdf"),
+            "PDF Files (*.pdf)",
+        )
+        if not dest:
+            return
+        if not dest.lower().endswith(".pdf"):
+            dest += ".pdf"
+            if os.path.exists(dest):
+                answer = QMessageBox.question(
+                    self, "Save as PDF", f"{os.path.basename(dest)} already exists. Replace it?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+        save_last_directory(self.settings, dest)
+        page = self.web.page()
+
+        def done(path: str, ok: bool) -> None:
+            try:
+                page.pdfPrintingFinished.disconnect(done)
+            except (RuntimeError, TypeError):
+                pass
+            if path == dest:
+                self.show_toast(f"Saved {os.path.basename(dest)}" if ok else "Could not save the PDF")
+
+        page.pdfPrintingFinished.connect(done)
+        page.printToPdf(dest)
+
     def _forget_conversion(self) -> None:
         worker, self.convert_worker = self.convert_worker, None
         if worker is not None and shiboken6.isValid(worker):
@@ -663,7 +731,7 @@ class DocumentMixin(ReaderHostBase):
 
     def _text_page_html(self) -> str:
         path = self.current_path
-        if document_kind(path) in CONVERTED_KINDS:
+        if self._converter_kind:
             return self._converted_page_html()
         with open(path, "rb") as f:
             data = f.read(TEXT_VIEW_LIMIT + 1)
@@ -715,6 +783,9 @@ class DocumentMixin(ReaderHostBase):
             return
         if self.converted_pdf:
             self.save_converted_pdf()
+            return
+        if self.text_document:
+            self.save_page_as_pdf()
             return
         if self.has_unsaved_page_edits():
             box = QMessageBox(self)

@@ -3,7 +3,9 @@ Installing LibreOffice: the commands chosen for each system (built, never
 run), the install dialog running plans in order with real child processes
 that stand in for the installers, and the window asking only when it
 should: once per kind of file, never for restored tabs, never after "Don't
-ask again".
+ask again". When Riemann can read the file itself, the prompt offers the
+basic view, which later files of that kind get without asking, and choosing
+it without the packages offers to install them.
 """
 
 import sys
@@ -154,8 +156,9 @@ def window(qtbot, monkeypatch):
     app_settings().remove(OFFICE_ASK_KEY)
 
 
-def test_the_window_asks_once_per_kind_and_opens_nothing_when_declined(window, tmp_path):
-    with patch("riemann.ui.office_install.offer_office", return_value=False) as offer:
+def test_the_window_asks_once_per_kind_and_opens_nothing_when_declined(window, tmp_path, monkeypatch):
+    monkeypatch.setattr("riemann.window.documents.packages_ready", lambda fmt: False)
+    with patch("riemann.ui.office_install.offer_office", return_value="") as offer:
         assert window._open_document(make_docx(tmp_path / "a.docx"), preview=False) is None
         assert window._open_document(make_docx(tmp_path / "b.docx"), preview=False) is None
         assert offer.call_count == 1
@@ -174,12 +177,14 @@ def test_dont_ask_again_and_restored_tabs_never_ask(window, tmp_path):
     prompt.reject()
     assert app_settings().value(OFFICE_ASK_KEY, True, type=bool) is False
     with patch("riemann.ui.office_install.offer_office") as offer:
-        assert window._open_document(make_docx(tmp_path / "a.docx"), preview=False) is None
+        basic = window._open_document(make_docx(tmp_path / "a.docx"), preview=False)
         window._restore_tabs_from_items([{"type": "doc", "data": make_docx(tmp_path / "b.docx")}], window.tabs_main)
     offer.assert_not_called()
     restored = window.tabs_main.widget(window.tabs_main.count() - 1)
     assert restored.current_path.endswith("b.docx")
     restored.cleanup()
+    assert basic is not None
+    basic.cleanup()
 
 
 def test_installing_from_the_prompt_opens_the_file(window, tmp_path, monkeypatch):
@@ -187,11 +192,75 @@ def test_installing_from_the_prompt_opens_the_file(window, tmp_path, monkeypatch
     installed = []
     monkeypatch.setattr(office, "find_office", lambda override="": found if installed else None)
 
-    def offer(parent, path):
+    def offer(parent, path, basic=False):
         installed.append(path)
-        return True
+        return "office"
 
     with patch("riemann.ui.office_install.offer_office", side_effect=offer):
         tab = window._open_document(make_docx(tmp_path / "a.docx"), preview=False)
     assert tab is not None and installed
     tab.cleanup()
+
+
+def test_the_prompt_offers_the_basic_view_only_when_riemann_can_read_the_file(qtbot):
+    from riemann.ui.office_install import OfficePrompt
+
+    plain = OfficePrompt(None, "a.vsd")
+    qtbot.addWidget(plain)
+    assert plain.btn_basic is None
+    prompt = OfficePrompt(None, "a.docx", basic=True)
+    qtbot.addWidget(prompt)
+    prompt.btn_basic.click()
+    assert prompt.choice == "basic" and prompt.result() == prompt.DialogCode.Accepted
+
+
+def test_the_basic_view_is_asked_once_then_opens_without_asking(window, tmp_path):
+    with patch("riemann.ui.office_install.offer_office", return_value="basic") as offer:
+        first = window._open_document(make_docx(tmp_path / "a.docx"), preview=False)
+        second = window._open_document(make_docx(tmp_path / "b.docx"), preview=False)
+    assert offer.call_count == 1 and offer.call_args.kwargs == {"basic": True}
+    assert first is not None and second is not None
+    first.cleanup()
+    second.cleanup()
+
+
+def test_choosing_the_basic_view_without_its_packages_offers_them(window, tmp_path, monkeypatch):
+    ready = []
+    monkeypatch.setattr("riemann.window.documents.packages_ready", lambda fmt: bool(ready))
+
+    def install(parent):
+        ready.append(True)
+        return True
+
+    with patch("riemann.ui.office_install.offer_office", return_value="basic"), patch(
+        "riemann.ui.office_install.offer_basic_packages", side_effect=install
+    ) as packages:
+        tab = window._open_document(make_docx(tmp_path / "a.docx"), preview=False)
+    assert packages.call_count == 1 and tab is not None
+    tab.cleanup()
+    with patch("riemann.ui.office_install.offer_office", return_value="basic"), patch(
+        "riemann.ui.office_install.offer_basic_packages", return_value=False
+    ):
+        ready.clear()
+        assert window._open_document(make_docx(tmp_path / "b.pptx"), preview=False) is None
+
+
+def test_offer_basic_packages_installs_from_the_lock(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from riemann.core import dependencies
+    from riemann.ui import office_install
+
+    names = []
+
+    class Worker(dependencies.DependencyWorker):
+        def run(self):
+            names.append(self.pip_name)
+            self.finished_task.emit(self.pip_name, self.action, True)
+
+    monkeypatch.setattr(dependencies, "DependencyWorker", Worker)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    assert office_install.offer_basic_packages(None) is True
+    assert names == [dependencies.OFFICE_VIEWERS_LOCK]
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    assert office_install.offer_basic_packages(None) is False and len(names) == 1

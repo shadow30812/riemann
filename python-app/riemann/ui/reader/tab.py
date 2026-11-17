@@ -362,7 +362,7 @@ class PreviewReaderTab(ReaderTab):
         super()._on_document_loaded(doc, state)
         self.preview_banner.setVisible(True)
 
-    def _show_text_document(self, path: str) -> None:
-        super()._show_text_document(path)
+    def _show_text_document(self, path: str, converter: str = "") -> None:
+        super()._show_text_document(path, converter)
         self.toolbar.setVisible(False)
         self.preview_banner.setVisible(True)

@@ -6,6 +6,7 @@ fetched, the cache, and the read-only reader tab with Save as PDF, Edit in
 LibreOffice and updating when the file changes.
 """
 
+import base64
 import http.server
 import json
 import os
@@ -297,6 +298,25 @@ def test_real_libreoffice_converts_without_fetching_remote_pictures(tmp_path):
     assert hits == []
 
 
+@needs_libreoffice
+def test_real_libreoffice_recalculates_a_workbook_for_the_table_view(qtbot, tmp_path):
+    openpyxl = pytest.importorskip("openpyxl")
+    from riemann.ui.viewers import SpreadsheetTab
+
+    book = openpyxl.Workbook()
+    book.active.append(["Rent", 1200.5])
+    book.active.append(["Food", 800])
+    book.active["B3"] = "=SUM(B1:B2)"
+    path = str(tmp_path / "budget.xlsx")
+    book.save(path)
+    tab = SpreadsheetTab(path)
+    qtbot.addWidget(tab)
+    assert wait_for(lambda: tab.models, timeout=120)
+    assert tab.model.cell(2, 1) == "2000.5"
+    assert tab.btn_pages.isVisibleTo(tab)
+    tab.cleanup()
+
+
 @pytest.fixture
 def window(qtbot, fake):
     from riemann.app import RiemannWindow
@@ -359,12 +379,33 @@ def test_the_tab_updates_when_the_file_is_saved_elsewhere(window, tmp_path, fake
 
 def test_a_restored_tab_without_libreoffice_says_what_is_needed(window, tmp_path, monkeypatch):
     monkeypatch.setenv("RIEMANN_NO_OFFICE", "1")
+    monkeypatch.setattr("riemann.ui.reader.mixins.document.packages_ready", lambda fmt: False)
     window._restore_tabs_from_items([{"type": "doc", "data": docx(tmp_path / "report.docx")}], window.tabs_main)
     tab = window.tabs_main.widget(window.tabs_main.count() - 1)
     page = []
     assert wait_for(lambda: tab.convert_worker is None and tab.web is not None)
     assert wait_for(lambda: (tab.web.page().toHtml(page.append), bool(page) and "needs LibreOffice" in page[-1])[1])
     assert tab.current_doc is None
+    tab.cleanup()
+
+
+def test_without_libreoffice_a_word_file_gets_the_basic_view(window, tmp_path, monkeypatch):
+    from riemann.core.office_basic import BASIC_NOTE
+
+    monkeypatch.setenv("RIEMANN_NO_OFFICE", "1")
+    secret = tmp_path / "secret.png"
+    secret.write_bytes(b"\x89PNG\r\n\x1a\nSECRETBYTES")
+    window._restore_tabs_from_items(
+        [{"type": "doc", "data": docx(tmp_path / "report.docx", "Basic words", external_image=str(secret))}],
+        window.tabs_main,
+    )
+    tab = window.tabs_main.widget(window.tabs_main.count() - 1)
+    page = []
+    assert wait_for(lambda: tab.convert_worker is None and tab.web is not None)
+    assert wait_for(lambda: (tab.web.page().toHtml(page.append), bool(page) and "Basic words" in page[-1])[1])
+    assert BASIC_NOTE.split(",")[0] in page[-1]
+    assert base64.b64encode(secret.read_bytes()).decode() not in page[-1]
+    assert tab.converted_pdf is None and tab.current_path.endswith("report.docx")
     tab.cleanup()
 
 
