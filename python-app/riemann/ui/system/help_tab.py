@@ -195,7 +195,8 @@ TOPICS = [
                     "Markdown files open formatted, with maths typeset. Text files, logs and source code "
                     "open in the same kind of tab. Code is shown in colour when the optional Pygments "
                     "component is installed.",
-                    "HTML files open in the browser. Files Riemann can't show are refused with a message.",
+                    "HTML files open in the browser. Any other file opens as its bytes, read-only. Riemann "
+                    "never runs a file: programs get a warning, and no way to open them elsewhere.",
                 ],
             ),
         ],

@@ -10,7 +10,7 @@ A desktop document reader and web browser in one window, written in Python (PySi
 | --- | --- | --- |
 | Desktop app | `python-app/riemann/` | Entry `app.py` (`RiemannWindow`, `run()`). The window's behaviour is split into mixins in `window/` (documents, session, system, menus, panes, tabs, chrome, folders). |
 | Reader tab | `python-app/riemann/ui/reader/` | `tab.py` (`ReaderTab`) plus behaviour split into `mixins/` (toolbar, navigation, selection, input, appearance, document, pages, read_aloud, forms, citations, rendering, annotations, ai, ...). State and widgets that more than one mixin uses are declared in `mixins/host.py` (`ReaderHost`); a test checks `ReaderTab` has them all. Rendering runs in `render_worker.py`. Markdown and text files open here too, as one HTML page in the tab's web view, and so do EPUB books and the basic views of Office files; Office files with LibreOffice open as a converted PDF, read-only (`mixins/document.py`). `replace_text.py` is Replace text. |
-| Viewer tabs | `python-app/riemann/ui/viewers/` | `image_tab.py` (pictures), `table_tab.py` (CSV and TSV, editable, saved only after asking), `spreadsheet_tab.py` (Excel and OpenDocument sheets, read-only). |
+| Viewer tabs | `python-app/riemann/ui/viewers/` | `image_tab.py` (pictures), `table_tab.py` (CSV and TSV, editable, saved only after asking), `spreadsheet_tab.py` (Excel and OpenDocument sheets, read-only), `hex_tab.py` (any other file as bytes, read-only; `core/binary.py` says which files are programs). |
 | Reader toolbar layouts | `python-app/riemann/ui/reader/toolbar_layout.py` | The buttons are created once in `mixins/toolbar.py`; `ToolbarLayout` only places them (top bar, side rail, ribbon, floating pill, menus, hidden) per the layout chosen in Settings. Add a new button to `COMMANDS` there, or it shows nowhere. |
 | System tabs | `python-app/riemann/ui/system/` | Settings, history, bookmarks, downloads, library and help open as tabs (`window/system.py`). Help (`help_tab.py`, F1) is plain-words text for new users plus every keyboard shortcut. |
 | Browser tab | `python-app/riemann/ui/browser.py` | Qt WebEngine. Start page is a local file in `assets/homepage/`. |
@@ -92,7 +92,7 @@ env -u LD_LIBRARY_PATH QT_QPA_PLATFORM=offscreen ./riemann/bin/python -m pytest 
 
 ### Data safety
 
-- Decide what a file is with `core.doctypes` (`document_kind`, `is_reader_name`, `has_text_name`), not with suffix checks of your own. Binary files are refused, not opened.
+- Decide what a file is with `core.doctypes` (`document_kind`, `is_reader_name`, `has_text_name`), not with suffix checks of your own. Binary files open read-only as bytes in the hex view and are never run; a program (`core.binary.program_kind`) gets no Open with.
 - Code in a reader that opens a file (start page, drops, dialogs) calls `open_here`, so the file follows the preview setting and reaches history.
 - Page edits, redaction and Remove password go through `_edit_pages`, which changes a scratch copy; the user's file changes only on Save. Encrypted files stay encrypted unless the user removes the password; editing a signed file asks first.
 - Redaction saves the file in full (never an incremental update) and replaces the source only after `verify_redaction` passes. Where it can't remove exactly what is marked, it stops and names the page.

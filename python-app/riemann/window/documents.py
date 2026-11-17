@@ -53,7 +53,7 @@ from ..core.features import (
 from ..ui.browser import BrowserTab, PreviewTextTab
 from ..ui.palette import tinted_icon, tokens
 from ..ui.reader.tab import PreviewReaderTab, ReaderTab
-from ..ui.viewers import ImageTab, SpreadsheetTab, TableTab
+from ..ui.viewers import HexTab, ImageTab, SpreadsheetTab, TableTab
 from ..core.assets import icon_path
 from ..core import office
 from ..core.office_basic import basic_format, packages_ready
@@ -329,9 +329,6 @@ class DocumentsMixin:
         self.show_toast(f"{os.path.basename(path)} can't be shown without LibreOffice or the basic-view packages.")
         return False
 
-    def _refuse_binary(self, path: str) -> None:
-        self.show_toast(f"{os.path.basename(path)} isn't a document, image or text file, so Riemann can't show it.")
-
     def _create_reader(self, preview: bool) -> "ReaderTab":
         """Creates an empty reader tab, lightweight when preview is True; it knows whether this window is incognito."""
         reader = PreviewReaderTab() if preview else ReaderTab()
@@ -347,8 +344,8 @@ class DocumentsMixin:
         return "spreadsheet" if kind == "office" and office_type(path) == "spreadsheet" else kind
 
     def _create_viewer(self, kind: str, path: str, preview: bool) -> QWidget:
-        """The ImageTab, TableTab or SpreadsheetTab for path."""
-        viewer = {"image": ImageTab, "spreadsheet": SpreadsheetTab}.get(kind, TableTab)
+        """The ImageTab, TableTab, SpreadsheetTab or HexTab for path."""
+        viewer = {"image": ImageTab, "spreadsheet": SpreadsheetTab, "binary": HexTab}.get(kind, TableTab)
         if viewer is SpreadsheetTab:
             widget = viewer(path, getattr(self, "dark_mode", False), preview=preview, incognito=bool(getattr(self, "incognito", False)))
         else:
@@ -426,8 +423,8 @@ class DocumentsMixin:
         """
         Opens any supported file as a tab. PDFs, Office files, e-books, Markdown and
         other text files go to the reader, images to an ImageTab, CSV and TSV to a
-        TableTab, spreadsheets to a SpreadsheetTab, HTML to the browser;
-        binary files are refused. Preview tabs use the
+        TableTab, spreadsheets to a SpreadsheetTab, HTML to the browser,
+        and any other file to a HexTab, which shows its bytes. Preview tabs use the
         lightweight viewers instead. When preview is None, the "Open Documents in
         Preview Mode" setting decides. Returns the new tab, or None if nothing was opened.
         """
@@ -439,9 +436,6 @@ class DocumentsMixin:
             preview = self._preview_mode_enabled()
 
         kind = self._document_kind(path)
-        if kind == "binary":
-            self._refuse_binary(path)
-            return None
         if kind == "office" and not preview:
             if not self.isVisible() and self._office_prompt_due(path):
                 QTimer.singleShot(0, self, lambda: self._open_document(path, target_widget, False, page, None, activate))
@@ -515,9 +509,6 @@ class DocumentsMixin:
         )
         if tab_widget is None or getattr(reader, "current_path", None):
             kind = self._document_kind(path)
-            if kind == "binary":
-                self._refuse_binary(path)
-                return
             if kind in VIEWER_KINDS or self._viewer_kind(kind, path) == "spreadsheet":
                 self._open_document(path, tab_widget)
                 return
@@ -800,9 +791,6 @@ class DocumentsMixin:
             return
 
         kind = self._document_kind(path)
-        if kind == "binary":
-            self._refuse_binary(path)
-            return
         self.add_to_history(path, "web" if kind == "html" else "pdf")
 
         kind = self._viewer_kind(kind, path)

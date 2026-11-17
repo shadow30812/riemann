@@ -75,6 +75,7 @@ from PySide6.QtWidgets import (
 
 from .palette import CONTENT, qcolor, tokens
 from ..core.assets import icon_path
+from ..core.binary import program_kind
 
 
 _BROWSERS = [
@@ -107,7 +108,9 @@ def populate_open_with_menu(
     """
     Fills menu with ways to open target outside Riemann: the system default
     application and the browsers (or, for folders, file managers and editors)
-    found on this machine. target is a local file, a folder or a URL.
+    found on this machine. target is a local file, a folder or a URL. A
+    program (core.binary.program_kind) gets no way to open it, since the
+    system's default application for a program runs it.
     """
     menu.clear()
     is_url = "://" in target and not target.startswith("file://")
@@ -115,6 +118,9 @@ def populate_open_with_menu(
         target = QUrl(target).toLocalFile()
     if not target or (not is_url and not os.path.exists(target)):
         menu.addAction("Nothing to open").setEnabled(False)
+        return
+    if not is_url and os.path.isfile(target) and program_kind(target):
+        menu.addAction("Riemann doesn't start programs").setEnabled(False)
         return
 
     is_folder = not is_url and os.path.isdir(target)

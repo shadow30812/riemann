@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QApplication
 from riemann.core.constants import ViewMode
 from riemann.ui.reader.mixins.document import SET_HTML_LIMIT, TEXT_VIEW_LIMIT
 from riemann.ui.reader.tab import ReaderTab
+from riemann.ui.viewers import HexTab
 
 
 @pytest.fixture(scope="session")
@@ -128,7 +129,7 @@ def test_a_pdf_after_a_text_file_leaves_text_mode(reader, tmp_path):
     assert reader.current_path == str(pdf)
 
 
-def test_the_window_routes_text_to_the_reader_and_refuses_binaries(qtbot, tmp_path):
+def test_the_window_routes_text_to_the_reader_and_binaries_to_the_hex_view(qtbot, tmp_path):
     from riemann.app import RiemannWindow
 
     window = RiemannWindow(incognito=False, restore_session=False)
@@ -140,11 +141,9 @@ def test_the_window_routes_text_to_the_reader_and_refuses_binaries(qtbot, tmp_pa
 
     binary = tmp_path / "photo.dat"
     binary.write_bytes(b"\0\1\2\3 neither text nor a picture")
-    count = window.tabs_main.count()
-    with patch.object(window, "show_toast") as toast:
-        assert window._open_document(str(binary), preview=False) is None
-    assert window.tabs_main.count() == count
-    assert "photo.dat" in toast.call_args.args[0]
+    opened = window._open_document(str(binary), preview=False)
+    assert isinstance(opened, HexTab) and opened.current_path == str(binary)
+    assert window._document_icon_name(str(binary)) == "binary.png"
 
 
 def test_a_document_with_no_telling_name_is_classed_by_its_contents(tmp_path):
@@ -157,3 +156,6 @@ def test_a_document_with_no_telling_name_is_classed_by_its_contents(tmp_path):
     assert document_class(str(pdf)) == "PDF"
     assert document_class(str(text)) == "Text"
     assert document_class(str(tmp_path / "missing")) == "Text"
+    blob = tmp_path / "blob"
+    blob.write_bytes(b"\0\1\2")
+    assert document_class(str(blob)) == "Other"

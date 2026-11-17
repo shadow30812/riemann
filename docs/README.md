@@ -43,7 +43,7 @@ On the test machine (numbers and method under [Performance](#performance)):
 
 ### Text, Markdown and code
 
-Markdown files open rendered, with maths typeset by KaTeX. Plain text and source files open in the same reader, highlighted when the optional Pygments component is installed. Riemann treats any file that looks like UTF-8 text as text, so logs, `Makefile` and files without an extension open too. HTML files open in the browser. Binary files Riemann can't show are refused with a message, rather than opened as gibberish.
+Markdown files open rendered, with maths typeset by KaTeX. Plain text and source files open in the same reader, highlighted when the optional Pygments component is installed. Riemann treats any file that looks like UTF-8 text as text, so logs, `Makefile` and files without an extension open too. HTML files open in the browser. Any other file opens as its bytes, read-only, in a hex view. Riemann never runs a file: programs get a warning and no "Open with".
 
 ### Office files
 

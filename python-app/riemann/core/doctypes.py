@@ -24,12 +24,12 @@ document_kind(path) returns "pdf", "markdown", "html", "ebook", "office",
   .cpp, .log, Makefile and files with no extension all count;
 - a file that isn't text but starts with one of IMAGE_SIGNATURES is an image
   whatever its name. Text is tested first, so a text file that happens to
-  start with "BM" stays text. Everything else is binary, and the app refuses
-  to open it.
+  start with "BM" stays text. Everything else is binary, shown read-only as
+  bytes in the hex view (core/binary.py), never run.
 
 The reader shows PDFs, Markdown, text and e-books (READER_KINDS), and a table
 as text when asked ("Open as text"); an e-book is turned into one page first
-(core/epub.py); images and tables open in the tabs of
+(core/epub.py); images, tables and binary files open in the tabs of
 ui/viewers (VIEWER_KINDS). TAB_KINDS are the kinds that open in a document tab. TEXT_SUFFIXES and TEXT_NAMES (the
 prose and code lists together) name the common text and source-code files.
 They are used where reading the file is too slow or not trusted: the explorer's icons, the open dialogs'
@@ -38,7 +38,8 @@ when another process hands it a path (a security boundary, so it never
 sniffs content).
 
 document_class(path) sorts the Documents history into DOCUMENT_CLASSES (PDF,
-Markdown, E-book, Spreadsheet, Code, Text, Image): CODE_SUFFIXES and CODE_NAMES are source, build and
+Word, Slides, Spreadsheet, Markdown, E-book, Code, Text, Image, and Other for
+binary files; a file that is gone and whose name says nothing counts as Text): CODE_SUFFIXES and CODE_NAMES are source, build and
 style files; PROSE_SUFFIXES and PROSE_NAMES are prose, data, configuration
 and logs, which count as Text. It goes by name first, since history lists
 files that may be gone, and reads only a file whose name says nothing.
@@ -49,9 +50,9 @@ import os
 SNIFF_BYTES = 8192
 MARKDOWN_SUFFIXES = (".md", ".markdown")
 HTML_SUFFIXES = (".html", ".htm", ".xhtml")
-DOCUMENT_CLASSES = ("PDF", "Word", "Slides", "Spreadsheet", "Markdown", "E-book", "Code", "Text", "Image")
+DOCUMENT_CLASSES = ("PDF", "Word", "Slides", "Spreadsheet", "Markdown", "E-book", "Code", "Text", "Image", "Other")
 READER_KINDS = ("pdf", "markdown", "text", "ebook", "office")
-VIEWER_KINDS = ("image", "table")
+VIEWER_KINDS = ("image", "table", "binary")
 TAB_KINDS = READER_KINDS + VIEWER_KINDS
 TABLE_SUFFIXES = (".csv", ".tsv")
 EBOOK_SUFFIXES = (".epub",)
@@ -286,6 +287,8 @@ def document_class(path: str) -> str:
     kind = document_kind(path)
     if kind == "office":
         return OFFICE_CLASSES.get(office_type(path) or "document", "Word")
+    if kind == "binary" and os.path.isfile(path):
+        return "Other"
     return {"pdf": "PDF", "markdown": "Markdown", "image": "Image", "ebook": "E-book"}.get(kind, "Text")
 
 
