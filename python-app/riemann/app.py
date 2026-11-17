@@ -450,11 +450,28 @@ class RiemannWindow(
         RiemannWindow._save_all_windows_session()
         QApplication.instance().quit()
 
+    def _flush_documents(self) -> None:
+        """Writes form entries and annotations still waiting on their timers into each reader's PDF."""
+        for tabs in (self.tabs_main, self.tabs_side):
+            for widget in [tabs.widget(i) for i in range(tabs.count())]:
+                if not isinstance(widget, ReaderTab):
+                    continue
+                for flush in (widget.flush_forms_to_pdf, widget.flush_annotations_to_pdf):
+                    try:
+                        flush()
+                    except Exception:
+                        log.warning("Could not store changes in %s", widget.current_path, exc_info=True)
+
     def closeEvent(self, event: QCloseEvent) -> None:
-        """Saves the session unless the window is incognito; asks first about page edits and web pages with unsaved changes."""
+        """
+        Saves the session unless the window is incognito; asks first about page
+        edits and web pages with unsaved changes, and writes annotations and
+        form entries still waiting on their timers into the PDFs.
+        """
         if not self.close_confirmed and not self.confirm_close():
             event.ignore()
             return
+        self._flush_documents()
         if self.incognito:
             if self in RiemannWindow._all_open_windows:
                 RiemannWindow._all_open_windows.remove(self)

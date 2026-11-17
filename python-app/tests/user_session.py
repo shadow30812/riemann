@@ -377,12 +377,161 @@ def scenario_leave_site(files):
     state["quitting"] = True
 
 
+def save_dialog(path):
+    """Waits for a Save dialog, types path into it and clicks Save."""
+    from PySide6.QtWidgets import QFileDialog, QLineEdit
+
+    box = yield dialog(QFileDialog)
+    yield 0.5
+    name = box.findChild(QLineEdit, "fileNameEdit")
+    name.setFocus()
+    name.selectAll()
+    type_text(path, name)
+    yield lambda: name.text() == path
+    press(box, "Save")
+    yield lambda: dialog(QFileDialog)() is None
+
+
+def highlight_word(tab, word, page=0):
+    """Text Highlight from the annotation tools, pressed at the word's start and released at its end."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    key("Ctrl+Shift+A", tab)
+    yield lambda: tab.anno_toolbar.isVisible()
+    click(tab.anno_toolbar.btn_markup_h)
+    yield lambda: tab.current_tool == "markup_highlight"
+    l, t, r, b = word_rect(tab, word, page)
+    middle = int((t + b) / 2)
+    widget = tab.page_widgets[page]
+    QTest.mousePress(widget, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(int(l) + 1, middle))
+    QTest.mouseRelease(widget, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(int(r) - 1, middle))
+    yield lambda: any(a.get("type") == "markup" for a in tab.annotations.get(str(page), []))
+
+
+def scenario_office(files):
+    """
+    Opens a Word file from the command line (LibreOffice converts it), saves it
+    as a PDF with Ctrl+S, highlights a word in that PDF and quits.
+    """
+    docx, pdf = files
+    yield reader_ready(docx)
+    tab = current_tab()
+    notes["banner"] = tab.converted_banner is not None and tab.converted_banner.isVisible()
+    notes["annotations_blocked"] = not tab.anno_toolbar.isVisible()
+    later(key, "Ctrl+S", tab)
+    yield from save_dialog(pdf)
+    yield reader_ready(pdf)
+    notes["banner_after_save"] = tab.converted_banner is not None and tab.converted_banner.isVisible()
+    yield from highlight_word(tab, "Hello")
+    notes["docx_unchanged"] = open(docx, "rb").read() == state["original"]
+    later(key, "Ctrl+Q", window())
+    state["quitting"] = True
+
+
+def page_text(tab):
+    """The text of the page in tab's web view."""
+    from PySide6.QtWidgets import QApplication
+
+    found = []
+    tab.web.page().toPlainText(found.append)
+    end = time.time() + 5
+    while not found and time.time() < end:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    return found[0] if found else ""
+
+
+def scenario_office_basic(files):
+    """
+    Without LibreOffice: a Word file from the command line brings the install
+    prompt, answered "Use the basic view"; a second Word file through Ctrl+O
+    then opens the same way without asking.
+    """
+    from PySide6.QtWidgets import QFileDialog, QLabel, QLineEdit
+
+    from riemann.ui.office_install import OfficePrompt
+
+    first, second = files
+    box = yield dialog(OfficePrompt)
+    notes["prompt"] = box.findChildren(QLabel)[0].text()
+    press(box, "Use the basic view")
+    yield lambda: getattr(current_tab(), "current_path", None) == first and current_tab().web is not None
+    tab = current_tab()
+    yield lambda: "First words" in page_text(tab)
+    notes["first_text"] = page_text(tab)
+    later(key, "Ctrl+O", window())
+    picker = yield dialog(QFileDialog)
+    yield 0.5
+    name = picker.findChild(QLineEdit, "fileNameEdit")
+    name.setFocus()
+    type_text(second, name)
+    yield lambda: name.text() == second
+    press(picker, "Open")
+    yield lambda: dialog(QFileDialog)() is None
+    yield 1.0
+    notes["asked_again"] = isinstance(dialog()(), OfficePrompt)
+    yield lambda: getattr(current_tab(), "current_path", None) == second and current_tab().web is not None
+    tab = current_tab()
+    yield lambda: "Second words" in page_text(tab)
+    notes["second_text"] = True
+
+
+def table_view():
+    from riemann.ui.viewers import TableTab
+
+    tab = current_tab()
+    return tab if isinstance(tab, TableTab) and tab.model is not None and tab.model.rowCount() else None
+
+
+def edit_cell(tab, row, column, text):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    tab.view.setCurrentIndex(tab.model.index(row, column))
+    tab.view.setFocus()
+    key("F2", tab.view)
+    yield lambda: tab.cell_editor() is not None
+    editor = tab.cell_editor()
+    editor.selectAll()
+    type_text(text, editor)
+    QTest.keyClick(editor, Qt.Key.Key_Return)
+    yield lambda: tab.model.cell(row, column) == text
+
+
+def scenario_edit_table(files):
+    """
+    Changes a cell of a CSV file and saves it with Ctrl+S, answering Save;
+    changes another, then quits with Ctrl+Q and answers Don't Save.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    tab = yield table_view
+    yield from edit_cell(tab, 0, 1, "30")
+    notes["unchanged_before_save"] = open(files[0], "rb").read() == state["original"]
+    later(key, "Ctrl+S", tab)
+    box = yield dialog(QMessageBox)
+    notes["save_asked"] = box.text()
+    press(box, "Save")
+    yield lambda: not tab.modified
+    notes["after_save"] = open(files[0], encoding="utf-8").read()
+    yield from edit_cell(tab, 1, 1, "99")
+    later(key, "Ctrl+Q", window())
+    box = yield dialog(QMessageBox)
+    notes["quit_asked"] = box.text()
+    press(box, "Don't Save")
+    state["quitting"] = True
+
+
 SCENARIOS = {
     "read": scenario_read,
     "redact": scenario_redact,
     "open_text": scenario_open_text,
     "quit_with_edits": scenario_quit_with_edits,
     "leave_site": scenario_leave_site,
+    "office": scenario_office,
+    "office_basic": scenario_office_basic,
+    "edit_table": scenario_edit_table,
 }
 
 
@@ -475,7 +624,7 @@ def main():
             later(play, name, files)
 
     app_module.RiemannWindow.show = show
-    command_files = [] if name == "open_text" else files
+    command_files = {"open_text": [], "office": files[:1], "office_basic": files[:1]}.get(name, files)
     sys.argv = [sys.argv[0], "--new-window", *command_files]
     try:
         app_module.run()
