@@ -57,7 +57,7 @@ riemann/
 │   │   │   ├── homepage.html
 │   │   │   ├── homepage.js
 │   │   │   ├── Icon.png
-│   │   │   ├── icon.ico
+│   │   │   ├── windows-icon.ico
 │   │   │   ├── __tests__/
 │   │   │   │   ├── audio_engine.test.js
 │   │   │   │   └── homepage.test.js

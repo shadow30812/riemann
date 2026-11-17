@@ -20,7 +20,7 @@ A desktop PDF reader and web browser in one window, written in Python (PySide6 6
 | AI engine | `python-app/riemann/core/ai_server.py` | FastAPI on a random localhost port, per-run token, run as a child of the app (`python -m riemann.core.ai_server`, or the frozen exe with `--riemann-ai-sidecar`). ONNX MiniLM on onnxruntime; the model is downloaded on first use, pinned by commit and SHA-256. It never opens PDFs: the app sends page text. Client side: `core/ai_engine.py`. |
 | PDFium | `libs/` | `libpdfium.so`, `pdfium.dll`, not in git: `just fetch-pdfium` (or `python scripts/fetch_pdfium.py`) downloads them, pinned by SHA-256. |
 
-`python-app/riemann/assets/riemann_ai_engine/` may still exist on older checkouts: the 8 GB packed environment of the old AI sidecar, no longer used or built. It can be deleted; until then, exclude it from every search, lint and copy.
+An old checkout may still hold `python-app/riemann/assets/riemann_ai_engine/`, the 8 GB packed environment of the old AI sidecar. Nothing uses or builds it; delete it.
 
 ## Commands
 
@@ -46,6 +46,12 @@ just test
 just test-rust
 ```
 
+After changing a version in `pyproject.toml` (needs uv and network; CI fails until the locks match):
+
+```bash
+just lock
+```
+
 Modules the packaged builds leave out are listed once, in `scripts/build-excludes.txt`; `nbuild.sh`, `nbuild.ps1`, the release workflow and `Riemann.spec` all read it.
 
 `just clean` deletes build output inside the project folders only. Never widen its paths. `.github/workflows/tests.yml` runs the same tests on GitHub for every push and pull request.
@@ -59,11 +65,11 @@ env -u LD_LIBRARY_PATH QT_QPA_PLATFORM=offscreen ./riemann/bin/python -m pytest 
 ## Environment traps on the main dev machine
 
 - `LD_LIBRARY_PATH` points at another Qt build (`/opt/plecs`). Unset it (`env -u LD_LIBRARY_PATH`) for every Python command, or PySide6 fails to import.
-- `grep` is ugrep and ignores `--include`. Use `/usr/bin/grep` with `--exclude-dir=riemann_ai_engine`.
+- `grep` is ugrep and ignores `--include`. Use `/usr/bin/grep`.
 - The repository sits on NTFS; `sed -i` warns about permissions. Edit with the editor tool or Python.
 - `pytest --timeout` is not installed.
 - Offscreen runs that start QtWebEngine need `QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu`, or the GPU process crashes now and then.
-- Node is not installed, so the JavaScript tests in `assets/__tests__/` do not run here.
+- Node is not installed, so the JavaScript tests in `assets/__tests__/` do not run here; `tests.yml` runs them on GitHub (`npm ci`, then `npx jest python-app/riemann/assets/__tests__`).
 
 ## Rules
 
@@ -89,7 +95,9 @@ env -u LD_LIBRARY_PATH QT_QPA_PLATFORM=offscreen ./riemann/bin/python -m pytest 
 
 - Local services (AI sidecar, captions server) listen on `127.0.0.1`, on a random port, and require a per-run token compared with `hmac.compare_digest`. Keep it that way for any new service.
 - The start page is a local file with file-access rights. Treat anything that reaches it from a web page as untrusted: validate with `sanitize_homepage_links`, build DOM with `textContent`, allow only http and https links. Use `is_local_homepage(url)` for "is this the start page" checks.
-- Downloads of code or models must be pinned by version and SHA-256.
+- Downloads of code or models must be pinned by version and SHA-256. Optional packages install from the hashed locks in `assets/requirements/` (`pip install --require-hashes --no-deps`); after changing a version in `pyproject.toml`, run `just lock`. yt-dlp must never be given `remote_components`: its YouTube solver comes from the pinned `yt-dlp-ejs` package and runs in the pinned Deno (`js_runtimes` in `ui/browser.py`).
+- Markdown from files or AI answers is rendered only through `render_markdown_safely` (`ui/reader/utils.py`), which checks links on the parsed output.
+- The single-instance socket is per user (`UserAccessOption`), and a running instance opens only what `accepts_handoff` allows.
 
 ### Qt pitfalls
 
@@ -97,11 +105,15 @@ env -u LD_LIBRARY_PATH QT_QPA_PLATFORM=offscreen ./riemann/bin/python -m pytest 
 - Don't call `QAction.menu()` on menu-bar actions from Python and let the result go out of scope: it invalidates the menu's actions. Use `findChildren(QMenu)`.
 - Mixins that override Qt event handlers must come before `QWidget`/`QMainWindow` in the class bases.
 - Tie delayed callbacks to the widget they touch (`QTimer.singleShot(ms, widget, fn)`), so they are dropped if the widget is deleted first.
+- Every browser tab on a profile receives its `downloadRequested`; `_handle_download` claims each request once. Don't connect another handler to it.
 
 ### Threads and processes
 
 - PDFium is not thread-safe. Within one process, all calls into `riemann_core` go through its single lock; don't add parallel PDFium access from threads. Parallelism comes from processes: each reader renders pages in a child process of its own (`core/render_process.py`, `PageRenderer`), so render through the tab's `page_renderer`, not `current_doc.render_page`. The child module must not import Qt or `core.log`. `RIEMANN_RENDER_PROCESS=0` turns children off.
 - Stop every `QThread` before the app exits. Test harnesses must call `stop_all_render_workers` or emit `aboutToQuit`, or the process ends with "QThread: Destroyed while thread is still running" and a core dump.
+- Never call `QThread.terminate`: a thread killed inside PDFium keeps the `riemann_core` lock for ever. Register a worker with `ui/threads.track` when it starts, and when its tab closes hand it to `ui/threads.release` with the signals that reach the tab; it finishes on its own and quitting waits for it. Workers that make network requests check `isInterruptionRequested` between requests.
+- The Windows executable icon is `assets/icons/windows-icon.ico`; `Icon.ico` (really a PNG) is the Linux desktop icon. No two assets may differ only in letter case.
+- Child processes get `core.processes.NO_WINDOW` (`**NO_WINDOW`), so the windowed Windows build never flashes a console.
 - Long work (OCR, indexing, network) never runs on the UI thread.
 
 ### Testing

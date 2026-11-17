@@ -147,6 +147,8 @@ Important behaviors depend on these flags:
 
 Be extremely careful when modifying startup flags because subtle browser regressions can occur on Linux distributions.
 
+The flags are `CHROMIUM_FLAGS` in `app.py`. Both Chromium sandboxes stay on, and renderers are not capped: `--process-per-site` gives each site one renderer, shared by its tabs.
+
 ---
 
 ## Single-Instance IPC
@@ -165,7 +167,7 @@ Secondary Launch
 
 This system prevents duplicate application instances during OS-level "Open With" actions.
 
-If an independent window instance is explicitly required, passing `--new-window` bypasses single-instance IPC forwarding and initiates a new process instance.
+If an independent window instance is explicitly required, passing `--new-window` bypasses single-instance IPC forwarding and initiates a new process instance. That process does not take the socket from the running one: `listen_for_instances` removes a socket file only when nobody answers on it. The socket is limited to the same user account, and the running instance opens only existing folders and PDF, Markdown or HTML files sent to it.
 
 ---
 
@@ -1360,43 +1362,31 @@ Keep helper behavior consistent.
 
 ## Packaging
 
-The project supports:
+Release executables are built with Nuitka (`scripts/nbuild.sh` on Linux, `scripts/nbuild.ps1` and `.github/workflows/release.yml` on Windows); `Riemann.spec` builds the same with PyInstaller. All four read the modules to leave out from `scripts/build-excludes.txt`, and leave out the JavaScript tests and log files under `assets/`. The Rust core is built into the environment with `maturin develop --release` (`just build`).
 
-* Nuitka
-* PyInstaller
-* Rust extension packaging
+The Windows builds use `--windows-console-mode=attach` (no console of its own, but output shows when started from a terminal) and `assets/icons/windows-icon.ico` (a real ICO; `Icon.ico` is the PNG the Linux desktop uses, and two names that differ only in case would collide on Windows). Child processes started by the app pass `core.processes.NO_WINDOW`, so ffmpeg, Tesseract, pip and the render and AI children never flash a console window.
+
+`build_entry.py` is the entry point of the frozen app. It routes `--riemann-render-process` and `--riemann-ai-sidecar` to the child processes before Qt loads, writes startup crashes to `crash.log`, and on Linux drops `LD_LIBRARY_PATH` folders that hold another Qt 6.
+
+---
+
+## AI Engine Process
+
+The AI engine (`core/ai_server.py`) is the app itself, started again as a child: `python -m riemann.core.ai_server` from source, the frozen executable with `--riemann-ai-sidecar` in a build. It needs no bundled environment of its own. It embeds text with all-MiniLM-L6-v2 on onnxruntime; the model is downloaded on first use, pinned by commit and SHA-256. The app passes a free loopback port and a random token (`RIEMANN_AI_PORT`, `RIEMANN_AI_TOKEN`); without both the server refuses to start.
 
 ---
 
 ## Optional Dependencies
 
-Heavy dependencies are intentionally separable.
+Heavy features (Snip-to-LaTeX, local captions, video streaming) install their packages on demand into a venv in the app's data folder (`core/dependencies.py`). Each feature installs from a hashed lock in `assets/requirements/` with `pip install --require-hashes --no-deps`, so every package, dependencies included, is pinned by version and SHA-256. `scripts/lock_optional.py` writes the locks from the `bundled` and `extra` groups of `pyproject.toml`; run it after changing a version there. The venv is created only when something is installed; startup only mounts one that already exists.
 
-This significantly reduces:
-
-* binary size
-* startup cost
-* packaging complexity
+yt-dlp comes with `yt-dlp-ejs`, the JavaScript that solves YouTube's challenges, so yt-dlp never downloads solver code at run time. It needs a JavaScript runtime such as Deno on `PATH`.
 
 ---
 
 ## Frozen Runtime Handling
 
-Many modules check:
-
-```python
-sys.frozen
-```
-
-and:
-
-```python
-sys._MEIPASS
-```
-
-This logic is required for packaged builds.
-
-Never assume development-path resource loading.
+Bundled files are found through `core/assets.py` (`asset_path`, `icon_path`), and `is_frozen()` says whether this is a built executable. No other module checks `sys.frozen`, `sys._MEIPASS` or `__compiled__`; `tests/test_assets.py` fails if one does.
 
 ---
 
