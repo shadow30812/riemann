@@ -9,6 +9,10 @@ Notes:
 
 _highlight_section: Outlines are not always in page order, so look at every
 entry; on ties the later (usually deeper) entry wins.
+
+show_sections: a document shown as one web page (an e-book) has sections but
+no pages. Its entries carry an anchor in the page instead of a page number;
+clicking one emits anchor_selected, and the thumbnails button is disabled.
 """
 
 import atexit
@@ -39,6 +43,7 @@ from .render_worker import PAGE_IMAGE_FORMAT
 
 THUMB_WIDTH = 132
 MAX_THUMBS = 160
+ANCHOR_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
 def read_outline(doc: Any, path: str) -> List[Tuple[int, str, int]]:
@@ -137,6 +142,7 @@ class PdfSidebarWidget(QWidget):
     """
 
     page_selected = Signal(int)
+    anchor_selected = Signal(str)
     pages_menu_requested = Signal(QPoint)
 
     def __init__(self, parent=None, dark_mode: bool = False):
@@ -284,6 +290,7 @@ class PdfSidebarWidget(QWidget):
         self._outline_pages = []
         self.tree.clear()
         self.thumbs.clear()
+        self.btn_thumbs.setEnabled(True)
         if doc is None:
             return
 
@@ -314,6 +321,13 @@ class PdfSidebarWidget(QWidget):
         if self.isVisible() and self.mode == "thumbnails":
             self._visible_timer.start()
 
+    def show_sections(self, entries: list) -> None:
+        """Lists sections of a page-less document: entries are (depth, title, anchor)."""
+        self.load_document("", None, self.theme_mode)
+        self.btn_thumbs.setEnabled(False)
+        self.set_mode("outline")
+        self._on_outline_ready(self._generation, [(depth, title, -1, anchor) for depth, title, anchor in entries])
+
     def set_theme_mode(self, theme_mode: int) -> None:
         """Re-renders thumbnails after the page colours (dark/light reading mode) change."""
         if theme_mode == self.theme_mode or self.doc is None:
@@ -330,10 +344,12 @@ class PdfSidebarWidget(QWidget):
         self.tree.clear()
         self._outline_pages = []
         parents: List[QTreeWidgetItem] = []
-        for depth, title, page in entries:
+        for depth, title, page, *anchor in entries:
             item = QTreeWidgetItem([title or "Untitled"])
             item.setToolTip(0, title)
             item.setData(0, Qt.ItemDataRole.UserRole, page)
+            if anchor:
+                item.setData(0, ANCHOR_ROLE, anchor[0])
             del parents[depth:]
             if parents:
                 parents[-1].addChild(item)
@@ -352,6 +368,11 @@ class PdfSidebarWidget(QWidget):
         self._highlight_section()
 
     def _on_outline_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+        anchor = item.data(0, ANCHOR_ROLE)
+        if anchor:
+            self.tree.setCurrentItem(item)
+            self.anchor_selected.emit(str(anchor))
+            return
         page = item.data(0, Qt.ItemDataRole.UserRole)
         if page is not None and int(page) >= 0:
             self.page_selected.emit(int(page))

@@ -188,6 +188,21 @@ def highlighted_code(text: str, path: str, dark_mode: bool) -> str:
     return f"<pre>{html.escape(text)}</pre>"
 
 
+def generate_document_html(body: str, dark_mode: bool, note: str = "") -> str:
+    """
+    A document already turned into clean HTML (an e-book, through
+    core/html_clean.py) as a page in the same frame as Markdown; note is shown
+    above it. No KaTeX: the body has no TeX to typeset.
+    """
+    if note:
+        body = f'<p class="riemann-note">{html.escape(note)}</p>' + body
+    return _document_page(
+        body,
+        dark_mode,
+        extra_css="img { max-width: 100%; height: auto; } section + section { margin-top: 3em; }",
+    )
+
+
 def generate_text_html(text: str, path: str, dark_mode: bool, note: str = "") -> str:
     """A plain text or source file as an HTML page in the same frame as Markdown; note is shown under it."""
     body = highlighted_code(text, path, dark_mode)

@@ -8,7 +8,7 @@ place the keys work. A row is (keys, what they do); keys lists alternatives
 for the same action, written as QKeySequence text ("Ctrl+K, K" is shown as
 "Ctrl+K then K") or, for keys that are not one sequence, in words
 ("Shift+arrow keys"). tests/test_help.py fails when a QShortcut that the
-window, a reader, an image tab, a browser tab or the AI panel registers is missing here, so
+window, a reader, an image or table tab, a browser tab or the AI panel registers is missing here, so
 a new shortcut has to be described before it ships. Keys a widget reads in
 its keyPressEvent (A, W, H, the presentation keys) can't be listed that way
 and are kept in step by hand.
@@ -31,7 +31,8 @@ TOPICS = [
                 "What Riemann is",
                 [
                     "Riemann is a PDF reader and a web browser in one window. PDFs, web pages, pictures, "
-                    "Markdown, text files and source code each open in a tab of their own.",
+                    "EPUB books, CSV tables, Markdown, text files and source code each open in a tab of "
+                    "their own.",
                 ],
             ),
             (
@@ -195,6 +196,54 @@ TOPICS = [
                     "open in the same kind of tab. Code is shown in colour when the optional Pygments "
                     "component is installed.",
                     "HTML files open in the browser. Files Riemann can't show are refused with a message.",
+                ],
+            ),
+        ],
+    ),
+    (
+        "ebooks",
+        "E-books",
+        "book-open",
+        [
+            (
+                "EPUB books",
+                [
+                    "EPUB books open in a reader tab as one long page, in the same colours as Markdown. "
+                    "N switches between light and dark pages, and the zoom works as it does for text.",
+                    "The sidebar lists the book's chapters: click one to go there. Links inside the book "
+                    "work too.",
+                    "Riemann leaves out the book's own fonts, styles and scripts, and never loads "
+                    "pictures from the web. Very large pictures are left out with a note at the top.",
+                    "A book that takes more than two minutes to read, or can't be read at all, is "
+                    "refused with a message.",
+                ],
+            ),
+        ],
+    ),
+    (
+        "tables",
+        "Tables",
+        "list-tree",
+        [
+            (
+                "CSV and TSV files",
+                [
+                    "CSV and TSV files open as a table, with the first row kept at the top when it holds "
+                    "column names. Riemann works out whether the values are separated by commas, "
+                    "semicolons or tabs, and which text encoding the file uses.",
+                    "A large file opens straight away: more rows are read as you scroll down.",
+                    "\"Open as text\" in the toolbar shows the file as plain text instead.",
+                ],
+            ),
+            (
+                "Sorting, finding and copying",
+                [
+                    "Click a column's heading to sort by it, again to reverse the order, and a third time "
+                    "to put the rows back as they are in the file. Numbers sort by value, and empty "
+                    "cells go last.",
+                    "Ctrl+F finds text in the table. Return goes to the next match and Shift+Return to "
+                    "the one before.",
+                    "Select cells and press Ctrl+C to copy them. They paste into a spreadsheet as cells.",
                 ],
             ),
         ],
@@ -405,6 +454,15 @@ SHORTCUTS = [
             (("Ctrl+G",), "Video speed control"),
             (("Ctrl+M",), "Music mode"),
             (("F12", "Ctrl+Shift+I"), "Developer tools"),
+        ],
+    ),
+    (
+        "In a table",
+        [
+            (("Ctrl+F",), "Find text in the table"),
+            (("Return", "Shift+Return"), "Next or previous match"),
+            (("Ctrl+C",), "Copy the selected cells"),
+            (("Esc",), "Close the find bar"),
         ],
     ),
     (

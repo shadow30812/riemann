@@ -24,9 +24,18 @@ are cut off with a note. QWebEngineView.setHtml refuses pages over 2 MB, so a
 bigger page is written to a file in the cache folder (one per tab, deleted
 with the tab) and loaded from there; such a page can't load KaTeX or the
 emoji font, since local pages may not reach remote or other local files.
+
+Kinds in CONVERTED_KINDS (EPUB books) are turned into clean HTML first, in a
+child process (core/convert_process.py) driven by a ConvertWorker, while the
+page says the file is opening. The result is kept for the tab, so the N key
+re-renders without converting again; reload converts again. The book's table
+of contents goes to the sections sidebar (_document_sections), whose entries
+scroll the page to their anchor. Closing the tab, or opening another file in
+it, kills a conversion still running.
 """
 
 import gc
+import json
 import os
 import shutil
 import sys
@@ -64,12 +73,14 @@ from ....core import page_edit, pdf_annotations, pdf_forms
 from ....core.managers import PasswordDialog
 from ..render_worker import PAGE_CACHE, PageRenderWorker
 from ....core.render_process import PageRenderer
-from ..utils import generate_markdown_html, generate_text_html
-from ....core.doctypes import MARKDOWN_SUFFIXES, dialog_filter, is_text_document
+from ..utils import generate_document_html, generate_markdown_html, generate_text_html
+from ....core.convert_process import Conversion, ConvertError
+from ....core.doctypes import CONVERTED_KINDS, MARKDOWN_SUFFIXES, dialog_filter, document_kind, is_text_document
 from ...threads import release, track
 from ....core.log import log
 from ....core.settings import (
     NOTES_VISIBLE_KEY,
+    SIDEBAR_MODE_KEY,
     SIDEBAR_VISIBLE_KEY,
     get_dialog_directory,
     save_last_directory,
@@ -101,6 +112,28 @@ class DocumentLoadWorker(QThread):
         self.loaded.emit(doc, page_edit.document_state(self.path, self.password))
 
 
+class ConvertWorker(QThread):
+    converted = Signal(str, object)
+    failed = Signal(str, str)
+
+    def __init__(self, kind: str, path: str):
+        super().__init__()
+        self.path = path
+        self.conversion = Conversion(kind, path)
+
+    def run(self):
+        try:
+            result = self.conversion.run()
+        except ConvertError as e:
+            self.failed.emit(self.path, str(e))
+            return
+        except Exception as e:
+            log.warning("Converting %s failed: %s", self.path, e)
+            self.failed.emit(self.path, str(e) or type(e).__name__)
+            return
+        self.converted.emit(self.path, result)
+
+
 class DocumentMixin(ReaderHostBase):
     web = None
     load_worker = None
@@ -109,6 +142,10 @@ class DocumentMixin(ReaderHostBase):
     _char_geometry_cache = None
     text_document = False
     _text_page_file: Optional[str] = None
+    convert_worker: Optional[ConvertWorker] = None
+    _converted: Optional[dict] = None
+    _convert_error = ""
+    _document_sections: tuple = ()
     document_password: Optional[str] = None
     document_encrypted = False
     document_signed = False
@@ -158,6 +195,7 @@ class DocumentMixin(ReaderHostBase):
         self.document_password = self._load_password
         self.document_encrypted, self.document_signed = state
         self.text_document = False
+        self._forget_conversion()
         self._drop_text_page_file()
         self._update_protect_button()
         self._replace_page_renderer(PageRenderer(doc, self._load_source, self._load_password))
@@ -191,6 +229,7 @@ class DocumentMixin(ReaderHostBase):
 
         if not self.is_preview:
             self.toolbar.show()
+            self.sidebar_nav.set_mode(self.settings.value(SIDEBAR_MODE_KEY, "outline", type=str))
             self.sidebar_nav.load_document(path, self.page_renderer, self.theme_mode)
             self._set_sidebar_visible(
                 self.settings.value(SIDEBAR_VISIBLE_KEY, False, type=bool)
@@ -373,6 +412,15 @@ class DocumentMixin(ReaderHostBase):
         except OSError:
             self._loaded_mtime = None
         self._update_tab_title(os.path.basename(path))
+        self._forget_conversion()
+        self.sidebar_nav.load_document("", None, self.theme_mode)
+        self._set_sidebar_visible(False)
+        kind = document_kind(path)
+        if kind in CONVERTED_KINDS:
+            self.convert_worker = ConvertWorker(kind, path)
+            self.convert_worker.converted.connect(self._on_converted)
+            self.convert_worker.failed.connect(self._on_convert_failed)
+            track(self.convert_worker).start()
         try:
             self._render_text_page()
         except OSError as e:
@@ -387,8 +435,54 @@ class DocumentMixin(ReaderHostBase):
         self.btn_ocr.setEnabled(False)
         self._update_protect_button()
 
+    def _forget_conversion(self) -> None:
+        worker, self.convert_worker = self.convert_worker, None
+        if worker is not None and shiboken6.isValid(worker):
+            worker.conversion.cancel()
+            release(worker, worker.converted, worker.failed)
+        self._converted = None
+        self._convert_error = ""
+        self._document_sections = ()
+
+    def _on_converted(self, path: str, result: dict) -> None:
+        if path != self.current_path or not self.text_document:
+            return
+        self.convert_worker = None
+        self._converted = result
+        self._document_sections = tuple(tuple(entry) for entry in result.get("sections") or ())
+        if self._document_sections and not self.is_preview:
+            self.sidebar_nav.show_sections(list(self._document_sections))
+            self._set_sidebar_visible(self.settings.value(SIDEBAR_VISIBLE_KEY, False, type=bool))
+        self._render_text_page()
+
+    def _on_convert_failed(self, path: str, message: str) -> None:
+        if path != self.current_path or not self.text_document:
+            return
+        self.convert_worker = None
+        self._convert_error = f"Riemann couldn't open {os.path.basename(path)}. {message}"
+        self.show_toast(f"Could not open {os.path.basename(path)}")
+        self._render_text_page()
+
+    def scroll_to_anchor(self, anchor: str) -> None:
+        """Scrolls a converted document's page to the element with id anchor ("#id")."""
+        if self.web is None or not anchor.startswith("#"):
+            return
+        target = json.dumps(anchor[1:])
+        self.web.page().runJavaScript(
+            f"(function(){{var e=document.getElementById({target});if(e)e.scrollIntoView();}})()"
+        )
+
+    def _converted_page_html(self) -> str:
+        dark = self.theme_mode != 0
+        if self._converted is not None:
+            return generate_document_html(self._converted.get("html", ""), dark, self._converted.get("note", ""))
+        message = self._convert_error or f"Opening {os.path.basename(self.current_path)}…"
+        return generate_document_html("", dark, message)
+
     def _text_page_html(self) -> str:
         path = self.current_path
+        if document_kind(path) in CONVERTED_KINDS:
+            return self._converted_page_html()
         with open(path, "rb") as f:
             data = f.read(TEXT_VIEW_LIMIT + 1)
         note = ""
@@ -782,6 +876,7 @@ class DocumentMixin(ReaderHostBase):
         """Explicitly severs references to heavy resources to trigger native destructors."""
         self.notes_panel.save()
         self._drop_text_page_file()
+        self._forget_conversion()
         try:
             self.flush_forms_to_pdf()
         except Exception as e:

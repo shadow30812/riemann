@@ -74,6 +74,7 @@ class ReaderHost(Protocol):
     metadata_worker: Optional[Any]
     edit_scratch: Optional[str]
     text_document: bool
+    _document_sections: Tuple[Any, ...]
     document_password: Optional[str]
     document_encrypted: bool
     document_signed: bool

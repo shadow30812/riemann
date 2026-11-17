@@ -62,6 +62,7 @@ CLEAN_EXIT_KEY = "session/clean_exit"
 HOMEPAGE_NAME_KEY = "homepage/custom_name"
 NOTES_VISIBLE_KEY = "reader/notes_visible"
 SIDEBAR_VISIBLE_KEY = "reader/sidebar_visible"
+SIDEBAR_MODE_KEY = "reader/sidebar_mode"
 
 SEARCH_URL_KEY = "browser/search_url"
 

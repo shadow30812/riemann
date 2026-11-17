@@ -1,7 +1,7 @@
 """
 The Help page: it opens from F1 and the Help menu, and its shortcut tables
-list every QShortcut the window, a reader, an image tab, a browser tab and
-the AI panel register, so a new shortcut can't ship undescribed.
+list every QShortcut the window, a reader, an image or table tab, a browser
+tab and the AI panel register, so a new shortcut can't ship undescribed.
 """
 
 from unittest.mock import MagicMock, patch
@@ -15,7 +15,7 @@ from riemann.app import RiemannWindow
 from riemann.ui.reader.tab import ReaderTab
 from riemann.ui.system import PAGES
 from riemann.ui.system.help_tab import SHORTCUTS, TOPICS, HelpTab, shown_keys
-from riemann.ui.viewers import ImageTab
+from riemann.ui.viewers import ImageTab, TableTab
 from test_browser import _WebEngineTracker
 
 
@@ -54,12 +54,16 @@ def test_every_shortcut_the_app_registers_is_on_the_help_page(qtbot, webengine, 
 
     image = ImageTab(str(tmp_path / "picture.png"))
     qtbot.addWidget(image)
+    (tmp_path / "table.csv").write_text("a,b\n1,2\n")
+    table = TableTab(str(tmp_path / "table.csv"))
+    qtbot.addWidget(table)
 
-    registered = own_keys(window) | own_keys(reader) | own_keys(image) | own_keys(browser) | own_keys(panel)
+    registered = own_keys(window) | own_keys(reader) | own_keys(image) | own_keys(table) | own_keys(browser) | own_keys(panel)
     missing = registered - documented_keys()
     assert not missing, f"describe these in riemann/ui/system/help_tab.py SHORTCUTS: {sorted(missing)}"
     reader.cleanup()
     image.cleanup()
+    table.cleanup()
 
 
 def test_f1_and_the_help_menu_open_the_help_page_once(qtbot):

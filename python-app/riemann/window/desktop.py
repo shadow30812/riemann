@@ -27,7 +27,9 @@ IMAGE_MIME_TYPES = (
     "image/svg+xml", "image/vnd.microsoft.icon", "image/vnd.adobe.photoshop", "image/jp2",
     "image/x-portable-anymap", "image/x-tga", "image/x-pcx", "image/apng"
 )
-MIME_TYPES = ("application/pdf", "text/markdown", "text/plain", "text/html", "inode/directory") + IMAGE_MIME_TYPES
+MIME_TYPES = (
+    "application/pdf", "text/markdown", "text/plain", "text/html", "inode/directory", "application/epub+zip"
+) + IMAGE_MIME_TYPES
 
 
 def install_linux_integration():

@@ -6,9 +6,10 @@ packaged as a standalone executable. It imports the main run function
 from the application package and executes it.
 
 Started with --riemann-render-process (riemann.core.render_process.CHILD_FLAG)
-it becomes a page-render child, and with --riemann-ai-sidecar
-(riemann.core.ai_engine.SERVER_FLAG) the AI search engine. Neither loads Qt,
-so those checks come before the Qt setup below.
+it becomes a page-render child, with --riemann-convert
+(riemann.core.convert_process.CHILD_FLAG) a document converter, and with
+--riemann-ai-sidecar (riemann.core.ai_engine.SERVER_FLAG) the AI search
+engine. None of them loads Qt, so those checks come before the Qt setup below.
 
 On Linux, a folder on LD_LIBRARY_PATH that holds another Qt 6 (some
 engineering tools put theirs there) makes the dynamic loader pick its
@@ -53,6 +54,11 @@ if len(sys.argv) > 1 and sys.argv[1] == "--riemann-render-process":
 
     serve()
     sys.exit(0)
+
+if len(sys.argv) > 1 and sys.argv[1] == "--riemann-convert":
+    from riemann.core.convert_process import serve as serve_convert
+
+    sys.exit(serve_convert(sys.argv[2:]))
 
 if len(sys.argv) > 1 and sys.argv[1] == "--riemann-ai-sidecar":
     from riemann.core.ai_server import main as serve_ai

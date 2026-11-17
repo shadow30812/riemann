@@ -1,12 +1,15 @@
 """
 What kind of document a file is, decided in one place for the whole app.
 
-document_kind(path) returns "pdf", "markdown", "html", "image", "text" or
-"binary":
+document_kind(path) returns "pdf", "markdown", "html", "ebook", "image",
+"table", "text" or "binary":
 
 - a name ending in .pdf, or a file starting with %PDF-, is a PDF;
 - .md and .markdown are Markdown; .html, .htm and .xhtml are HTML, which opens
   in the browser;
+- .csv and .tsv (TABLE_SUFFIXES) are tables, shown as a grid;
+- .epub is an e-book, and so is a zip whose first entry is a mimetype file
+  saying application/epub+zip, as the EPUB format requires;
 - a name in IMAGE_SUFFIXES is an image: the formats Pillow reads, less those
   that need outside programs or only identify a file (EPS, WMF and EMF, GRIB,
   BUFR, HDF5, MPEG, IPTC), plus SVG and WBMP, which only Qt reads;
@@ -18,8 +21,10 @@ document_kind(path) returns "pdf", "markdown", "html", "image", "text" or
   start with "BM" stays text. Everything else is binary, and the app refuses
   to open it.
 
-The reader shows PDFs, Markdown and text (READER_KINDS); an image opens in
-ui/viewers/image_tab.py. TAB_KINDS are the kinds that open in a document tab. TEXT_SUFFIXES and TEXT_NAMES (the
+The reader shows PDFs, Markdown, text and e-books (READER_KINDS), and a table
+as text when asked ("Open as text"); an e-book is turned into one page first
+(core/epub.py); images and tables open in the tabs of
+ui/viewers (VIEWER_KINDS). TAB_KINDS are the kinds that open in a document tab. TEXT_SUFFIXES and TEXT_NAMES (the
 prose and code lists together) name the common text and source-code files.
 They are used where reading the file is too slow or not trusted: the explorer's icons, the open dialogs'
 filter, and window/instance.py, which decides what a running Riemann opens
@@ -27,7 +32,7 @@ when another process hands it a path (a security boundary, so it never
 sniffs content).
 
 document_class(path) sorts the Documents history into DOCUMENT_CLASSES (PDF,
-Markdown, Code, Text, Image): CODE_SUFFIXES and CODE_NAMES are source, build and
+Markdown, E-book, Spreadsheet, Code, Text, Image): CODE_SUFFIXES and CODE_NAMES are source, build and
 style files; PROSE_SUFFIXES and PROSE_NAMES are prose, data, configuration
 and logs, which count as Text. It goes by name first, since history lists
 files that may be gone, and reads only a file whose name says nothing.
@@ -38,9 +43,14 @@ import os
 SNIFF_BYTES = 8192
 MARKDOWN_SUFFIXES = (".md", ".markdown")
 HTML_SUFFIXES = (".html", ".htm", ".xhtml")
-DOCUMENT_CLASSES = ("PDF", "Markdown", "Code", "Text", "Image")
-READER_KINDS = ("pdf", "markdown", "text")
-TAB_KINDS = READER_KINDS + ("image",)
+DOCUMENT_CLASSES = ("PDF", "Markdown", "E-book", "Spreadsheet", "Code", "Text", "Image")
+READER_KINDS = ("pdf", "markdown", "text", "ebook")
+CONVERTED_KINDS = ("ebook",)
+VIEWER_KINDS = ("image", "table")
+TAB_KINDS = READER_KINDS + VIEWER_KINDS
+TABLE_SUFFIXES = (".csv", ".tsv")
+EBOOK_SUFFIXES = (".epub",)
+EPUB_MIMETYPE = b"mimetypeapplication/epub+zip"
 
 IMAGE_SUFFIXES = (
     ".apng", ".avif", ".avifs", ".blp", ".bmp", ".bw", ".cur", ".dcx", ".dds", ".dib", ".fit",
@@ -60,7 +70,7 @@ IMAGE_SIGNATURES = (
 
 PROSE_SUFFIXES = (
     ".txt", ".text", ".log", ".out", ".err", ".nfo", ".rst", ".adoc", ".asciidoc", ".org", ".tex",
-    ".ltx", ".sty", ".cls", ".bib", ".bst", ".srt", ".vtt", ".sub", ".csv", ".tsv", ".psv", ".json",
+    ".ltx", ".sty", ".cls", ".bib", ".bst", ".srt", ".vtt", ".sub", ".psv", ".json",
     ".jsonl", ".ndjson", ".json5", ".geojson", ".xml", ".xsd", ".xsl", ".xslt", ".rss",
     ".atom", ".plist", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".config", ".properties",
     ".env", ".editorconfig", ".gitignore", ".gitattributes", ".gitmodules", ".dockerignore",
@@ -116,11 +126,20 @@ def has_image_name(path: str) -> bool:
     return path.lower().endswith(IMAGE_SUFFIXES)
 
 
+def has_table_name(path: str) -> bool:
+    return path.lower().endswith(TABLE_SUFFIXES)
+
+
 def is_reader_name(path: str) -> bool:
-    """True when the name alone says a document tab shows this file (PDF, Markdown, listed text or an image)."""
+    """True when the name alone says a document tab shows this file (PDF, Markdown, listed text, a table or an image)."""
     lower = path.lower()
     return (
-        lower.endswith(".pdf") or lower.endswith(MARKDOWN_SUFFIXES) or has_text_name(path) or has_image_name(path)
+        lower.endswith(".pdf")
+        or lower.endswith(MARKDOWN_SUFFIXES)
+        or has_text_name(path)
+        or has_table_name(path)
+        or lower.endswith(EBOOK_SUFFIXES)
+        or has_image_name(path)
     )
 
 
@@ -146,6 +165,10 @@ def document_kind(path: str) -> str:
         return "markdown"
     if lower.endswith(HTML_SUFFIXES):
         return "html"
+    if lower.endswith(TABLE_SUFFIXES):
+        return "table"
+    if lower.endswith(EBOOK_SUFFIXES):
+        return "ebook"
     if lower.endswith(IMAGE_SUFFIXES):
         return "image"
     try:
@@ -157,23 +180,29 @@ def document_kind(path: str) -> str:
         return "pdf"
     if looks_like_text(sample):
         return "text"
+    if sample.startswith(b"PK\x03\x04") and sample[30:30 + len(EPUB_MIMETYPE)] == EPUB_MIMETYPE:
+        return "ebook"
     return "image" if has_image_signature(sample) else "binary"
 
 
 def is_text_document(path: str) -> bool:
-    """True for files the reader shows as a page of text (Markdown or plain text) rather than as a PDF."""
-    return document_kind(path) in ("markdown", "text")
+    """True for files the reader shows as one HTML page (Markdown, plain text, a table as text, an e-book) rather than as a PDF."""
+    return document_kind(path) in ("markdown", "text", "table", "ebook")
 
 
 def document_class(path: str) -> str:
     name = os.path.basename(path).lower()
     if name in CODE_NAMES or name.endswith(CODE_SUFFIXES):
         return "Code"
+    if has_table_name(path):
+        return "Spreadsheet"
+    if path.lower().endswith(EBOOK_SUFFIXES):
+        return "E-book"
     if has_text_name(path):
         return "Text"
     if has_image_name(path):
         return "Image"
-    return {"pdf": "PDF", "markdown": "Markdown", "image": "Image"}.get(document_kind(path), "Text")
+    return {"pdf": "PDF", "markdown": "Markdown", "image": "Image", "ebook": "E-book"}.get(document_kind(path), "Text")
 
 
 def _patterns(suffixes, upper: bool = False) -> str:
@@ -186,7 +215,7 @@ def dialog_filter(html: bool = True) -> str:
     PDFs, images and everything. Image and PDF names are listed in capitals
     too, since cameras write IMG_0001.JPG and the Linux dialog matches case.
     """
-    suffixes = MARKDOWN_SUFFIXES + (HTML_SUFFIXES if html else ()) + TEXT_SUFFIXES
+    suffixes = MARKDOWN_SUFFIXES + (HTML_SUFFIXES if html else ()) + EBOOK_SUFFIXES + TABLE_SUFFIXES + TEXT_SUFFIXES
     images = _patterns(IMAGE_SUFFIXES, upper=True)
     supported = f"*.pdf *.PDF {_patterns(suffixes)} {images} {' '.join(TEXT_NAMES)}"
     return ";;".join(

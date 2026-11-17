@@ -36,7 +36,7 @@ from ..toolbar_layout import ToolbarLayout
 from ..notes import NotesPanel
 from .host import ReaderHostBase
 from ....core.assets import icon_path
-from ....core.settings import SIDEBAR_VISIBLE_KEY
+from ....core.settings import SIDEBAR_MODE_KEY, SIDEBAR_VISIBLE_KEY
 
 
 class ToolbarMixin(ReaderHostBase):
@@ -121,8 +121,9 @@ class ToolbarMixin(ReaderHostBase):
         self.stack.addWidget(self.home_page_widget)
 
         self.sidebar_nav = PdfSidebarWidget(self, dark_mode=self._home_dark)
-        self.sidebar_nav.set_mode(self.settings.value("reader/sidebar_mode", "outline", type=str))
+        self.sidebar_nav.set_mode(self.settings.value(SIDEBAR_MODE_KEY, "outline", type=str))
         self.sidebar_nav.page_selected.connect(self.navigate_to)
+        self.sidebar_nav.anchor_selected.connect(self.scroll_to_anchor)
         self.sidebar_nav.pages_menu_requested.connect(self.show_pages_menu)
         self.sidebar_nav.btn_thumbs.clicked.connect(self._remember_sidebar_state)
         self.sidebar_nav.btn_outline.clicked.connect(self._remember_sidebar_state)
@@ -407,7 +408,7 @@ class ToolbarMixin(ReaderHostBase):
 
     def toggle_sidebar(self) -> None:
         """Shows or hides the sections and thumbnails sidebar."""
-        if self.is_preview or not self.current_doc:
+        if self.is_preview or not (self.current_doc or self._document_sections):
             return
         self._set_sidebar_visible(not self.sidebar_nav.isVisible())
         self._remember_sidebar_state()
@@ -420,7 +421,8 @@ class ToolbarMixin(ReaderHostBase):
 
     def _remember_sidebar_state(self) -> None:
         self.settings.setValue(SIDEBAR_VISIBLE_KEY, self.sidebar_nav.isVisible())
-        self.settings.setValue("reader/sidebar_mode", self.sidebar_nav.mode)
+        if self.current_doc:
+            self.settings.setValue(SIDEBAR_MODE_KEY, self.sidebar_nav.mode)
 
     def _update_page_input_width(self, text: str = "") -> None:
         """Fits the page-number box to its text."""
