@@ -113,6 +113,12 @@ class DummyReaderTab(QWidget):
     def cleanup(self):
         pass
 
+    def flush_forms_to_pdf(self):
+        pass
+
+    def flush_annotations_to_pdf(self):
+        pass
+
     def resolve_page_edits(self):
         return True
 
