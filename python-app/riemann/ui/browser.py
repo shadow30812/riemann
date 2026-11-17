@@ -53,6 +53,8 @@ import urllib.parse
 from html import escape as html_escape
 from typing import Any, Optional
 from ..core.assets import asset_path, icon_path
+from ..core.dependencies import venv_python
+from .reader.utils import render_markdown_safely
 
 _deno_dir = os.path.expanduser("~/.deno/bin")
 if os.path.isdir(_deno_dir) and _deno_dir not in os.environ.get("PATH", ""):
@@ -2456,11 +2458,7 @@ class PreviewTextTab(QWidget):
 
     def _markdown_html(self, text: str) -> str:
         try:
-            import markdown
-
-            body = markdown.markdown(
-                text, extensions=["fenced_code", "tables", "sane_lists", "toc"]
-            )
+            body = render_markdown_safely(text, extensions=("fenced_code", "tables", "sane_lists", "toc"))
         except Exception:
             import html as html_lib
 
@@ -2503,10 +2501,13 @@ class PreviewTextTab(QWidget):
         if not url.scheme() and url.fragment():
             self.editor.scrollToAnchor(url.fragment())
             return
-        if url.isRelative():
+        relative = url.isRelative()
+        if relative:
             url = self.editor.document().baseUrl().resolved(url)
         win = self.window()
         if url.isLocalFile():
+            if not relative:
+                return
             local = url.toLocalFile()
             if os.path.isfile(local) and hasattr(win, "_open_document"):
                 win._open_document(local)

@@ -14,11 +14,14 @@ import html
 import re
 
 import markdown
+import markdown.treeprocessors
+import markdown.util
 
+from ...core.endpoints import JSDELIVR_NPM
 from ..palette import tokens
 
 KATEX_VERSION = "0.16.9"
-KATEX_CDN = f"https://cdn.jsdelivr.net/npm/katex@{KATEX_VERSION}/dist"
+KATEX_CDN = f"{JSDELIVR_NPM}/katex@{KATEX_VERSION}/dist"
 KATEX_FILES = {
     "katex.min.css": "sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV",
     "katex.min.js": "sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8",
@@ -73,21 +76,52 @@ def generate_reflow_html(text: str, dark_mode: bool) -> str:
     return f"<!DOCTYPE html><html><head>{katex_cdn}<style>{style}</style></head><body>{escaped_text}</body></html>"
 
 
-UNSAFE_URL = re.compile(r"""(<[a-z]+\b[^<>]*?\s(?:href|src)=")\s*(?:javascript|vbscript|data|file):""", re.I)
+SAFE_SCHEMES = ("http", "https", "mailto")
+_URL_SCHEME = re.compile(r"([a-z][a-z0-9+.\-]*):", re.I)
+_URL_IGNORED = re.compile(r"[\x00-\x20\x7f]+")
+BLOCKED_URL = "#blocked"
 
 
-def render_markdown_safely(markdown_text: str) -> str:
+def url_is_safe(url: str, schemes: tuple = ()) -> bool:
     """
-    Markdown to HTML with raw HTML shown as text and script links disabled.
+    True for relative URLs and for http, https, mailto and the given extra
+    schemes, judged as a browser reads the attribute: entities decoded, and
+    the whitespace and control characters it skips removed.
+    """
+    text = html.unescape(url.replace(markdown.util.AMP_SUBSTITUTE, "&"))
+    match = _URL_SCHEME.match(_URL_IGNORED.sub("", text))
+    return match is None or match.group(1).lower() in SAFE_SCHEMES + tuple(schemes)
+
+
+class _SafeLinks(markdown.treeprocessors.Treeprocessor):
+    def __init__(self, md, schemes: tuple) -> None:
+        super().__init__(md)
+        self.schemes = schemes
+
+    def run(self, root) -> None:
+        for element in root.iter():
+            for attr in ("href", "src"):
+                value = element.get(attr)
+                if value is not None and not url_is_safe(value, self.schemes):
+                    element.set(attr, BLOCKED_URL)
+
+
+def render_markdown_safely(markdown_text: str, extensions: tuple = ("fenced_code", "tables"), schemes: tuple = ()) -> str:
+    """
+    Markdown to HTML with raw HTML shown as text and every link and image
+    limited to url_is_safe.
 
     A Markdown file may come from anywhere. Python-Markdown copies raw HTML
     (including <script>) straight through and keeps javascript: links, and the
-    preview runs with JavaScript on, so both are switched off here.
+    reader's preview runs with JavaScript on. The links are checked on the
+    parsed tree, after the inline patterns ran, rather than on the source, so
+    javascript&#58; and other encodings are caught as the browser decodes them.
     """
-    md = markdown.Markdown(extensions=["fenced_code", "tables"])
+    md = markdown.Markdown(extensions=list(extensions))
     md.preprocessors.deregister("html_block")
     md.inlinePatterns.deregister("html")
-    return UNSAFE_URL.sub(r"\1#blocked:", md.convert(markdown_text))
+    md.treeprocessors.register(_SafeLinks(md, tuple(schemes)), "riemann_safe_links", 1)
+    return md.convert(markdown_text)
 
 
 def generate_markdown_html(markdown_text: str, dark_mode: bool) -> str:

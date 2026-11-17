@@ -11,6 +11,10 @@ Notes:
 
 showEvent: The panel exists from startup; ask the provider for models only once
 someone opens it, not on every launch.
+
+_on_chunk: The answer is drawn again at most once per render interval while it
+streams. Restarting the timer on every chunk drew nothing until the answer
+ended, and drawing on every chunk re-rendered the whole Markdown each time.
 """
 
 import html
@@ -23,7 +27,6 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-import markdown
 from PySide6.QtCore import QObject, QSettings, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -45,6 +48,7 @@ from PySide6.QtWidgets import (
 )
 
 from .palette import tinted_icon, tokens
+from .reader.utils import render_markdown_safely
 from ..core.log import log
 from ..core.settings import app_settings
 from ..core.endpoints import (
@@ -780,7 +784,8 @@ class AiSidecarPanel(QWidget):
     def _on_chunk(self, request_id: int, piece: str) -> None:
         if request_id == self._request_id:
             self._pending += piece
-            self._render_timer.start()
+            if not self._render_timer.isActive():
+                self._render_timer.start()
 
     def _on_finished(self, request_id: int, error: str) -> None:
         if request_id != self._request_id or not self._busy:
@@ -824,7 +829,7 @@ class AiSidecarPanel(QWidget):
                     f"{html.escape(m['content']).replace(chr(10), '<br>')}</td></tr></table>"
                 )
             elif m["role"] == "assistant":
-                body = markdown.markdown(link_citations(m["content"]), extensions=["fenced_code", "tables"])
+                body = render_markdown_safely(link_citations(m["content"]), schemes=("page",))
                 parts.append(f"<div style='margin-top:10px; color:{t['text']}'>{body}</div>")
             else:
                 color = t["danger"] if m["role"] == "error" else t["muted"]
