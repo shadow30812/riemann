@@ -284,16 +284,23 @@ class DocumentsMixin:
         """'pdf', 'markdown', 'html', 'ebook', 'office', 'image', 'table', 'text' or 'binary' (core/doctypes.py)."""
         return document_kind(path)
 
+    def _office_prompt_due(self, path: str) -> bool:
+        """True when opening path now would ask about LibreOffice."""
+        if getattr(self, "_restoring_tabs", False):
+            return False
+        if office.find_office(self.settings.value(OFFICE_PATH_KEY, "", type=str)) is not None:
+            return False
+        asked = self.__dict__.get("_office_asked", set())
+        return self.settings.value(OFFICE_ASK_KEY, True, type=bool) and (office_type(path) or "document") not in asked
+
     def _office_ready(self, path: str) -> bool:
         if getattr(self, "_restoring_tabs", False):
             return True
         if office.find_office(self.settings.value(OFFICE_PATH_KEY, "", type=str)) is not None:
             return True
         fmt = basic_format(path)
-        asked = self.__dict__.setdefault("_office_asked", set())
-        kind = office_type(path) or "document"
-        if self.settings.value(OFFICE_ASK_KEY, True, type=bool) and kind not in asked:
-            asked.add(kind)
+        if self._office_prompt_due(path):
+            self.__dict__.setdefault("_office_asked", set()).add(office_type(path) or "document")
             from ..ui.office_install import offer_office
 
             choice = offer_office(self, path, basic=fmt is not None)
@@ -420,9 +427,7 @@ class DocumentsMixin:
             self._refuse_binary(path)
             return None
         if kind == "office" and not preview:
-            if not self.isVisible() and not getattr(self, "_restoring_tabs", False) and office.find_office(
-                self.settings.value(OFFICE_PATH_KEY, "", type=str)
-            ) is None:
+            if not self.isVisible() and self._office_prompt_due(path):
                 QTimer.singleShot(0, self, lambda: self._open_document(path, target_widget, False, page, None, activate))
                 return None
             if not self._office_ready(path):
