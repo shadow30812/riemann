@@ -178,3 +178,51 @@ def test_quitting_waits_for_tracked_workers_still_running(qapp):
     worker.started_flag.wait(5)
     threads.wait_for_released(5000)
     assert worker.isFinished()
+
+
+def test_a_worker_dropped_by_the_slot_of_its_last_signal_is_not_destroyed_while_running():
+    result = run_child(
+        """
+        import gc
+        from PySide6.QtCore import QThread, Signal
+        from riemann.ui.threads import track
+
+        class Converter(QThread):
+            converted = Signal(str)
+
+            def run(self):
+                self.converted.emit("done")
+                gate.wait(30)
+
+        class Tab:
+            def __init__(self):
+                self.worker = Converter()
+                self.worker.converted.connect(self.on_converted)
+                track(self.worker).start()
+
+            def on_converted(self, value):
+                self.worker = None
+                gc.collect()
+                gate.set()
+
+        tab = Tab()
+        end = time.time() + 3
+        while time.time() < end:
+            QCoreApplication.processEvents()
+            time.sleep(0.01)
+        print("survived", flush=True)
+        """
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert "survived" in result.stdout
+
+
+def test_a_tracked_worker_is_let_go_once_finished(qapp):
+    worker = threads.track(_Gate())
+    worker.start()
+    worker.started_flag.wait(5)
+    assert worker in threads._TRACKED
+    worker.gate.set()
+    assert worker.wait(5000)
+    QCoreApplication.processEvents()
+    assert worker not in threads._TRACKED

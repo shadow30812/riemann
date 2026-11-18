@@ -66,6 +66,7 @@ from .pages import format_page_ranges, parse_page_ranges
 from .host import ReaderHostBase
 from ....core.assets import is_frozen
 from ....core.endpoints import RELEASES, loopback_url
+from ...threads import track
 
 AI_CONNECT_ATTEMPTS = 90
 AI_LOADING_ATTEMPTS = 1800
@@ -141,7 +142,7 @@ class AiMixin(ReaderHostBase):
         thread.finished_ocr.connect(self._on_ocr_finished)
         thread.error_occurred.connect(self._on_ocr_failed)
         self._ocr_thread = thread
-        thread.start()
+        track(thread).start()
 
     def _on_ocr_finished(self, page_index: int, text: str) -> None:
         QApplication.restoreOverrideCursor()
@@ -187,7 +188,7 @@ class AiMixin(ReaderHostBase):
         thread.finished_ocr.connect(lambda results, problem: self._on_ocr_pages_finished(dialog, results, problem))
         self._ocr_thread = thread
         self._ocr_progress = dialog
-        thread.start()
+        track(thread).start()
 
     def _on_ocr_pages_finished(self, dialog: QProgressDialog, results: list, problem: str) -> None:
         self._ocr_progress = None
@@ -544,7 +545,7 @@ class AiMixin(ReaderHostBase):
         thread.error_occurred.connect(self._on_ai_pages_failed)
         self._ai_text_thread = thread
         self.show_toast("AI: reading the document...")
-        thread.start()
+        track(thread).start()
 
     def _on_ai_pages_read(self, path: str, pages: list) -> None:
         self._ai_text_thread = None

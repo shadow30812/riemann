@@ -7,6 +7,13 @@ deleted first; a two-argument singleShot has no such tie.
 
 Text files are opened with an explicit encoding: without one, Windows reads
 and writes in its ANSI code page, not UTF-8.
+
+Workers (the package's QThread subclasses) are registered with
+ui/threads.track before they start, so they outlive the reference their owner
+drops in the slot of their last signal (see ui/threads.py). UNTRACKED_WORKERS
+lists the exceptions: the page render worker, which has a registry of its own,
+and long jobs (installs, downloads, model loading, captions) that quitting
+should not wait for.
 """
 
 import ast
@@ -100,3 +107,55 @@ def test_a_render_worker_stuck_in_a_page_is_released_not_killed(qapp):
     assert not Stuck.killed and host._render_worker is None
     assert released_count() >= 1
     wait_for_released(2000)
+
+
+UNTRACKED_WORKERS = {
+    "core/captions_server.py": {"self.worker_thread"},
+    "core/dependencies.py": {"self.worker"},
+    "core/features.py": {"self.worker", "worker"},
+    "ui/browser.py": {"self.dl_worker"},
+    "ui/reader/mixins/ai.py": {"self.loader_thread", "self.inst_thread", "self.downloader", "self.inference_thread"},
+    "ui/reader/mixins/document.py": {"self._render_worker"},
+}
+
+
+def trees():
+    for folder, _, files in os.walk(APP):
+        for name in files:
+            if name.endswith(".py"):
+                path = os.path.join(folder, name)
+                with open(path, encoding="utf-8") as f:
+                    yield os.path.relpath(path, APP).replace(os.sep, "/"), ast.parse(f.read(), path)
+
+
+def test_workers_are_tracked_before_they_start():
+    parsed = dict(trees())
+    workers = {"QThread"}
+    while True:
+        found = {
+            node.name
+            for tree in parsed.values()
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef) and any(ast.unparse(b).split(".")[-1] in workers for b in node.bases)
+        }
+        if found <= workers:
+            break
+        workers |= found
+    loose = []
+    for path, tree in parsed.items():
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            made, tracked = set(), set()
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                    if ast.unparse(node.value.func).split(".")[-1] in workers:
+                        made.update(ast.unparse(t) for t in node.targets)
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "track" and node.args:
+                    tracked.add(ast.unparse(node.args[0]))
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "start":
+                    name = ast.unparse(node.func.value)
+                    if name in made and name not in tracked and name not in UNTRACKED_WORKERS.get(path, ()):
+                        loose.append(f"{path}:{node.lineno} {name}")
+    assert loose == []

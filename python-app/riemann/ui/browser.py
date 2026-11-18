@@ -153,6 +153,7 @@ from ..core.captions_server import CaptionsServer
 from .browser_handlers import WHATSAPP_HEADER_UA, WHATSAPP_HOST, ScriptInjector
 from .palette import dialog_icon, incognito_url_style, link_tip_style, toast_style, tokens
 from .shortcuts import share_keys
+from .threads import track
 from .toast import Toast
 from ..core.log import log
 from ..core.doctypes import document_kind
@@ -2414,7 +2415,7 @@ class BrowserTab(QWidget):
             self.stream_worker.error.connect(
                 lambda e: self.show_toast(f"Stream error: {e}")
             )
-            self.stream_worker.start()
+            track(self.stream_worker).start()
 
     def _on_stream_extracted(self, direct_url: str) -> None:
         """Routes the extracted raw video stream to the selected player."""

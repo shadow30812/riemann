@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushBu
 
 from ...core import citations
 from ..palette import tokens, ui_font
+from ..threads import track
 
 
 class _Lookup(QThread):
@@ -136,7 +137,7 @@ class CitationCard(QFrame):
         self.btn_lookup.setText("Looking…")
         self._worker = _Lookup(self.reference)
         self._worker.found.connect(self._on_found)
-        self._worker.start()
+        track(self._worker).start()
 
     def _on_found(self, reference: str, info) -> None:
         self._lookups[reference] = info if info else False

@@ -15,32 +15,47 @@ interpreter exit; it asks every tracked thread to stop and waits for those
 still running, released or tracked, each up to RELEASE_WAIT_MS. Workers that make
 network requests check isInterruptionRequested between requests, so they end
 within one request timeout.
+
+track also keeps the worker alive until it has finished. A tab clears its
+worker attribute in the slot of the worker's last signal, and that signal is
+emitted at the end of run, before run returns: when the slot ran first, the
+tab held the last reference, and the thread was destroyed while still running,
+from inside its own run. Both track and release let a worker go only after
+finished, on the main thread (a queued connection), and after wait, because
+finished is emitted while the thread still counts as running.
 """
 
 import atexit
 import warnings
-import weakref
 from typing import Optional
 
 import shiboken6
-from PySide6.QtCore import QThread, SignalInstance
+from PySide6.QtCore import QThread, Qt, SignalInstance
 
 RELEASE_WAIT_MS = 10000
 
 _RELEASED: "set[QThread]" = set()
-_TRACKED: "weakref.WeakSet[QThread]" = weakref.WeakSet()
+_TRACKED: "set[QThread]" = set()
 
 
 def track(thread: QThread) -> QThread:
-    """Registers a worker so quitting waits for it; returns the thread."""
+    """Registers a worker so quitting waits for it and it outlives its owner's reference; returns the thread."""
     _TRACKED.add(thread)
+    thread.finished.connect(lambda t=thread: _untrack(t), Qt.ConnectionType.QueuedConnection)
     return thread
 
 
-def _forget(thread: QThread) -> None:
-    _RELEASED.discard(thread)
+def _untrack(thread: QThread) -> None:
     if shiboken6.isValid(thread):
+        thread.wait()
+    _TRACKED.discard(thread)
+
+
+def _forget(thread: QThread) -> None:
+    if shiboken6.isValid(thread):
+        thread.wait()
         thread.deleteLater()
+    _RELEASED.discard(thread)
 
 
 def release(thread: Optional[QThread], *signals: SignalInstance) -> None:
@@ -61,7 +76,7 @@ def release(thread: Optional[QThread], *signals: SignalInstance) -> None:
     thread.requestInterruption()
     thread.setParent(None)
     _RELEASED.add(thread)
-    thread.finished.connect(lambda t=thread: _forget(t))
+    thread.finished.connect(lambda t=thread: _forget(t), Qt.ConnectionType.QueuedConnection)
     if thread.isFinished():
         _forget(thread)
 
