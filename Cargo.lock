@@ -458,7 +458,7 @@ dependencies = [
 
 [[package]]
 name = "riemann_core"
-version = "7.1.0"
+version = "7.2.1"
 dependencies = [
  "anyhow",
  "once_cell",
@@ -469,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "riemann_ocr_worker"
-version = "7.1.0"
+version = "7.2.1"
 dependencies = [
  "anyhow",
  "image",
