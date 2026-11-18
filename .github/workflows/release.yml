@@ -47,7 +47,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\Nuitka\Nuitka\Cache
-          key: ${{ runner.os }}-nuitka-${{ hashFiles('pyproject.toml') }}
+          key: ${{ runner.os }}-nuitka-${{ hashFiles('pyproject.toml', 'scripts/build-requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-nuitka-
 
@@ -66,7 +66,7 @@ jobs:
       - name: Install Global Build Tools
         run: |
           python -m pip install --upgrade pip
-          pip install maturin nuitka zstandard
+          pip install maturin zstandard -r scripts/build-requirements.txt
 
       - name: Debug Python + pip
         run: |

@@ -57,7 +57,7 @@ Remake the screenshots in `docs/images/` (throwaway settings, offscreen; the spl
 env -u LD_LIBRARY_PATH ./riemann/bin/python scripts/take_screenshots.py
 ```
 
-Modules the packaged builds leave out are listed once, in `scripts/build-excludes.txt`; `nbuild.sh`, `nbuild.ps1`, the release workflow and `Riemann.spec` all read it.
+Modules the packaged builds leave out are listed once, in `scripts/build-excludes.txt`; `nbuild.sh`, `nbuild.ps1`, the release workflow and `Riemann.spec` all read it. The Nuitka version is pinned once, in `scripts/build-requirements.txt`; the build scripts refuse any other.
 
 `just clean` deletes build output inside the project folders only. Never widen its paths. `.github/workflows/tests.yml` runs the same tests on GitHub for every push and pull request.
 
@@ -113,7 +113,7 @@ env -u LD_LIBRARY_PATH QT_QPA_PLATFORM=offscreen ./riemann/bin/python -m pytest 
 - Never install an application-wide Python event filter (`app.installEventFilter`): even an empty one crashes QtWebEngine at startup. Filter specific widgets instead (see `ui/tooltip.py`).
 - Don't call `QAction.menu()` on menu-bar actions from Python and let the result go out of scope: it invalidates the menu's actions. Use `findChildren(QMenu)`.
 - Mixins that override Qt event handlers must come before `QWidget`/`QMainWindow` in the class bases.
-- Tie delayed callbacks to the widget they touch (`QTimer.singleShot(ms, widget, fn)`), so they are dropped if the widget is deleted first.
+- Tie delayed callbacks to the widget they touch (`QTimer.singleShot(ms, widget, fn)`), so they are dropped if the widget is deleted first. Nuitka builds of that form need Nuitka 4.3 or later (`scripts/build-requirements.txt`): 4.2 left the callback unguarded against PySide6 freeing it, and the app crashed at random.
 - Every browser tab on a profile receives its `downloadRequested`; `_handle_download` claims each request once. Don't connect another handler to it.
 - A widget that registers `QShortcut`s calls `ui/shortcuts.share_keys(self)` after creating them; otherwise the keys stop working in split view, where two tabs own the same shortcut. Describe every new shortcut in `SHORTCUTS` in `ui/system/help_tab.py` (`tests/test_help.py` fails otherwise), in plain words.
 - Code that closes a browser tab or a window asks first: `close_tab`/`close_side_tab` (through `may_close`) or `confirm_close`, which let a page with unsaved changes ask Leave or Stay (`BrowserTab.confirm_leave`). Don't blank or delete a page before that.

@@ -13,8 +13,11 @@ if ! command -v maturin &> /dev/null; then
     echo "Error: maturin is missing. Run 'pip install maturin'"
     exit 1
 fi
-if ! python3 -m nuitka --version &> /dev/null; then
-    echo "Error: nuitka is missing. Run 'pip install nuitka patchelf'"
+NUITKA_PIN=$(sed -n 's/^nuitka==//p' scripts/build-requirements.txt)
+NUITKA_HAVE=$(python3 -m nuitka --version 2>/dev/null | head -n 1 || true)
+if [ "$NUITKA_HAVE" != "$NUITKA_PIN" ]; then
+    echo "Error: the build needs Nuitka ${NUITKA_PIN} (found: ${NUITKA_HAVE:-none})."
+    echo "Run 'pip install -r scripts/build-requirements.txt patchelf'"
     exit 1
 fi
 
@@ -123,6 +126,7 @@ python3 -m nuitka \
     build_entry.py
 
 if command -v strip &> /dev/null && [ -f "dist/Riemann" ]; then
+    --noinclude-data-files='onnxruntime/capi/*.so*' \
     log_info "Stripping debug symbols..."
     strip -s dist/Riemann
 fi

@@ -5,8 +5,10 @@ if (!(Get-Command maturin -ErrorAction SilentlyContinue)) {
     Write-Host "Error: maturin is missing. Run 'pip install maturin'" -ForegroundColor Red
     exit 1
 }
-if (!(Get-Command nuitka -ErrorAction SilentlyContinue)) {
-    Write-Host "Error: nuitka is missing. Run 'pip install nuitka'" -ForegroundColor Red
+$NuitkaPin = (Select-String -Path scripts/build-requirements.txt -Pattern '^nuitka==(.+)$').Matches[0].Groups[1].Value
+$NuitkaHave = (python -m nuitka --version 2>$null | Select-Object -First 1)
+if ($NuitkaHave -ne $NuitkaPin) {
+    Write-Host "Error: the build needs Nuitka $NuitkaPin (found: $NuitkaHave). Run 'pip install -r scripts/build-requirements.txt'" -ForegroundColor Red
     exit 1
 }
 

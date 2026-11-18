@@ -3,6 +3,12 @@ Every build reads its module exclusions from scripts/build-excludes.txt.
 
 The list used to be written out in four places, and the copies had drifted:
 the Windows script missed eight of the modules the Linux one skipped.
+
+The Nuitka builds also share one pinned version, scripts/build-requirements.txt.
+The release workflow installed the newest Nuitka while local builds kept 4.2,
+whose PySide6 plugin left the callback of QTimer.singleShot(ms, widget, fn)
+unguarded; PySide6 then freed it while still in use, and those builds crashed
+at random.
 """
 
 import pathlib
@@ -29,6 +35,22 @@ def test_exclude_list_names_modules():
     ]
     assert lines and len(lines) == len(set(lines))
     assert all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*", line) for line in lines)
+
+
+NUITKA_BUILDS = ["scripts/nbuild.sh", "scripts/nbuild.ps1", ".github/workflows/release.yml"]
+
+
+def test_nuitka_version_is_pinned_at_a_fixed_release():
+    pins = re.findall(r"^nuitka==(\S+)$", (REPO / "scripts" / "build-requirements.txt").read_text(encoding="utf-8"), re.M)
+    assert len(pins) == 1
+    assert tuple(int(part) for part in pins[0].split(".")) >= (4, 3)
+
+
+@pytest.mark.parametrize("build", NUITKA_BUILDS)
+def test_nuitka_builds_use_the_pinned_version(build):
+    text = (REPO / build).read_text(encoding="utf-8")
+    assert "build-requirements.txt" in text
+    assert re.findall(r"pip install[^\n]*\bnuitka\b(?!-)", text) == []
 
 
 @pytest.mark.parametrize("build", BUILDS)

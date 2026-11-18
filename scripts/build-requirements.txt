@@ -1,0 +1,6 @@
+# Nuitka version the release builds use. nbuild.sh and nbuild.ps1 refuse any
+# other; release.yml installs this one. Nuitka 4.2's PySide6 plugin guarded only
+# the first argument of QTimer.singleShot, so in singleShot(ms, widget, fn) the
+# callback went to PySide6 unguarded, PySide6 released it once too often, and
+# the build crashed at random once such timers had fired. 4.3 guards the last.
+nuitka==4.3.5
