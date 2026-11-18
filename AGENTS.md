@@ -45,7 +45,13 @@ just test
 just test-rust
 ```
 
-After changing a version in `pyproject.toml` (needs uv and network; CI fails until the locks match):
+Set the app's version in every file that states it (`pyproject.toml`, `riemann/__init__.py`, both `Cargo.toml`s, `Cargo.lock`, the README); give a version, or `major`, `minor` or `patch`, and `--check` lists what each file holds:
+
+```bash
+just version 7.2.0
+```
+
+After changing a dependency's version in `pyproject.toml` (needs uv and network; CI fails until the locks match):
 
 ```bash
 just lock

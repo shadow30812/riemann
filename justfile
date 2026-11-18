@@ -4,6 +4,7 @@
 #   just fetch-pdfium  download PDFium into libs/, checked against pinned SHA-256s
 #   just build   rebuild the Rust extension (release) into the active environment
 #   just test    run every test suite (scripts/test_runner.sh)
+#   just version 7.2.0  set the version in every file (or major, minor, patch)
 #   just clean   remove build output and caches inside the project's own folders
 #
 # `clean` only touches rust-core, rust-ocr-worker, python-app and riemann-ai,
@@ -27,6 +28,10 @@ lock:
 
 test:
 	bash scripts/test_runner.sh
+
+# Sets the version everywhere it is written: just version 7.2.0, or major, minor or patch; --check lists them.
+version new:
+	{{python}} scripts/set_version.py {{new}}
 
 test-rust:
 	cargo test -p riemann_ocr_worker
