@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from ...components import AnnotationToolbar, build_open_with_menu
+from ...components import AnnotationToolbar, RepaintingLineEdit, build_open_with_menu
 from ..sidebar import PdfSidebarWidget
 from ..toolbar_layout import ToolbarLayout
 from ..notes import NotesPanel
@@ -455,7 +455,7 @@ class ToolbarMixin(ReaderHostBase):
         sb_layout = QHBoxLayout(self.search_bar)
         sb_layout.setContentsMargins(10, 5, 10, 5)
 
-        self.txt_search = QLineEdit()
+        self.txt_search = RepaintingLineEdit()
         self.txt_search.setPlaceholderText("Find text...")
         self.txt_search.returnPressed.connect(self.find_next)
 
@@ -493,7 +493,7 @@ class ToolbarMixin(ReaderHostBase):
         sb_layout = QHBoxLayout(self.ai_search_bar)
         sb_layout.setContentsMargins(10, 5, 10, 5)
 
-        self.txt_ai_search = QLineEdit()
+        self.txt_ai_search = RepaintingLineEdit()
         self.txt_ai_search.setPlaceholderText(
             "Ask AI to find concepts, meanings, or subjects..."
         )

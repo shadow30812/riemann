@@ -193,3 +193,47 @@ def test_switching_to_vertical_tabs_and_back_measures_the_tabs_again(qtbot):
 
     tabs.set_vertical_tabs(False)
     assert [bar.tabRect(i).size() for i in range(bar.count())] == horizontal
+
+
+def test_find_field_repaints_whole_after_the_caret_blinks(qapp, qtbot):
+    import time
+
+    from PySide6.QtCore import QCoreApplication
+
+    from riemann.ui.components import RepaintingLineEdit
+
+    painted = []
+
+    class Field(RepaintingLineEdit):
+        def paintEvent(self, event):
+            painted.append(event.rect())
+            super().paintEvent(event)
+
+    field = Field()
+    qtbot.addWidget(field)
+    field.resize(300, 30)
+    field.setText("attention")
+    field.show()
+    field.activateWindow()
+    field.setFocus()
+    end = time.time() + 1.5
+    while time.time() < end:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    partial = [i for i, rect in enumerate(painted) if rect != field.rect()]
+    assert partial, "the caret never blinked"
+    for i in partial:
+        assert field.rect() in painted[i + 1 :], painted
+
+
+def test_reader_find_boxes_repaint_whole(qapp):
+    from riemann.ui.components import RepaintingLineEdit
+    from riemann.ui.reader.tab import ReaderTab
+
+    tab = ReaderTab()
+    try:
+        assert isinstance(tab.txt_search, RepaintingLineEdit)
+        assert isinstance(tab.txt_ai_search, RepaintingLineEdit)
+    finally:
+        tab.cleanup()
+        tab.deleteLater()

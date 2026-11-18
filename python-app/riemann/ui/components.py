@@ -25,6 +25,12 @@ widths used to correct themselves on the next click).
 
 mouseMoveEvent: Pulled downwards out of a horizontal strip, or sideways out of
 a vertical one. End Qt's own in-strip move before the tab is taken out.
+
+RepaintingLineEdit: The blinking caret repaints only a narrow strip around
+itself. At a fractional scale (Riemann's interface scale sets
+QT_SCALE_FACTOR, and desktops scale too) that strip is rounded to whole
+pixels and can miss a sliver of the caret, which then stays on screen beside
+it as a second caret. Any partial repaint is widened to the whole field.
 """
 
 import os
@@ -58,6 +64,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QLineEdit,
     QInputDialog,
     QLabel,
     QMenu,
@@ -93,6 +100,13 @@ _FOLDER_APPS = [
     ("Thunar", ["thunar"]),
     ("Visual Studio Code", ["code"]),
 ]
+
+
+class RepaintingLineEdit(QLineEdit):
+    def paintEvent(self, event) -> None:
+        if event.rect() != self.rect():
+            self.update()
+        super().paintEvent(event)
 
 
 def _launch(parent: Optional[QWidget], cmd: str, arg: str) -> None:
