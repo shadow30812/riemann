@@ -17,7 +17,7 @@ dialog runs its own event loop and the scenario must keep stepping inside it.
 Observations go into the dict notes, written to WORKDIR/result.json when the
 scenario ends; the app then quits through Ctrl+Q, so the session is saved as
 it would be. An exception, a condition that never comes true, or the app
-hanging past DEADLINE writes the error there instead and exits non-zero; a
+hanging past DEADLINE (DEADLINES for long scenarios) writes the error there instead and exits non-zero; a
 hang also prints every thread's stack to stderr.
 """
 
@@ -31,6 +31,7 @@ import traceback
 
 WAIT = 20.0
 DEADLINE = 150.0
+DEADLINES = {"tour": 280.0}
 
 notes: dict = {}
 state = {"app": None, "window": None, "workdir": None, "done": False}
@@ -46,9 +47,9 @@ def finish(error=None):
         json.dump(notes, f, indent=2, default=str)
 
 
-def watchdog():
-    time.sleep(DEADLINE)
-    finish(f"the app did not finish within {DEADLINE:.0f} s")
+def watchdog(deadline):
+    time.sleep(deadline)
+    finish(f"the app did not finish within {deadline:.0f} s")
     faulthandler.dump_traceback(all_threads=True)
     os._exit(3)
 
@@ -523,6 +524,118 @@ def scenario_edit_table(files):
     state["quitting"] = True
 
 
+def tab_showing(target):
+    """The tab showing target (a path, or an http address for a browser tab), once it has something on screen."""
+    from riemann.ui.browser import BrowserTab
+    from riemann.ui.reader.tab import ReaderTab
+
+    web = target.startswith("http")
+
+    def shown():
+        tabs = window().tabs_main
+        for i in range(tabs.count()):
+            tab = tabs.widget(i)
+            if web or isinstance(tab, BrowserTab):
+                if isinstance(tab, BrowserTab) and tab.web.title() and (
+                    tab.web.url().toString().rstrip("/") == target.rstrip("/") or tab.web.url().toLocalFile() == os.path.abspath(target)
+                ):
+                    return tab
+                continue
+            if os.path.abspath(getattr(tab, "current_path", "") or "") != os.path.abspath(target):
+                continue
+            if isinstance(tab, ReaderTab):
+                if tab.text_document:
+                    return tab if tab.web is not None and tab.web.title() else None
+                page = tab.page_widgets.get(tab.current_page_index)
+                return tab if page is not None and getattr(page, "has_full_page", False) else None
+            if hasattr(tab, "decoded"):
+                return tab if tab.decoded is not None else None
+            return tab
+        return None
+
+    return shown
+
+
+def visit(tab, target):
+    """Does on tab what a person does first with that kind of file."""
+    from riemann.ui.reader.tab import ReaderTab
+    from riemann.ui.viewers import HexTab
+
+    window().tabs_main.setCurrentWidget(tab)
+    yield 0.3
+    if isinstance(tab, ReaderTab) and not tab.text_document and target.endswith(".pdf"):
+        select_word(tab, "SECRET")
+        yield lambda: bool(tab.current_selected_text)
+        key("Ctrl+C", tab.page_widgets[0])
+    if isinstance(tab, HexTab):
+        tab.view.setFocus()
+        key("F", tab.view)
+        yield lambda: getattr(window(), "_reader_fullscreen", False)
+        key("Escape", tab.view)
+        yield lambda: not getattr(window(), "_reader_fullscreen", False)
+    key("N", tab)
+    yield 0.2
+
+
+def close_every_tab():
+    """Ctrl+W until no tab is left, answering Don't Save or Leave when asked."""
+    tabs = window().tabs_main
+    for _ in range(4 * tabs.count() + 4):
+        if tabs.count() == 0:
+            return
+        before = tabs.count()
+        later(key, "Ctrl+W", window())
+        end = time.time() + 3
+        while time.time() < end and tabs.count() == before:
+            box = dialog()()
+            if box is not None:
+                for label in ("Don't Save", "Discard", "Leave", "Close"):
+                    try:
+                        press(box, label)
+                        break
+                    except StopIteration:
+                        continue
+            yield 0.05
+        yield 0.1
+
+
+def scenario_tour(files):
+    """
+    Opens one file of every kind Riemann reads, and web pages, the way a drop
+    or a second launch does; waits for each to show, does the first thing a
+    person would (a PDF word selected and copied, the hex view's full screen
+    in and out, the page theme switched), opens History, then closes every
+    tab. The second round starts after the first round's timers have run out,
+    which is when a build that freed slots too early crashed.
+    """
+    import gc
+
+    from riemann.ui.office_install import OfficePrompt
+
+    notes["rounds"] = []
+    for round_ in range(2):
+        shown = []
+        for target in files:
+            if target.startswith("http"):
+                window().new_browser_tab(target)
+            else:
+                later(window().open_path, target)
+                yield 0.3
+                prompt = dialog(OfficePrompt)()
+                if prompt is not None:
+                    press(prompt, "Use the basic view")
+            tab = yield tab_showing(target)
+            yield from visit(tab, target)
+            shown.append(type(tab).__name__)
+        later(key, "Ctrl+H", window())
+        yield lambda: getattr(current_tab(), "page", None) == "history"
+        yield from close_every_tab()
+        notes["rounds"].append(shown)
+        gc.collect()
+        yield 6.0
+    notes["left_open"] = window().tabs_main.count()
+
+
 SCENARIOS = {
     "read": scenario_read,
     "redact": scenario_redact,
@@ -532,6 +645,7 @@ SCENARIOS = {
     "office": scenario_office,
     "office_basic": scenario_office_basic,
     "edit_table": scenario_edit_table,
+    "tour": scenario_tour,
 }
 
 
@@ -606,7 +720,7 @@ def main():
     name, workdir, files = sys.argv[1], sys.argv[2], sys.argv[3:]
     state["workdir"] = workdir
     state["original"] = open(files[0], "rb").read() if files and os.path.isfile(files[0]) else None
-    threading.Thread(target=watchdog, daemon=True).start()
+    threading.Thread(target=watchdog, args=(DEADLINES.get(name, DEADLINE),), daemon=True).start()
 
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     import riemann.app as app_module
@@ -624,7 +738,7 @@ def main():
             later(play, name, files)
 
     app_module.RiemannWindow.show = show
-    command_files = {"open_text": [], "office": files[:1], "office_basic": files[:1]}.get(name, files)
+    command_files = {"open_text": [], "office": files[:1], "office_basic": files[:1], "tour": []}.get(name, files)
     sys.argv = [sys.argv[0], "--new-window", *command_files]
     try:
         app_module.run()

@@ -133,7 +133,12 @@ env -u LD_LIBRARY_PATH QT_QPA_PLATFORM=offscreen ./riemann/bin/python -m pytest 
 - pytest-qt is not installed here; `conftest.py` supplies a fallback `qtbot` whose `addWidget` stops the widget's timers at teardown. Pass every window a test creates to `qtbot.addWidget`, or its timers keep running into later tests.
 - Every bug fix gets a test that fails without the fix. Prefer tests on behaviour (files on disk, real sockets, real PDFs in `benchmarks/corpus/`) over mocks of `open` or `json.dump`.
 - Any script that launches Riemann must set `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and `HOME` to throwaway folders, plus `QT_QPA_PLATFORM=offscreen`. Never touch the real `~/.config/Riemann` or `~/.local/share/Riemann`.
-- `tests/test_user_sessions.py` drives the whole app in a child process through real keys, clicks and dialogs (scenarios in `tests/user_session.py`). Add a scenario there for a flow that spans several parts of the app.
+- `tests/test_user_sessions.py` drives the whole app in a child process through real keys, clicks and dialogs (scenarios in `tests/user_session.py`). Add a scenario there for a flow that spans several parts of the app. The `tour` scenario opens every kind of file and web pages twice, closing all tabs in between.
+- Some crashes happen only in the Nuitka build. `scripts/nbuild.sh --sessions` compiles the session driver with the release flags; run the session tests against it after changing the Nuitka version or the build flags:
+
+```bash
+cd python-app && RIEMANN_SESSION_DRIVER=../dist/sessions/nuitka_session.dist/riemann-sessions env -u LD_LIBRARY_PATH ../riemann/bin/python -m pytest tests/test_user_sessions.py -q
+```
 - The Rust core's tests are unit tests inside `rust-core/src/lib.rs` (the crate is a `cdylib`); `just test-rust` runs them with PDFium from `libs/`.
 - Performance-sensitive changes to rendering: run the scroll benchmark in `benchmarks/` with a temporary label so the stored baseline isn't overwritten.
 

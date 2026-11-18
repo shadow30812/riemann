@@ -3,6 +3,23 @@ set -e
 
 cd "$(dirname "$0")/.."
 
+# With --sessions the script builds the session driver (python-app/tests/
+# nuitka_session.py) instead of Riemann: the same modules and flags, as a
+# folder rather than one file, so the user-session tests can play their
+# scenarios inside a Nuitka build:
+#   cd python-app && RIEMANN_SESSION_DRIVER=../dist/sessions/nuitka_session.dist/riemann-sessions \
+#     ../riemann/bin/python -m pytest tests/test_user_sessions.py
+ENTRY=build_entry.py
+PACKAGING=--onefile
+OUTPUT_DIR=dist
+OUTPUT_NAME=Riemann
+if [ "${1:-}" = "--sessions" ]; then
+    ENTRY=python-app/tests/nuitka_session.py
+    PACKAGING=--standalone
+    OUTPUT_DIR=dist/sessions
+    OUTPUT_NAME=riemann-sessions
+fi
+
 GREEN='\033[0;32m'
 NC='\033[0m'
 
@@ -47,7 +64,7 @@ python3 scripts/fetch_pdfium.py linux-x64
 
 log_info "[4/4] Compiling with Nuitka..."
 
-export PYTHONPATH=$PYTHONPATH:$(pwd)/python-app
+export PYTHONPATH=$PYTHONPATH:$(pwd)/python-app:$(pwd)/python-app/tests:$(pwd)
 export LIBRARY_PATH="$(pwd)/libs:${LIBRARY_PATH:-}"
 
 # ── Discover PySide6's bundled Qt directories ──
@@ -95,7 +112,7 @@ else
 fi
 
 python3 -m nuitka \
-    --onefile \
+    $PACKAGING \
     --lto=no \
     --jobs=$(nproc) \
     --enable-plugin=pyside6 \
@@ -109,6 +126,7 @@ python3 -m nuitka \
     --include-package-data=onnxruntime \
     --noinclude-data-files='onnxruntime/datasets/*' \
     --noinclude-data-files='onnxruntime/tools/*' \
+    --noinclude-data-files='onnxruntime/capi/*.so*' \
     --include-package=tokenizers \
     --include-package=uvicorn \
     --include-package=yt_dlp_ejs \
@@ -120,13 +138,17 @@ python3 -m nuitka \
     --include-package=striprtf \
     --include-data-file=libs/libpdfium.so=libpdfium.so \
     --include-data-files=${QT_STAGING}/lib/*=./ \
-    --output-dir=dist \
-    --output-filename=Riemann \
+    --output-dir=$OUTPUT_DIR \
+    --output-filename=$OUTPUT_NAME \
     $EXCLUDES \
-    build_entry.py
+    $ENTRY
+
+if [ "$ENTRY" != build_entry.py ]; then
+    log_info "Session driver: ${OUTPUT_DIR}/nuitka_session.dist/${OUTPUT_NAME}"
+    exit 0
+fi
 
 if command -v strip &> /dev/null && [ -f "dist/Riemann" ]; then
-    --noinclude-data-files='onnxruntime/capi/*.so*' \
     log_info "Stripping debug symbols..."
     strip -s dist/Riemann
 fi

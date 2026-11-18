@@ -8,10 +8,13 @@ afterwards: files on disk, the history, the clipboard.
 They start QtWebEngine, so each takes a few seconds.
 """
 
+import functools
+import http.server
 import json
 import os
 import subprocess
 import sys
+import threading
 import zipfile
 
 import pikepdf
@@ -20,6 +23,7 @@ import pytest
 from text_fixtures import all_stream_bytes, make_text_pdf
 
 DRIVER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_session.py")
+COMPILED_DRIVER = os.path.abspath(os.environ["RIEMANN_SESSION_DRIVER"]) if os.environ.get("RIEMANN_SESSION_DRIVER") else None
 
 
 def run_session(tmp_path, scenario, *files, **extra_env):
@@ -32,8 +36,8 @@ def run_session(tmp_path, scenario, *files, **extra_env):
     work = tmp_path / "work"
     work.mkdir(exist_ok=True)
     done = subprocess.run(
-        [sys.executable, DRIVER, scenario, str(work), *map(str, files)],
-        env=env, cwd=os.path.dirname(DRIVER), capture_output=True, text=True, timeout=240,
+        [*([COMPILED_DRIVER] if COMPILED_DRIVER else [sys.executable, DRIVER]), scenario, str(work), *map(str, files)],
+        env=env, cwd=os.path.dirname(DRIVER), capture_output=True, text=True, timeout=320,
     )
     result_file = work / "result.json"
     notes = json.loads(result_file.read_text()) if result_file.exists() else {"error": "no result written"}
@@ -177,3 +181,76 @@ def test_changing_a_csv_cell_saves_only_after_asking(tmp_path):
     assert notes["after_save"] == "name,score\nAda,30\nBob,1\n"
     assert "aren't saved" in notes["quit_asked"]
     assert table.read_bytes() == b"name,score\r\nAda,30\r\nBob,1\r\n"
+
+
+class _Pages(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def web_pages(tmp_path):
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text(
+        "<!doctype html><title>Front page</title><style>p { color: teal }</style>"
+        "<h1>Front</h1><p id=t>Loading</p><a href=next.html>Next</a>"
+        "<script>document.getElementById('t').textContent = 'Ready'; setTimeout(() => document.title += '!', 50)</script>",
+        encoding="utf-8",
+    )
+    (site / "next.html").write_text("<!doctype html><title>Next page</title><p>Second</p><img src=dot.png>", encoding="utf-8")
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(_Pages, directory=str(site)))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield [f"http://127.0.0.1:{server.server_port}/index.html", f"http://127.0.0.1:{server.server_port}/next.html"]
+    server.shutdown()
+
+
+def every_kind_of_file(folder):
+    """One file of every kind Riemann opens, plus a program and plain bytes."""
+    import openpyxl
+    from pptx import Presentation
+    from PIL import Image
+
+    from test_ebooks import book_files, make_epub
+
+    files = [make_text_pdf(folder / "paper.pdf", [(72, 700, 24, "KEEP SECRET KEEP")])]
+    files.append(word_file(folder / "letter.docx", "Hello reader"))
+    book = openpyxl.Workbook()
+    book.active.append(["name", "score"])
+    book.active.append(["Ada", 3])
+    book.save(folder / "scores.xlsx")
+    files.append(folder / "scores.xlsx")
+    slides = Presentation()
+    slides.slides.add_slide(slides.slide_layouts[0]).shapes.title.text = "Slide words"
+    slides.save(folder / "talk.pptx")
+    files.append(folder / "talk.pptx")
+    files.append(make_epub(folder / "book.epub", book_files()))
+    texts = {
+        "notes.md": "# Notes\n\nSome *words* and `code`.\n\n> a quote\n",
+        "plain.txt": "Plain words\n",
+        "script.py": "print('hi')\n",
+        "table.csv": "name,score\nAda,3\n",
+        "page.html": "<!doctype html><title>Local page</title><p>Local</p>",
+        "shape.svg": '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><circle cx="20" cy="20" r="15" fill="teal"/></svg>',
+    }
+    for name, text in texts.items():
+        (folder / name).write_text(text, encoding="utf-8")
+        files.append(folder / name)
+    Image.new("RGB", (64, 48), (200, 80, 40)).save(folder / "photo.jpg")
+    Image.new("RGBA", (32, 32), (20, 120, 200, 255)).save(folder / "icon.png")
+    (folder / "data.bin").write_bytes(bytes(range(256)) * 64)
+    (folder / "tool").write_bytes(b"\x7fELF\x02\x01\x01" + bytes(500))
+    files += [folder / "photo.jpg", folder / "icon.png", folder / "data.bin", folder / "tool"]
+    return [str(f) for f in files]
+
+
+def test_a_tour_of_every_kind_of_file_and_web_pages_ends_cleanly(tmp_path, web_pages):
+    folder = tmp_path / "files"
+    folder.mkdir()
+    targets = every_kind_of_file(folder) + web_pages
+    notes, _ = run_session(tmp_path, "tour", *targets)
+    assert len(notes["rounds"]) == 2
+    for shown in notes["rounds"]:
+        assert len(shown) == len(targets)
+        assert {"ReaderTab", "ImageTab", "TableTab", "HexTab", "BrowserTab"} <= set(shown)
+    assert notes["left_open"] == 0
