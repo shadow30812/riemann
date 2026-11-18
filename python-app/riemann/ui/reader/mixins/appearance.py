@@ -43,6 +43,7 @@ from ...palette import (
     FONT_STACK,
     GridCanvas,
     link_tip_style,
+    menu_style,
     path_row,
     scrollbar_style,
     short_folder,
@@ -124,7 +125,7 @@ class AppearanceMixin(ReaderHostBase):
             QComboBox {{ background-color: {input_bg}; color: {sb_fg}; border: 1px solid {input_border}; border-radius: 4px; padding: 4px; }}
             QComboBox::drop-down {{ border: none; width: 24px; }}
             QComboBox::down-arrow {{ image: url("{arrow_url}"); width: 16px; height: 16px; }}
-        """)
+        """ + menu_style(t))
         if self.toolbar_layout is not None:
             self.toolbar_layout.restyle()
 

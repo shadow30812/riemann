@@ -323,3 +323,51 @@ def test_layout_d_pill_stays_visible_outside_full_screen(qapp, reader, store, mo
     layout.wake_pill()
     pump(qapp, 0.8)
     assert layout.pill_shown()
+
+
+@pytest.mark.skipif(not os.path.exists(CORPUS), reason="benchmark corpus not downloaded")
+@pytest.mark.parametrize("ui_dark,page_mode", [(False, 1), (True, 0), (False, 0), (True, 1)])
+def test_rail_menus_are_readable_in_every_theme(qapp, store, ui_dark, page_mode):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QToolButton, QVBoxLayout, QWidget
+
+    from riemann.core.assets import asset_path
+    from riemann.ui.reader.tab import ReaderTab
+
+    tl.set_layout("C")
+    window = QWidget()
+    with open(os.path.join(asset_path("theme"), "modern_dark.css" if ui_dark else "modern_light.css"), encoding="utf-8") as f:
+        window.setStyleSheet(f.read())
+    QVBoxLayout(window).setContentsMargins(0, 0, 0, 0)
+    tab = ReaderTab()
+    window.layout().addWidget(tab)
+    window.resize(1280, 720)
+    window.show()
+    try:
+        tab.load_document(os.path.abspath(CORPUS))
+        pump(qapp, 15, lambda: tab.current_doc is not None)
+        tab.theme_mode = page_mode
+        tab.apply_theme()
+        pump(qapp, 0.2)
+        button = next(b for b in tab.toolbar_layout.rail.findChildren(QToolButton, "railFlyout") if b.property("riemannGroup") == "File")
+        menu = button.findChild(QMenu)
+        tab.toolbar_layout._fill_menu(menu, [c.key for c in tl.COMMANDS if c.group == "File"])
+        menu.popup(button.mapToGlobal(QPoint(-menu.sizeHint().width() - 6, 0)))
+        pump(qapp, 0.3)
+        image = menu.grab().toImage()
+        rect = menu.actionGeometry(menu.actions()[0])
+        lightness = sorted(
+            QColor(image.pixel(x, y)).lightness()
+            for x in range(rect.left() + 40, rect.right() - 40)
+            for y in range(rect.top(), rect.bottom())
+        )
+        background = lightness[len(lightness) // 2]
+        ink = lightness[0] if background > 128 else lightness[-1]
+        assert abs(background - ink) > 100, (background, ink)
+        menu.hide()
+    finally:
+        tab.cleanup()
+        tab.deleteLater()
+        window.deleteLater()
+        pump(qapp, 0.1)

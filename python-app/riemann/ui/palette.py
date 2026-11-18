@@ -176,6 +176,19 @@ def incognito_url_style() -> str:
     )
 
 
+def menu_style(t: dict) -> str:
+    """The QSS themes' menus in t's colours, for menus opened from widgets themed apart from the app."""
+    return (
+        f"QMenu {{ background-color: {t['surface']}; color: {t['text']}; border: 1px solid {t['border']};"
+        " border-radius: 10px; padding: 6px 4px; }"
+        "QMenu::item { padding: 6px 32px 6px 16px; border-radius: 6px; margin: 1px 4px;"
+        f" background: transparent; color: {t['text']}; }}"
+        f"QMenu::item:selected {{ background-color: {t['raised']}; color: {t['text']}; }}"
+        f"QMenu::item:disabled {{ color: {t['faint']}; }}"
+        f"QMenu::separator {{ height: 1px; background: {t['border']}; margin: 6px 12px; }}"
+    )
+
+
 def banner_style(t: dict, kind: str) -> str:
     """kind is "accent", "success", "warning", "danger" or "neutral"."""
     if kind == "neutral":
