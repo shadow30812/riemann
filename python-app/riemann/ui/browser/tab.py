@@ -16,6 +16,11 @@ progress: the page-loading line above the toolbar, LOAD_BAR_HEIGHT pixels.
 Its own style sheet sets the height too, since the theme style sheets give
 every progress bar min-height: 8px, which outranked setFixedHeight.
 
+homepage_icon_tones: the start page can't read the pixels of the favicons it
+loads from other sites, so the tab measures the cached copy of each quick
+link's icon (icon_tone) and sends the tones as window.iconTones; the page
+puts a plate behind an icon in the theme it would vanish in.
+
 eventFilter: The tab is closing: its view is gone but children still report
 events.
 """
@@ -41,7 +46,7 @@ from PySide6.QtCore import (
     QTimer,
     QUrl,
 )
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QImage
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
@@ -59,7 +64,7 @@ from PySide6.QtWidgets import (
 from ...core import permissions
 from ...core.captions_server import CaptionsServer
 from ..browser_handlers import ScriptInjector
-from ..palette import incognito_url_style, legible_icon, link_tip_style, page_theme, tokens
+from ..palette import icon_tone, incognito_url_style, legible_icon, link_tip_style, page_theme, tokens
 from ..toast import Toast
 from ...core.log import log
 from ...core.settings import (
@@ -111,6 +116,31 @@ def _os_display_name() -> str:
         import getpass
 
         return getpass.getuser()
+
+
+def homepage_icon_tones(links_json: str, cached_icons: dict) -> dict:
+    """{host: "dark" or "light"} for the quick links whose cached icon needs a plate in that theme."""
+    try:
+        links = json.loads(links_json) if links_json else []
+    except ValueError:
+        return {}
+    tones = {}
+    for link in links if isinstance(links, list) else []:
+        url = str(link.get("url", "")) if isinstance(link, dict) else ""
+        host = urllib.parse.urlsplit(url if "://" in url else "https://" + url).hostname or ""
+        data = cached_icons.get(host, "")
+        if host in tones or not data.startswith("data:image/") or "," not in data:
+            continue
+        try:
+            image = QImage.fromData(base64.b64decode(data.split(",", 1)[1]))
+        except ValueError:
+            continue
+        if image.isNull():
+            continue
+        tone = icon_tone(image.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        if tone:
+            tones[host] = tone
+    return tones
 
 
 class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
@@ -304,10 +334,12 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
                 cached_icons[key] = fav_settings.value(key, "", type=str)
             icons_json = json.dumps(cached_icons)
 
+            tones_json = json.dumps(homepage_icon_tones("" if links == "null" else links, cached_icons))
+
             theme = page_theme(self.dark_mode)
             js_code = (
                 f"window.setTheme && window.setTheme('{theme}'); "
-                f"window.cachedIcons = {icons_json}; window.searchTemplate = {json.dumps(search_template())}; "
+                f"window.cachedIcons = {icons_json}; window.iconTones = {tones_json}; window.searchTemplate = {json.dumps(search_template())}; "
                 f"window.initHomepage({json.dumps(name)}, {links});"
             )
             self.web.page().runJavaScript(js_code)

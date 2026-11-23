@@ -142,6 +142,9 @@ function renderGrid(links) {
             img.src = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(link.url)}&sz=64`;
             img.className = 'icon-img';
             img.alt = 'icon';
+            const tones = window.iconTones || {};
+            const tone = Object.prototype.hasOwnProperty.call(tones, hostname) ? tones[hostname] : '';
+            if (tone === 'dark' || tone === 'light') img.dataset.tone = tone;
             img.onerror = () => window.handleIconError(img, hostname);
             a.appendChild(img);
         } else {

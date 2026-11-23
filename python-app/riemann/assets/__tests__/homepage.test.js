@@ -84,6 +84,23 @@ describe('Homepage UI Interactions', () => {
         expect(window.currentLinks[3].url).toBe('https://newsite.com');
     });
 
+    test('icons the host marked with a tone get it as data-tone', () => {
+        window.iconTones = { 'chatgpt.com': 'dark', 'white.example': 'light', 'odd.example': 'red' };
+        window.renderGrid([
+            { name: 'ChatGPT', url: 'https://chatgpt.com' },
+            { name: 'White', url: 'https://white.example' },
+            { name: 'Odd', url: 'https://odd.example' },
+            { name: 'Constructor', url: 'https://constructor' }
+        ]);
+
+        const imgs = document.querySelectorAll('.card .icon-img');
+        expect(imgs[0].dataset.tone).toBe('dark');
+        expect(imgs[1].dataset.tone).toBe('light');
+        expect(imgs[2].dataset.tone).toBeUndefined();
+        expect(imgs[3].dataset.tone).toBeUndefined();
+        delete window.iconTones;
+    });
+
     test('Search input Enter key redirects correctly', () => {
         const searchInput = document.getElementById('searchInput');
 

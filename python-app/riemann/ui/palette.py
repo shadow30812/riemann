@@ -40,6 +40,8 @@ would on the light theme's. It measures the icon's average brightness, its
 opaque pixels weighted by alpha, against the tab background; under
 ICON_MIN_CONTRAST the icon is drawn smaller on a rounded plate of the other
 theme's surface. Icons with colour or their own background pass unchanged.
+icon_tone makes the same test for both themes at once, for the start page's
+quick-link tiles, which draw their plate in CSS.
 
 dialog_icon puts a Lucide icon on a dialog, tinted for the theme of the
 window it belongs to (window_is_dark reads that window's dark_mode: the
@@ -325,6 +327,10 @@ def _relative_luminance(color: QColor) -> float:
     return 0.2126 * channel(color.redF()) + 0.7152 * channel(color.greenF()) + 0.0722 * channel(color.blueF())
 
 
+def _contrast(a: float, b: float) -> float:
+    return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+
+
 def icon_luminance(image) -> float:
     """The alpha-weighted mean relative luminance of an image's pixels, or -1 when it is transparent."""
     total = weight = 0.0
@@ -338,6 +344,17 @@ def icon_luminance(image) -> float:
     return total / weight if weight else -1.0
 
 
+def icon_tone(image) -> str:
+    """"dark" for an icon that would vanish on the dark theme's surface, "light" on the light one's, else ""."""
+    luminance = icon_luminance(image)
+    if luminance < 0:
+        return ""
+    for dark, tone in ((True, "dark"), (False, "light")):
+        if _contrast(luminance, _relative_luminance(QColor(tokens(dark)["surface"]))) < ICON_MIN_CONTRAST:
+            return tone
+    return ""
+
+
 def legible_icon(icon: QIcon, dark: bool, size: int = 32) -> QIcon:
     """icon, or icon on a plate of the opposite tone when it would vanish on the theme's tab bar."""
     if icon.isNull():
@@ -347,8 +364,7 @@ def legible_icon(icon: QIcon, dark: bool, size: int = 32) -> QIcon:
     if luminance < 0:
         return icon
     background = _relative_luminance(QColor(tokens(dark)["canvas"]))
-    ratio = (max(luminance, background) + 0.05) / (min(luminance, background) + 0.05)
-    if ratio >= ICON_MIN_CONTRAST:
+    if _contrast(luminance, background) >= ICON_MIN_CONTRAST:
         return icon
     plate = QPixmap(size, size)
     plate.fill(Qt.GlobalColor.transparent)

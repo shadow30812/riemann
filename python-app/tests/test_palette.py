@@ -215,3 +215,45 @@ def test_favicons_that_would_vanish_on_the_tab_bar_get_a_plate(qapp, glyph, dark
         assert corner.name().upper() == QColor(tokens(not dark)["surface"]).name().upper()
     else:
         assert shown is icon
+
+
+@pytest.mark.parametrize("glyph, tone", [("#000000", "dark"), ("#FFFFFF", "light"), ("#E8453C", "")])
+def test_icon_tone_names_the_theme_an_icon_would_vanish_in(qapp, glyph, tone):
+    from riemann.ui.palette import icon_tone
+
+    assert icon_tone(_glyph_icon(glyph).pixmap(32, 32).toImage()) == tone
+
+
+def test_start_page_gets_tones_for_quick_links_with_cached_icons(qapp):
+    """The start page can't read cross-site favicon pixels, so the tab sends a tone for each cached one."""
+    import base64
+    import json
+
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+
+    from riemann.ui.browser.tab import homepage_icon_tones
+
+    def data_uri(glyph):
+        raw = QByteArray()
+        buffer = QBuffer(raw)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        _glyph_icon(glyph).pixmap(32, 32).save(buffer, "PNG")
+        return "data:image/png;base64," + base64.b64encode(raw.data()).decode()
+
+    cached = {
+        "chatgpt.com": data_uri("#000000"),
+        "white.example": data_uri("#FFFFFF"),
+        "google.com": data_uri("#E8453C"),
+        "broken.example": "data:image/png;base64,!!!",
+    }
+    links = json.dumps(
+        [
+            {"name": "ChatGPT", "url": "https://chatgpt.com/"},
+            {"name": "White", "url": "white.example"},
+            {"name": "Google", "url": "https://google.com"},
+            {"name": "Broken", "url": "https://broken.example"},
+            {"name": "Uncached", "url": "https://uncached.example"},
+        ]
+    )
+    assert homepage_icon_tones(links, cached) == {"chatgpt.com": "dark", "white.example": "light"}
+    assert homepage_icon_tones("", cached) == {}

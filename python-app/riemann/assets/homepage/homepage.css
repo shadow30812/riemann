@@ -31,6 +31,7 @@ web page cannot see fonts registered with Qt.
     --grid: rgba(255, 255, 255, 0.028);
     --glow: rgba(107, 155, 255, 0.07);
     --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    --plate: #FFFFFF;
     color-scheme: dark;
 }
 
@@ -51,6 +52,7 @@ web page cannot see fonts registered with Qt.
     --grid: rgba(255, 255, 255, 0.05);
     --glow: rgba(95, 195, 255, 0.08);
     --shadow: none;
+    --plate: #FFFFFF;
     color-scheme: dark;
 }
 
@@ -71,6 +73,7 @@ web page cannot see fonts registered with Qt.
     --grid: rgba(0, 0, 0, 0.035);
     --glow: rgba(47, 111, 235, 0.05);
     --shadow: 0 10px 30px rgba(20, 20, 30, 0.10);
+    --plate: #232428;
     color-scheme: light;
 }
 
@@ -141,7 +144,9 @@ Purpose: The greeting and the search field.
 
 /*
 Component: Quick links grid
-Purpose: Shortcut cards and the Add Link card.
+Purpose: Shortcut cards and the Add Link card. An icon the host marked with
+data-tone (dark or light, from window.iconTones) sits on a --plate of the other
+theme's surface in the theme it would vanish in.
 */
 .grid {
     display: grid;
@@ -188,6 +193,14 @@ Purpose: Shortcut cards and the Add Link card.
     margin-bottom: 10px;
     border-radius: 8px;
     object-fit: contain;
+}
+
+:root[data-theme="dark"] .card .icon-img[data-tone="dark"],
+:root[data-theme="contrast"] .card .icon-img[data-tone="dark"],
+:root[data-theme="light"] .card .icon-img[data-tone="light"] {
+    padding: 4px;
+    box-sizing: border-box;
+    background: var(--plate);
 }
 
 .card .title {
