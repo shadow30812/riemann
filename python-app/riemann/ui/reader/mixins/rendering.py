@@ -234,7 +234,7 @@ class RenderingMixin(ReaderHostBase):
         lbl.setFixedSize(w, h)
         t = tokens(self.theme_mode != 0)
         bg = t["raised"] if self.theme_mode != 0 else t["surface"]
-        lbl.setStyleSheet(f"background-color: {bg}; border: 1px solid {t['border_strong']};")
+        lbl.setStyleSheet(f"QLabel {{ background-color: {bg}; border: 1px solid {t['border_strong']}; }}")
         lbl.installEventFilter(self)
         return lbl
 
@@ -525,7 +525,7 @@ class RenderingMixin(ReaderHostBase):
                     ctrl = QLineEdit(self.page_widgets[idx])
                     ctrl.setText(value)
                     t = tokens(self.theme_mode != 0)
-                    ctrl.setStyleSheet(f"background: {t['accent_soft']}; border: 1px solid {t['accent']};")
+                    ctrl.setStyleSheet(f"QLineEdit {{ background: {t['accent_soft']}; border: 1px solid {t['accent']}; }}")
                     ctrl.textChanged.connect(
                         lambda v, k=cache_key: self._record_form_value(k, v)
                     )

@@ -80,7 +80,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .palette import CONTENT, qcolor, tokens
+from .palette import CONTENT, menu_style, qcolor, tokens
 from ..core.assets import icon_path
 from ..core.binary import program_kind
 
@@ -799,7 +799,7 @@ class AnnotationToolbar(QWidget):
     def update_theme(self, is_dark: bool) -> None:
         t = tokens(is_dark)
         bg, fg, menu_bg, border = t["raised"], t["text"], t["surface"], t["border"]
-        btn_hover, btn_checked, outline = t["border"], t["accent_soft"], t["border_strong"]
+        btn_hover, btn_checked = t["border"], t["accent_soft"]
 
         self.setStyleSheet(f"""
             QWidget {{ background-color: {bg}; border-bottom: 1px solid {border}; color: {fg}; }}
@@ -807,10 +807,8 @@ class AnnotationToolbar(QWidget):
             QToolButton:hover {{ background-color: {btn_hover}; }}
             QToolButton:checked {{ background-color: {btn_checked}; border: 1px solid {t['accent']}; }}
             QToolButton::menu-indicator {{ image: none; }}
-            QMenu {{ background-color: {menu_bg}; color: {fg}; border: 1px solid {outline}; }}
-            QMenu::item:selected {{ background-color: {btn_hover}; color: {fg}; }}
             QSpinBox {{ background-color: {menu_bg}; color: {fg}; selection-background-color: {t['accent']}; selection-color: {t['accent_text']}; }}
-        """)
+        """ + menu_style(t))
 
     def _update_icons(self) -> None:
         is_dark = False

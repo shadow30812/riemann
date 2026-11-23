@@ -245,3 +245,82 @@ def test_comments_on_rotated_pages_are_placed_as_displayed(tmp_path, rotate):
     riemann_core = pytest.importorskip("riemann_core")
     doc = riemann_core.PdfEngine().load_document(path, None)
     assert read_comments_from_core(doc)[0][0]["rel_rect"] == expected
+
+
+def _contrast(a, b):
+    def lum(c):
+        def ch(v):
+            v /= 255
+            return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+        return 0.2126 * ch(c.red()) + 0.7152 * ch(c.green()) + 0.0722 * ch(c.blue())
+
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _readable(menu, action):
+    from PySide6.QtCore import QPoint
+
+    menu.popup(QPoint(0, 0))
+    QApplication.processEvents()
+    img = menu.grab().toImage()
+    rect = menu.actionGeometry(action)
+    background = img.pixelColor(rect.right() - 2, rect.center().y())
+    best = max(
+        _contrast(img.pixelColor(x, y), background)
+        for x in range(rect.left(), rect.left() + rect.width() // 2)
+        for y in range(rect.top(), rect.bottom())
+    )
+    menu.close()
+    menu.deleteLater()
+    return best
+
+
+def _themed_host(qtbot, reader, ui_dark, page_dark):
+    from PySide6.QtWidgets import QWidget
+
+    from riemann.core.assets import asset_path
+
+    css = "modern_dark.css" if ui_dark else "modern_light.css"
+    with open(asset_path("theme", css), encoding="utf-8") as f:
+        sheet = f.read()
+    host = QWidget()
+    qtbot.addWidget(host)
+    host.setStyleSheet(sheet)
+    reader.setParent(host)
+    reader.theme_mode = 1 if page_dark else 0
+    reader.apply_theme()
+    host.show()
+    return host
+
+
+@pytest.mark.parametrize("ui_dark", [False, True])
+def test_selection_menu_on_a_page_is_readable_when_page_and_interface_themes_differ(reader, qtbot, ui_dark):
+    """A page's stylesheet had no selector, so the Copy Text menu took the page's paper as its background."""
+    from PySide6.QtWidgets import QMenu
+
+    _themed_host(qtbot, reader, ui_dark, page_dark=not ui_dark)
+    page = reader._create_page_label(0)
+    reader.scroll_layout.addWidget(page)
+    menu = QMenu(page)
+    copy = menu.addAction("Copy Text")
+    menu.addAction("Search Web")
+    assert _readable(menu, copy) >= 4.5
+    reader.setParent(None)
+
+
+@pytest.mark.parametrize("ui_dark", [False, True])
+def test_copy_menu_of_find_fields_is_readable_when_page_and_interface_themes_differ(reader, qtbot, ui_dark):
+    """The Copy item drew in the interface theme's text colour on the page theme's background."""
+    from PySide6.QtWidgets import QLineEdit
+
+    _themed_host(qtbot, reader, ui_dark, page_dark=not ui_dark)
+    for bar in (reader.search_bar, reader.ai_search_bar):
+        edit = bar.findChild(QLineEdit)
+        edit.setText("attention")
+        edit.selectAll()
+        menu = edit.createStandardContextMenu()
+        copy = next(a for a in menu.actions() if a.text().replace("&", "").startswith("Copy"))
+        assert _readable(menu, copy) >= 4.5, bar.objectName()
+    reader.setParent(None)

@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..palette import incognito_url_style, link_tip_style, toast_style, tokens
+from ..palette import incognito_url_style, link_tip_style, menu_style, toast_style, tokens
 from ..shortcuts import share_keys
 from ...core.settings import DARK_MODE_KEY, browser_settings
 from .interceptor import is_local_homepage
@@ -411,6 +411,7 @@ class ChromeMixin:
             f"border-radius: 8px; padding: 5px 10px; color: {t['text']}; "
             f"selection-background-color: {t['accent']}; selection-color: {t['accent_text']}; }} "
             f"QLineEdit:focus {{ border-color: {t['accent']}; }}"
+            + menu_style(t)
         )
         self.toolbar.setStyleSheet(style)
         self.search_bar.setStyleSheet(style)
@@ -421,14 +422,7 @@ class ChromeMixin:
         if self.incognito:
             self.txt_url.setStyleSheet(incognito_url_style())
 
-        menu_bg, menu_fg, menu_border = t["surface"], t["text"], t["border"]
-        if hasattr(self, "btn_zoom") and self.btn_zoom.menu():
-            self.btn_zoom.menu().setStyleSheet(
-                f"QMenu {{ background: {menu_bg}; \
-                           color: {menu_fg}; \
-                           border: 1px solid {menu_border}; }} \
-                QMenu::item:selected {{ background: {t['raised']}; }}"
-            )
+        self.web.setStyleSheet(menu_style(t))
 
         if hasattr(self, "btn_back"):
             self._update_icons()

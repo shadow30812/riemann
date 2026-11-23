@@ -81,6 +81,7 @@ class AppearanceMixin(ReaderHostBase):
 
         if self.web:
             self.web.page().setBackgroundColor(color)
+            self.web.setStyleSheet(menu_style(t))
 
         self.scroll_content.setStyleSheet(
             f"#scrollContent {{ background-color: {t['canvas']}; }}"
@@ -89,6 +90,7 @@ class AppearanceMixin(ReaderHostBase):
             f"QScrollArea {{ background: {t['canvas']}; border: none; }}"
             + scrollbar_style(t)
             + f"QScrollBar:vertical, QScrollBar:horizontal {{ background: {t['canvas']}; }}"
+            + menu_style(t)
         )
         self.sidebar_nav.update_theme(is_dark)
 
@@ -141,7 +143,7 @@ class AppearanceMixin(ReaderHostBase):
                 border: none; }}
             QPushButton:hover {{ background: {t['border']}; 
                 border-radius: 4px; }}
-        """)
+        """ + menu_style(t))
 
         self.link_tooltip.setStyleSheet(link_tip_style(t))
         self.ai_search_bar.setStyleSheet(
@@ -153,6 +155,7 @@ class AppearanceMixin(ReaderHostBase):
             f"QPushButton#askAi {{ background-color: {t['accent']}; color: {t['accent_text']}; "
             "border-radius: 4px; padding: 4px 10px; }"
             f"QPushButton#askAi:hover {{ background-color: {t['accent_hover']}; }}"
+            + menu_style(t)
         )
 
         self._update_icons()
@@ -389,7 +392,7 @@ class AppearanceMixin(ReaderHostBase):
             QScrollBar:vertical {{ background: transparent; width: 14px; }}
             QScrollBar::handle:vertical {{ background: {t["border_strong"]}; border-radius: 5px; margin: 2px; min-height: 24px; }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-        """)
+        """ + menu_style(t))
         self.lbl_drop_icon.setPixmap(tinted_pixmap("file-text", t["accent"], 36))
         if self.list_recent.count():
             self._populate_home_recents()
