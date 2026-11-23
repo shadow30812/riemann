@@ -59,7 +59,7 @@ from PySide6.QtWidgets import (
 from ...core import permissions
 from ...core.captions_server import CaptionsServer
 from ..browser_handlers import ScriptInjector
-from ..palette import incognito_url_style, link_tip_style, tokens
+from ..palette import incognito_url_style, legible_icon, link_tip_style, tokens
 from ..toast import Toast
 from ...core.log import log
 from ...core.settings import (
@@ -494,7 +494,7 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
             parent = parent.parent()
 
     def _update_tab_icon(self, icon) -> None:
-        """Shows the site's favicon on the tab."""
+        """Shows the site's favicon on the tab, on a plate when it would vanish on the tab bar."""
 
         parent = self.parent()
         page_icon = QIcon(icon_path("browser.png"))
@@ -502,7 +502,7 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
             if isinstance(parent, QTabWidget):
                 idx = parent.indexOf(self)
                 if idx != -1 and not icon.isNull():
-                    parent.setTabIcon(idx, icon)
+                    parent.setTabIcon(idx, legible_icon(icon, bool(getattr(self.window(), "dark_mode", self.dark_mode))))
                 else:
                     parent.setTabIcon(idx, page_icon)
                 break
@@ -524,6 +524,9 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
 
                     fav_settings = favicon_cache()
                     fav_settings.setValue(host, data_uri)
+
+    def refresh_tab_icon(self) -> None:
+        self._update_tab_icon(self.web.icon())
 
     def deleteLater(self) -> None:
         """

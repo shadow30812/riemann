@@ -207,6 +207,8 @@ class ChromeMixin:
                 w = tab_widget.widget(i)
                 if hasattr(w, "_update_icons"):
                     w._update_icons()
+                if hasattr(w, "refresh_tab_icon"):
+                    w.refresh_tab_icon()
                 if hasattr(w, "apply_ui_theme"):
                     w.apply_ui_theme(self.dark_mode)
                 if getattr(w, "is_system_tab", False):

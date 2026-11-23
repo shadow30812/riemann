@@ -138,3 +138,44 @@ def test_signature_banner_follows_the_reader_theme(qapp, qtbot):
     finally:
         tab.cleanup()
         tab.deleteLater()
+
+
+def _glyph_icon(colour):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+
+    pm = QPixmap(32, 32)
+    pm.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pm)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(colour))
+    painter.drawEllipse(6, 6, 20, 20)
+    painter.end()
+    return QIcon(pm)
+
+
+@pytest.mark.parametrize(
+    "glyph, dark, plated",
+    [
+        ("#000000", True, True),
+        ("#FFFFFF", False, True),
+        ("#000000", False, False),
+        ("#FFFFFF", True, False),
+        ("#E8453C", True, False),
+        ("#E8453C", False, False),
+    ],
+)
+def test_favicons_that_would_vanish_on_the_tab_bar_get_a_plate(qapp, glyph, dark, plated):
+    """ChatGPT's black logo vanished on the dark tab bar; a white one would on the light bar."""
+    from PySide6.QtGui import QColor
+
+    from riemann.ui.palette import legible_icon, tokens
+
+    icon = _glyph_icon(glyph)
+    shown = legible_icon(icon, dark)
+    corner = shown.pixmap(32, 32).toImage().pixelColor(5, 16)
+    if plated:
+        assert corner.alpha() == 255
+        assert corner.name().upper() == QColor(tokens(not dark)["surface"]).name().upper()
+    else:
+        assert shown is icon

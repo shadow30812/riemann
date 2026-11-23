@@ -3,14 +3,6 @@
 The same values live in assets/theme/modern_*.css and assets/homepage/homepage.css;
 change all three together.
 
-"system" is the teal accent of System tabs (Settings, History, Downloads...),
-kept apart from the blue accent so those tabs read as part of Riemann, not
-documents or web pages. "private" is the purple of incognito address bars, which
-are always dark, so only DARK["private"] is used. "success" and "warning" (with
-"danger" and "accent") colour status banners such as the signature check; the
-light values keep 4.5:1 contrast under white text, the dark ones under
-accent_text. The CSS files use none of these three.
-
 toast_style, link_tip_style, incognito_url_style, banner_style,
 overlay_style and scrollbar_style are the small stylesheets several widgets
 share. overlay_style
@@ -20,10 +12,17 @@ document content in either theme, so it always uses the dark tokens.
 CONTENT holds colours that belong to the document or the projector rather than
 the interface theme, so they don't change with it: the presentation stage and
 its black and white blanks, the laser pointer, the default pen and text ink,
-search hits, note markers, text selection, the read-aloud highlight, the
+search hits, note markers, text selection, the read-aloud highlight, the the
 outline of a redaction mark and the box a redaction leaves, and the glow of a
 tab playing media. qcolor turns any of these values into a QColor
 with alpha.
+
+legible_icon keeps a site's favicon visible on the tab bar. A dark logo
+(ChatGPT's black knot) vanished on the dark theme's tabs, and a white one
+would on the light theme's. It measures the icon's average brightness, its
+opaque pixels weighted by alpha, against the tab background; under
+ICON_MIN_CONTRAST the icon is drawn smaller on a rounded plate of the other
+theme's surface. Icons with colour or their own background pass unchanged.
 
 dialog_icon puts a Lucide icon on a dialog, tinted for the theme of the
 window it belongs to (window_is_dark reads that window's dark_mode: the
@@ -252,6 +251,55 @@ def tinted_pixmap(name: str, color: str, size: int, dpr: float = 2.0) -> QPixmap
 
 def tinted_icon(name: str, color: str, size: int = 24) -> QIcon:
     return QIcon(tinted_pixmap(name, color, size))
+
+
+ICON_MIN_CONTRAST = 1.8
+
+
+def _relative_luminance(color: QColor) -> float:
+    def channel(v: float) -> float:
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * channel(color.redF()) + 0.7152 * channel(color.greenF()) + 0.0722 * channel(color.blueF())
+
+
+def icon_luminance(image) -> float:
+    """The alpha-weighted mean relative luminance of an image's pixels, or -1 when it is transparent."""
+    total = weight = 0.0
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color = image.pixelColor(x, y)
+            alpha = color.alphaF()
+            if alpha > 0.05:
+                total += _relative_luminance(color) * alpha
+                weight += alpha
+    return total / weight if weight else -1.0
+
+
+def legible_icon(icon: QIcon, dark: bool, size: int = 32) -> QIcon:
+    """icon, or icon on a plate of the opposite tone when it would vanish on the theme's tab bar."""
+    if icon.isNull():
+        return icon
+    image = icon.pixmap(size, size).toImage()
+    luminance = icon_luminance(image)
+    if luminance < 0:
+        return icon
+    background = _relative_luminance(QColor(tokens(dark)["canvas"]))
+    ratio = (max(luminance, background) + 0.05) / (min(luminance, background) + 0.05)
+    if ratio >= ICON_MIN_CONTRAST:
+        return icon
+    plate = QPixmap(size, size)
+    plate.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(plate)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(tokens(not dark)["surface"]))
+    painter.drawRoundedRect(0, 0, size, size, size * 0.25, size * 0.25)
+    inset = round(size * 0.14)
+    painter.drawPixmap(inset, inset, icon.pixmap(size - 2 * inset, size - 2 * inset))
+    painter.end()
+    return QIcon(plate)
 
 
 def window_is_dark(widget: QWidget) -> bool:
