@@ -261,7 +261,7 @@ The other scripts (`bench_core.py`, `bench_startup.py`, `bench_memory.py`) run t
 | | |
 | --- | --- |
 | Python (app) | 39,500 lines in 117 files |
-| Python (tests) | 16,200 lines, 1,351 tests |
+| Python (tests) | 16,200 lines, 1,352 tests |
 | Rust (core and OCR worker) | 2,000 lines, 36 tests |
 | JavaScript (injected browser scripts, homepage) | 1,300 lines, plus 240 lines of tests |
 | Benchmarks | 850 lines of Python |

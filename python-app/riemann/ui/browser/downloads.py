@@ -141,7 +141,7 @@ class Downloads(QObject):
             self.dl_worker, self.web.title() or "Video_Download", dest_dir, bool(options.get("playlist", False))
         )
         self.dl_worker.progress.connect(self.progress.emit)
-        self.dl_worker.finished.connect(self._on_video_finished)
+        self.dl_worker.done.connect(self._on_video_finished)
         self.dl_worker.start()
 
     def cancel_video_download(self) -> None:

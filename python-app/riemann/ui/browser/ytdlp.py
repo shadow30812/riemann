@@ -5,8 +5,9 @@ yt-dlp comes from the optional packages (core/dependencies.py) with its pinned
 YouTube solver (yt-dlp-ejs), which runs in Deno; js_runtimes points yt-dlp at
 the pinned Deno, and yt-dlp is never given remote_components.
 
-YtDlpStreamWorker reports the stream URL through found. Named finished, the
-signal hid QThread.finished, so ui/threads.track never let the worker go.
+YtDlpStreamWorker reports the stream URL through found and YtDlpWorker the
+outcome through done. Named finished, a signal hides QThread.finished, which
+ui/threads.track and release wait for.
 
 YtDlpWorker is yt-dlp's logger (debug, info, warning, error). With
 ignoreerrors on, a failed video (a 403 from the site, a format that is
@@ -120,7 +121,7 @@ class YtDlpWorker(QThread):
 
     progress = Signal(int)
     progress_details = Signal(dict)
-    finished = Signal(bool, str)
+    done = Signal(bool, str)
 
     def __init__(self, url: str, download_dir: str, dl_opts: dict | None = None) -> None:
         super().__init__()
@@ -214,22 +215,22 @@ class YtDlpWorker(QThread):
 
             if self.is_cancelled:
                 self.cleanup_remnants()
-                self.finished.emit(False, "Download cancelled.")
+                self.done.emit(False, "Download cancelled.")
             elif self.errors:
-                self.finished.emit(False, self.failure_message())
+                self.done.emit(False, self.failure_message())
             else:
-                self.finished.emit(True, "Download complete!")
+                self.done.emit(True, "Download complete!")
 
         except KeyboardInterrupt:
             self.cleanup_remnants()
-            self.finished.emit(False, "Download cancelled.")
+            self.done.emit(False, "Download cancelled.")
 
         except Exception as e:
             self.cleanup_remnants()
             if self.is_cancelled:
-                self.finished.emit(False, "Download cancelled.")
+                self.done.emit(False, "Download cancelled.")
             else:
-                self.finished.emit(False, str(e))
+                self.done.emit(False, str(e))
 
     def progress_hook(self, d: dict) -> None:
         """

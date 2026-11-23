@@ -13,7 +13,8 @@ ui/threads.track before they start, so they outlive the reference their owner
 drops in the slot of their last signal (see ui/threads.py). UNTRACKED_WORKERS
 lists the exceptions: the page render worker, which has a registry of its own,
 and long jobs (installs, downloads, model loading, captions) that quitting
-should not wait for.
+should not wait for. No worker declares a signal of its own named finished:
+it would hide QThread.finished, which track and release wait for.
 """
 
 import ast
@@ -134,8 +135,8 @@ def trees():
                     yield os.path.relpath(path, APP).replace(os.sep, "/"), ast.parse(f.read(), path)
 
 
-def test_workers_are_tracked_before_they_start():
-    parsed = dict(trees())
+def worker_classes(parsed):
+    """The names of QThread and every class in the app derived from it."""
     workers = {"QThread"}
     while True:
         found = {
@@ -145,8 +146,28 @@ def test_workers_are_tracked_before_they_start():
             if isinstance(node, ast.ClassDef) and any(ast.unparse(b).split(".")[-1] in workers for b in node.bases)
         }
         if found <= workers:
-            break
+            return workers
         workers |= found
+
+
+def test_no_worker_hides_qthread_finished():
+    parsed = dict(trees())
+    workers = worker_classes(parsed)
+    hiding = [
+        f"{path}:{stmt.lineno} {node.name}"
+        for path, tree in parsed.items()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef) and node.name in workers
+        for stmt in node.body
+        if isinstance(stmt, (ast.Assign, ast.AnnAssign))
+        and "finished" in [ast.unparse(t) for t in (stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target])]
+    ]
+    assert hiding == []
+
+
+def test_workers_are_tracked_before_they_start():
+    parsed = dict(trees())
+    workers = worker_classes(parsed)
     loose = []
     for path, tree in parsed.items():
         for fn in ast.walk(tree):

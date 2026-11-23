@@ -330,7 +330,7 @@ class AiMixin(ReaderHostBase):
         self.dl_dialog.setAutoClose(True)
 
         self.downloader.progress.connect(self.dl_dialog.setValue)
-        self.downloader.finished.connect(self.on_download_finished)
+        self.downloader.done.connect(self.on_download_finished)
         self.dl_dialog.canceled.connect(self.downloader.cancel)
         self.dl_dialog.show()
         self.downloader.start()

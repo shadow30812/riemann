@@ -116,7 +116,7 @@ def test_ytdlpworker_success(mock_ydl, qtbot):
     mock_inst = MagicMock()
     mock_ydl.return_value.__enter__.return_value = mock_inst
     worker = YtDlpWorker("http://fake.url", "/fake/dir")
-    with qtbot.waitSignal(worker.finished, timeout=1000) as blocker:
+    with qtbot.waitSignal(worker.done, timeout=1000) as blocker:
         worker.run()
     assert blocker.args == [True, "Download complete!"]
 
@@ -127,7 +127,7 @@ def test_ytdlpworker_failure(mock_ydl, qtbot):
     mock_inst.download.side_effect = Exception("Network error")
     mock_ydl.return_value.__enter__.return_value = mock_inst
     worker = YtDlpWorker("http://fake.url", "/fake/dir")
-    with qtbot.waitSignal(worker.finished, timeout=1000) as blocker:
+    with qtbot.waitSignal(worker.done, timeout=1000) as blocker:
         worker.run()
     assert blocker.args == [False, "Network error"]
 
@@ -136,7 +136,7 @@ def test_ytdlpworker_failure(mock_ydl, qtbot):
 def test_ytdlpworker_cancelled(mock_ydl, qtbot):
     worker = YtDlpWorker("http://fake.url", "/fake/dir")
     worker.is_cancelled = True
-    with qtbot.waitSignal(worker.finished, timeout=1000) as blocker:
+    with qtbot.waitSignal(worker.done, timeout=1000) as blocker:
         worker.run()
     assert blocker.args == [False, "Download cancelled."]
 
@@ -1079,7 +1079,7 @@ class _FakeYoutubeDL:
 def _run_with_fake_ytdlp(worker, script):
     _FakeYoutubeDL.script = staticmethod(script)
     results = []
-    worker.finished.connect(lambda ok, msg: results.append((ok, msg)))
+    worker.done.connect(lambda ok, msg: results.append((ok, msg)))
     with patch("yt_dlp.YoutubeDL", _FakeYoutubeDL):
         worker.run()
     return results

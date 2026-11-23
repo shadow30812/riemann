@@ -40,7 +40,7 @@ class ModelDownloader(QThread):
     """
 
     progress = Signal(int)
-    finished = Signal(bool)
+    done = Signal(bool)
 
     CHUNK = 1 << 20
 
@@ -67,13 +67,13 @@ class ModelDownloader(QThread):
                 )
             self.progress.emit(99)
             safe_extract(zip_path, self.dest_folder)
-            self.finished.emit(True)
+            self.done.emit(True)
         except DownloadCancelled:
             self.error = "Download cancelled."
-            self.finished.emit(False)
+            self.done.emit(False)
         except Exception as e:
             self.error = str(e)
-            self.finished.emit(False)
+            self.done.emit(False)
         finally:
             try:
                 os.remove(zip_path)

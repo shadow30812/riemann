@@ -436,7 +436,7 @@ class ConvertDialog(QDialog):
             self.txt_output.text(),
             self.input_paths,
         )
-        self.worker.finished.connect(self._on_success)
+        self.worker.succeeded.connect(self._on_success)
         self.worker.error.connect(self._on_error)
         self.worker.start()
 
@@ -594,7 +594,7 @@ class CompressDialog(QDialog):
             self.slider.value(),
             os.path.splitext(in_path)[1].lower(),
         )
-        self.worker.finished.connect(self._on_success)
+        self.worker.succeeded.connect(self._on_success)
         self.worker.error.connect(self._on_error)
         self.worker.start()
 
@@ -609,7 +609,7 @@ class CompressDialog(QDialog):
 
 
 class ConversionWorker(QThread):
-    finished = Signal()
+    succeeded = Signal()
     error = Signal(str)
 
     def __init__(self, idx, in_path, out_path, input_paths=None):
@@ -639,13 +639,13 @@ class ConversionWorker(QThread):
                 html_str = DocumentConverter.epub_to_html(self.in_path)
                 with open(self.out_path, "w", encoding="utf-8") as f:
                     f.write(html_str)
-            self.finished.emit()
+            self.succeeded.emit()
         except Exception as e:
             self.error.emit(str(e))
 
 
 class CompressionWorker(QThread):
-    finished = Signal()
+    succeeded = Signal()
     error = Signal(str)
 
     def __init__(self, in_path, out_path, lossless, quality, ext):
@@ -668,14 +668,14 @@ class CompressionWorker(QThread):
                 )
                 if not success:
                     raise Exception("Image processing failed.")
-            self.finished.emit()
+            self.succeeded.emit()
         except Exception as e:
             self.error.emit(str(e))
 
 
 class CaptionGeneratorWorker(QThread):
     progress = Signal(str)
-    finished = Signal(bool, str)
+    done = Signal(bool, str)
 
     def __init__(self, video_path):
         super().__init__()
@@ -738,16 +738,16 @@ class CaptionGeneratorWorker(QThread):
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, **NO_WINDOW
             )
 
-            self.finished.emit(True, f"Successfully created:\n{output_path}\n{srt_path}")
+            self.done.emit(True, f"Successfully created:\n{output_path}\n{srt_path}")
 
         except ImportError:
-            self.finished.emit(False, "faster-whisper is not installed.")
+            self.done.emit(False, "faster-whisper is not installed.")
         except subprocess.CalledProcessError:
-            self.finished.emit(
+            self.done.emit(
                 False, "FFmpeg failed. Ensure it is installed on your system."
             )
         except Exception as e:
-            self.finished.emit(False, f"An error occurred: {e!s}")
+            self.done.emit(False, f"An error occurred: {e!s}")
 
 
 def unused_path(path: str) -> str:
@@ -816,7 +816,7 @@ def trigger_local_caption_generation(parent_window):
         else:
             QMessageBox.warning(parent_window, "Error", message)
 
-    worker.finished.connect(on_finished)
+    worker.done.connect(on_finished)
 
     worker.start()
     progress_dialog.show()

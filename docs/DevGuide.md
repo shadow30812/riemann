@@ -1063,7 +1063,7 @@ yt-dlp stream extraction allows playback through:
 
 This bypasses unsupported Chromium codecs.
 
-`YtDlpStreamWorker` (`ui/browser/ytdlp.py`) finds the direct URL without downloading. It passes the pinned Deno (`js_runtimes`) whichever cookie source the person picks, a browser's cookies or a cookies.txt file. It reports the URL through `found`, not `finished`: a signal of that name would hide `QThread.finished`, which `ui/threads.track` listens for to let the worker go.
+`YtDlpStreamWorker` (`ui/browser/ytdlp.py`) finds the direct URL without downloading. It passes the pinned Deno (`js_runtimes`) whichever cookie source the person picks, a browser's cookies or a cookies.txt file. It reports the URL through `found`, not `finished`: a signal of that name would hide `QThread.finished`, which `ui/threads.track` listens for to let the worker go. No worker in the app names a signal `finished` (`tests/test_source_rules.py` checks this); the others report through `done` or `succeeded`.
 
 ---
 

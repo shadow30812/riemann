@@ -268,7 +268,7 @@ def test_ytdlp_cancel_shows_at_once_and_stops_the_worker(qapp):
 
     class Worker(QObject):
         progress_details = Signal(dict)
-        finished = Signal(bool, str)
+        done = Signal(bool, str)
         is_cancelled = False
 
         def stop(self):
@@ -285,7 +285,7 @@ def test_ytdlp_cancel_shows_at_once_and_stops_the_worker(qapp):
     assert not button.isEnabled()
     mgr.update_progress(worker, {"status": "downloading", "percentage": 50, "video_id": "v", "filename": "v.mp4"})
     assert task["videos"] == {}
-    worker.finished.emit(False, "Download cancelled.")
+    worker.done.emit(False, "Download cancelled.")
     assert task["is_finished"]
     mgr.close()
     mgr.deleteLater()

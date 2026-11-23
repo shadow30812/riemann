@@ -58,7 +58,7 @@ def serve():
 
 def _run(downloader):
     results = []
-    downloader.finished.connect(results.append)
+    downloader.done.connect(results.append)
     downloader.run()
     return results
 

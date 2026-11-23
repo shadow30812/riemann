@@ -800,7 +800,7 @@ class YtDlpDownloadManager(QDialog):
         worker.progress_details.connect(
             lambda data, w=worker: self.update_progress(w, data)
         )
-        worker.finished.connect(
+        worker.done.connect(
             lambda success, msg, w=worker: self.on_finished(w, success, msg)
         )
 
