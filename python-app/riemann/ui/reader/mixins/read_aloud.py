@@ -7,7 +7,9 @@ Sentences come from the same character geometry text selection uses, so the
 highlight lines up with the text on the page. Speech rate and voice are user
 settings (READ_RATE_KEY, READ_VOICE_KEY). On Linux the engine is
 speech-dispatcher; when Qt cannot load it, the reader says what to install
-instead of failing silently.
+instead of failing silently. Qt's plugin links against libspeechd, which
+distributions package apart from the daemon, so the daemon alone is not
+enough.
 
 Ctrl+Shift+U or the toolbar button starts and stops it; Esc stops it too.
 
@@ -40,8 +42,10 @@ WORD = re.compile(r"\S+")
 SENTENCE = re.compile(r"\S.*?(?:[.!?]+[\"'”’)\]]*(?=\s|$)|$)", re.S)
 
 NO_ENGINE = (
-    "Read aloud needs a speech engine. On Linux, install speech-dispatcher "
-    "and a voice such as espeak-ng with your package manager, then restart Riemann."
+    "Read aloud needs a speech engine. On Linux, install speech-dispatcher, "
+    "its client library (speech-dispatcher-libs on Fedora and RHEL, libspeechd2 "
+    "on Debian and Ubuntu) and a voice such as espeak-ng with your package "
+    "manager, then restart Riemann."
 )
 
 
