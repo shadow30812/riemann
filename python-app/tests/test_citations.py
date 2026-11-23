@@ -90,6 +90,34 @@ def test_reference_text_is_read_from_the_bibliography():
 
 
 @pytest.mark.skipif(not os.path.exists(CORPUS), reason="benchmark corpus not downloaded")
+def test_citation_hover_works_without_a_reader(qapp, qtbot):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QWidget
+
+    import riemann_core
+    from riemann.ui.reader.mixins.citations import CitationHover
+
+    owner = QWidget()
+    qtbot.addWidget(owner)
+    owner.resize(900, 700)
+    owner.show()
+    doc = riemann_core.PdfEngine().load_document(os.path.abspath(CORPUS), None)
+    hover = CitationHover(lambda: doc, owner)
+    went = []
+    hover.go_to.connect(lambda page, top: went.append((page, top)))
+    hover.hover("#page=11&top=453.45", owner, QPoint(100, 100))
+    end = time.time() + 3
+    while time.time() < end and not hover.card.isVisible():
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert "Long short-term memory" in hover.card.text.text()
+    hover.card.go_to.emit(10, 453.45)
+    assert went == [(10, 453.45)]
+    hover.left()
+    hover.forget()
+
+
+@pytest.mark.skipif(not os.path.exists(CORPUS), reason="benchmark corpus not downloaded")
 def test_hovering_a_citation_shows_its_reference(qapp):
     from riemann.ui.reader.tab import ReaderTab
 
@@ -108,20 +136,20 @@ def test_hovering_a_citation_shows_its_reference(qapp):
     pump(3, lambda: bool(getattr(tab.page_widgets.get(1), "link_rects", None)))
     widget = tab.page_widgets[1]
     rect, url = next((r, u) for r, u in widget.link_rects if u.startswith("#page=11&top=453"))
-    tab._hover_internal_link(url, widget, rect.center())
-    pump(2, lambda: tab.citation_card.isVisible())
-    assert tab.citation_card.isVisible()
-    assert "Long short-term memory" in tab.citation_card.text.text()
+    tab.citations.hover(url, widget, rect.center())
+    pump(2, lambda: tab.citations.card.isVisible())
+    assert tab.citations.card.isVisible()
+    assert "Long short-term memory" in tab.citations.card.text.text()
     opened = []
     tab.window().open_url_beside = opened.append
-    tab.citation_card.info = {
+    tab.citations.card.info = {
         "title": "Long Short-Term Memory",
         "arxiv": "",
         "doi": "10.1162/x",
         "authors": [],
         "cited_by": 1,
     }
-    tab.citation_card._show_info()
-    tab.citation_card._open()
+    tab.citations.card._show_info()
+    tab.citations.card._open()
     assert opened == ["https://doi.org/10.1162/x"]
     tab.cleanup()

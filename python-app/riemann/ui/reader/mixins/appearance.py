@@ -416,7 +416,7 @@ class AppearanceMixin(ReaderHostBase):
         theme (N) instead; see apply_theme.
         """
         self.notes_panel.apply_theme(dark)
-        self.citation_card.apply_theme(dark)
+        self.citations.apply_theme(dark)
         self._home_dark_override = None
         if dark != self._home_dark:
             self._style_home_page(dark)

@@ -39,6 +39,7 @@ from ....core.constants import ViewMode, ZoomMode
 if TYPE_CHECKING:
     from ..toolbar_layout import ToolbarLayout
     from ..widgets import PageWidget
+    from .citations import CitationHover
     from .read_aloud import ReadAloud
     from .ruler import ReadingRuler
 
@@ -101,6 +102,7 @@ class ReaderHost(Protocol):
     combo_zoom: QComboBox
     ruler: "ReadingRuler"
     read_aloud: "ReadAloud"
+    citations: "CitationHover"
     link_tooltip: QLabel
     sidebar_nav: QWidget
     notes_panel: QWidget

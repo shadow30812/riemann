@@ -465,9 +465,9 @@ class InputMixin(ReaderHostBase):
                             target = self._parse_internal_link(hovered_url)
                             page_label = target[0] + 1 if target else "?"
                             self.link_tooltip.setText(f"Jump to Page {page_label} ↗")
-                            self._hover_internal_link(hovered_url, source, event.pos())
+                            self.citations.hover(hovered_url, source, event.pos())
                         else:
-                            self._hover_left_link()
+                            self.citations.left()
                             self.link_tooltip.setText(hovered_url)
                         self.link_tooltip.adjustSize()
                         self.link_tooltip.move(
@@ -484,7 +484,7 @@ class InputMixin(ReaderHostBase):
                         else:
                             source.setCursor(Qt.CursorShape.IBeamCursor)
                     else:
-                        self._hover_left_link()
+                        self.citations.left()
                         hovered_comment = self._get_comment_at_pos(
                             page_idx, event.pos(), source.width(), source.height()
                         )

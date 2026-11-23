@@ -277,7 +277,7 @@ class DocumentMixin(ReaderHostBase):
         self.signature_appearances = {}
         self._reset_document_caches()
         self.reset_navigation_history()
-        self._reference_cache = {}
+        self.citations.forget()
         self._forms_blocked = bool(self.converted_pdf)
         self._show_converted_banner()
         if self.notes_panel.isVisible() or self.settings.value(NOTES_VISIBLE_KEY, False, type=bool):

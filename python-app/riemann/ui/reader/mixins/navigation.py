@@ -40,6 +40,20 @@ from .host import ReaderHostBase
 
 NAV_HISTORY_LIMIT = 100
 
+def parse_internal_link(url: str) -> tuple[int, float | None] | None:
+    """
+    Parses '#page=N' or '#page=N&top=Y' into a 0-based page index and an
+    optional vertical target in PDF points (origin at the page bottom).
+    """
+    try:
+        params = urllib.parse.parse_qs(url.lstrip("#"))
+        page = int(float(params["page"][0])) - 1
+        top = float(params["top"][0]) if "top" in params else None
+        return page, top
+    except (KeyError, ValueError, IndexError):
+        return None
+
+
 class NavigationMixin(ReaderHostBase):
     _autoscroll_nav_timer = None
     _nav_back = None
@@ -337,19 +351,7 @@ class NavigationMixin(ReaderHostBase):
         bar = self.scroll.verticalScrollBar()
         bar.setValue(int(bar.value() + (direction * ph)))
 
-    @staticmethod
-    def _parse_internal_link(url: str) -> tuple[int, float | None] | None:
-        """
-        Parses '#page=N' or '#page=N&top=Y' into a 0-based page index and an
-        optional vertical target in PDF points (origin at the page bottom).
-        """
-        try:
-            params = urllib.parse.parse_qs(url.lstrip("#"))
-            page = int(float(params["page"][0])) - 1
-            top = float(params["top"][0]) if "top" in params else None
-            return page, top
-        except (KeyError, ValueError, IndexError):
-            return None
+    _parse_internal_link = staticmethod(parse_internal_link)
 
     def jump_to_page(self, idx: int, top_pts: float | None = None) -> None:
         """

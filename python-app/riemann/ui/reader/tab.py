@@ -48,7 +48,7 @@ from ..shortcuts import share_keys
 from .mixins.ai import AiMixin
 from .mixins.annotations import AnnotationsMixin
 from .mixins.appearance import AppearanceMixin
-from .mixins.citations import CitationsMixin
+from .mixins.citations import CitationHover
 from .mixins.document import DocumentMixin
 from .mixins.forms import FormsMixin
 from .mixins.input import InputMixin
@@ -81,7 +81,6 @@ class ReaderTab(
     DocumentMixin,
     PagesMixin,
     FormsMixin,
-    CitationsMixin,
     QWidget,
     RenderingMixin,
     AnnotationsMixin,
@@ -298,6 +297,18 @@ class ReaderTab(
         button = self.btn_read_aloud
         if button is not None:
             button.setChecked(on)
+
+    def _setup_citation_card(self) -> None:
+        self.citations = CitationHover(lambda: self.current_doc, self, self._home_dark)
+        self.citations.go_to.connect(lambda page, top: self.navigate_to(page, top_pts=top))
+        self.citations.open_beside.connect(self._open_beside)
+
+    def _open_beside(self, url: str) -> None:
+        window = self.window()
+        if hasattr(window, "open_url_beside"):
+            window.open_url_beside(url)
+        elif hasattr(window, "new_browser_tab"):
+            window.new_browser_tab(url)
 
     def _get_tab_widget(self) -> QTabWidget | None:
         """The QTabWidget this tab sits in, or None."""
