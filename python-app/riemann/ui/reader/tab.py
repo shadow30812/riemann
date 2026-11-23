@@ -1,8 +1,11 @@
 """
 Reader Tab Component.
 
-The main aggregator class that combines all mixins to provide
-the full PDF reading experience.
+ReaderTab combines the mixins in mixins/ and owns the parts that are classes
+of their own (the reading ruler, read aloud, citation cards, form saving,
+document metadata and text search). Each part gets what it needs as
+functions in its constructor and reports through signals; __init__ connects
+those signals to the reader's widgets.
 
 Notes:
 

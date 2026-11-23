@@ -1,8 +1,10 @@
 """
 What the reader mixins expect from the class that combines them.
 
-ReaderTab (ui/reader/tab.py) is a QWidget built from about fifteen mixins, and
-each mixin reads state and widgets that another one creates. ReaderHost lists
+ReaderTab (ui/reader/tab.py) is a QWidget built from about a dozen mixins, and
+each mixin reads state and widgets that another one creates. The parts the
+tab owns (ruler, read_aloud, citations, forms, metadata, search) are listed
+too, since mixins call them. ReaderHost lists
 that shared surface in one place: the document state set in ReaderTab.__init__,
 the widgets built by ToolbarMixin.setup_ui, and the few methods every mixin
 calls. Mixins derive from ReaderHostBase, which is ReaderHost for type checkers

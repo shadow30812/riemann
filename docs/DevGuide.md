@@ -400,19 +400,25 @@ Reader functionality is divided into mixins in `ui/reader/mixins/`:
 * `AppearanceMixin`: themes, the start page, toasts, full screen, presentation.
 * `DocumentMixin`: loading, reloading, saving copies, cleanup.
 * `PagesMixin`: delete, rotate, move, extract and insert pages (`core/page_edit.py`).
-* `ReadAloudMixin`, `FormsMixin`, `CitationsMixin`.
-* `RenderingMixin`, `AnnotationsMixin`, `SearchMixin`, `AiMixin`, `MetadataMixin`, `SignaturesMixin`.
+* `RenderingMixin`, `AnnotationsMixin`, `AiMixin`, `SignaturesMixin`.
 
 Mixins that override Qt event handlers come before `QWidget` in `ReaderTab`'s bases. Every mixin derives from `ReaderHostBase` (`mixins/host.py`): for type checkers it is the `ReaderHost` Protocol, which declares the state and widgets the mixins share; at run time it is `object`. A test checks that a fresh `ReaderTab` has every name `ReaderHost` declares, so add an attribute there when a second mixin starts using it.
 
-This architecture prevents the reader from becoming a monolithic God object.
+Inside a mixin, `self` is the whole tab, so any mixin can read or change any other's state. The parts at the edges are therefore ordinary classes the tab owns instead ("the tab has a ruler", not "the tab is a ruler"). Each gets the few things it needs through its constructor, usually as functions such as `page_chars(page)` or `document()`, and reports back through Qt signals; `ReaderTab.__init__` connects those signals to the widgets. Each can be built in a test without a `ReaderTab`:
+
+* `ReadingRuler` (`mixins/ruler.py`, `tab.ruler`): the reading ruler.
+* `ReadAloud` (`mixins/read_aloud.py`, `tab.read_aloud`): reading aloud and its highlights.
+* `CitationHover` (`mixins/citations.py`, `tab.citations`): citation hover cards.
+* `FormSaver` (`mixins/forms.py`, `tab.forms`): writing form entries into the PDF.
+* `DocumentMetadata` (`mixins/metadata.py`, `tab.metadata`): bibliographic details, renaming, citations.
+* `PageSearch` (`mixins/search.py`, `tab.search`): finding text; the search bar itself stays in `ReaderTab`.
 
 When adding features:
 
 * rendering-related logic belongs in RenderingMixin
 * persistent annotation logic belongs in AnnotationMixin
 * AI flows belong in AiMixin
-* search logic belongs in SearchMixin
+* a feature that needs only a little of the reader's state is a class of its own, built like the parts above
 
 Do not continuously expand `ReaderTab` itself.
 
@@ -822,7 +828,7 @@ Avoid invalidating the cache unnecessarily.
 
 ## `ui/browser/`
 
-This package contains the primary Chromium integration layer. `tab.py` is `BrowserTab`; its behaviour is split into mixins: `chrome.py` (toolbar, find bar, shortcuts, theme, zoom, bookmarks), `media.py` (captions, music and video modes, mute), `stream.py` (outside players and the built-in player) and `downloads.py`. `interceptor.py` decides what pages may load, `page.py` is the `WebPage`, `ytdlp.py` holds the yt-dlp workers and `preview.py` the `PreviewTextTab`.
+This package contains the primary Chromium integration layer. `tab.py` is `BrowserTab`; `chrome.py` is its one mixin (toolbar, find bar, shortcuts, theme, zoom, bookmarks). The rest are classes the tab owns, each given what it works on (the web view, the captions server, the widget its dialogs open over) and reporting through signals, so each can be built in a test without a `BrowserTab`: `MediaControls` (`media.py`: captions, music and video modes, mute), `StreamLauncher` and `VideoPlayer` (`stream.py`: outside players and the built-in one) and `Downloads` (`downloads.py`: files, videos, saving a page as PDF). The tab turns its buttons into calls on them and their signals into toasts, the loading line and calls on the window. `interceptor.py` decides what pages may load, `page.py` is the `WebPage`, `ytdlp.py` holds the yt-dlp workers and `preview.py` the `PreviewTextTab`.
 
 Responsibilities:
 

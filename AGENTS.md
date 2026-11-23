@@ -9,7 +9,7 @@ A desktop document reader and web browser in one window, written in Python (PySi
 | Part | Path | Notes |
 | --- | --- | --- |
 | Desktop app | `python-app/riemann/` | Entry `app.py` (`RiemannWindow`, `run()`). The window's behaviour is split into mixins in `window/` (documents, session, system, menus, panes, tabs, chrome, folders). |
-| Reader tab | `python-app/riemann/ui/reader/` | `tab.py` (`ReaderTab`) plus behaviour split into `mixins/` (toolbar, navigation, selection, input, appearance, document, pages, read_aloud, ruler, forms, citations, rendering, annotations, ai, ...). State and widgets that more than one mixin uses are declared in `mixins/host.py` (`ReaderHost`); a test checks `ReaderTab` has them all. Rendering runs in `render_worker.py`. Markdown and text files open here too, as one HTML page in the tab's web view, and so do EPUB books and the basic views of Office files; Office files with LibreOffice open as a converted PDF, read-only (`mixins/document.py`). `replace_text.py` is Replace text. |
+| Reader tab | `python-app/riemann/ui/reader/` | `tab.py` (`ReaderTab`) plus behaviour split into `mixins/` (toolbar, navigation, selection, input, appearance, document, pages, rendering, annotations, ai, signatures). State and widgets that more than one mixin uses are declared in `mixins/host.py` (`ReaderHost`); a test checks `ReaderTab` has them all. Also in `mixins/`, but ordinary classes the tab owns (constructor arguments in, Qt signals out, testable without a `ReaderTab`): `ReadingRuler` (ruler.py), `ReadAloud` (read_aloud.py), `CitationHover` (citations.py), `FormSaver` (forms.py), `DocumentMetadata` (metadata.py), `PageSearch` (search.py). Rendering runs in `render_worker.py`. Markdown and text files open here too, as one HTML page in the tab's web view, and so do EPUB books and the basic views of Office files; Office files with LibreOffice open as a converted PDF, read-only (`mixins/document.py`). `replace_text.py` is Replace text. |
 | Viewer tabs | `python-app/riemann/ui/viewers/` | `image_tab.py` (pictures), `table_tab.py` (CSV and TSV, editable, saved only after asking), `spreadsheet_tab.py` (Excel and OpenDocument sheets, read-only), `hex_tab.py` (any other file as bytes, read-only; `core/binary.py` says which files are programs). |
 | Reader toolbar layouts | `python-app/riemann/ui/reader/toolbar_layout.py` | The buttons are created once in `mixins/toolbar.py`; `ToolbarLayout` only places them (top bar, side rail, ribbon, floating pill, menus, hidden) per the layout chosen in Settings. Add a new button to `COMMANDS` there, or it shows nowhere. |
 | System tabs | `python-app/riemann/ui/system/` | Settings, history, bookmarks, downloads, library and help open as tabs (`window/system.py`). Help (`help_tab.py`, F1) is plain-words text for new users plus every keyboard shortcut. |
@@ -43,6 +43,12 @@ just test
 
 ```bash
 just test-rust
+```
+
+Lint as CI does: ruff on the Python code (rules in `pyproject.toml`, 120 columns), rustfmt and clippy on the Rust code:
+
+```bash
+just lint
 ```
 
 Set the app's version in every file that states it (`pyproject.toml`, `riemann/__init__.py`, both `Cargo.toml`s, `Cargo.lock`, the README); give a version, or `major`, `minor` or `patch`, and `--check` lists what each file holds:
@@ -86,7 +92,7 @@ env -u LD_LIBRARY_PATH QT_QPA_PLATFORM=offscreen ./riemann/bin/python -m pytest 
 - The repository sits on NTFS; `sed -i` warns about permissions. Edit with the editor tool or Python.
 - `pytest --timeout` is not installed.
 - Offscreen runs that start QtWebEngine need `QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu`, or the GPU process crashes now and then.
-- Node is not installed, so the JavaScript tests in `assets/__tests__/` do not run here; `tests.yml` runs them on GitHub (`npm ci`, then `npx jest python-app/riemann/assets/__tests__`).
+- Node 22 is in `~/.local/opt`, linked from `~/.local/bin`, not from the system packages. Run the JavaScript tests in `assets/__tests__/` with `npm ci`, then `npx jest python-app/riemann/assets/__tests__`, as `tests.yml` does on GitHub.
 
 ## Rules
 
