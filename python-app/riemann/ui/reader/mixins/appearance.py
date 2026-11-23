@@ -133,6 +133,7 @@ class AppearanceMixin(ReaderHostBase):
                 border-radius: 4px; padding: 4px; }}
             QComboBox::drop-down {{ border: none; width: 24px; }}
             QComboBox::down-arrow {{ image: url("{arrow_url}"); width: 16px; height: 16px; }}
+            QComboBox QAbstractItemView {{ selection-background-color: {checked_bg}; selection-color: {fg}; }}
         """
             + menu_style(t)
         )
