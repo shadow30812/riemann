@@ -9,7 +9,6 @@ import os
 import time
 import psutil
 from PySide6.QtCore import (
-    Qt,
     QUrl,
 )
 from PySide6.QtGui import (
@@ -330,7 +329,7 @@ class ChromeMixin:
     def _get_icon_img_tag(self, icon_base: str) -> str:
         """Generates an HTML img tag pointing to the correct local SVG based on dark mode."""
         path = icon_path(f"{icon_base}.svg", getattr(self, "dark_mode", False)).replace(os.sep, "/")
-        return f'<img src="file:///{path}" width="14" height="14" style="vertical-align: middle;">'
+        return f'<img src="file:///{path}" width="12" height="12" style="vertical-align: middle;">'
 
     def _update_global_metrics(self) -> None:
         """Updates the global metrics ticker in the menu bar with icons and real speeds."""
@@ -394,13 +393,11 @@ class ChromeMixin:
 
         clock_str = time.strftime("%I:%M:%S %p")
         self.metrics_label.setText(
-            f" <b>{clock_str}</b> &nbsp;|&nbsp; Mem: {mem_str} &nbsp;|&nbsp; Uptime: {uptime_str} &nbsp;|&nbsp; {net_str} &nbsp;|&nbsp; {bat_str} "
+            f" <b>{clock_str}</b> | Mem: {mem_str} | Uptime: {uptime_str} | {net_str} | {bat_str} "
         )
         needed = self.metrics_label.sizeHint().width()
         if needed > self.metrics_label.minimumWidth():
             self.metrics_label.setMinimumWidth(needed)
-            self.menu_corner_widget.adjustSize()
-            self.menuBar().setCornerWidget(self.menu_corner_widget, Qt.Corner.TopRightCorner)
 
     def _update_floating_btn_style(self) -> None:
         """Applies dynamic theme styling to the floating fullscreen button."""

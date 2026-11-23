@@ -6,6 +6,15 @@ the window's attributes freely, as they did when they lived in one class.
 
 Notes:
 
+CornerFit: the menu bar sizes its corner widget (layout buttons, mini player,
+metrics) only when it is set. When the corner's contents grew later (a theme
+change restyles the buttons, the Folder button or the mini player appears, the
+metrics text gets longer) the corner kept its old width and the metrics label,
+rightmost, was cut off at the window edge, battery first. CornerFit sets the
+corner again whenever its layout asks for a different width or the bar resizes
+it to one; it tries once per hint and bar width, so a window too narrow for
+the corner doesn't set it over and over.
+
 _init_shortcuts: Applied once, before the session's tabs exist: tabs added
 later are polished as they appear, and setting it again would restyle every
 widget.
@@ -16,6 +25,8 @@ import time
 from typing import Optional
 import psutil
 from PySide6.QtCore import (
+    QEvent,
+    QObject,
     QSize,
     Qt,
     QTimer,
@@ -47,6 +58,34 @@ from ..ui.reader.tab import ReaderTab
 from ..ui.command_palette import CommandPalette
 from ..ui.palette import tokens
 from ..core.settings import FAVOURITE_FOLDERS_KEY, favourites_settings
+
+
+
+class CornerFit(QObject):
+    WATCH = (QEvent.Type.LayoutRequest, QEvent.Type.Resize)
+
+    def __init__(self, menubar, corner) -> None:
+        super().__init__(corner)
+        self.menubar = menubar
+        self.corner = corner
+        self._fitted = None
+        corner.installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() in self.WATCH:
+            QTimer.singleShot(0, self, self.fit)
+        return False
+
+    def fit(self) -> None:
+        """Sets the corner again when its width is not what it asks for; a failed try is not repeated for the same hint and bar width."""
+        hint = self.corner.sizeHint().width()
+        if self.corner.width() == hint:
+            self._fitted = None
+            return
+        attempt = (hint, self.menubar.width())
+        if attempt != self._fitted:
+            self._fitted = attempt
+            self.menubar.setCornerWidget(self.corner, Qt.Corner.TopRightCorner)
 
 
 class MenusMixin:
@@ -219,7 +258,7 @@ class MenusMixin:
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
 
-        self.metrics_label.setMinimumWidth(580)
+        self.metrics_label.setMinimumWidth(480)
 
         self.menu_corner_widget = QWidget(self)
         self.menu_corner_layout = QHBoxLayout(self.menu_corner_widget)
@@ -299,6 +338,7 @@ class MenusMixin:
         self.menuBar().setCornerWidget(
             self.menu_corner_widget, Qt.Corner.TopRightCorner
         )
+        self._corner_fit = CornerFit(self.menuBar(), self.menu_corner_widget)
         self.metrics_timer = QTimer(self)
         self.metrics_timer.timeout.connect(self._update_global_metrics)
         self.metrics_timer.start(2000)
@@ -306,7 +346,7 @@ class MenusMixin:
     def _style_menu_corner(self) -> None:
         t = tokens(self.dark_mode)
         self.metrics_label.setStyleSheet(
-            f"color: {t['muted']}; font-size: 11px; padding-right: 15px; font-weight: bold;"
+            f"QLabel {{ color: {t['muted']}; font-size: 10px; padding-right: 10px; font-weight: bold; }}"
         )
         style = (
             "QToolButton { font-size: 11px; padding: 1px 6px; border-radius: 4px; }"

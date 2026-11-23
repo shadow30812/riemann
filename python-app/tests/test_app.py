@@ -1233,3 +1233,33 @@ def test_quitting_lets_web_pages_ask_once(qtbot):
         app.instance.return_value.quit.assert_called_once()
         window.closeEvent(QCloseEvent())
     tab.confirm_leave.assert_called_once()
+
+
+def _settle(app, passes=5):
+    for _ in range(passes):
+        app.processEvents()
+
+
+def test_menu_bar_corner_refits_when_its_contents_grow(qtbot):
+    """After a theme change the corner kept its old width and the battery was cut off."""
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    window.resize(1920, 700)
+    window.show()
+    app = QApplication.instance()
+    _settle(app)
+    from riemann.ui import palette
+
+    corner = window.menu_corner_widget
+    window.dark_mode = True
+    for on in (True, False):
+        palette.set_high_contrast(on)
+        window.enforce_global_stylesheet()
+        _settle(app)
+    assert corner.width() == corner.sizeHint().width()
+    window.btn_toggle_folder.setVisible(True)
+    _settle(app)
+    assert corner.width() == corner.sizeHint().width()
+    label = window.metrics_label
+    assert label.geometry().right() < corner.width()
+
