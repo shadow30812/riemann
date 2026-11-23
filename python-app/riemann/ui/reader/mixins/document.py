@@ -278,7 +278,7 @@ class DocumentMixin(ReaderHostBase):
         self._reset_document_caches()
         self.reset_navigation_history()
         self.citations.forget()
-        self._forms_blocked = bool(self.converted_pdf)
+        self.forms.blocked = bool(self.converted_pdf)
         self._show_converted_banner()
         if self.notes_panel.isVisible() or self.settings.value(NOTES_VISIBLE_KEY, False, type=bool):
             self.notes_panel.load(self.current_path)

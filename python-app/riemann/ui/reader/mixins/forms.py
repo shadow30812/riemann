@@ -3,66 +3,75 @@ Filling in PDF forms in the reader.
 
 The rendering mixin places editable controls over a page's form widgets and
 records entries in form_values_cache, keyed by (page index, annotation
-index). This mixin writes them into the PDF 1.5 s after the last change, on a
+index). FormSaver writes them into the PDF 1.5 s after the last change, on a
 worker thread, through riemann.core.pdf_forms, when "Save annotations inside
-PDF files" is on; pending entries are written when the tab closes, and
-saving a copy includes them. A signed or encrypted form keeps its entries in
-the reader only, and says so once.
+PDF files" is on; flush() writes pending entries at once (when the tab
+closes), and saving a copy includes them. A signed or encrypted form keeps
+its entries in the reader only, and says so once.
+
+FormSaver is given path(), the file being written, and values(), the
+entries. saved(path) says the file now holds them; toast carries messages.
 """
 
 import threading
+from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from ....core import pdf_annotations, pdf_forms
+from ....core import pdf_forms
 from .annotations import store_in_pdf_enabled
-from .host import ReaderHostBase
+
+SAVE_DELAY_MS = 1500
 
 
-class _FormBridge(QObject):
-    written = Signal(str, str)
+class FormSaver(QObject):
+    saved = Signal(str)
+    toast = Signal(str)
+    _written = Signal(str, str)
 
+    def __init__(
+        self,
+        path: Callable[[], str],
+        values: Callable[[], dict],
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.path = path
+        self.values = values
+        self.blocked = False
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(SAVE_DELAY_MS)
+        self._timer.timeout.connect(self.save)
+        self._written.connect(self._on_written)
 
-class FormsMixin(ReaderHostBase):
-    _form_bridge_obj = None
-    _form_timer = None
-    _forms_blocked = False
+    def changed(self) -> None:
+        """An entry changed: writes the entries once they have stopped changing for a moment."""
+        if store_in_pdf_enabled():
+            self._timer.start()
 
-    def _form_changed(self) -> None:
-        if not store_in_pdf_enabled():
+    def flush(self) -> None:
+        """Writes waiting entries now, before returning."""
+        if self._timer.isActive():
+            self._timer.stop()
+            self.save(blocking=True)
+
+    def save(self, blocking: bool = False) -> None:
+        path = self.path()
+        values = dict(self.values() or {})
+        if not path.lower().endswith(".pdf") or not values or self.blocked:
             return
-        timer = self._form_timer
-        if timer is None:
-            timer = self._form_timer = QTimer(self)
-            timer.setSingleShot(True)
-            timer.setInterval(1500)
-            timer.timeout.connect(self._save_forms)
-        timer.start()
 
-    def _form_bridge(self) -> _FormBridge:
-        bridge = self._form_bridge_obj
-        if bridge is None:
-            bridge = self._form_bridge_obj = _FormBridge(self)
-            bridge.written.connect(self._on_forms_written)
-        return bridge
-
-    def _save_forms(self, blocking: bool = False) -> None:
-        path = self.pdf_path()
-        values = dict(self.form_values_cache or {})
-        if not path.lower().endswith(".pdf") or not values or self._forms_blocked:
-            return
-        bridge = self._form_bridge()
-
-        def work():
+        def work() -> None:
             try:
                 result = pdf_forms.write_form_values(path, values)
             except Exception as e:
                 result = f"error: {e}"
             if blocking:
-                self._on_forms_written(path, result)
+                self._on_written(path, result)
             else:
                 try:
-                    bridge.written.emit(path, result)
+                    self._written.emit(path, result)
                 except RuntimeError:
                     pass
 
@@ -71,29 +80,13 @@ class FormsMixin(ReaderHostBase):
         else:
             threading.Thread(target=work, name="riemann-forms").start()
 
-    def _on_forms_written(self, path: str, result: str) -> None:
-        if path != self.pdf_path():
+    def _on_written(self, path: str, result: str) -> None:
+        if path != self.path():
             return
         if result == "ok":
-            sig = pdf_annotations.file_signature(path)
-            if self._anno_file_sig is not None:
-                self._anno_file_sig = sig
-                self._write_annotation_json()
-            if path == self.current_path:
-                try:
-                    import os
-
-                    self._loaded_mtime = os.path.getmtime(path)
-                except OSError:
-                    pass
+            self.saved.emit(path)
         elif result == "blocked":
-            self._forms_blocked = True
-            self.show_toast("This PDF is signed or encrypted: form entries stay in Riemann. Save a copy to keep them.")
+            self.blocked = True
+            self.toast.emit("This PDF is signed or encrypted: form entries stay in Riemann. Save a copy to keep them.")
         elif result == "changed":
-            self._form_changed()
-
-    def flush_forms_to_pdf(self) -> None:
-        timer = self._form_timer
-        if timer is not None and timer.isActive():
-            timer.stop()
-            self._save_forms(blocking=True)
+            self.changed()

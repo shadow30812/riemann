@@ -396,7 +396,7 @@ def test_an_office_file_opens_read_only_and_save_as_pdf_makes_it_editable(window
     assert not tab.anno_toolbar.isVisible()
     tab._add_anno_data(0, {"type": "note", "rel_pos": (0.1, 0.1), "text": "x", "color": "#000000"})
     assert not any(tab.annotations.values())
-    assert not tab._editable() and tab._forms_blocked
+    assert not tab._editable() and tab.forms.blocked
 
     dest = str(tmp_path / "report.pdf")
     with patch("riemann.ui.reader.mixins.document.QFileDialog.getSaveFileName", return_value=(dest, "")):

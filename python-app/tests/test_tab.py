@@ -627,6 +627,33 @@ def test_form_entries_are_saved_into_the_pdf(reader_tab, qapp, tmp_path, monkeyp
     reader_tab.cleanup()
 
 
+def test_form_saver_writes_entries_without_a_reader(qapp, tmp_path, monkeypatch):
+    import time
+
+    from form_fixtures import make_form_pdf
+
+    from riemann.core.pdf_forms import read_form_values
+    from riemann.ui.reader.mixins.forms import FormSaver
+
+    monkeypatch.setattr("riemann.ui.reader.mixins.forms.store_in_pdf_enabled", lambda: True)
+    path = make_form_pdf(str(tmp_path / "form.pdf"))
+    values = {(0, 0): "Ada Lovelace", (0, 1): True}
+    saver = FormSaver(lambda: path, lambda: values)
+    saved = []
+    saver.saved.connect(saved.append)
+    saver.changed()
+    end = time.time() + 10
+    while time.time() < end and not saved:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert saved == [path]
+    assert read_form_values(path)["name"] == "Ada Lovelace"
+    values[(0, 0)] = "Grace Hopper"
+    saver.changed()
+    saver.flush()
+    assert read_form_values(path)["name"] == "Grace Hopper"
+
+
 def test_new_toast_replaces_the_one_on_screen(reader_tab):
     from PySide6.QtWidgets import QLabel
 

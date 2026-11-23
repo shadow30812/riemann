@@ -15,6 +15,7 @@ between characters of one page: position i sits just before character i, so the
 selected characters are [min(anchor, focus), max(anchor, focus)).
 """
 
+import os
 import sys
 from typing import Any
 
@@ -40,6 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...core import pdf_annotations
 from ...core.constants import ViewMode, ZoomMode
 from ...core.render_process import PageRenderer
 from ...core.settings import app_settings
@@ -50,7 +52,7 @@ from .mixins.annotations import AnnotationsMixin
 from .mixins.appearance import AppearanceMixin
 from .mixins.citations import CitationHover
 from .mixins.document import DocumentMixin
-from .mixins.forms import FormsMixin
+from .mixins.forms import FormSaver
 from .mixins.input import InputMixin
 from .mixins.metadata import MetadataMixin
 from .mixins.navigation import NavigationMixin
@@ -80,7 +82,6 @@ class ReaderTab(
     AppearanceMixin,
     DocumentMixin,
     PagesMixin,
-    FormsMixin,
     QWidget,
     RenderingMixin,
     AnnotationsMixin,
@@ -171,6 +172,9 @@ class ReaderTab(
         self.read_aloud.word_shown.connect(self._show_spoken_word)
         self.read_aloud.reading_changed.connect(self._show_reading_aloud)
         self.read_aloud.toast.connect(self.show_toast)
+        self.forms = FormSaver(self.pdf_path, lambda: self.form_values_cache, self)
+        self.forms.saved.connect(self._on_forms_saved)
+        self.forms.toast.connect(self.show_toast)
 
         self._init_backend()
         self.setup_ui()
@@ -297,6 +301,20 @@ class ReaderTab(
         button = self.btn_read_aloud
         if button is not None:
             button.setChecked(on)
+
+    def flush_forms_to_pdf(self) -> None:
+        self.forms.flush()
+
+    def _on_forms_saved(self, path: str) -> None:
+        sig = pdf_annotations.file_signature(path)
+        if self._anno_file_sig is not None:
+            self._anno_file_sig = sig
+            self._write_annotation_json()
+        if path == self.current_path:
+            try:
+                self._loaded_mtime = os.path.getmtime(path)
+            except OSError:
+                pass
 
     def _setup_citation_card(self) -> None:
         self.citations = CitationHover(lambda: self.current_doc, self, self._home_dark)

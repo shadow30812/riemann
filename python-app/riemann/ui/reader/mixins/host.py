@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from ..toolbar_layout import ToolbarLayout
     from ..widgets import PageWidget
     from .citations import CitationHover
+    from .forms import FormSaver
     from .read_aloud import ReadAloud
     from .ruler import ReadingRuler
 
@@ -103,6 +104,7 @@ class ReaderHost(Protocol):
     ruler: "ReadingRuler"
     read_aloud: "ReadAloud"
     citations: "CitationHover"
+    forms: "FormSaver"
     link_tooltip: QLabel
     sidebar_nav: QWidget
     notes_panel: QWidget

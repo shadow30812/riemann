@@ -546,7 +546,7 @@ class RenderingMixin(ReaderHostBase):
 
     def _record_form_value(self, key, value) -> None:
         self.form_values_cache[key] = value
-        self._form_changed()
+        self.forms.changed()
 
     def _render_links(
         self, idx: int, scale: float, logical_w: float, logical_h: float
