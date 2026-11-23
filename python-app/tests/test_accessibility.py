@@ -6,6 +6,11 @@ Accessibility section of Settings that switches them.
 Screen readers name a control by its accessible name, and Qt gives an
 icon-only button none, so one test opens a window with a reader and a browser
 tab and checks that every control a screen reader would announce has a name.
+
+close_window cleans up each reader before closing its window, as closing the
+tab would: that releases the reader's workers (the metadata lookup goes to the
+network), which otherwise were still running, parented to the reader, when the
+session's teardown deleted the window, and Qt aborted the process.
 """
 
 import os
@@ -27,6 +32,7 @@ from PySide6.QtWidgets import (
 from riemann.app import RiemannWindow
 from riemann.ui import accessibility
 from riemann.ui.accessibility import NAMED, describe_tip, name_from_tooltip
+from riemann.ui.reader.tab import ReaderTab
 from riemann.ui.tooltip import TooltipSkin
 
 CORPUS_PDF = os.path.join(os.path.dirname(__file__), "..", "..", "benchmarks", "corpus", "attention.pdf")
@@ -40,6 +46,12 @@ def wait_for(condition, timeout=20.0):
             return True
         time.sleep(0.01)
     return condition()
+
+
+def close_window(window):
+    for reader in window.findChildren(ReaderTab):
+        reader.cleanup()
+    window.close()
 
 
 def _announced(widget) -> bool:
@@ -100,7 +112,7 @@ def test_every_control_in_a_reader_and_a_browser_tab_has_a_name(qapp, qtbot):
     window.new_browser_tab(url="about:blank")
     wait_for(lambda: False, timeout=0.5)
     assert _unnamed(window) == []
-    window.close()
+    close_window(window)
 
 
 def test_names_can_be_turned_off_and_back_on(qapp):
@@ -139,8 +151,6 @@ def test_text_lines_follow_reading_order_and_columns():
 
 def test_reading_ruler_follows_the_pointer_and_the_keys(qapp, qtbot, monkeypatch):
     from PySide6.QtCore import QPoint, QSettings
-
-    from riemann.ui.reader.tab import ReaderTab
 
     store = QSettings("RiemannTest", "Ruler")
     store.clear()
@@ -188,7 +198,7 @@ def window(qapp, qtbot):
     yield win
     palette.set_high_contrast(False)
     accessibility.set_enabled(True)
-    win.close()
+    close_window(win)
 
 
 def test_settings_has_an_accessibility_section_that_reaches_open_readers(window):

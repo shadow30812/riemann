@@ -13,6 +13,10 @@ _delete_leftover_widgets: at the end of the session every top-level widget
 still alive (windows, reader tabs made on their own) is deleted while the
 application still runs. A reader's web page left alive until Qt WebEngine
 releases its profile at exit crashed the interpreter after the tests passed.
+Before that, every tracked or released worker is asked to stop and waited for,
+and the render threads are stopped: a worker parented to a reader inside a
+window (the metadata lookup, still inside a web request) aborted the process
+when the window was deleted under it.
 
 qtbot (fallback when pytest-qt is missing): addWidget remembers the widget, and
 teardown stops its timers and hides it. Windows left polling (the mini player
@@ -57,13 +61,14 @@ def qapp():
         server.stop()
         del app.captions_server
 
-@pytest.fixture(scope="session", autouse=True)
-def _delete_leftover_widgets():
-    yield
-    app = QApplication.instance()
-    if app is None:
-        return
-    for widget in app.topLevelWidgets():
+def delete_widgets(app, widgets):
+    """Stops every background worker, then deletes widgets and flushes the deletions."""
+    from riemann.ui.reader.render_worker import stop_all_render_workers
+    from riemann.ui.threads import wait_for_released
+
+    wait_for_released()
+    stop_all_render_workers()
+    for widget in widgets:
         if not shiboken6.isValid(widget):
             continue
         for timer in widget.findChildren(QTimer):
@@ -78,6 +83,15 @@ def _delete_leftover_widgets():
     for _ in range(3):
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _delete_leftover_widgets():
+    yield
+    app = QApplication.instance()
+    if app is None:
+        return
+    delete_widgets(app, app.topLevelWidgets())
 
 
 if importlib.util.find_spec("pytestqt") is None:

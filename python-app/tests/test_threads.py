@@ -230,3 +230,34 @@ def test_a_tracked_worker_is_let_go_once_finished(qapp):
     assert worker.wait(5000)
     QCoreApplication.processEvents()
     assert worker not in threads._TRACKED
+
+
+def test_session_teardown_stops_workers_inside_a_window_before_deleting_it():
+    result = run_child(
+        """
+        sys.path.insert(0, "tests")
+        import shiboken6
+        from PySide6.QtCore import QThread
+        from PySide6.QtWidgets import QWidget
+        from riemann.ui.threads import track
+        from conftest import delete_widgets
+
+        class Lookup(QThread):
+            def run(self):
+                started.set()
+                while not self.isInterruptionRequested():
+                    self.msleep(10)
+
+        window = QWidget()
+        reader = QWidget(window)
+        worker = track(Lookup(reader))
+        worker.start()
+        started.wait(5)
+        delete_widgets(app, [window])
+        print("running", worker.isRunning() if shiboken6.isValid(worker) else False, flush=True)
+        print("survived", flush=True)
+        """
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert "running False" in result.stdout
+    assert "survived" in result.stdout
