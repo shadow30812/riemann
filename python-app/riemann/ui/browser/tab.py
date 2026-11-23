@@ -2,12 +2,13 @@
 BrowserTab: one web page in a tab, with Riemann's toolbar around it.
 
 The toolbar, find bar, shortcuts, theme, zoom and bookmarks come from the
-chrome mixin; stream (outside players) and downloads are mixins too. The
-attributes they share (web, profile, toolbar buttons, progress, lbl_toast,
-dark_mode, incognito) are made in __init__. Captions, music and video modes
-and mute are MediaControls (media.py), a part the tab owns: it gets the web
-view and the captions server, and the tab turns its buttons into calls and
-its signals into toasts and the tab bar's speaker mark.
+chrome mixin; downloads is a mixin too. The attributes they share (web,
+profile, toolbar buttons, progress, lbl_toast, dark_mode, incognito) are made
+in __init__. Captions, music and video modes and mute are MediaControls
+(media.py), and streaming to a player is StreamLauncher (stream.py): parts
+the tab owns, given only what they work on (the web view, the captions
+server, the widget their dialogs open over). The tab turns its buttons into
+calls on them and their signals into toasts and the tab bar's speaker mark.
 
 Notes:
 
@@ -88,7 +89,7 @@ from .interceptor import (
 )
 from .media import MediaControls
 from .page import LEAVE_WAIT_MS, PermissionBar, WebPage
-from .stream import StreamMixin
+from .stream import StreamLauncher
 
 LOAD_BAR_HEIGHT = 2
 
@@ -146,7 +147,7 @@ def homepage_icon_tones(links_json: str, cached_icons: dict) -> dict:
     return tones
 
 
-class BrowserTab(ChromeMixin, StreamMixin, DownloadsMixin, QWidget):
+class BrowserTab(ChromeMixin, DownloadsMixin, QWidget):
     def __init__(
         self,
         start_url: str = "",
@@ -296,6 +297,8 @@ class BrowserTab(ChromeMixin, StreamMixin, DownloadsMixin, QWidget):
         self.media = MediaControls(self.web, app.captions_server, self)
         self.media.toast.connect(self.show_toast)
         self.media.playing_changed.connect(self._set_tab_playing_state)
+        self.streamer = StreamLauncher(self)
+        self.streamer.toast.connect(self.show_toast)
 
         self.link_tooltip = QLabel(self)
         self.link_tooltip.setStyleSheet(link_tip_style(tokens(self.dark_mode)))
@@ -317,6 +320,9 @@ class BrowserTab(ChromeMixin, StreamMixin, DownloadsMixin, QWidget):
         muted = self.btn_mute.isChecked()
         self.media.set_muted(muted)
         self.btn_mute.setIcon(self._get_icon("volume-x.svg" if muted else "volume-on.svg"))
+
+    def stream_video(self) -> None:
+        self.streamer.stream(self.web.url().toString())
 
     def _set_tab_playing_state(self, state: str | None) -> None:
         """Shows on the tab bar whether this tab is playing sound."""

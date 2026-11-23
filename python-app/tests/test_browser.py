@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 import shiboken6
-from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QUrl
+from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QObject, QUrl, Signal
 from PySide6.QtGui import QFocusEvent
 from PySide6.QtWebEngineCore import (
     QWebEnginePage,
@@ -35,6 +35,7 @@ from riemann.ui.browser import (
     YtDlpWorker,
 )
 from riemann.ui.browser.media import MediaControls
+from riemann.ui.browser.stream import BUILT_IN_PLAYER, StreamLauncher, VideoPlayer, format_time
 
 
 @pytest.fixture
@@ -722,6 +723,87 @@ def test_ytdlp_stream_worker_downloads_no_solver_code():
         worker.run()
         opts = mock_ydl.call_args[0][0]
         assert "remote_components" not in opts
+
+
+def test_ytdlp_stream_worker_reads_a_cookie_file():
+    worker = YtDlpStreamWorker("https://youtube.com/watch?v=123", cookie_file="/tmp/cookies.txt")
+    with patch("yt_dlp.YoutubeDL") as mock_ydl:
+        mock_ydl.return_value.__enter__.return_value.extract_info.return_value = {"url": "https://stream.url"}
+        worker.run()
+    opts = mock_ydl.call_args[0][0]
+    assert opts["cookiefile"] == "/tmp/cookies.txt"
+    assert "remote_components" not in opts
+
+
+class _FakeStreamWorker(QObject):
+    finished = Signal(str)
+    error = Signal(str)
+    made = []
+
+    def __init__(self, url, cookies_browser=None, cookie_file=None):
+        super().__init__()
+        self.url, self.cookies_browser, self.cookie_file = url, cookies_browser, cookie_file
+        self.started = False
+        _FakeStreamWorker.made.append(self)
+
+    def start(self):
+        self.started = True
+
+
+def _launcher(qtbot, answers, monkeypatch):
+    owner = QWidget()
+    qtbot.addWidget(owner)
+    launcher = StreamLauncher(owner)
+    toasts, played = [], []
+    launcher.toast.connect(toasts.append)
+    launcher.play = played.append
+    replies = iter(answers)
+    monkeypatch.setattr("riemann.ui.browser.stream.QInputDialog.getItem", lambda *a, **k: next(replies))
+    monkeypatch.setattr("riemann.ui.browser.stream.YtDlpStreamWorker", _FakeStreamWorker)
+    monkeypatch.setattr("riemann.ui.browser.stream.track", lambda worker: worker)
+    _FakeStreamWorker.made.clear()
+    return launcher, toasts, played
+
+
+def test_stream_launcher_works_without_a_browser_tab(qtbot, monkeypatch):
+    launcher, toasts, played = _launcher(qtbot, [(BUILT_IN_PLAYER, True), ("Auto-extract: Firefox", True)], monkeypatch)
+    launcher.stream("-https://example.com")
+    assert toasts == ["Invalid or insecure URL for streaming."]
+    launcher.stream("https://example.com/watch")
+    (worker,) = _FakeStreamWorker.made
+    assert worker.started and worker.cookies_browser == "firefox" and worker.cookie_file is None
+    worker.finished.emit("https://cdn.example.com/video.mp4")
+    assert played == ["https://cdn.example.com/video.mp4"]
+
+
+def test_vlc_that_fails_to_start_falls_back_to_the_built_in_player(qtbot, monkeypatch):
+    launcher, toasts, played = _launcher(qtbot, [("VLC", True), ("No Cookies (Public Video)", True)], monkeypatch)
+
+    def no_vlc(*args, **kwargs):
+        raise OSError("vlc missing")
+
+    monkeypatch.setattr("riemann.ui.browser.stream.subprocess.Popen", no_vlc)
+    launcher.stream("https://example.com/watch")
+    _FakeStreamWorker.made[0].finished.emit("https://cdn.example.com/video.mp4")
+    assert played == ["https://cdn.example.com/video.mp4"]
+    assert "Failed to start VLC. Falling back to native player." in toasts
+
+
+def test_a_second_stream_takes_over_the_first_window_s_controls(qtbot):
+    owner = QWidget()
+    qtbot.addWidget(owner)
+    launcher = StreamLauncher(owner)
+    first = launcher.play("")
+    second = launcher.play("")
+    assert first.player is second.player
+    assert launcher.video_window is second
+
+
+def test_video_player_shows_the_time(qtbot):
+    player = VideoPlayer("")
+    qtbot.addWidget(player)
+    assert player.time_label.text() == "00:00 / 00:00"
+    assert format_time(61_000) == "01:01" and format_time(3_723_000) == "1:02:03"
 
 
 def test_ytdlp_settings_dialog_playlist_autodetection(qapp):

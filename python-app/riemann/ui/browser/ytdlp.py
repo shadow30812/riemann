@@ -68,10 +68,11 @@ class YtDlpStreamWorker(QThread):
     finished = Signal(str)
     error = Signal(str)
 
-    def __init__(self, url, cookies_browser=None):
+    def __init__(self, url, cookies_browser=None, cookie_file=None):
         super().__init__()
         self.url = url
         self.cookies_browser = cookies_browser
+        self.cookie_file = cookie_file
 
     def run(self):
         """
@@ -87,7 +88,9 @@ class YtDlpStreamWorker(QThread):
             "noplaylist": True,
             "js_runtimes": js_runtimes(),
         }
-        if self.cookies_browser:
+        if self.cookie_file:
+            ydl_opts = {"format": "best[ext=mp4]", "quiet": True, "noplaylist": True, "cookiefile": self.cookie_file}
+        elif self.cookies_browser:
             ydl_opts["cookiesfrombrowser"] = (self.cookies_browser,)
 
         try:
