@@ -1,8 +1,8 @@
 """Tests for saving form fields into PDFs (riemann/core/pdf_forms.py)."""
 
 import pikepdf
-
 from form_fixtures import make_form_pdf
+
 from riemann.core.pdf_forms import read_form_values, write_form_values
 
 

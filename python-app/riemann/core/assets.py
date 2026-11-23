@@ -24,7 +24,6 @@ No Qt imports: the render and AI child processes use this module too.
 
 import os
 import sys
-from typing import Optional
 
 PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -45,7 +44,7 @@ def executable() -> str:
     return os.path.realpath("/proc/self/exe")
 
 
-def bundle_dir() -> Optional[str]:
+def bundle_dir() -> str | None:
     """The PyInstaller unpack folder, or None outside a PyInstaller bundle."""
     if getattr(sys, "frozen", False):
         return getattr(sys, "_MEIPASS", None)

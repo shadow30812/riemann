@@ -36,14 +36,13 @@ import atexit
 import threading
 import weakref
 from collections import OrderedDict
-from typing import Dict, Hashable, Optional, Tuple
+from collections.abc import Hashable
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
 
 from ...core import render_process
 from ...core.log import log
-
 
 # Rendered pages are always opaque (PDFium draws onto a white background), so
 # their BGRA bytes are exactly Qt's RGB32 layout (0xffRRGGBB). RGB32 is also the
@@ -74,9 +73,9 @@ class PageImageCache:
     def __init__(self, budget_bytes: int = 384 * 1024 * 1024) -> None:
         self.budget = budget_bytes
         self.used = 0
-        self._items: "OrderedDict[Hashable, QImage]" = OrderedDict()
+        self._items: OrderedDict[Hashable, QImage] = OrderedDict()
 
-    def get(self, key: Hashable) -> Optional[QImage]:
+    def get(self, key: Hashable) -> QImage | None:
         img = self._items.get(key)
         if img is not None:
             self._items.move_to_end(key)
@@ -92,7 +91,7 @@ class PageImageCache:
             _, evicted = self._items.popitem(last=False)
             self.used -= evicted.sizeInBytes()
 
-    def find_any(self, owner: Hashable, page_idx: int, theme: int) -> Optional[QImage]:
+    def find_any(self, owner: Hashable, page_idx: int, theme: int) -> QImage | None:
         """Returns the most recent image of a page at any scale, used as a stand-in."""
         for key in reversed(self._items):
             if key[0] == owner and key[1] == page_idx and key[3] == theme:
@@ -132,7 +131,7 @@ atexit.register(stop_all_render_workers)
 
 # A job is keyed by (page index, is_thumbnail) and carries the render
 # parameters plus the generation of the document it was requested for.
-JobKey = Tuple[int, bool]
+JobKey = tuple[int, bool]
 
 
 class PageRenderWorker(QThread):
@@ -150,7 +149,7 @@ class PageRenderWorker(QThread):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._cond = threading.Condition()
-        self._jobs: Dict[JobKey, tuple] = {}
+        self._jobs: dict[JobKey, tuple] = {}
         self._focus = 0
         self._doc = None
         self._generation = None

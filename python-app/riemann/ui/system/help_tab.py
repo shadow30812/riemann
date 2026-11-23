@@ -651,4 +651,4 @@ class HelpTab(SectionedSystemTab):
             page.setStyleSheet(style)
 
 
-__all__ = ["HelpTab", "SHORTCUTS", "TOPICS", "shown_keys"]
+__all__ = ["SHORTCUTS", "TOPICS", "HelpTab", "shown_keys"]

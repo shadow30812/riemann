@@ -32,16 +32,14 @@ QSettings store must not be written from two threads.
 
 import json
 import os
-from typing import Any, Optional
-from ...core.assets import asset_path
+from typing import Any
 
 from PySide6.QtCore import QCoreApplication, QObject, QTimer, QUrl
 from PySide6.QtWebEngineCore import QWebEngineUrlRequestInfo, QWebEngineUrlRequestInterceptor
 
-from ..browser_handlers import WHATSAPP_HEADER_UA, WHATSAPP_HOST
+from ...core.assets import asset_path
 from ...core.settings import app_settings
-
-
+from ..browser_handlers import WHATSAPP_HEADER_UA, WHATSAPP_HOST
 
 HOMEPAGE_PATH = os.path.abspath(asset_path("homepage", "homepage.html"))
 
@@ -99,7 +97,7 @@ def local_load_allowed(first_party: QUrl, request: QUrl, resource_type) -> bool:
     return _inside(target, os.path.dirname(first_party.toLocalFile()))
 
 
-def sanitize_homepage_links(payload: Any) -> Optional[str]:
+def sanitize_homepage_links(payload: Any) -> str | None:
     """The homepage's quick links as JSON, or None when payload is not a list of {name, url} strings."""
     try:
         data = json.loads(payload) if isinstance(payload, str) else None
@@ -141,7 +139,10 @@ def host_matches(host: str, domain: str) -> bool:
 
 
 def is_blocked(url: QUrl, rules) -> bool:
-    """True when url's host is a listed domain or below it; a rule with a path ("youtube.com/pagead") also needs that path prefix."""
+    """
+    True when url's host is a listed domain or below it; a rule with a path ("youtube.com/pagead") also needs that
+    path prefix.
+    """
     host, path = url.host(), url.path()
     for rule in rules:
         domain, _, prefix = rule.partition("/")
@@ -157,7 +158,7 @@ class RequestInterceptor(QWebEngineUrlRequestInterceptor):
     and surgical Header injection for Monkeytype/Firebase auth.
     """
 
-    def __init__(self, parent: Optional[QObject] = None) -> None:
+    def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.blocked_domains = list(BLOCKED_DOMAINS)
         self.spoofed_ua = WHATSAPP_HEADER_UA.encode()

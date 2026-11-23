@@ -10,13 +10,13 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QLabel, QMenu
+from test_browser import _WebEngineTracker
 
 from riemann.app import RiemannWindow
 from riemann.ui.reader.tab import ReaderTab
 from riemann.ui.system import PAGES
 from riemann.ui.system.help_tab import SHORTCUTS, TOPICS, HelpTab, shown_keys
 from riemann.ui.viewers import ImageTab, TableTab
-from test_browser import _WebEngineTracker
 
 
 @pytest.fixture
@@ -45,7 +45,10 @@ def test_every_shortcut_the_app_registers_is_on_the_help_page(qtbot, webengine, 
     qtbot.addWidget(window)
     settings = MagicMock()
     settings.return_value.value.side_effect = lambda key, default=None, type=None: default
-    with patch("riemann.ui.reader.tab.app_settings", settings), patch("riemann.ui.reader.mixins.appearance.app_settings", settings):
+    with (
+        patch("riemann.ui.reader.tab.app_settings", settings),
+        patch("riemann.ui.reader.mixins.appearance.app_settings", settings),
+    ):
         reader = ReaderTab()
     qtbot.addWidget(reader)
     browser = webengine.tab()
@@ -58,7 +61,9 @@ def test_every_shortcut_the_app_registers_is_on_the_help_page(qtbot, webengine, 
     table = TableTab(str(tmp_path / "table.csv"))
     qtbot.addWidget(table)
 
-    registered = own_keys(window) | own_keys(reader) | own_keys(image) | own_keys(table) | own_keys(browser) | own_keys(panel)
+    registered = (
+        own_keys(window) | own_keys(reader) | own_keys(image) | own_keys(table) | own_keys(browser) | own_keys(panel)
+    )
     missing = registered - documented_keys()
     assert not missing, f"describe these in riemann/ui/system/help_tab.py SHORTCUTS: {sorted(missing)}"
     reader.cleanup()

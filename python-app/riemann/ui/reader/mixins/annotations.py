@@ -36,7 +36,7 @@ parsing finished.
 import json
 import os
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QMouseEvent
@@ -54,11 +54,11 @@ from PySide6.QtWidgets import (
 
 from ....core import annotation_store, pdf_annotations, redaction
 from ....core.doctypes import document_kind
-from ....core.storage import write_json_atomic
-from ..widgets import PageWidget
 from ....core.settings import app_settings
+from ....core.storage import write_json_atomic
 from ...palette import CONTENT, app_is_dark, tokens
 from ..replace_text import ReplaceTextDialog, overlay_from_selection, ring_colour
+from ..widgets import PageWidget
 from .host import ReaderHostBase
 from .pages import format_page_ranges
 
@@ -76,7 +76,7 @@ class _PdfStoreBridge(QObject):
     write_done = Signal(str, object, str)
 
 
-def annotation_touches(anno: Dict[str, Any], rects: List[List[float]]) -> bool:
+def annotation_touches(anno: dict[str, Any], rects: list[list[float]]) -> bool:
     """Whether a Riemann annotation (relative page coordinates) touches any of rects."""
     boxes = [(min(l, r), min(t, b), max(l, r), max(t, b)) for l, t, r, b in rects]
 
@@ -150,13 +150,13 @@ def _relative_display_rect(rect, space) -> tuple:
     return (min(u1, u2), min(v1, v2), max(u1, u2), max(v1, v2))
 
 
-def read_comments_from_core(doc) -> Dict[int, List[Dict[str, Any]]]:
+def read_comments_from_core(doc) -> dict[int, list[dict[str, Any]]]:
     """
     Same result as read_external_comments, read through the Rust core. Each
     call releases the GIL and the PDFium lock between pages, so it can run on a
     worker thread without starving the UI thread or the page renderer.
     """
-    comments: Dict[int, List[Dict[str, Any]]] = {}
+    comments: dict[int, list[dict[str, Any]]] = {}
     for page_idx in range(doc.page_count):
         try:
             crop, items = doc.get_comments(page_idx)
@@ -181,13 +181,13 @@ def read_comments_from_core(doc) -> Dict[int, List[Dict[str, Any]]]:
     return comments
 
 
-def read_external_comments(path: str) -> Dict[int, List[Dict[str, Any]]]:
+def read_external_comments(path: str) -> dict[int, list[dict[str, Any]]]:
     """
     Extracts native PDF comments created by other applications (Acrobat, Preview,
     Okular), keyed by page index. Pure pypdf parsing with no Qt calls, so it is
     safe to run off the UI thread.
     """
-    comments: Dict[int, List[Dict[str, Any]]] = {}
+    comments: dict[int, list[dict[str, Any]]] = {}
     if not path or not os.path.isfile(path) or document_kind(path) != "pdf":
         return comments
 
@@ -214,7 +214,7 @@ def read_external_comments(path: str) -> Dict[int, List[Dict[str, Any]]]:
                         continue
 
                     contents = ""
-                    if "/Contents" in obj and obj["/Contents"]:
+                    if obj.get("/Contents"):
                         contents = str(obj["/Contents"]).strip()
                     elif "/Popup" in obj:
                         popup = obj["/Popup"].get_object()
@@ -259,7 +259,7 @@ def read_external_comments(path: str) -> Dict[int, List[Dict[str, Any]]]:
 class CommentViewDialog(QDialog):
     """Clean popup dialog displaying external PDF comments from Acrobat, Preview, etc."""
 
-    def __init__(self, comment: Dict[str, Any], parent=None):
+    def __init__(self, comment: dict[str, Any], parent=None):
         super().__init__(parent)
         self.setWindowTitle("PDF Comment")
         self.setMinimumSize(380, 240)
@@ -301,7 +301,8 @@ class CommentViewDialog(QDialog):
         txt_edit.setPlainText(comment.get("contents", ""))
         txt_edit.setReadOnly(True)
         txt_edit.setStyleSheet(
-            f"font-size: 13px; line-height: 1.4; border: 1px solid {t['border_strong']}; border-radius: 6px; padding: 6px;"
+            f"font-size: 13px; line-height: 1.4; border: 1px solid {t['border_strong']}; border-radius: 6px; padding: "
+            "6px;"
         )
         layout.addWidget(txt_edit)
 
@@ -367,7 +368,7 @@ class AnnotationsMixin(ReaderHostBase):
         p = self._get_annotation_path()
         if os.path.exists(p):
             try:
-                with open(p, "r", encoding="utf-8") as f:
+                with open(p, encoding="utf-8") as f:
                     data = json.load(f)
             except (OSError, ValueError):
                 data = {}
@@ -467,7 +468,7 @@ class AnnotationsMixin(ReaderHostBase):
                 self._pdf_store_timer = timer
             timer.start()
 
-    def _annotation_snapshot(self) -> Dict[str, List[Dict[str, Any]]]:
+    def _annotation_snapshot(self) -> dict[str, list[dict[str, Any]]]:
         return json.loads(json.dumps(self.annotations))
 
     def _store_annotations_in_pdf(self, blocking: bool = False) -> None:
@@ -519,7 +520,7 @@ class AnnotationsMixin(ReaderHostBase):
             return
         if sig is not None:
             self._anno_file_sig = sig
-            self._anno_written = pdf_annotations.written_form((self._pdf_store_snapshot or {}))
+            self._anno_written = pdf_annotations.written_form(self._pdf_store_snapshot or {})
             self._write_annotation_json()
             if path == self.current_path and self._loaded_mtime == self._pdf_store_mtime_before:
                 try:
@@ -589,7 +590,7 @@ class AnnotationsMixin(ReaderHostBase):
             return
         _, p_idx, _ = self.undo_stack.pop()
         pid = str(p_idx)
-        if pid in self.annotations and self.annotations[pid]:
+        if self.annotations.get(pid):
             item = self.annotations[pid].pop()
             self.redo_stack.append((pid, item))
             self.save_annotations()
@@ -625,7 +626,7 @@ class AnnotationsMixin(ReaderHostBase):
                     return True
         return False
 
-    def show_annotation_popup(self, data: Dict, p_idx: int, idx: int) -> None:
+    def show_annotation_popup(self, data: dict, p_idx: int, idx: int) -> None:
         """Edits or deletes text annotation idx on page p_idx."""
         txt, ok = QInputDialog.getText(
             self, "Edit Note", "Text (Empty to delete):", text=data.get("text", "")
@@ -654,7 +655,7 @@ class AnnotationsMixin(ReaderHostBase):
                 },
             )
 
-    def _add_anno_data(self, page_idx: int, data: Dict) -> None:
+    def _add_anno_data(self, page_idx: int, data: dict) -> None:
         """Appends an annotation, records it for undo and saves."""
         if self.converted_pdf:
             self.show_toast("Save as PDF (Ctrl+S) to mark it up.")
@@ -669,14 +670,14 @@ class AnnotationsMixin(ReaderHostBase):
         self.save_annotations()
         self.refresh_page_render(page_idx)
 
-    def _add_redaction_mark(self, page_idx: int, rects: List[List[float]]) -> None:
+    def _add_redaction_mark(self, page_idx: int, rects: list[list[float]]) -> None:
         """Marks rects (relative, unrotated) on a page for redaction; nothing is removed until applied."""
         boxes = [[min(l, r), min(t, b), max(l, r), max(t, b)] for l, t, r, b in rects]
         self._add_anno_data(page_idx, {"type": "redact", "rects": boxes})
 
-    def _selected_rects(self) -> Dict[int, List[List[float]]]:
+    def _selected_rects(self) -> dict[int, list[list[float]]]:
         """The current text selection as relative, unrotated rects per page."""
-        out: Dict[int, List[List[float]]] = {}
+        out: dict[int, list[list[float]]] = {}
         for page_idx, widget in sorted(self.page_widgets.items()):
             rects = getattr(widget, "selected_text_rects", None) or []
             w, h = widget.width(), widget.height()
@@ -700,13 +701,15 @@ class AnnotationsMixin(ReaderHostBase):
             return
         page_size = self.current_doc.get_page_size(page_idx)
         background = self._background_around(page_idx, rects, page_size)
-        overlay = overlay_from_selection(rects, self.current_doc.get_char_styles(page_idx), page_size, dialog.text(), background)
+        overlay = overlay_from_selection(
+            rects, self.current_doc.get_char_styles(page_idx), page_size, dialog.text(), background
+        )
         self._add_anno_data(page_idx, overlay)
         if dialog.remove_original():
             self._add_redaction_mark(page_idx, rects)
         self.clear_all_text_selections()
 
-    def _background_around(self, page_idx: int, rects: List[List[float]], page_size) -> str:
+    def _background_around(self, page_idx: int, rects: list[list[float]], page_size) -> str:
         """The page's own colour around rects, from a render without the dark theme."""
         width, height = page_size
         try:
@@ -730,8 +733,8 @@ class AnnotationsMixin(ReaderHostBase):
         if selected:
             self.show_toast("Marked for redaction. Apply redactions to remove the text.")
 
-    def redaction_marks(self) -> Dict[int, List[List[float]]]:
-        marks: Dict[int, List[List[float]]] = {}
+    def redaction_marks(self) -> dict[int, list[list[float]]]:
+        marks: dict[int, list[list[float]]] = {}
         for pid, annos in self.annotations.items():
             for anno in annos:
                 if anno.get("type") == "redact" and anno.get("rects"):
@@ -781,7 +784,7 @@ class AnnotationsMixin(ReaderHostBase):
         self.redo_stack.clear()
         self.save_annotations()
 
-    def _redaction_exempt_ids(self) -> List[str]:
+    def _redaction_exempt_ids(self) -> list[str]:
         return [
             str(a["id"]) for annos in self.annotations.values() for a in annos
             if a.get("type") == "replace" and a.get("id")
@@ -885,7 +888,7 @@ class AnnotationsMixin(ReaderHostBase):
 
     def _get_comment_at_pos(
         self, page_idx: int, pos: Any, page_w: int, page_h: int
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Finds any external comment clicked or hovered on at the given page position."""
         if not self.external_comments:
             return None
@@ -906,7 +909,7 @@ class AnnotationsMixin(ReaderHostBase):
                 return c
         return None
 
-    def show_external_comment_dialog(self, comment: Dict[str, Any]) -> None:
+    def show_external_comment_dialog(self, comment: dict[str, Any]) -> None:
         """Displays dialog showing external comment content, author, and date."""
         dlg = CommentViewDialog(comment, self)
         dlg.exec()

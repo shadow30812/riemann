@@ -51,7 +51,10 @@ from PySide6.QtWidgets import (
 )
 
 from ....core import ai_engine
+from ....core.assets import is_frozen
+from ....core.endpoints import RELEASES, loopback_url
 from ....core.settings import get_dialog_directory, save_last_directory
+from ...threads import track
 from ..widgets import PageWidget
 from ..workers import (
     InferenceThread,
@@ -62,11 +65,8 @@ from ..workers import (
     OcrThread,
     PageTextThread,
 )
-from .pages import format_page_ranges, parse_page_ranges
 from .host import ReaderHostBase
-from ....core.assets import is_frozen
-from ....core.endpoints import RELEASES, loopback_url
-from ...threads import track
+from .pages import format_page_ranges, parse_page_ranges
 
 AI_CONNECT_ATTEMPTS = 90
 AI_LOADING_ATTEMPTS = 1800

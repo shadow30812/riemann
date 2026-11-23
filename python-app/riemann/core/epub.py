@@ -31,7 +31,6 @@ import base64
 import html
 import posixpath
 import zipfile
-from typing import Optional
 from urllib.parse import unquote, urldefrag
 
 from lxml import etree
@@ -63,7 +62,7 @@ def _local(tag) -> str:
     return tag.rsplit("}", 1)[-1].lower() if isinstance(tag, str) else ""
 
 
-def _attr(element, name: str) -> Optional[str]:
+def _attr(element, name: str) -> str | None:
     for key, value in element.attrib.items():
         if _local(key) == name:
             return value
@@ -94,7 +93,7 @@ class _Book:
             raise EpubError(f"{name} can't be read")
         return root
 
-    def image(self, name: str) -> Optional[str]:
+    def image(self, name: str) -> str | None:
         media = IMAGE_TYPES.get(posixpath.splitext(name)[1].lower())
         if media is None:
             return None
@@ -122,7 +121,7 @@ def _package(book: _Book):
     try:
         container = book.xml(CONTAINER)
     except KeyError:
-        raise EpubError("This isn't an EPUB book: it has no META-INF/container.xml.")
+        raise EpubError("This isn't an EPUB book: it has no META-INF/container.xml.") from None
     rootfile = next((e for e in container.iter() if _local(e.tag) == "rootfile"), None)
     path = _attr(rootfile, "full-path") if rootfile is not None else None
     if not path:
@@ -166,7 +165,7 @@ def _spine(opf, manifest: dict) -> tuple:
     return chapters, toc_id
 
 
-def _anchor(chapters: dict, base: str, href: str) -> Optional[str]:
+def _anchor(chapters: dict, base: str, href: str) -> str | None:
     target, fragment = urldefrag(href)
     path = _resolve(base, target) if target else base
     if path not in chapters:
@@ -240,7 +239,7 @@ def read_epub(path: str) -> dict:
     try:
         archive = zipfile.ZipFile(path)
     except (zipfile.BadZipFile, OSError) as error:
-        raise EpubError(f"The book can't be opened ({error}).")
+        raise EpubError(f"The book can't be opened ({error}).") from error
     with archive:
         book = _Book(archive)
         opf_path, opf = _package(book)
@@ -264,7 +263,9 @@ def read_epub(path: str) -> dict:
                 data,
                 resolve_image=lambda src, base=name: book.image(_resolve(base, src)),
                 xml=True,
-                rewrite_link=lambda href, base=name: href if ":" in href.split("/")[0] else _anchor(chapters, base, href),
+                rewrite_link=lambda href, base=name: (
+                    href if ":" in href.split("/")[0] else _anchor(chapters, base, href)
+                ),
                 id_prefix=f"c{index}-",
             )
             parts.append(f'<section id="c{index}">{body}</section>')

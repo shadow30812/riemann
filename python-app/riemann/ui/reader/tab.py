@@ -16,7 +16,7 @@ selected characters are [min(anchor, focus), max(anchor, focus)).
 """
 
 import sys
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from PySide6.QtCore import (
     QEvent,
@@ -40,29 +40,29 @@ from PySide6.QtWidgets import (
 )
 
 from ...core.constants import ViewMode, ZoomMode
-from .mixins.ai import AiMixin
-from .mixins.annotations import AnnotationsMixin
-from .mixins.metadata import MetadataMixin
-from .mixins.rendering import RenderingMixin
-from .mixins.search import SearchMixin
-from .mixins.signatures import SignaturesMixin
-from .render_worker import PageRenderWorker
 from ...core.render_process import PageRenderer
-from .widgets import PageWidget
+from ...core.settings import app_settings
 from ..palette import CONTENT, overlay_style, tokens
 from ..shortcuts import share_keys
-from .mixins.toolbar import ToolbarMixin
-from .mixins.navigation import NavigationMixin
-from .mixins.selection import SelectionMixin
-from .mixins.input import InputMixin
+from .mixins.ai import AiMixin
+from .mixins.annotations import AnnotationsMixin
 from .mixins.appearance import AppearanceMixin
+from .mixins.citations import CitationsMixin
 from .mixins.document import DocumentMixin
+from .mixins.forms import FormsMixin
+from .mixins.input import InputMixin
+from .mixins.metadata import MetadataMixin
+from .mixins.navigation import NavigationMixin
 from .mixins.pages import PagesMixin
 from .mixins.read_aloud import ReadAloudMixin
+from .mixins.rendering import RenderingMixin
 from .mixins.ruler import RulerMixin
-from .mixins.forms import FormsMixin
-from .mixins.citations import CitationsMixin
-from ...core.settings import app_settings
+from .mixins.search import SearchMixin
+from .mixins.selection import SelectionMixin
+from .mixins.signatures import SignaturesMixin
+from .mixins.toolbar import ToolbarMixin
+from .render_worker import PageRenderWorker
+from .widgets import PageWidget
 
 try:
     import riemann_core
@@ -99,16 +99,16 @@ class ReaderTab(
     signatures_detected = Signal(list)
     is_preview = False
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
         self.settings: QSettings = app_settings()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAcceptDrops(True)
 
-        self.engine: Optional[riemann_core.PdfEngine] = None
-        self.current_doc: Optional[riemann_core.RiemannDocument] = None
-        self.current_path: Optional[str] = None
+        self.engine: riemann_core.PdfEngine | None = None
+        self.current_doc: riemann_core.RiemannDocument | None = None
+        self.current_path: str | None = None
         self.current_page_index: int = 0
 
         self.theme_mode: int = 0
@@ -122,38 +122,38 @@ class ReaderTab(
         self.current_tool: str = "nav"
         self.pen_color: str = CONTENT["pen"]
         self.pen_thickness: int = 3
-        self.active_drawing: List[QPoint] = []
-        self.annotations: Dict[str, List[Dict[str, Any]]] = {}
-        self.undo_stack: List[Tuple[str, int, int]] = []
-        self.redo_stack: List[Tuple[str, Dict]] = []
+        self.active_drawing: list[QPoint] = []
+        self.annotations: dict[str, list[dict[str, Any]]] = {}
+        self.undo_stack: list[tuple[str, int, int]] = []
+        self.redo_stack: list[tuple[str, dict]] = []
 
         self.is_snipping: bool = False
         self.snip_start: QPoint = QPoint()
-        self.snip_band: Optional[QRubberBand] = None
+        self.snip_band: QRubberBand | None = None
         self._pending_snip_image = None
         self.latex_model = None
 
-        self.form_widgets: Dict[int, List[QWidget]] = {}
-        self.form_values_cache: Dict[Tuple[int, int], Any] = {}
-        self.page_widgets: Dict[int, PageWidget] = {}
-        self.rendered_pages: Set[int] = set()
-        self.search_result: Optional[Tuple[int, List[Tuple[float, ...]]]] = None
-        self.text_segments_cache: Dict[int, List[Tuple[str, List[Tuple[float, ...]]]]] = {}
+        self.form_widgets: dict[int, list[QWidget]] = {}
+        self.form_values_cache: dict[tuple[int, int], Any] = {}
+        self.page_widgets: dict[int, PageWidget] = {}
+        self.rendered_pages: set[int] = set()
+        self.search_result: tuple[int, list[tuple[float, ...]]] | None = None
+        self.text_segments_cache: dict[int, list[tuple[str, list[tuple[float, ...]]]]] = {}
 
         self.virtual_threshold: int = 15
         self._virtual_enabled: bool = False
-        self._top_spacer: Optional[QWidget] = None
-        self._bottom_spacer: Optional[QWidget] = None
-        self._virtual_range: Tuple[int, int] = (0, 0)
-        self._cached_base_size: Optional[Tuple[int, int]] = None
+        self._top_spacer: QWidget | None = None
+        self._bottom_spacer: QWidget | None = None
+        self._virtual_range: tuple[int, int] = (0, 0)
+        self._cached_base_size: tuple[int, int] | None = None
         self._doc_generation: int = 0
-        self._render_worker: Optional[PageRenderWorker] = None
-        self.page_renderer: Optional[PageRenderer] = None
-        self._raw_links_cache: Dict[int, list] = {}
-        self._raw_forms_cache: Dict[int, list] = {}
+        self._render_worker: PageRenderWorker | None = None
+        self.page_renderer: PageRenderer | None = None
+        self._raw_links_cache: dict[int, list] = {}
+        self._raw_forms_cache: dict[int, list] = {}
 
         self._autoscroll_active: bool = False
-        self._autoscroll_origin_global: Optional[QPoint] = None
+        self._autoscroll_origin_global: QPoint | None = None
         self._autoscroll_speed_y: float = 0.0
         self._autoscroll_speed_x: float = 0.0
 
@@ -176,7 +176,7 @@ class ReaderTab(
         self.autoscroll_timer.setInterval(30)
         self.autoscroll_timer.timeout.connect(self._do_autoscroll)
 
-        self.external_comments: Dict[int, List[Dict[str, Any]]] = {}
+        self.external_comments: dict[int, list[dict[str, Any]]] = {}
 
         self.page_indicator_popup = QLabel(self)
         self.page_indicator_popup.setStyleSheet(overlay_style())
@@ -244,7 +244,7 @@ class ReaderTab(
         sc2.activated.connect(lambda: self.cycle_tab(-1))
         share_keys(self)
 
-    def _get_tab_widget(self) -> Optional[QTabWidget]:
+    def _get_tab_widget(self) -> QTabWidget | None:
         """The QTabWidget this tab sits in, or None."""
         parent = self.parent()
         while parent:
@@ -357,7 +357,7 @@ class PreviewReaderTab(ReaderTab):
     def load_document(
         self,
         path: str,
-        password: Optional[str] = None,
+        password: str | None = None,
         is_retry: bool = False,
     ) -> None:
         self.current_path = path

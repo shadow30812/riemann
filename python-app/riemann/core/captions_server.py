@@ -18,7 +18,6 @@ import secrets
 import weakref
 
 import shiboken6
-
 from PySide6.QtCore import QByteArray, QObject, QThread, QUrlQuery, Signal, Slot
 from PySide6.QtNetwork import QHostAddress
 from PySide6.QtWebSockets import QWebSocket, QWebSocketProtocol, QWebSocketServer

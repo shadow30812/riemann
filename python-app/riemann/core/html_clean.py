@@ -32,9 +32,10 @@ page template.
 
 import html as html_lib
 import re
-from typing import Callable, Optional
+from collections.abc import Callable
 
-from lxml import etree, html as lxml_html
+from lxml import etree
+from lxml import html as lxml_html
 
 BLOCK = {
     "p", "div", "section", "article", "header", "footer", "aside", "nav", "main", "blockquote", "pre",
@@ -85,8 +86,8 @@ SCHEME = re.compile(r"^([a-z][a-z0-9+.\-]*):", re.I)
 IGNORED_IN_URL = re.compile(r"[\x00-\x20\x7f]+")
 NUMBER = re.compile(r"^\d{1,5}(%|px)?$")
 
-ImageResolver = Callable[[str], Optional[str]]
-LinkRewriter = Callable[[str], Optional[str]]
+ImageResolver = Callable[[str], str | None]
+LinkRewriter = Callable[[str], str | None]
 
 
 def _local_name(tag) -> str:
@@ -95,7 +96,7 @@ def _local_name(tag) -> str:
     return tag.rsplit("}", 1)[-1].rsplit(":", 1)[-1].lower()
 
 
-def safe_href(href: str) -> Optional[str]:
+def safe_href(href: str) -> str | None:
     text = IGNORED_IN_URL.sub("", href or "")
     if text.startswith("#") and len(text) > 1:
         return text
@@ -105,7 +106,7 @@ def safe_href(href: str) -> Optional[str]:
     return None
 
 
-def safe_image(src: str, resolve_image: Optional[ImageResolver]) -> Optional[str]:
+def safe_image(src: str, resolve_image: ImageResolver | None) -> str | None:
     src = (src or "").strip()
     if DATA_IMAGE.match(src):
         return src
@@ -116,7 +117,7 @@ def safe_image(src: str, resolve_image: Optional[ImageResolver]) -> Optional[str
     return None
 
 
-def _svg_picture(element) -> Optional[str]:
+def _svg_picture(element) -> str | None:
     for child in element.iter():
         if _local_name(child.tag) == "image":
             for name, value in child.attrib.items():
@@ -238,7 +239,9 @@ def _drop_namespaces(root) -> None:
 
 def _parse(markup: str, xml: bool):
     if xml:
-        parser = etree.XMLParser(recover=True, resolve_entities=False, no_network=True, remove_comments=True, remove_pis=True)
+        parser = etree.XMLParser(
+            recover=True, resolve_entities=False, no_network=True, remove_comments=True, remove_pis=True
+        )
         try:
             root = etree.fromstring(markup if isinstance(markup, bytes) else markup.encode("utf-8"), parser)
         except etree.XMLSyntaxError:
@@ -255,9 +258,9 @@ def _parse(markup: str, xml: bool):
 
 def clean_html(
     markup,
-    resolve_image: Optional[ImageResolver] = None,
+    resolve_image: ImageResolver | None = None,
     xml: bool = False,
-    rewrite_link: Optional[LinkRewriter] = None,
+    rewrite_link: LinkRewriter | None = None,
     id_prefix: str = "",
 ) -> str:
     """

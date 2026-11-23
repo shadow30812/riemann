@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from PySide6.QtCore import Qt
+
 from riemann.ui.reader.mixins.ai import AiMixin
 
 

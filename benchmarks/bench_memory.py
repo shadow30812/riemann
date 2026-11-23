@@ -16,7 +16,16 @@ import os
 import sys
 import time
 
-from _common import CORPUS, corpus_path, isolate_user_dirs, machine_info, rss_mb, tree_pss_mb, use_checkout, write_results
+from _common import (
+    CORPUS,
+    corpus_path,
+    isolate_user_dirs,
+    machine_info,
+    rss_mb,
+    tree_pss_mb,
+    use_checkout,
+    write_results,
+)
 
 ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 ap.add_argument("--tabs", type=int, default=10)
@@ -91,7 +100,8 @@ def main():
             }
             samples.append(sample)
             print(
-                f"{n:2} tabs: RSS {sample['rss_mb']:6.0f} MB | with children (PSS) {sample['tree_pss_mb']:6.0f} MB | page cache {sample['cache_mb']:5.0f} MB "
+                f"{n:2} tabs: RSS {sample['rss_mb']:6.0f} MB | with children (PSS) {sample['tree_pss_mb']:6.0f} MB | "
+                f"page cache {sample['cache_mb']:5.0f} MB "
                 f"of {sample['cache_budget_mb']:.0f} MB budget"
             )
 

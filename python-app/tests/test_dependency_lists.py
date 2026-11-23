@@ -36,7 +36,7 @@ def _project():
 
 
 def _name(requirement):
-    return re.split(r"[\[<>=! @]", requirement, 1)[0].lower().replace("_", "-")
+    return re.split(r"[\[<>=! @]", requirement, maxsplit=1)[0].lower().replace("_", "-")
 
 
 def test_optional_groups_match_the_versions_the_app_installs():
@@ -98,7 +98,11 @@ def _lock_pins(path):
     with open(path, encoding="utf-8") as f:
         text = f.read()
     entries = re.findall(r"^([A-Za-z0-9][^\s;\\]*)[^\n]*((?:\n\s+--hash=sha256:[0-9a-f]{64}[^\n]*)+)", text, re.M)
-    return {_name(req): req.split("==", 1)[1] for req, _ in entries}, len(entries), len(re.findall(r"^[A-Za-z0-9]", text, re.M))
+    return (
+        {_name(req): req.split("==", 1)[1] for req, _ in entries},
+        len(entries),
+        len(re.findall(r"^[A-Za-z0-9]", text, re.M)),
+    )
 
 
 def test_every_on_demand_package_has_a_hashed_lock_with_its_pinned_version():
@@ -130,7 +134,11 @@ def test_installs_require_hashes_and_take_nothing_outside_the_lock():
 def test_startup_never_creates_the_venv_or_looks_for_python(tmp_path, monkeypatch):
     from riemann.core import dependencies
 
-    monkeypatch.setattr(dependencies, "_venv_paths", lambda: (str(tmp_path), str(tmp_path / "venv"), str(tmp_path / "venv" / "bin" / "python")))
+    monkeypatch.setattr(
+        dependencies,
+        "_venv_paths",
+        lambda: (str(tmp_path), str(tmp_path / "venv"), str(tmp_path / "venv" / "bin" / "python")),
+    )
     started = []
     monkeypatch.setattr(dependencies.subprocess, "check_output", lambda *a, **k: started.append(a))
     monkeypatch.setattr(dependencies.subprocess, "check_call", lambda *a, **k: started.append(a))
@@ -153,7 +161,9 @@ def _frozen_at(monkeypatch, tmp_path, version="3.11.9"):
 
     monkeypatch.setattr(dependencies, "_is_frozen", lambda: True)
     monkeypatch.setattr(dependencies, "packages_dir", lambda: str(tmp_path / "packages" / "py311"))
-    monkeypatch.setattr(dependencies, "_bundled_version", lambda full=False: version if full else version.rsplit(".", 1)[0])
+    monkeypatch.setattr(
+        dependencies, "_bundled_version", lambda full=False: version if full else version.rsplit(".", 1)[0]
+    )
     return dependencies
 
 

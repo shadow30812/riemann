@@ -16,24 +16,26 @@ any valid recently closed windows.
 
 import os
 import time
-from typing import List, Optional
+from typing import Optional
+
 from PySide6.QtCore import (
     QUrl,
 )
 from PySide6.QtWidgets import (
+    QMainWindow,
     QMessageBox,
     QTabWidget,
     QWidget,
 )
+
+from ..core.log import log
+from ..core.settings import CLEAN_EXIT_KEY, app_settings
 from ..ui.browser import BrowserTab, PreviewTextTab, is_local_homepage
-from ..ui.viewers import VIEWER_TABS
 from ..ui.explorer import FolderHomeTab
 from ..ui.reader.tab import ReaderTab
-from ..core.log import log
-from PySide6.QtWidgets import QMainWindow
 from ..ui.system import PAGES as SYSTEM_PAGES
+from ..ui.viewers import VIEWER_TABS
 from .common import window_class
-from ..core.settings import CLEAN_EXIT_KEY, app_settings
 
 
 class SessionMixin:
@@ -139,10 +141,9 @@ class SessionMixin:
                     self.explorer_panel.show()
                 self.history_manager.add(active_folder, "folder")
 
-            if self.tabs_main.count() == 0 and self.tabs_side.count() == 0:
-                if not self.external_files:
-                    self.new_pdf_tab()
-                    self.new_browser_tab()
+            if self.tabs_main.count() == 0 and self.tabs_side.count() == 0 and not self.external_files:
+                self.new_pdf_tab()
+                self.new_browser_tab()
 
             self._extra_windows = []
             for win_data in saved_windows[1:]:
@@ -208,14 +209,12 @@ class SessionMixin:
         self._restore_tabs_from_settings("session/side_tabs", self.tabs_side)
 
         main_idx = self.settings.value("session/main_active_idx", -1, type=int)
-        if isinstance(main_idx, int):
-            if main_idx >= 0 and main_idx < self.tabs_main.count():
-                self.tabs_main.setCurrentIndex(main_idx)
+        if isinstance(main_idx, int) and main_idx >= 0 and main_idx < self.tabs_main.count():
+            self.tabs_main.setCurrentIndex(main_idx)
 
         side_idx = self.settings.value("session/side_active_idx", -1, type=int)
-        if isinstance(side_idx, int):
-            if side_idx >= 0 and side_idx < self.tabs_side.count():
-                self.tabs_side.setCurrentIndex(side_idx)
+        if isinstance(side_idx, int) and side_idx >= 0 and side_idx < self.tabs_side.count():
+            self.tabs_side.setCurrentIndex(side_idx)
 
         if self.tabs_side.count() > 0:
             self.tabs_side.show()
@@ -224,10 +223,9 @@ class SessionMixin:
         else:
             self.tabs_side.hide()
 
-        if self.tabs_main.count() == 0 and self.tabs_side.count() == 0:
-            if not self.external_files:
-                self.new_pdf_tab()
-                self.new_browser_tab()
+        if self.tabs_main.count() == 0 and self.tabs_side.count() == 0 and not self.external_files:
+            self.new_pdf_tab()
+            self.new_browser_tab()
 
         active_folder = self.settings.value("session/active_folder", "", type=str)
         if active_folder and os.path.exists(active_folder):
@@ -276,7 +274,7 @@ class SessionMixin:
                     self.open_system_page(data, target=target_widget)
 
     @staticmethod
-    def _as_bool(value) -> Optional[bool]:
+    def _as_bool(value) -> bool | None:
         """Reads a boolean back from QSettings, which may hand back strings."""
         if value is None or isinstance(value, bool):
             return value
@@ -291,7 +289,7 @@ class SessionMixin:
 
     def _record_closed_tab(self, widget: QWidget) -> None:
         """Remembers a closed tab so it can be reopened."""
-        if isinstance(widget, (ReaderTab, PreviewTextTab) + VIEWER_TABS) and widget.current_path:
+        if isinstance(widget, (ReaderTab, PreviewTextTab, *VIEWER_TABS)) and widget.current_path:
             self.closed_tabs_stack.append(
                 {
                     "type": "pdf",
@@ -335,7 +333,7 @@ class SessionMixin:
 
         target.setCurrentIndex(target.count() - 1)
 
-    def _serialize_tab_state(self, tab_widget: QTabWidget) -> List[dict]:
+    def _serialize_tab_state(self, tab_widget: QTabWidget) -> list[dict]:
         """The session data of each tab, leaving out empty reader tabs and browser start pages."""
         tabs_data = []
         media_domains = [
@@ -364,7 +362,7 @@ class SessionMixin:
                 if isinstance(page, int) and getattr(wid, "current_doc", None):
                     entry["page"] = page
                 tabs_data.append(entry)
-            elif isinstance(wid, (PreviewTextTab,) + VIEWER_TABS) and getattr(wid, "current_path", None):
+            elif isinstance(wid, (PreviewTextTab, *VIEWER_TABS)) and getattr(wid, "current_path", None):
                 tabs_data.append(
                     {
                         "type": "doc",
@@ -373,22 +371,21 @@ class SessionMixin:
                     }
                 )
 
-            elif isinstance(wid, BrowserTab):
-                if not getattr(wid, "incognito", False):
-                    url_str = wid.web.url().toString()
+            elif isinstance(wid, BrowserTab) and not getattr(wid, "incognito", False):
+                url_str = wid.web.url().toString()
 
-                    for domain in media_domains:
-                        if domain in url_str.lower():
-                            url_obj = wid.web.url()
-                            url_str = f"{url_obj.scheme()}://{url_obj.host()}"
-                            break
+                for domain in media_domains:
+                    if domain in url_str.lower():
+                        url_obj = wid.web.url()
+                        url_str = f"{url_obj.scheme()}://{url_obj.host()}"
+                        break
 
-                    if (
-                        not is_local_homepage(QUrl(url_str))
-                        and url_str != "about:blank"
-                        and url_str
-                    ):
-                        tabs_data.append({"type": "web", "data": url_str})
+                if (
+                    not is_local_homepage(QUrl(url_str))
+                    and url_str != "about:blank"
+                    and url_str
+                ):
+                    tabs_data.append({"type": "web", "data": url_str})
         return tabs_data
 
     def _auto_save_session(self) -> None:

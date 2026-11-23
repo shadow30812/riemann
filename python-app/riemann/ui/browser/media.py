@@ -10,11 +10,11 @@ scripts.
 import json
 import os
 import sys
-from ...core.assets import asset_path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QTabWidget
 
+from ...core.assets import asset_path
 from .page import CAPTIONS_WORLD
 
 
@@ -45,7 +45,7 @@ class MediaMixin:
     def get_captions_script(self) -> str:
         try:
             candidate_path = asset_path("caption_engine.js")
-            with open(candidate_path, "r", encoding="utf-8") as f:
+            with open(candidate_path, encoding="utf-8") as f:
                 return f.read()
         except Exception as e:
             print(f"[ERROR] Failed to load captions script: {e}")
@@ -68,7 +68,7 @@ class MediaMixin:
                 self.show_toast("Error: Missing audio_engine.js")
                 return ""
 
-            with open(candidate_path, "r", encoding="utf-8") as f:
+            with open(candidate_path, encoding="utf-8") as f:
                 return f.read()
 
         except Exception as e:
@@ -111,7 +111,7 @@ class MediaMixin:
                 self.show_toast("Error: Missing video_engine.js")
                 return ""
 
-            with open(candidate_path, "r", encoding="utf-8") as f:
+            with open(candidate_path, encoding="utf-8") as f:
                 return f.read()
 
         except Exception as e:

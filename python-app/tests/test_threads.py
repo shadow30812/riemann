@@ -49,10 +49,14 @@ def close(tab):
 
 
 def run_child(body: str) -> subprocess.CompletedProcess:
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu", RIEMANN_RENDER_PROCESS="0")
+    env = dict(
+        os.environ, QT_QPA_PLATFORM="offscreen", QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu", RIEMANN_RENDER_PROCESS="0"
+    )
     env.pop("LD_LIBRARY_PATH", None)
     script = CHILD_PRELUDE + textwrap.dedent(body)
-    return subprocess.run([sys.executable, "-c", script], cwd=APP_DIR, env=env, capture_output=True, text=True, timeout=120)
+    return subprocess.run(
+        [sys.executable, "-c", script], cwd=APP_DIR, env=env, capture_output=True, text=True, timeout=120
+    )
 
 
 def test_closing_a_reader_while_metadata_is_fetched_does_not_abort():

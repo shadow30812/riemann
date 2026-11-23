@@ -30,13 +30,14 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from ...components import AnnotationToolbar, RepaintingLineEdit, build_open_with_menu
-from ..sidebar import PdfSidebarWidget
-from ..toolbar_layout import ToolbarLayout
-from ..notes import NotesPanel
-from .host import ReaderHostBase
+
 from ....core.assets import icon_path
 from ....core.settings import SIDEBAR_MODE_KEY, SIDEBAR_VISIBLE_KEY
+from ...components import AnnotationToolbar, RepaintingLineEdit, build_open_with_menu
+from ..notes import NotesPanel
+from ..sidebar import PdfSidebarWidget
+from ..toolbar_layout import ToolbarLayout
+from .host import ReaderHostBase
 
 
 class ToolbarMixin(ReaderHostBase):
@@ -251,7 +252,9 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_present = QPushButton()
         self.btn_present.setIcon(self._get_icon("presentation.svg"))
         self.btn_present.setIconSize(icon_size)
-        self.btn_present.setToolTip("Present (Shift+F5)\nFull screen, one page at a time. L for a laser pointer, Esc to stop.")
+        self.btn_present.setToolTip(
+            "Present (Shift+F5)\nFull screen, one page at a time. L for a laser pointer, Esc to stop."
+        )
         self.btn_present.clicked.connect(self.start_presentation)
 
         self.btn_pages = QPushButton()
@@ -492,9 +495,7 @@ class ToolbarMixin(ReaderHostBase):
         sb_layout.addWidget(self.btn_close_search)
 
     def _setup_ai_search_bar(self) -> None:
-        """
-        Organizes specialized AI interaction interface overlays incorporating custom thematic styling distinct from standard bars.
-        """
+        """Builds the bar for asking the AI about the document."""
         self.ai_search_bar = QWidget()
         self.ai_search_bar.setVisible(False)
         self.ai_search_bar.setFixedHeight(45)

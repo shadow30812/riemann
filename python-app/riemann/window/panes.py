@@ -16,7 +16,7 @@ _apply_vertical_tabs: Only the main pane gets the vertical strip: the split-
 view pane is usually narrow and keeps its compact horizontal tabs.
 """
 
-from typing import Optional
+
 import shiboken6
 from PySide6.QtCore import (
     QTimer,
@@ -28,9 +28,10 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QWidget,
 )
-from ..ui.palette import tokens
+
 from ..core.assets import icon_path
 from ..core.settings import TABS_COLLAPSED_KEY, VERTICAL_TABS_KEY
+from ..ui.palette import tokens
 
 
 class PanesMixin:
@@ -45,7 +46,7 @@ class PanesMixin:
 
     def _move_tab_between(
         self, source: QTabWidget, idx: int, target: QTabWidget
-    ) -> Optional[QWidget]:
+    ) -> QWidget | None:
         """Moves a tab (with its title, icon and tooltip) to the other pane."""
         widget = source.widget(idx)
         if widget is None:
@@ -214,7 +215,7 @@ class PanesMixin:
                 return
             widget = widget.parentWidget()
 
-    def _active_pane_widget(self) -> Optional[QWidget]:
+    def _active_pane_widget(self) -> QWidget | None:
         pane = self._active_pane if self._split_view_active() else self.tabs_main
         return pane.currentWidget()
 

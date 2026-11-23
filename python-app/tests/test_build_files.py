@@ -41,7 +41,9 @@ NUITKA_BUILDS = ["scripts/nbuild.sh", "scripts/nbuild.ps1", ".github/workflows/r
 
 
 def test_nuitka_version_is_pinned_at_a_fixed_release():
-    pins = re.findall(r"^nuitka==(\S+)$", (REPO / "scripts" / "build-requirements.txt").read_text(encoding="utf-8"), re.M)
+    pins = re.findall(
+        r"^nuitka==(\S+)$", (REPO / "scripts" / "build-requirements.txt").read_text(encoding="utf-8"), re.M
+    )
     assert len(pins) == 1
     assert tuple(int(part) for part in pins[0].split(".")) >= (4, 3)
 

@@ -23,8 +23,7 @@ and YouTube answered the burst with 429s.
 import os
 import re
 import time
-from typing import Any, Optional
-from ...core.dependencies import script_dirs
+from typing import Any
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -38,9 +37,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..palette import dialog_icon
+from ...core.dependencies import script_dirs
 from ...core.log import log
-
+from ..palette import dialog_icon
 
 _deno_dir = os.path.expanduser("~/.deno/bin")
 if os.path.isdir(_deno_dir) and _deno_dir not in os.environ.get("PATH", ""):
@@ -117,7 +116,7 @@ class YtDlpWorker(QThread):
     progress_details = Signal(dict)
     finished = Signal(bool, str)
 
-    def __init__(self, url: str, download_dir: str, dl_opts: Optional[dict] = None) -> None:
+    def __init__(self, url: str, download_dir: str, dl_opts: dict | None = None) -> None:
         super().__init__()
         self.url = url
         self.download_dir = download_dir
@@ -253,11 +252,11 @@ class YtDlpWorker(QThread):
             try:
                 pct_val = int(
                     float(
-                        (
+
                             re.sub(r"\x1b\[[0-9;]*m", "", d.get("_percent_str", "0%"))
                             .replace("%", "")
                             .strip()
-                        )
+
                     )
                 )
             except ValueError:

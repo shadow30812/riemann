@@ -9,7 +9,6 @@ cited paper sits next to the one being read. "Go to reference" follows the
 link as a click would. Nothing is sent to OpenAlex unless the user asks.
 """
 
-from typing import Optional
 
 from PySide6.QtCore import QPoint, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QFont
@@ -41,11 +40,11 @@ class CitationCard(QFrame):
         super().__init__(parent)
         self.setObjectName("citationCard")
         self.setFixedWidth(self.WIDTH)
-        self.target: Optional[tuple] = None
+        self.target: tuple | None = None
         self.reference = ""
         self.info = None
         self._lookups: dict[str, object] = {}
-        self._worker: Optional[_Lookup] = None
+        self._worker: _Lookup | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(8)
@@ -89,7 +88,8 @@ class CitationCard(QFrame):
         t = tokens(dark)
         self.setStyleSheet(
             f"""
-            QFrame#citationCard {{ background: {t["surface"]}; border: 1px solid {t["border_strong"]}; border-radius: 10px; }}
+            QFrame#citationCard {{ background: {t["surface"]}; border: 1px solid {t["border_strong"]};
+                border-radius: 10px; }}
             QLabel {{ color: {t["text"]}; background: transparent; }}
             """
         )

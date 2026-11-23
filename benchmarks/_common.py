@@ -6,7 +6,7 @@ import platform
 import statistics
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 BENCH_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(BENCH_DIR)
@@ -93,7 +93,7 @@ def machine_info(app_path=None):
         pass
     checkout = app_path or REPO_ROOT
     info = {
-        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "date": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
         "cpu": cpu,
         "logical_cores": os.cpu_count(),
         "ram_gb": ram_gb,
@@ -165,7 +165,7 @@ def tree_pss_mb(pid=None):
     """
     root = pid or os.getpid()
     total_kb = 0
-    for p in [root] + _descendants(root):
+    for p in [root, *_descendants(root)]:
         try:
             with open(f"/proc/{p}/smaps_rollup") as f:
                 for line in f:

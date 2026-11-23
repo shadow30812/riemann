@@ -1,9 +1,10 @@
 from unittest.mock import MagicMock
 
 import pytest
-import riemann.ui.reader.mixins.search
 from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
+
+import riemann.ui.reader.mixins.search
 from riemann.core.constants import ViewMode
 from riemann.ui.reader.mixins.search import SearchMixin
 

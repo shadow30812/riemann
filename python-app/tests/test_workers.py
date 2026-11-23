@@ -6,6 +6,7 @@ import zipfile
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from riemann.ui.reader.workers import (
     InferenceThread,
     InstallerThread,

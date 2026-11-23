@@ -19,17 +19,23 @@ import zipfile
 
 import pikepdf
 import pytest
-
 from text_fixtures import all_stream_bytes, make_text_pdf
 
 DRIVER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_session.py")
-COMPILED_DRIVER = os.path.abspath(os.environ["RIEMANN_SESSION_DRIVER"]) if os.environ.get("RIEMANN_SESSION_DRIVER") else None
+COMPILED_DRIVER = (
+    os.path.abspath(os.environ["RIEMANN_SESSION_DRIVER"]) if os.environ.get("RIEMANN_SESSION_DRIVER") else None
+)
 
 
 def run_session(tmp_path, scenario, *files, **extra_env):
     env = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
     env.update(extra_env)
-    for var, sub in (("HOME", "home"), ("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache")):
+    for var, sub in (
+        ("HOME", "home"),
+        ("XDG_CONFIG_HOME", "config"),
+        ("XDG_DATA_HOME", "data"),
+        ("XDG_CACHE_HOME", "cache"),
+    ):
         env[var] = str(tmp_path / "profile" / sub)
         os.makedirs(env[var], exist_ok=True)
     env.update(QT_QPA_PLATFORM="offscreen", QTWEBENGINE_DISABLE_SANDBOX="1", _RIEMANN_SANITIZED="1")
@@ -79,7 +85,7 @@ def test_the_open_dialog_opens_text_and_images_and_right_steps_to_the_next_image
     image, next_image = photos / "photo 2.png", photos / "photo 10.jpg"
     Image.new("RGB", (120, 80), "teal").save(image)
     Image.new("RGB", (60, 40), "orange").save(next_image)
-    notes, env = run_session(tmp_path, "open_text", text_file, image, next_image)
+    notes, _env = run_session(tmp_path, "open_text", text_file, image, next_image)
     assert notes["text_view"]
     assert notes["image_offered"]
     assert notes["image_size"] == [120, 80]
@@ -130,7 +136,8 @@ def word_file(path, text):
         z.writestr(
             "_rels/.rels",
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="r1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+            '<Relationship Id="r1" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
             'Target="word/document.xml"/></Relationships>',
         )
         z.writestr(
@@ -195,10 +202,13 @@ def web_pages(tmp_path):
     (site / "index.html").write_text(
         "<!doctype html><title>Front page</title><style>p { color: teal }</style>"
         "<h1>Front</h1><p id=t>Loading</p><a href=next.html>Next</a>"
-        "<script>document.getElementById('t').textContent = 'Ready'; setTimeout(() => document.title += '!', 50)</script>",
+        "<script>document.getElementById('t').textContent = 'Ready'; setTimeout(() => document.title += '!', "
+        "50)</script>",
         encoding="utf-8",
     )
-    (site / "next.html").write_text("<!doctype html><title>Next page</title><p>Second</p><img src=dot.png>", encoding="utf-8")
+    (site / "next.html").write_text(
+        "<!doctype html><title>Next page</title><p>Second</p><img src=dot.png>", encoding="utf-8"
+    )
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(_Pages, directory=str(site)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield [f"http://127.0.0.1:{server.server_port}/index.html", f"http://127.0.0.1:{server.server_port}/next.html"]
@@ -208,9 +218,8 @@ def web_pages(tmp_path):
 def every_kind_of_file(folder):
     """One file of every kind Riemann opens, plus a program and plain bytes."""
     import openpyxl
-    from pptx import Presentation
     from PIL import Image
-
+    from pptx import Presentation
     from test_ebooks import book_files, make_epub
 
     files = [make_text_pdf(folder / "paper.pdf", [(72, 700, 24, "KEEP SECRET KEEP")])]
@@ -231,7 +240,10 @@ def every_kind_of_file(folder):
         "script.py": "print('hi')\n",
         "table.csv": "name,score\nAda,3\n",
         "page.html": "<!doctype html><title>Local page</title><p>Local</p>",
-        "shape.svg": '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><circle cx="20" cy="20" r="15" fill="teal"/></svg>',
+        "shape.svg": (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">'
+            '<circle cx="20" cy="20" r="15" fill="teal"/></svg>'
+        ),
     }
     for name, text in texts.items():
         (folder / name).write_text(text, encoding="utf-8")

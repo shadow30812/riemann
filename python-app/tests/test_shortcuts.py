@@ -74,8 +74,11 @@ def test_a_panels_own_shortcut_wins_over_the_windows_while_it_has_the_focus(qtbo
 @contextmanager
 def plain_settings():
     settings = MagicMock()
-    settings.return_value.value.side_effect = lambda key, default=None, type=None: False if key == "reader/notes_visible" else True
-    with patch("riemann.ui.reader.tab.app_settings", settings), patch("riemann.ui.reader.mixins.appearance.app_settings", settings):
+    settings.return_value.value.side_effect = lambda key, default=None, type=None: key != "reader/notes_visible"
+    with (
+        patch("riemann.ui.reader.tab.app_settings", settings),
+        patch("riemann.ui.reader.mixins.appearance.app_settings", settings),
+    ):
         yield
 
 

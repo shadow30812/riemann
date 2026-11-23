@@ -2,6 +2,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from riemann.ui.reader.mixins.metadata import MetadataMixin
 
 
@@ -132,6 +133,7 @@ def test_a_finished_and_deleted_worker_doesnt_break_the_next_extraction_or_closi
     import time
 
     from PySide6.QtCore import QCoreApplication, QEvent
+
     from riemann.core import annotation_store
     from riemann.ui.reader.tab import ReaderTab
     from riemann.ui.reader.workers import MetadataExtractionWorker

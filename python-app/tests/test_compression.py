@@ -147,7 +147,9 @@ def test_compression_default_output_changes_only_the_file_name(tmp_path, qapp, m
     src.write_bytes(b"%PDF-1.4\n")
     (folder / "report_compressed.pdf").write_bytes(b"older")
     seen = []
-    monkeypatch.setattr(features.QFileDialog, "getSaveFileName", lambda parent, title, default, flt: (seen.append(default), ("", ""))[1])
+    monkeypatch.setattr(
+        features.QFileDialog, "getSaveFileName", lambda parent, title, default, flt: (seen.append(default), ("", ""))[1]
+    )
     dialog = features.CompressDialog()
     dialog.txt_input.setText(str(src))
     dialog.browse_output()

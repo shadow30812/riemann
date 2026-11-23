@@ -108,7 +108,9 @@ class _SafeLinks(markdown.treeprocessors.Treeprocessor):
                     element.set(attr, BLOCKED_URL)
 
 
-def render_markdown_safely(markdown_text: str, extensions: tuple = ("fenced_code", "tables"), schemes: tuple = ()) -> str:
+def render_markdown_safely(
+    markdown_text: str, extensions: tuple = ("fenced_code", "tables"), schemes: tuple = ()
+) -> str:
     """
     Markdown to HTML with raw HTML shown as text and every link and image
     limited to url_is_safe.
@@ -133,7 +135,8 @@ def emoji_font_style() -> str:
     return f"""<style>
     @font-face {{ font-family: "Riemann Noto Emoji"; src: url("{font_uri}") format("truetype"); }}
     body, p, span, div, h1, h2, h3, h4, h5, h6, table, th, td, li, pre, code {{
-        font-family: inherit, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Riemann Noto Emoji", "Twemoji Mozilla" !important;
+        font-family: inherit, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Riemann Noto Emoji",
+            "Twemoji Mozilla" !important;
     }}
 </style>"""
 
@@ -142,7 +145,8 @@ def _document_page(body: str, dark_mode: bool, head: str = "", extra_css: str = 
     t = tokens(dark_mode)
     bg = t["canvas"] if dark_mode else t["surface"]
     style = f"""
-    body {{ background:{bg}; color:{t["text"]}; padding:40px; font-family: sans-serif; max-width: 800px; margin: 0 auto; line-height: 1.6; }}
+    body {{ background:{bg}; color:{t["text"]}; padding:40px; font-family: sans-serif; max-width: 800px;
+        margin: 0 auto; line-height: 1.6; }}
     pre {{ background: {t["raised"]}; padding: 10px; border-radius: 5px; overflow-x: auto; }}
     code {{ font-family: monospace; }}
     a {{ color: {t["accent"]}; }}
@@ -151,7 +155,10 @@ def _document_page(body: str, dark_mode: bool, head: str = "", extra_css: str = 
     .riemann-note {{ color: {t["muted"]}; font-style: italic; }}
     {extra_css}
     """
-    return f"<!DOCTYPE html><html><head><meta charset=\"utf-8\">{head}<style>{style}</style>{emoji_font_style()}</head><body>{body}</body></html>"
+    return (
+        f'<!DOCTYPE html><html><head><meta charset="utf-8">{head}<style>{style}</style>{emoji_font_style()}</head>'
+        f"<body>{body}</body></html>"
+    )
 
 
 def generate_markdown_html(markdown_text: str, dark_mode: bool, note: str = "") -> str:

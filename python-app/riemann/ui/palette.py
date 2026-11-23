@@ -209,8 +209,10 @@ def scrollbar_style(t: dict) -> str:
     return (
         "QScrollBar:vertical { border: none; background: transparent; width: 16px; margin: 0px; }"
         "QScrollBar:horizontal { border: none; background: transparent; height: 16px; margin: 0px; }"
-        f"QScrollBar::handle:vertical {{ background: {t['border_strong']}; min-height: 24px; border-radius: 5px; margin: 2px; }}"
-        f"QScrollBar::handle:horizontal {{ background: {t['border_strong']}; min-width: 24px; border-radius: 5px; margin: 2px; }}"
+        "QScrollBar::handle:vertical "
+        f"{{ background: {t['border_strong']}; min-height: 24px; border-radius: 5px; margin: 2px; }}"
+        "QScrollBar::handle:horizontal "
+        f"{{ background: {t['border_strong']}; min-width: 24px; border-radius: 5px; margin: 2px; }}"
         f"QScrollBar::handle:hover {{ background: {t['faint']}; }}"
         "QScrollBar::add-line, QScrollBar::sub-line { width: 0px; height: 0px; }"
         "QScrollBar::add-page, QScrollBar::sub-page { background: none; }"

@@ -42,13 +42,13 @@ import os
 import re
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 NAME_PREFIX = "riemann:"
 DATA_KEY = "/RiemannData"
 RECT_KEY = "/RiemannRect"
 
-Box = Tuple[float, float, float, float]
+Box = tuple[float, float, float, float]
 STANDARD_FONTS = {
     "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique",
     "Times-Roman", "Times-Bold", "Times-Italic", "Times-BoldItalic",
@@ -66,7 +66,7 @@ def _pdf_date() -> str:
     return now.strftime("D:%Y%m%d%H%M%S") + (f"{offset[:3]}'{offset[3:]}'" if offset else "")
 
 
-def _hex_to_rgb(value: Any) -> List[float]:
+def _hex_to_rgb(value: Any) -> list[float]:
     if isinstance(value, (list, tuple)) and len(value) >= 3:
         return [max(0.0, min(1.0, float(c) / 255.0)) for c in value[:3]]
     s = str(value or "").lstrip("#")
@@ -80,7 +80,7 @@ def _hex_to_rgb(value: Any) -> List[float]:
     return [1.0, 0.85, 0.0]
 
 
-def _rgb_to_hex(rgb) -> Optional[str]:
+def _rgb_to_hex(rgb) -> str | None:
     try:
         r, g, b = (max(0, min(255, round(float(c) * 255))) for c in list(rgb)[:3])
     except (TypeError, ValueError):
@@ -97,7 +97,7 @@ class _PageSpace:
         self.h = (self.top - self.bottom) or 1.0
         self.rotate = rotate % 360
 
-    def to_pdf(self, u: float, v: float) -> Tuple[float, float]:
+    def to_pdf(self, u: float, v: float) -> tuple[float, float]:
         if self.rotate == 90:
             return self.left + v * self.w, self.bottom + u * self.h
         if self.rotate == 180:
@@ -106,7 +106,7 @@ class _PageSpace:
             return self.right - v * self.w, self.top - u * self.h
         return self.left + u * self.w, self.top - v * self.h
 
-    def from_pdf(self, x: float, y: float) -> Tuple[float, float]:
+    def from_pdf(self, x: float, y: float) -> tuple[float, float]:
         if self.rotate == 90:
             return (y - self.bottom) / self.h, (x - self.left) / self.w
         if self.rotate == 180:
@@ -133,7 +133,7 @@ def _inherited(page_obj, key: str):
     return None
 
 
-def _box(value) -> Optional[Box]:
+def _box(value) -> Box | None:
     try:
         x1, y1, x2, y2 = (float(v) for v in value)
     except Exception:
@@ -141,7 +141,7 @@ def _box(value) -> Optional[Box]:
     return min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)
 
 
-def visible_box(crop: Optional[Box], media: Optional[Box]) -> Box:
+def visible_box(crop: Box | None, media: Box | None) -> Box:
     """The crop box clipped to the media box, falling back as the Rust core does."""
     if crop and media:
         clipped = (max(crop[0], media[0]), max(crop[1], media[1]), min(crop[2], media[2]), min(crop[3], media[3]))
@@ -164,7 +164,7 @@ def _text_stream_literal(text: str) -> str:
     return "(" + safe.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)") + ")"
 
 
-def _build_annotation(pdf, page, space: _PageSpace, anno: Dict[str, Any], author: str):
+def _build_annotation(pdf, page, space: _PageSpace, anno: dict[str, Any], author: str):
     """Returns a pikepdf Dictionary for one Riemann annotation, or None."""
     import pikepdf
     from pikepdf import Array, Dictionary, Name, String
@@ -186,7 +186,7 @@ def _build_annotation(pdf, page, space: _PageSpace, anno: Dict[str, Any], author
     )
     d[Name(DATA_KEY)] = String(json.dumps(anno, separators=(",", ":")))
 
-    def ink(strokes: List[List[Tuple[float, float]]], width: float, opacity: float = 1.0):
+    def ink(strokes: list[list[tuple[float, float]]], width: float, opacity: float = 1.0):
         pdf_strokes = [[c for u, v in s for c in space.to_pdf(u, v)] for s in strokes if s]
         if not pdf_strokes:
             return None
@@ -255,7 +255,10 @@ def _build_annotation(pdf, page, space: _PageSpace, anno: Dict[str, Any], author
         fill = "{:.3f} {:.3f} {:.3f} rg".format(*background)
         color_op = "{:.3f} {:.3f} {:.3f} rg".format(*rgb)
         lines = contents.splitlines() or [""]
-        ops = [f"{fill} 0 0 {dw:g} {dh:g} re f", f"BT /RmF {size:g} Tf {color_op} {leading:g} TL 0 {dh - baseline:g} Td"]
+        ops = [
+            f"{fill} 0 0 {dw:g} {dh:g} re f",
+            f"BT /RmF {size:g} Tf {color_op} {leading:g} TL 0 {dh - baseline:g} Td",
+        ]
         ops += [f"{_text_stream_literal(line)} Tj T*" for line in lines]
         ops.append("ET")
         d.Subtype = Name.FreeText
@@ -340,7 +343,7 @@ def _is_riemann(annot) -> bool:
         return False
 
 
-def serialize_objects(objects: Dict[Tuple[int, int], Any]) -> List[Tuple[int, int, bytes]]:
+def serialize_objects(objects: dict[tuple[int, int], Any]) -> list[tuple[int, int, bytes]]:
     """(number, generation, body) for each indirect object, ready for an incremental section."""
     import pikepdf
 
@@ -357,7 +360,7 @@ def serialize_objects(objects: Dict[Tuple[int, int], Any]) -> List[Tuple[int, in
     return serialized
 
 
-def collect_new_objects(objects: Dict[Tuple[int, int], Any], root, first_new: int) -> None:
+def collect_new_objects(objects: dict[tuple[int, int], Any], root, first_new: int) -> None:
     """Adds root and every object reachable from it that was created after first_new."""
     import pikepdf
 
@@ -380,7 +383,7 @@ def collect_new_objects(objects: Dict[Tuple[int, int], Any], root, first_new: in
     walk(root)
 
 
-def incremental_save(path: str, original: bytes, pdf, objects, dest: Optional[str] = None) -> bool:
+def incremental_save(path: str, original: bytes, pdf, objects, dest: str | None = None) -> bool:
     """
     Appends the given objects of pdf (opened from original) to path as an
     incremental update, or writes original plus that update to dest. Returns
@@ -412,7 +415,7 @@ def _last_startxref(data: bytes) -> int:
 
 
 def _incremental_section(
-    original: bytes, objects: List[Tuple[int, int, bytes]], trailer: Dict[str, bytes]
+    original: bytes, objects: list[tuple[int, int, bytes]], trailer: dict[str, bytes]
 ) -> bytes:
     """Builds the bytes to append: the objects, a cross-reference section and trailer."""
     prev = _last_startxref(original)
@@ -423,7 +426,7 @@ def _incremental_section(
     if not original.endswith((b"\n", b"\r")):
         out.write(b"\n")
 
-    offsets: Dict[int, Tuple[int, int]] = {}
+    offsets: dict[int, tuple[int, int]] = {}
     for num, gen, body in objects:
         offsets[num] = (base + out.tell(), gen)
         out.write(b"%d %d obj\n" % (num, gen) + body + b"\nendobj\n")
@@ -458,7 +461,7 @@ def _incremental_section(
     return out.getvalue()
 
 
-def file_signature(path: str) -> Optional[List[int]]:
+def file_signature(path: str) -> list[int] | None:
     """Size and modification time, used to tell whether another app changed the file."""
     try:
         st = os.stat(path)
@@ -545,9 +548,9 @@ def can_store_in(path: str) -> bool:
 
 def write_annotations(
     path: str,
-    annotations: Dict[str, List[Dict[str, Any]]],
+    annotations: dict[str, list[dict[str, Any]]],
     author: str = "Riemann",
-    dest: Optional[str] = None,
+    dest: str | None = None,
 ) -> bool:
     """
     Replaces the Riemann annotations stored in the PDF at path with the given
@@ -603,7 +606,7 @@ def write_annotations(
                     f.write(original)
             return True
 
-        objects: Dict[Tuple[int, int], Any] = {}
+        objects: dict[tuple[int, int], Any] = {}
 
         original_size = int(pdf.trailer.get("/Size", 0))
         for page_obj in changed_pages:
@@ -637,14 +640,14 @@ def write_annotations(
     return True
 
 
-def read_annotations(path: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+def read_annotations(path: str) -> dict[str, list[dict[str, Any]]] | None:
     """
     Reads the Riemann annotations stored in a PDF, picking up edits other apps
     made to their text and colour. Returns None when the file holds none.
     """
     import pikepdf
 
-    found: Dict[str, List[Dict[str, Any]]] = {}
+    found: dict[str, list[dict[str, Any]]] = {}
     any_found = False
     try:
         pdf = pikepdf.open(path)
@@ -675,7 +678,7 @@ def read_annotations(path: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
     return found if any_found else None
 
 
-def _shift(anno: Dict[str, Any], du: float, dv: float) -> None:
+def _shift(anno: dict[str, Any], du: float, dv: float) -> None:
     if "rel_pos" in anno:
         u, v = anno["rel_pos"]
         anno["rel_pos"] = [float(u) + du, float(v) + dv]
@@ -688,7 +691,7 @@ def _shift(anno: Dict[str, Any], du: float, dv: float) -> None:
         ]
 
 
-def _follow_move(anno: Dict[str, Any], annot, page) -> Dict[str, Any]:
+def _follow_move(anno: dict[str, Any], annot, page) -> dict[str, Any]:
     """
     Updates an annotation's position when another app moved or resized it.
 
@@ -701,7 +704,7 @@ def _follow_move(anno: Dict[str, Any], annot, page) -> Dict[str, Any]:
         new = [float(v) for v in annot.Rect]
     except Exception:
         return anno
-    if len(old) != 4 or len(new) != 4 or max(abs(a - b) for a, b in zip(old, new)) < 0.5:
+    if len(old) != 4 or len(new) != 4 or max(abs(a - b) for a, b in zip(old, new, strict=False)) < 0.5:
         return anno
     space = _page_space(page)
     if anno.get("type") == "drawing" and anno.get("subtype") in ("rect", "oval"):
@@ -715,7 +718,7 @@ def _follow_move(anno: Dict[str, Any], annot, page) -> Dict[str, Any]:
     return anno
 
 
-def as_read_back(anno: Dict[str, Any]) -> Dict[str, Any]:
+def as_read_back(anno: dict[str, Any]) -> dict[str, Any]:
     """An annotation as read_annotations will return it after write_annotations stores it."""
     a = json.loads(json.dumps(anno))
     if a.get("type") in ("note", "text"):
@@ -727,12 +730,12 @@ def as_read_back(anno: Dict[str, Any]) -> Dict[str, Any]:
     return a
 
 
-def written_form(pages: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+def written_form(pages: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
     """The read-back form of a whole snapshot, kept as the base for merge_annotations."""
     return {str(pid): [as_read_back(a) for a in annos] for pid, annos in pages.items() if annos}
 
 
-def merge_annotations(local, stored, base) -> Dict[str, List[Dict[str, Any]]]:
+def merge_annotations(local, stored, base) -> dict[str, list[dict[str, Any]]]:
     """
     Three-way merge of Riemann's annotations with the set read from the PDF.
 
@@ -754,7 +757,7 @@ def merge_annotations(local, stored, base) -> Dict[str, List[Dict[str, Any]]]:
     L, S = by_id(local), by_id(stored)
     B = by_id(base) if base is not None else None
     order = list(L) + [i for i in S if i not in L]
-    merged: Dict[str, List[Dict[str, Any]]] = {}
+    merged: dict[str, list[dict[str, Any]]] = {}
     for i in order:
         in_l, in_s = i in L, i in S
         known = B is not None and i in B

@@ -22,7 +22,7 @@ widget.
 
 import os
 import time
-from typing import Optional
+
 import psutil
 from PySide6.QtCore import (
     QEvent,
@@ -43,22 +43,22 @@ from PySide6.QtWidgets import (
     QToolButton,
     QWidget,
 )
+
+from ..core.doctypes import dialog_filter
 from ..core.features import (
     trigger_local_caption_generation,
 )
-from ..core.doctypes import dialog_filter
 from ..core.mini_player import MiniAudioPlayer
+from ..core.settings import FAVOURITE_FOLDERS_KEY, favourites_settings
 from ..ui.browser import BrowserTab, PreviewTextTab
-from ..ui.viewers import VIEWER_TABS
+from ..ui.command_palette import CommandPalette
 from ..ui.components import (
     populate_open_with_menu,
 )
 from ..ui.favourites import ManageFavoritesDialog
-from ..ui.reader.tab import ReaderTab
-from ..ui.command_palette import CommandPalette
 from ..ui.palette import tokens
-from ..core.settings import FAVOURITE_FOLDERS_KEY, favourites_settings
-
+from ..ui.reader.tab import ReaderTab
+from ..ui.viewers import VIEWER_TABS
 
 
 class CornerFit(QObject):
@@ -77,7 +77,10 @@ class CornerFit(QObject):
         return False
 
     def fit(self) -> None:
-        """Sets the corner again when its width is not what it asks for; a failed try is not repeated for the same hint and bar width."""
+        """
+        Sets the corner again when its width is not what it asks for; a failed try is not repeated for the same hint
+        and bar width.
+        """
         hint = self.corner.sizeHint().width()
         if self.corner.width() == hint:
             self._fitted = None
@@ -389,7 +392,7 @@ class MenusMixin:
                 )
 
     @staticmethod
-    def _external_target(widget: Optional[QWidget]) -> str:
+    def _external_target(widget: QWidget | None) -> str:
         """The file, folder or web address a tab shows, for opening it in another app."""
         if widget is None:
             return ""
@@ -433,7 +436,7 @@ class MenusMixin:
                 widget = tab_widget.widget(i)
                 if widget is getattr(self, "preview_tab_widget", None):
                     continue
-                is_doc = isinstance(widget, (ReaderTab, PreviewTextTab) + VIEWER_TABS)
+                is_doc = isinstance(widget, (ReaderTab, PreviewTextTab, *VIEWER_TABS))
                 if (
                     is_doc
                     and getattr(widget, "current_path", None)

@@ -21,15 +21,11 @@ import json
 import math
 import os
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from PySide6.QtCore import QRect, Qt, QUrl
-
-from .annotation_store import pdf_identifier
-from .settings import DEFAULT_POPULAR_SITES, POPULAR_SITES_KEY, string_list
-from .storage import app_data_dir, write_json_atomic
-from .log import log
 from PySide6.QtGui import QColor, QDesktopServices, QPainter
 from PySide6.QtWebEngineCore import QWebEngineDownloadRequest
 from PySide6.QtWidgets import (
@@ -52,6 +48,10 @@ from PySide6.QtWidgets import (
 )
 
 from ..ui.palette import app_is_dark, dialog_icon, tokens
+from .annotation_store import pdf_identifier
+from .log import log
+from .settings import DEFAULT_POPULAR_SITES, POPULAR_SITES_KEY, string_list
+from .storage import app_data_dir, write_json_atomic
 
 
 class LibraryManager:
@@ -96,7 +96,7 @@ class LibraryManager:
             return f"id-{ident}"
         return hashlib.sha256(file_path.encode("utf-8")).hexdigest()
 
-    def get_metadata(self, file_path: str) -> Dict[str, Any]:
+    def get_metadata(self, file_path: str) -> dict[str, Any]:
         """
         The stored metadata for a file, or {} when there is none. A row saved
         under the old path key is moved to the file's /ID key on first read, and
@@ -123,7 +123,7 @@ class LibraryManager:
                 data["file_path"] = file_path
             return data
 
-    def save_metadata(self, file_path: str, data: Dict[str, Any]) -> None:
+    def save_metadata(self, file_path: str, data: dict[str, Any]) -> None:
         """Stores metadata for file_path; keys include title, authors, year, doi and arxiv_id."""
         file_hash = self.get_file_hash(file_path)
         with sqlite3.connect(self.db_path) as conn:
@@ -150,15 +150,15 @@ class LibraryManager:
                 ),
             )
 
-    def search_library(self, query: str) -> List[Dict[str, Any]]:
+    def search_library(self, query: str) -> list[dict[str, Any]]:
         """Searches the library metadata. Supports author: and year: filters."""
         import re
 
         author_match = re.search(r'author:\s*"?([^"\s]+)"?', query, re.IGNORECASE)
         year_match = re.search(r"year:\s*(\d{4})", query, re.IGNORECASE)
 
-        conditions: List[str] = []
-        params: List[str] = []
+        conditions: list[str] = []
+        params: list[str] = []
 
         if author_match:
             conditions.append("authors LIKE ?")
@@ -200,7 +200,7 @@ class BookmarksManager:
         """
         base = app_data_dir()
         self.path = os.path.join(base, "bookmarks.json")
-        self.bookmarks: List[Dict[str, str]] = []
+        self.bookmarks: list[dict[str, str]] = []
         self.load()
 
     def load(self) -> None:
@@ -209,7 +209,7 @@ class BookmarksManager:
         """
         if os.path.exists(self.path):
             try:
-                with open(self.path, "r", encoding="utf-8") as f:
+                with open(self.path, encoding="utf-8") as f:
                     self.bookmarks = json.load(f)
             except (json.JSONDecodeError, OSError):
                 self.bookmarks = []
@@ -251,8 +251,8 @@ class HistoryManager:
         """
         base = app_data_dir()
         self.path = os.path.join(base, "history.json")
-        self.history: Dict[str, List[Dict[str, str]]] = {"pdf": [], "web": [], "folder": []}
-        self.popular_sites: List[str] = string_list(POPULAR_SITES_KEY, DEFAULT_POPULAR_SITES)
+        self.history: dict[str, list[dict[str, str]]] = {"pdf": [], "web": [], "folder": []}
+        self.popular_sites: list[str] = string_list(POPULAR_SITES_KEY, DEFAULT_POPULAR_SITES)
         self.load()
 
     def load(self) -> None:
@@ -261,7 +261,7 @@ class HistoryManager:
         """
         if os.path.exists(self.path):
             try:
-                with open(self.path, "r", encoding="utf-8") as f:
+                with open(self.path, encoding="utf-8") as f:
                     data = json.load(f)
                 if isinstance(data, list):
                     data = {"web": data}
@@ -274,7 +274,7 @@ class HistoryManager:
                 self.history = {"pdf": [], "web": [], "folder": []}
 
     @staticmethod
-    def _entry(value) -> Optional[Dict[str, str]]:
+    def _entry(value) -> dict[str, str] | None:
         """Normalises a stored item; older versions kept bare paths without a time."""
         if isinstance(value, dict) and value.get("path"):
             return {"path": str(value["path"]), "timestamp": str(value.get("timestamp", ""))}
@@ -301,7 +301,7 @@ class HistoryManager:
         self.history[item_type] = entries[:500]
         self.save()
 
-    def get_model_data(self) -> List[str]:
+    def get_model_data(self) -> list[str]:
         """Web history plus the default popular sites, for address-bar completion."""
         combined = self.get_list("web")
         for site in self.popular_sites:
@@ -309,11 +309,11 @@ class HistoryManager:
                 combined.append(site)
         return combined
 
-    def get_list(self, item_type: str) -> List[str]:
+    def get_list(self, item_type: str) -> list[str]:
         """The paths or URLs of a category ('pdf', 'web' or 'folder'), newest first."""
         return [e["path"] for e in self.history.get(item_type, [])]
 
-    def get_entries(self, item_type: str) -> List[Dict[str, str]]:
+    def get_entries(self, item_type: str) -> list[dict[str, str]]:
         """
         Retrieves a category's entries, newest first, as dicts with 'path' and
         'timestamp' (ISO 8601, empty for items recorded by older versions).
@@ -329,7 +329,7 @@ class DownloadManager(QDialog):
     Persists download history across sessions.
     """
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Downloads")
         self.resize(700, 400)
@@ -358,7 +358,7 @@ class DownloadManager(QDialog):
         btn_layout.addWidget(btn_clear)
         layout.addLayout(btn_layout)
 
-        self.downloads: List[Dict[str, Any]] = []
+        self.downloads: list[dict[str, Any]] = []
         self._load_persistent_entries()
 
     def add_download(self, download_item: QWebEngineDownloadRequest) -> None:
@@ -453,7 +453,7 @@ class DownloadManager(QDialog):
         """
         Iterates through the table and removes any rows representing completed, cancelled, or failed downloads.
         """
-        rows_to_remove: List[int] = []
+        rows_to_remove: list[int] = []
         for i in range(self.table.rowCount()):
             status_item = self.table.item(i, 1)
             if status_item and status_item.text() in [
@@ -532,7 +532,7 @@ class DownloadManager(QDialog):
             return
 
         try:
-            with open(self._persist_path, "r", encoding="utf-8") as f:
+            with open(self._persist_path, encoding="utf-8") as f:
                 entries = json.load(f)
         except (json.JSONDecodeError, OSError):
             return
@@ -557,7 +557,7 @@ class DownloadManager(QDialog):
         """
         Extracts current table state and writes the download history to disk.
         """
-        out: List[Dict[str, str]] = []
+        out: list[dict[str, str]] = []
         for i in range(self.table.rowCount()):
             file_item = self.table.item(i, 0)
             status_item = self.table.item(i, 1)
@@ -598,7 +598,7 @@ class PasswordDialog(QDialog):
     previous password attempt failed.
     """
 
-    def __init__(self, parent=None, error_msg: Optional[str] = None):
+    def __init__(self, parent=None, error_msg: str | None = None):
         """
         error_msg, if given, is shown in red above the field (after a wrong password,
         for example).
@@ -649,7 +649,7 @@ class PasswordDialog(QDialog):
 
 
 class DownloadProgressBar(QProgressBar):
-    def __init__(self, dark: bool, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, dark: bool, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setTextVisible(False)
         self.set_dark(dark)
@@ -692,7 +692,7 @@ class YtDlpDownloadManager(QDialog):
     Uses a dynamic QTreeWidget to nest Playlists -> Videos -> Individual File Stream Parts.
     """
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("yt-dlp Downloads")
         self.resize(900, 450)
@@ -742,7 +742,7 @@ class YtDlpDownloadManager(QDialog):
         if not bytes_val or bytes_val <= 0:
             return "0 B"
         sizes = ["B", "KB", "MB", "GB", "TB"]
-        i = int(math.floor(math.log(bytes_val, 1024)))
+        i = math.floor(math.log(bytes_val, 1024))
         p = math.pow(1024, i)
         s = round(bytes_val / p, 2)
         return f"{s} {sizes[i]}"

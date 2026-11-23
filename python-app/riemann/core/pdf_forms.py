@@ -15,11 +15,10 @@ allowed. Values for such files stay in the reader until a copy is saved.
 """
 
 import io
-from typing import Dict, Optional, Tuple, Union
 
 from .pdf_annotations import _is_signed, collect_new_objects, incremental_save
 
-Value = Union[str, bool]
+Value = str | bool
 
 
 def _field_dict(annot):
@@ -34,7 +33,7 @@ def _field_dict(annot):
 
 
 def write_form_values(
-    path: str, values: Dict[Tuple[int, int], Value], dest: Optional[str] = None
+    path: str, values: dict[tuple[int, int], Value], dest: str | None = None
 ) -> str:
     """
     Stores values in the PDF at path (or in a copy at dest).
@@ -90,7 +89,7 @@ def write_form_values(
 
         if not touched:
             return "none"
-        objects: Dict[Tuple[int, int], object] = {}
+        objects: dict[tuple[int, int], object] = {}
         for obj in touched:
             if obj.is_indirect:
                 collect_new_objects(objects, obj, first_new)
@@ -103,12 +102,12 @@ def write_form_values(
     return "ok" if written else "changed"
 
 
-def read_form_values(path: str) -> Dict[str, Value]:
+def read_form_values(path: str) -> dict[str, Value]:
     """Field name -> value, for checking what a file holds."""
     import pikepdf
     from pikepdf.form import CheckboxField, Form, RadioButtonGroup
 
-    out: Dict[str, Value] = {}
+    out: dict[str, Value] = {}
     with pikepdf.open(path) as pdf:
         for name, wrapper in Form(pdf).items():
             if isinstance(wrapper, CheckboxField):

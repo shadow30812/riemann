@@ -33,7 +33,6 @@ the low-resolution render is the fallback for older builds.
 """
 
 import sys
-from typing import Dict, Optional, Tuple
 
 import shiboken6
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer
@@ -49,12 +48,12 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QCheckBox, QHBoxLayout, QLineEdit, QWidget
 
 from ....core.constants import FALLBACK_PAGE_SIZE, ViewMode, ZoomMode
-from ..render_worker import MAX_PAGE_PIXELS, PAGE_CACHE, page_image
-from ..utils import generate_reflow_html
-from ..widgets import PageWidget
 from ....core.log import log
 from ...palette import CONTENT, qcolor, tokens
+from ..render_worker import MAX_PAGE_PIXELS, PAGE_CACHE, page_image
 from ..replace_text import qt_families, themed
+from ..utils import generate_reflow_html
+from ..widgets import PageWidget
 from .host import ReaderHostBase
 
 # Thumbnails are rendered at this fraction of the target resolution and shown
@@ -464,7 +463,7 @@ class RenderingMixin(ReaderHostBase):
         widget.has_full_page = True
         widget.setPixmap(pix)
 
-    def invalidate_page_cache(self, idx: Optional[int] = None) -> None:
+    def invalidate_page_cache(self, idx: int | None = None) -> None:
         """Forgets cached renders after the PDF content itself changed."""
         owner = self._render_owner()
         if idx is None:
@@ -525,7 +524,9 @@ class RenderingMixin(ReaderHostBase):
                     ctrl = QLineEdit(self.page_widgets[idx])
                     ctrl.setText(value)
                     t = tokens(self.theme_mode != 0)
-                    ctrl.setStyleSheet(f"QLineEdit {{ background: {t['accent_soft']}; border: 1px solid {t['accent']}; }}")
+                    ctrl.setStyleSheet(
+                        f"QLineEdit {{ background: {t['accent_soft']}; border: 1px solid {t['accent']}; }}"
+                    )
                     ctrl.textChanged.connect(
                         lambda v, k=cache_key: self._record_form_value(k, v)
                     )
@@ -633,7 +634,7 @@ class RenderingMixin(ReaderHostBase):
         painter.end()
 
     def _draw_annotation(
-        self, painter: QPainter, anno: Dict, lw: float, lh: float, scale: float
+        self, painter: QPainter, anno: dict, lw: float, lh: float, scale: float
     ) -> None:
         """Draws one annotation; its positions are fractions of the page size (lw, lh)."""
         atype = anno.get("type", "note")
@@ -747,10 +748,7 @@ class RenderingMixin(ReaderHostBase):
         elif atype == "markup" and "rects" in anno:
             subtype = anno.get("subtype", "highlight")
             c_val = anno.get("color", (255, 255, 0))
-            if isinstance(c_val, list) or isinstance(c_val, tuple):
-                color = QColor(*c_val)
-            else:
-                color = QColor(c_val)
+            color = QColor(*c_val) if isinstance(c_val, (list, tuple)) else QColor(c_val)
 
             for l, t, r, b in anno["rects"]:
                 x1, x2 = sorted((l * lw, r * lw))
@@ -857,7 +855,7 @@ class RenderingMixin(ReaderHostBase):
             for i in range(probe_limit):
                 if exact_size is not None:
                     pw, ph = self.current_doc.get_page_size(i)
-                    w, h = int(round(pw)), int(round(ph))
+                    w, h = round(pw), round(ph)
                 else:
                     res = self.current_doc.render_page(i, test_scale, 0)
                     w = int(res.width / test_scale)
@@ -876,7 +874,7 @@ class RenderingMixin(ReaderHostBase):
         except Exception:
             self._cached_base_size = FALLBACK_PAGE_SIZE
 
-    def _get_target_page_size(self) -> Tuple[int, int]:
+    def _get_target_page_size(self) -> tuple[int, int]:
         """The page size in logical pixels at the current scale."""
         if not self._cached_base_size:
             self._probe_base_page_size()
@@ -909,7 +907,7 @@ class RenderingMixin(ReaderHostBase):
         for _ in range(2):
             QApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
 
-    def _page_top_y(self, idx: int) -> Optional[int]:
+    def _page_top_y(self, idx: int) -> int | None:
         """Returns the y offset of a page inside the scroll content, if laid out."""
         widget = self.page_widgets.get(idx)
         if widget is None or not shiboken6.isValid(widget):
@@ -919,7 +917,7 @@ class RenderingMixin(ReaderHostBase):
             return None
         return row.y() + widget.y()
 
-    def _page_anchor(self, y: float) -> Tuple[int, float]:
+    def _page_anchor(self, y: float) -> tuple[int, float]:
         """
         Finds the page under content position y and how far down it lies,
         as (page index, fraction of page height).

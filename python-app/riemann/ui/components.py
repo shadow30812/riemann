@@ -36,7 +36,6 @@ it as a second caret. Any partial repaint is widened to the whole field.
 import os
 import shutil
 import subprocess
-from typing import Optional
 
 import shiboken6
 from PySide6.QtCore import QEvent, QMimeData, QPoint, QRect, QSize, Qt, QUrl, Signal
@@ -64,9 +63,9 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
-    QLineEdit,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QMenu,
     QMessageBox,
     QPushButton,
@@ -80,10 +79,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .palette import CONTENT, menu_style, qcolor, tokens
 from ..core.assets import icon_path
 from ..core.binary import program_kind
-
+from .palette import CONTENT, menu_style, qcolor, tokens
 
 _BROWSERS = [
     ("Google Chrome", ["google-chrome-stable", "google-chrome", "chrome"]),
@@ -109,7 +107,7 @@ class RepaintingLineEdit(QLineEdit):
         super().paintEvent(event)
 
 
-def _launch(parent: Optional[QWidget], cmd: str, arg: str) -> None:
+def _launch(parent: QWidget | None, cmd: str, arg: str) -> None:
     try:
         subprocess.Popen([cmd, arg])
     except Exception as e:
@@ -117,7 +115,7 @@ def _launch(parent: Optional[QWidget], cmd: str, arg: str) -> None:
 
 
 def populate_open_with_menu(
-    menu: QMenu, target: str, parent: Optional[QWidget] = None
+    menu: QMenu, target: str, parent: QWidget | None = None
 ) -> None:
     """
     Fills menu with ways to open target outside Riemann: the system default
@@ -172,7 +170,7 @@ def populate_open_with_menu(
 
 
 def build_open_with_menu(
-    parent: Optional[QWidget], target: str, title: str = "Open in External Application"
+    parent: QWidget | None, target: str, title: str = "Open in External Application"
 ) -> QMenu:
     """A submenu offering populate_open_with_menu's choices for target."""
     menu = QMenu(title, parent)
@@ -253,7 +251,7 @@ class DraggableTabWidget(QTabWidget):
     and accepts file drops to open new documents.
     """
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setAcceptDrops(True)
         self.setTabBar(DraggableTabBar(self))
@@ -364,7 +362,7 @@ class DraggableTabBar(QTabBar):
             return QSize(self.VERTICAL_TAB_WIDTH, self._vertical_tab_height())
         return super().minimumTabSizeHint(index)
 
-    def _tab_close_button(self, index: int) -> Optional[QWidget]:
+    def _tab_close_button(self, index: int) -> QWidget | None:
         for side in (QTabBar.ButtonPosition.RightSide, QTabBar.ButtonPosition.LeftSide):
             btn = self.tabButton(index, side)
             if btn is not None:
@@ -483,10 +481,7 @@ class DraggableTabBar(QTabBar):
             return
 
         pos = event.position().toPoint()
-        if self._vertical:
-            pulled = not (-40 <= pos.x() <= self.width() + 40)
-        else:
-            pulled = not (-30 <= pos.y() <= self.height() + 30)
+        pulled = not -40 <= pos.x() <= self.width() + 40 if self._vertical else not -30 <= pos.y() <= self.height() + 30
         if not pulled:
             return
 
@@ -663,7 +658,7 @@ class AnnotationToolbar(QWidget):
     redo_requested = Signal()
     apply_redactions_requested = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFixedHeight(45)
         self.update_theme(False)
@@ -801,19 +796,23 @@ class AnnotationToolbar(QWidget):
         bg, fg, menu_bg, border = t["raised"], t["text"], t["surface"], t["border"]
         btn_hover, btn_checked = t["border"], t["accent_soft"]
 
-        self.setStyleSheet(f"""
+        self.setStyleSheet(
+            f"""
             QWidget {{ background-color: {bg}; border-bottom: 1px solid {border}; color: {fg}; }}
             QToolButton {{ border: none; padding: 4px; border-radius: 4px; font-size: 16px; color: {fg}; }}
             QToolButton:hover {{ background-color: {btn_hover}; }}
-            QToolButton:checked {{ background-color: {btn_checked}; border: 1px solid {t['accent']}; }}
+            QToolButton:checked {{ background-color: {btn_checked}; border: 1px solid {t["accent"]}; }}
             QToolButton::menu-indicator {{ image: none; }}
-            QSpinBox {{ background-color: {menu_bg}; color: {fg}; selection-background-color: {t['accent']}; selection-color: {t['accent_text']}; }}
-        """ + menu_style(t))
+            QSpinBox {{ background-color: {menu_bg}; color: {fg}; selection-background-color: {t["accent"]};
+                selection-color: {t["accent_text"]}; }}
+        """
+            + menu_style(t)
+        )
 
     def _update_icons(self) -> None:
         is_dark = False
         current_parent = self.parent()
-        
+
         while current_parent:
             if hasattr(current_parent, "theme_mode"):
                 is_dark = current_parent.theme_mode != 0

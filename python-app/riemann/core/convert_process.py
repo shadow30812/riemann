@@ -30,7 +30,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-from typing import Optional
 
 from .assets import PACKAGE_DIR, executable, is_frozen
 from .processes import NO_WINDOW
@@ -63,7 +62,7 @@ def _child_env() -> dict:
     env = dict(os.environ)
     if not is_frozen():
         paths = [p for p in sys.path if p and os.path.isdir(p)]
-        env["PYTHONPATH"] = os.pathsep.join([os.path.dirname(PACKAGE_DIR)] + paths)
+        env["PYTHONPATH"] = os.pathsep.join([os.path.dirname(PACKAGE_DIR), *paths])
     return env
 
 
@@ -74,7 +73,7 @@ class Conversion:
         if kind not in CONVERTERS:
             raise ConvertError(f"Riemann has no converter for {kind}.")
         self.kind, self.path, self.timeout = kind, path, timeout
-        self._proc: Optional[subprocess.Popen] = None
+        self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._cancelled = False
 
@@ -100,14 +99,16 @@ class Conversion:
             except subprocess.TimeoutExpired:
                 self._proc.kill()
                 self._proc.wait()
-                raise ConvertError(f"Reading the file took more than {int(self.timeout)} seconds, so Riemann stopped.")
+                raise ConvertError(
+                    f"Reading the file took more than {int(self.timeout)} seconds, so Riemann stopped."
+                ) from None
             if self._cancelled:
                 raise ConvertError("Cancelled.")
             try:
                 with open(out, encoding="utf-8") as f:
                     answer = json.load(f)
-            except (OSError, ValueError):
-                raise ConvertError(f"The file couldn't be read (the reader stopped with code {code}).")
+            except (OSError, ValueError) as error:
+                raise ConvertError(f"The file couldn't be read (the reader stopped with code {code}).") from error
         finally:
             try:
                 os.remove(out)

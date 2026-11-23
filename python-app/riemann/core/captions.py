@@ -20,11 +20,11 @@ def get_whisper_model():
                 cpu_threads=8,
             )
 
-        except ImportError:
+        except ImportError as error:
             raise RuntimeError(
                 "The 'faster-whisper' module is not installed. "
                 "Live captioning requires this module to be available in the environment."
-            )
+            ) from error
     return _whisper_model
 
 
@@ -34,7 +34,7 @@ def process_audio_chunk(audio_chunk: np.ndarray):
     """
     model = get_whisper_model()
     context_prompt = " ".join(_text_memory)
-    segments, info = model.transcribe(
+    segments, _info = model.transcribe(
         audio_chunk,
         beam_size=1,
         task="translate",

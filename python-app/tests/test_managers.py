@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from PySide6.QtWidgets import QApplication
+
 from riemann.core.managers import (
     BookmarksManager,
     DownloadManager,
@@ -133,7 +134,7 @@ def test_download_manager_persistence(mock_app_data):
     manager._persist_entries()
 
     assert os.path.exists(manager._persist_path)
-    with open(manager._persist_path, "r", encoding="utf-8") as f:
+    with open(manager._persist_path, encoding="utf-8") as f:
         data = json.load(f)
         assert len(data) == 1
         assert data[0]["file_name"] == "test.pdf"

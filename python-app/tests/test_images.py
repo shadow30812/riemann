@@ -30,7 +30,9 @@ from riemann.ui.viewers.image_tab import FIT_HEIGHT, FIT_PAGE, FIT_WIDTH, folder
 
 LEFT_OUT = {".eps", ".ps", ".wmf", ".emf", ".grib", ".bufr", ".h5", ".hdf", ".mpeg", ".mpg", ".iim"}
 QT_ONLY = {".svg", ".svgz", ".wbmp"}
-SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="blue"/></svg>'
+SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="blue"/></svg>'
+)
 
 
 def wait_for(condition, timeout=10.0):
@@ -168,7 +170,11 @@ def test_save_as_pdf_writes_every_page_and_keeps_svg_size(qapp, tmp_path):
 def test_folder_images_are_in_natural_order(tmp_path):
     for name in ("img10.png", "img2.png", "IMG1.PNG", "notes.txt"):
         (tmp_path / name).write_bytes(b"")
-    assert [os.path.basename(p) for p in folder_images(str(tmp_path / "img2.png"))] == ["IMG1.PNG", "img2.png", "img10.png"]
+    assert [os.path.basename(p) for p in folder_images(str(tmp_path / "img2.png"))] == [
+        "IMG1.PNG",
+        "img2.png",
+        "img10.png",
+    ]
 
 
 def make_folder(tmp_path):

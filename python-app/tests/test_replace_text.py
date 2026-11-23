@@ -8,11 +8,11 @@ import pikepdf
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QRect
 from PySide6.QtWidgets import QApplication
+from text_fixtures import all_stream_bytes, make_text_pdf
 
 from riemann.core import annotation_store, pdf_annotations
 from riemann.ui.reader import replace_text
 from riemann.ui.reader.tab import ReaderTab
-from text_fixtures import all_stream_bytes, make_text_pdf
 
 
 @pytest.fixture(scope="session")
@@ -77,7 +77,7 @@ def test_an_overlay_is_sized_from_the_selection_and_widened_for_longer_text():
     rect = [100 / 612, 1 - 720 / 792, 110 / 612, 1 - 692 / 792]
     overlay = replace_text.overlay_from_selection([rect], styles, (612.0, 792.0), "A much longer line", "#fafafa")
     assert overlay["font"] == "Times-Roman" and overlay["size"] == 24.0 and overlay["color"] == "#112233"
-    l, t, r, b = overlay["rects"][0]
+    l, t, r, _b = overlay["rects"][0]
     assert l == pytest.approx(rect[0]) and t == pytest.approx(rect[1])
     assert (r - l) * 612 >= replace_text.text_width("A much longer line", "Times-Roman", 24)
 
@@ -144,7 +144,12 @@ def secret_rect(path):
     doc = riemann_core.PdfEngine().load_document(path, None)
     boxes = [b for t, b in doc.get_char_boxes(0) if t.strip()][4:10]
     del doc
-    return (boxes[0][0] + 1) / 612, 1 - max(b[1] for b in boxes) / 792, (boxes[-1][2] - 1) / 612, 1 - min(b[3] for b in boxes) / 792
+    return (
+        (boxes[0][0] + 1) / 612,
+        1 - max(b[1] for b in boxes) / 792,
+        (boxes[-1][2] - 1) / 612,
+        1 - min(b[3] for b in boxes) / 792,
+    )
 
 
 def dialog(text, remove):

@@ -5,7 +5,6 @@ that tab to the front, optionally at a given section ("permissions" in
 Settings, "videos" in Downloads).
 """
 
-from typing import Optional
 
 from PySide6.QtWidgets import QTabWidget, QWidget
 
@@ -13,7 +12,7 @@ from ..ui.system import PAGES
 
 
 class SystemMixin:
-    def find_system_tab(self, page: str) -> tuple[Optional[QTabWidget], int]:
+    def find_system_tab(self, page: str) -> tuple[QTabWidget | None, int]:
         for tabs in (self.tabs_main, self.tabs_side):
             for i in range(tabs.count()):
                 w = tabs.widget(i)
@@ -21,7 +20,7 @@ class SystemMixin:
                     return tabs, i
         return None, -1
 
-    def open_system_page(self, page: str, section: str = "", target: Optional[QTabWidget] = None) -> QWidget:
+    def open_system_page(self, page: str, section: str = "", target: QTabWidget | None = None) -> QWidget:
         """Shows the System tab for page, creating it if this window has none."""
         tabs, index = self.find_system_tab(page)
         if tabs is not None:

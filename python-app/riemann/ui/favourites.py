@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
 )
+
 from ..core.settings import (
     FAVOURITE_FOLDERS_KEY,
     app_settings,

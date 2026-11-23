@@ -41,11 +41,11 @@ from PySide6.QtWidgets import (
     QSlider,
     QVBoxLayout,
 )
+
+from ..ui.palette import LIGHT, dialog_icon
 from .log import log
 from .processes import NO_WINDOW
-from .settings import app_settings, get_dialog_directory, save_last_directory
-from ..ui.palette import LIGHT, dialog_icon
-from .settings import DEFAULT_DIR_KEY, LAST_DIR_KEY
+from .settings import DEFAULT_DIR_KEY, LAST_DIR_KEY, app_settings, get_dialog_directory, save_last_directory
 
 
 class DocumentConverter:
@@ -100,14 +100,16 @@ class DocumentConverter:
         """Each page as a box of its size in points, with the text placed where it sits on the page."""
         doc = _open_pdf(pdf_path)
         with open(output_path, "w", encoding="utf-8") as f:
-            f.write("<!DOCTYPE html>\n<html><head><meta charset='utf-8'><style>"
-                    f".page{{position:relative;margin:12px auto;border:1px solid {LIGHT['border_strong']};overflow:hidden}}"
-                    ".page span{position:absolute;white-space:pre;line-height:1}"
-                    "</style></head><body>\n")
+            f.write(
+                "<!DOCTYPE html>\n<html><head><meta charset='utf-8'><style>"
+                f".page{{position:relative;margin:12px auto;border:1px solid {LIGHT['border_strong']};overflow:hidden}}"
+                ".page span{position:absolute;white-space:pre;line-height:1}"
+                "</style></head><body>\n"
+            )
             for page_num in range(doc.page_count):
                 width, height = doc.get_page_size(page_num)
                 f.write(f"<div class='page' style='width:{width:.1f}pt;height:{height:.1f}pt'>\n")
-                for text, (left, top, right, bottom) in doc.get_text_segments(page_num):
+                for text, (left, top, _right, bottom) in doc.get_text_segments(page_num):
                     if not text.strip():
                         continue
                     size = max(1.0, top - bottom)
@@ -698,7 +700,7 @@ class CaptionGeneratorWorker(QThread):
 
             self.progress.emit("Transcribing audio (this may take a few minutes)...")
 
-            segments, info = model.transcribe(
+            segments, _info = model.transcribe(
                 self.video_path,
                 beam_size=1,
                 task="translate",
@@ -745,7 +747,7 @@ class CaptionGeneratorWorker(QThread):
                 False, "FFmpeg failed. Ensure it is installed on your system."
             )
         except Exception as e:
-            self.finished.emit(False, f"An error occurred: {str(e)}")
+            self.finished.emit(False, f"An error occurred: {e!s}")
 
 
 def unused_path(path: str) -> str:

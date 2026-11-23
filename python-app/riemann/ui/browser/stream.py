@@ -20,8 +20,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..threads import track
 from ...core.settings import app_settings, get_dialog_directory, save_last_directory
+from ..threads import track
 from .ytdlp import YtDlpStreamWorker
 
 

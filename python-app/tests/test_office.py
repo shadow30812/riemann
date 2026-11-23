@@ -27,11 +27,12 @@ from riemann.core.office import OfficeConversion, OfficeError, find_office
 from riemann.core.settings import OFFICE_PATH_KEY, app_settings
 
 CORPUS_PDF = os.path.join(os.path.dirname(__file__), "..", "..", "benchmarks", "corpus", "attention.pdf")
-FAKE = '''#!{python}
+FAKE = """#!{python}
 import json, os, shutil, sys, time
 args = sys.argv[1:]
 with open(os.environ["FAKE_SOFFICE_LOG"], "a") as log:
-    log.write(json.dumps({{"args": args, "env": {{k: os.environ.get(k) for k in ("LD_LIBRARY_PATH", "PYTHONPATH", "SAL_USE_VCLPLUGIN")}}}}) + "\\n")
+    seen = ("LD_LIBRARY_PATH", "PYTHONPATH", "SAL_USE_VCLPLUGIN")
+    log.write(json.dumps({{"args": args, "env": {{k: os.environ.get(k) for k in seen}}}}) + "\\n")
 mode = os.environ.get("FAKE_SOFFICE_MODE", "ok")
 if mode == "sleep":
     time.sleep(60)
@@ -45,7 +46,7 @@ if mode == "ok" and "--convert-to" in args:
     out = args[args.index("--outdir") + 1]
     stem = os.path.splitext(os.path.basename(args[-1]))[0]
     shutil.copy({pdf!r}, os.path.join(out, stem + "." + args[args.index("--convert-to") + 1]))
-'''
+"""
 
 
 def wait_for(condition, timeout=20.0):
@@ -127,7 +128,8 @@ def docx(path, text="Hello", external_image=""):
         )
         z.writestr(
             "word/document.xml",
-            f'<?xml version="1.0"?><w:document {ns}><w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p>{picture}</w:body></w:document>',
+            '<?xml version="1.0"?><w:document '
+            f'{ns}><w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p>{picture}</w:body></w:document>',
         )
         z.writestr(
             "word/_rels/document.xml.rels",
@@ -145,9 +147,15 @@ def odf(path, mimetype):
 
 def test_office_files_are_known_by_name_and_by_content(tmp_path):
     for name, kind, cls in (
-        ("a.docx", "document", "Word"), ("b.DOC", "document", "Word"), ("c.odt", "document", "Word"),
-        ("d.rtf", "document", "Word"), ("e.pptx", "presentation", "Slides"), ("f.odp", "presentation", "Slides"),
-        ("g.xlsx", "spreadsheet", "Spreadsheet"), ("h.ods", "spreadsheet", "Spreadsheet"), ("i.odg", "drawing", "Slides"),
+        ("a.docx", "document", "Word"),
+        ("b.DOC", "document", "Word"),
+        ("c.odt", "document", "Word"),
+        ("d.rtf", "document", "Word"),
+        ("e.pptx", "presentation", "Slides"),
+        ("f.odp", "presentation", "Slides"),
+        ("g.xlsx", "spreadsheet", "Spreadsheet"),
+        ("h.ods", "spreadsheet", "Spreadsheet"),
+        ("i.odg", "drawing", "Slides"),
     ):
         assert document_kind(name) == "office"
         assert office_type(name) == kind
@@ -223,7 +231,11 @@ def test_libreoffice_runs_headless_in_a_locked_down_profile_of_its_own(fake, tmp
     assert "--headless" in args and args[-1] == os.path.abspath(source)
     assert call["env"] == {"LD_LIBRARY_PATH": None, "PYTHONPATH": None, "SAL_USE_VCLPLUGIN": "svp"}
     settings = open(os.path.join(office.profile_dir(), "user", "registrymodifications.xcu")).read()
-    for name, value in (("BlockUntrustedRefererLinks", "true"), ("DisableMacrosExecution", "true"), ("MacroSecurityLevel", "3")):
+    for name, value in (
+        ("BlockUntrustedRefererLinks", "true"),
+        ("DisableMacrosExecution", "true"),
+        ("MacroSecurityLevel", "3"),
+    ):
         assert f'oor:name="{name}" oor:op="fuse"><value>{value}</value>' in settings
 
 
@@ -239,7 +251,13 @@ def test_a_failed_slow_or_cancelled_conversion_says_so(fake, tmp_path, monkeypat
     assert time.time() - start < 10
     conversion = OfficeConversion(source, office=fake.found)
     errors = []
-    thread = threading.Thread(target=lambda: errors.append(pytest.raises(OfficeError, conversion.run).value))
+
+    def run():
+        with pytest.raises(OfficeError) as raised:
+            conversion.run()
+        errors.append(raised.value)
+
+    thread = threading.Thread(target=run)
     thread.start()
     assert wait_for(lambda: conversion._proc is not None, 10)
     conversion.cancel()
@@ -264,7 +282,11 @@ def test_cancelling_stops_the_process_libreoffice_starts(fake, tmp_path, monkeyp
     monkeypatch.setenv("FAKE_SOFFICE_MODE", "child")
     monkeypatch.setenv("FAKE_SOFFICE_CHILD", str(pid_file))
     conversion = OfficeConversion(source, office=fake.found)
-    thread = threading.Thread(target=lambda: pytest.raises(OfficeError, conversion.run))
+    def run():
+        with pytest.raises(OfficeError):
+            conversion.run()
+
+    thread = threading.Thread(target=run)
     thread.start()
     assert wait_for(lambda: pid_file.exists() and pid_file.read_text(), 10)
     child = int(pid_file.read_text())
@@ -400,9 +422,11 @@ def test_the_tab_updates_when_the_file_is_saved_elsewhere(window, tmp_path, fake
     wait_for(lambda: False, 0.5)
     assert loads == []
     assert len(fake.calls()) == 2
-    with patch.object(office, "open_in_office") as opened:
-        with patch("riemann.ui.reader.mixins.document.open_in_office", opened):
-            tab.edit_in_office()
+    with (
+        patch.object(office, "open_in_office") as opened,
+        patch("riemann.ui.reader.mixins.document.open_in_office", opened),
+    ):
+        tab.edit_in_office()
     opened.assert_called_once()
     tab.cleanup()
 

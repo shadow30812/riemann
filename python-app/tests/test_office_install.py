@@ -40,7 +40,12 @@ def have(*tools):
 def test_os_release_is_read_with_its_quotes_removed(tmp_path):
     path = tmp_path / "os-release"
     path.write_text('NAME="Rocky Linux"\nID="rocky"\nID_LIKE="rhel centos fedora"\n# comment\nVERSION_ID=10.2\n')
-    assert os_release(str(path)) == {"NAME": "Rocky Linux", "ID": "rocky", "ID_LIKE": "rhel centos fedora", "VERSION_ID": "10.2"}
+    assert os_release(str(path)) == {
+        "NAME": "Rocky Linux",
+        "ID": "rocky",
+        "ID_LIKE": "rhel centos fedora",
+        "VERSION_ID": "10.2",
+    }
     assert os_release(str(tmp_path / "missing")) == {}
 
 
@@ -66,8 +71,12 @@ def test_linux_uses_the_system_packages_first_then_flatpak(release, tool):
 
 
 def test_without_pkexec_or_a_known_system_only_flatpak_is_offered():
-    assert [p.name for p in install_plans("linux", {"ID": "fedora"}, have("dnf", "flatpak"))] == ["Flatpak from Flathub"]
-    assert [p.name for p in install_plans("linux", {"ID": "gentoo"}, have("pkexec", "flatpak"))] == ["Flatpak from Flathub"]
+    assert [p.name for p in install_plans("linux", {"ID": "fedora"}, have("dnf", "flatpak"))] == [
+        "Flatpak from Flathub"
+    ]
+    assert [p.name for p in install_plans("linux", {"ID": "gentoo"}, have("pkexec", "flatpak"))] == [
+        "Flatpak from Flathub"
+    ]
     assert install_plans("linux", {"ID": "gentoo"}, have()) == []
 
 
@@ -195,7 +204,9 @@ def test_an_office_file_opened_before_the_window_shows_waits_for_it(qtbot, tmp_p
     win = RiemannWindow(incognito=False, restore_session=False)
     qtbot.addWidget(win)
     shown = []
-    with patch("riemann.ui.office_install.offer_office", side_effect=lambda *a, **k: shown.append(win.isVisible()) or "basic"):
+    with patch(
+        "riemann.ui.office_install.offer_office", side_effect=lambda *a, **k: shown.append(win.isVisible()) or "basic"
+    ):
         assert win._open_document(make_docx(tmp_path / "a.docx"), preview=False) is None
         assert shown == []
         win.show()

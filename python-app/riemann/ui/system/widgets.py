@@ -302,11 +302,22 @@ class ToolbarLayoutEditor(QWidget):
             self.combo.addItem(label, key)
         self.combo.setCurrentIndex(max(0, self.combo.findData(tl.current_layout_name())))
         self.combo.currentIndexChanged.connect(self._layout_chosen)
-        setting_row(layout, "Layout", self.combo, "Default keeps the page and zoom at the top, tools on a rail at the right, and floats the page controls in full screen.")
+        setting_row(
+            layout,
+            "Layout",
+            self.combo,
+            "Default keeps the page and zoom at the top, tools on a rail at the right, and floats the page controls "
+            "in full screen.",
+        )
         self.cb_rail = QCheckBox()
         self.cb_rail.setChecked(not self.settings.value(tl.RAIL_HIDDEN_KEY, False, type=bool))
         self.cb_rail.toggled.connect(self._rail_toggled)
-        setting_row(layout, "Show the side rail", self.cb_rail, "Right-click the rail to hide it; its buttons move into the menus.")
+        setting_row(
+            layout,
+            "Show the side rail",
+            self.cb_rail,
+            "Right-click the rail to hide it; its buttons move into the menus.",
+        )
         self.custom = QWidget()
         self.custom.setObjectName("settingRow")
         custom_layout = QVBoxLayout(self.custom)

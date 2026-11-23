@@ -72,10 +72,9 @@ class SearchMixin(ReaderHostBase):
                 anno_match = False
                 if str(idx) in self.annotations:
                     for anno in self.annotations[str(idx)]:
-                        if anno.get("type") in ("note", "text") and "text" in anno:
-                            if term in anno["text"].lower():
-                                anno_match = True
-                                break
+                        if anno.get("type") in ("note", "text") and "text" in anno and term in anno["text"].lower():
+                            anno_match = True
+                            break
                 if term in text or anno_match:
                     self.current_page_index = idx
                     try:

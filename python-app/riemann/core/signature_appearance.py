@@ -16,7 +16,6 @@ never modified.
 """
 
 import io
-from typing import Dict, List, Optional, Tuple
 
 import pikepdf
 
@@ -29,7 +28,7 @@ _TICK = "0.42 0.76 0.44"
 _CROSS = "0.90 0.42 0.40"
 
 
-def _layer_parents(xobject, depth: int = 0) -> List[pikepdf.Dictionary]:
+def _layer_parents(xobject, depth: int = 0) -> list[pikepdf.Dictionary]:
     """XObject resource dictionaries, nested inside xobject, that name n1 or n4."""
     found = []
     resources = xobject.get("/Resources")
@@ -47,7 +46,7 @@ def _layer_parents(xobject, depth: int = 0) -> List[pikepdf.Dictionary]:
     return found
 
 
-def _bbox(stream) -> Tuple[float, float, float, float]:
+def _bbox(stream) -> tuple[float, float, float, float]:
     try:
         x1, y1, x2, y2 = (float(v) for v in stream.get("/BBox"))
         return min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)
@@ -55,7 +54,7 @@ def _bbox(stream) -> Tuple[float, float, float, float]:
         return 0.0, 0.0, 100.0, 100.0
 
 
-def _icon(status: str, box: Tuple[float, float, float, float]) -> bytes:
+def _icon(status: str, box: tuple[float, float, float, float]) -> bytes:
     x0, y0, x1, y1 = box
     w, h = x1 - x0, y1 - y0
     side = min(w, h) * 0.8
@@ -74,7 +73,7 @@ def _icon(status: str, box: Tuple[float, float, float, float]) -> bytes:
     return f"q {color} RG {width:.2f} w 1 J 1 j {path} Q".encode()
 
 
-def _form_to_rect(appearance, rect: Tuple[float, float, float, float]) -> str:
+def _form_to_rect(appearance, rect: tuple[float, float, float, float]) -> str:
     """The cm that places a form XObject in a rectangle (PDF 32000 12.5.5)."""
     bx0, by0, bx1, by1 = _bbox(appearance)
     try:
@@ -91,7 +90,7 @@ def _form_to_rect(appearance, rect: Tuple[float, float, float, float]) -> str:
     return f"{sx:.6f} 0 0 {sy:.6f} {rx0 - min(xs) * sx:.4f} {ry0 - min(ys) * sy:.4f} cm"
 
 
-def _status_pdf(src: pikepdf.Pdf, index: int, widget, rect, status: str) -> Optional[bytes]:
+def _status_pdf(src: pikepdf.Pdf, index: int, widget, rect, status: str) -> bytes | None:
     """
     The page cropped to the field, without its annotations, with the
     status appearance drawn on top. Keeping the page content underneath
@@ -152,7 +151,7 @@ def _is_signature(widget) -> bool:
     return False
 
 
-def status_appearances(path: str, statuses: Dict[str, str]) -> List[dict]:
+def status_appearances(path: str, statuses: dict[str, str]) -> list[dict]:
     """
     Returns {"page", "field", "rect", "pdf"} for each visible signature
     field whose stored appearance has validity layers and whose status in

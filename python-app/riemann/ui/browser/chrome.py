@@ -8,7 +8,6 @@ split view); the rightmost buttons are clipped instead of forcing the pane wide.
 """
 
 from typing import Any
-from ...core.assets import icon_path
 
 from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtGui import (
@@ -35,9 +34,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...core.assets import icon_path
+from ...core.settings import DARK_MODE_KEY, browser_settings
 from ..palette import incognito_url_style, link_tip_style, menu_style, page_theme, toast_style, tokens
 from ..shortcuts import share_keys
-from ...core.settings import DARK_MODE_KEY, browser_settings
 from .interceptor import is_local_homepage
 
 
@@ -390,9 +390,7 @@ class ChromeMixin:
         else:
             target_state_fs = getattr(self, "_was_app_fs_before_video", False)
 
-            if current_app_fs and not target_state_fs:
-                main_win.toggle_reader_fullscreen()
-            elif not current_app_fs and target_state_fs:
+            if (current_app_fs and not target_state_fs) or (not current_app_fs and target_state_fs):
                 main_win.toggle_reader_fullscreen()
 
     def apply_theme(self) -> None:

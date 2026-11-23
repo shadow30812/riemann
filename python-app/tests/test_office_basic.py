@@ -67,7 +67,8 @@ def make_docx(path):
         z.writestr(
             "_rels/.rels",
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="r1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+            '<Relationship Id="r1" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
             'Target="word/document.xml"/></Relationships>',
         )
         z.writestr(
@@ -85,8 +86,9 @@ def make_docx(path):
             "word/document.xml",
             f'<w:document xmlns:w="{W}"><w:body>'
             '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Results</w:t></w:r></w:p>'
-            '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Bold</w:t></w:r><w:r><w:t xml:space="preserve"> and plain.</w:t></w:r></w:p>'
-            '<w:p><w:r><w:t>&lt;script&gt;alert(1)&lt;/script&gt;</w:t></w:r></w:p>'
+            '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Bold</w:t></w:r><w:r><w:t xml:space="preserve"> and '
+            'plain.</w:t></w:r></w:p>'
+            "<w:p><w:r><w:t>&lt;script&gt;alert(1)&lt;/script&gt;</w:t></w:r></w:p>"
             "</w:body></w:document>",
         )
     return str(path)
@@ -265,12 +267,13 @@ def test_an_excel_workbook_gives_visible_sheets_with_formats_merges_and_formulas
 
 def test_an_opendocument_sheet_keeps_row_numbers_across_gaps_and_drops_the_empty_end(tmp_path):
     styles = (
-        '<style:style style:name="ta2" style:family="table"><style:table-properties table:display="false"/></style:style>'
+        '<style:style style:name="ta2" style:family="table">'
+        '<style:table-properties table:display="false"/></style:style>'
     )
     body = (
         "<office:spreadsheet>"
         '<table:table table:name="One">'
-        '<table:table-row><table:table-cell><text:p>top</text:p></table:table-cell>'
+        "<table:table-row><table:table-cell><text:p>top</text:p></table:table-cell>"
         '<table:table-cell table:number-columns-repeated="3"/>'
         '<table:table-cell table:formula="of:=[.A1]&amp;&quot;!&quot;" table:number-columns-spanned="2">'
         "<text:p>top!</text:p></table:table-cell><table:covered-table-cell/>"
@@ -279,7 +282,8 @@ def test_an_opendocument_sheet_keeps_row_numbers_across_gaps_and_drops_the_empty
         "</table:table-row>"
         '<table:table-row table:number-rows-repeated="3"><table:table-cell><text:p>same</text:p></table:table-cell>'
         "</table:table-row>"
-        '<table:table-row table:number-rows-repeated="1048570"><table:table-cell table:number-columns-repeated="16384"/>'
+        '<table:table-row table:number-rows-repeated="1048570"><table:table-cell '
+        'table:number-columns-repeated="16384"/>'
         "</table:table-row>"
         "</table:table>"
         '<table:table table:name="Hidden" table:style-name="ta2"><table:table-row><table:table-cell>'

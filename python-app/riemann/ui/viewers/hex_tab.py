@@ -22,7 +22,6 @@ so a filter on it (not on the application) passes F (full screen) and Esc
 
 import os
 from collections import OrderedDict
-from typing import Optional
 
 from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QSize, Qt
 from PySide6.QtGui import QFontDatabase, QIcon
@@ -112,7 +111,7 @@ class HexTab(QWidget):
         self.is_preview = preview
         self.dark_mode = dark_mode
         self.bytes_dark = dark_mode
-        self.lbl_toast: Optional[Toast] = None
+        self.lbl_toast: Toast | None = None
         self.program = program_kind(self.current_path)
         self.error = ""
         size = 0
@@ -220,12 +219,15 @@ class HexTab(QWidget):
         self.toolbar.setStyleSheet(
             f"QWidget#hexToolbar {{ background: {t['surface']}; border-bottom: 1px solid {t['border']}; }}"
             f"QLabel {{ color: {t['muted']}; background: transparent; }}"
-            f"QToolButton {{ color: {t['text']}; border: 1px solid transparent; border-radius: 4px; padding: 5px; background: transparent; }}"
+            f"QToolButton {{ color: {t['text']}; border: 1px solid transparent; border-radius: 4px; padding: 5px; "
+            f"background: transparent; }}"
             f"QToolButton:hover {{ background: {t['raised']}; }}"
             "QToolButton::menu-indicator { image: none; width: 0px; }"
         )
         tone = self.banner_tone()
-        self.banner.setStyleSheet(f"QFrame#hexBanner {{ {banner_style(t, tone)} }} QLabel {{ background: transparent; }}")
+        self.banner.setStyleSheet(
+            f"QFrame#hexBanner {{ {banner_style(t, tone)} }} QLabel {{ background: transparent; }}"
+        )
         colour = t["text"] if tone == "neutral" else t["accent_text"]
         self.lbl_banner.setStyleSheet(f"color: {colour};")
         icon = "binary" if tone == "neutral" else "shield-cog-corner"
@@ -258,12 +260,16 @@ class HexTab(QWidget):
             window.exit_fullscreen()
 
     def eventFilter(self, obj, event) -> bool:
-        if obj is self.view and event.type() == QEvent.Type.KeyPress:
-            if not event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier:
-                action = {Qt.Key.Key_F: self.toggle_reader_fullscreen, Qt.Key.Key_Escape: self._leave_fullscreen}.get(event.key())
-                if action is not None:
-                    action()
-                    return True
+        if (
+            obj is self.view
+            and event.type() == QEvent.Type.KeyPress
+            and not event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+        ):
+            keys = {Qt.Key.Key_F: self.toggle_reader_fullscreen, Qt.Key.Key_Escape: self._leave_fullscreen}
+            action = keys.get(event.key())
+            if action is not None:
+                action()
+                return True
         return super().eventFilter(obj, event)
 
     def update_fullscreen_icon(self, state: int) -> None:

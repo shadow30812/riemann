@@ -62,7 +62,7 @@ import sys
 import tempfile
 import threading
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Optional
 
 from PySide6.QtCore import QStandardPaths
 
@@ -73,12 +73,23 @@ CACHE_LIMIT = 500 * 1024 * 1024
 FOLDER = "office"
 FLATPAK_ID = "org.libreoffice.LibreOffice"
 VERSIONED = re.compile(r"^libreoffice\d+(\.\d+)*$")
-STRIPPED_ENV = ("PYTHONPATH", "PYTHONHOME", "LD_LIBRARY_PATH", "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH", "QML2_IMPORT_PATH")
+STRIPPED_ENV = (
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "LD_LIBRARY_PATH",
+    "QT_PLUGIN_PATH",
+    "QT_QPA_PLATFORM_PLUGIN_PATH",
+    "QML2_IMPORT_PATH",
+)
 PROFILE_SETTINGS = (
     ("/org.openoffice.Office.Common/Security/Scripting", "MacroSecurityLevel", "3"),
     ("/org.openoffice.Office.Common/Security/Scripting", "DisableMacrosExecution", "true"),
     ("/org.openoffice.Office.Common/Security/Scripting", "BlockUntrustedRefererLinks", "true"),
-    ("/org.openoffice.Office.Jobs/Jobs/org.openoffice.Office.Jobs:Job['UpdateCheck']/Arguments", "AutoCheckEnabled", "false"),
+    (
+        "/org.openoffice.Office.Jobs/Jobs/org.openoffice.Office.Jobs:Job['UpdateCheck']/Arguments",
+        "AutoCheckEnabled",
+        "false",
+    ),
 )
 
 _RUN_LOCK = threading.Lock()
@@ -101,7 +112,7 @@ class Office:
         return self.command[:1] == ("flatpak",)
 
 
-def _binary(path: str) -> Optional[Office]:
+def _binary(path: str) -> Office | None:
     if not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
         return None
     real = os.path.realpath(path)
@@ -112,7 +123,7 @@ def _binary(path: str) -> Optional[Office]:
     return Office((real,), real, f"{real}:{stamp}")
 
 
-def _on_path() -> List[str]:
+def _on_path() -> list[str]:
     names = ["soffice", "libreoffice"]
     found = [shutil.which(n) for n in names]
     for folder in os.environ.get("PATH", "").split(os.pathsep):
@@ -128,13 +139,13 @@ def _version_key(path: str):
     return [int(n) for n in re.findall(r"\d+", path)]
 
 
-def _linux_folders() -> List[str]:
+def _linux_folders() -> list[str]:
     opt = sorted(glob.glob("/opt/libreoffice*/program/soffice"), key=_version_key, reverse=True)
     lib = glob.glob("/usr/lib*/libreoffice/program/soffice") + glob.glob("/usr/local/lib*/libreoffice/program/soffice")
     return opt + lib
 
 
-def _windows_folders() -> List[str]:
+def _windows_folders() -> list[str]:
     paths = []
     try:
         import winreg
@@ -149,13 +160,13 @@ def _windows_folders() -> List[str]:
                     pass
     except ImportError:
         pass
-    for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+    for base in (os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)")):
         if base:
             paths.append(os.path.join(base, "LibreOffice", "program", "soffice.exe"))
     return paths
 
 
-def _flatpak() -> Optional[Office]:
+def _flatpak() -> Office | None:
     flatpak = shutil.which("flatpak")
     if not flatpak:
         return None
@@ -168,18 +179,20 @@ def _flatpak() -> Optional[Office]:
         return None
     if result.returncode != 0:
         return None
-    return Office(("flatpak", "run", "--command=soffice", FLATPAK_ID), f"Flatpak {FLATPAK_ID}", f"flatpak:{result.stdout.strip()}")
+    return Office(
+        ("flatpak", "run", "--command=soffice", FLATPAK_ID), f"Flatpak {FLATPAK_ID}", f"flatpak:{result.stdout.strip()}"
+    )
 
 
-def candidates() -> List[str]:
+def candidates() -> list[str]:
     if sys.platform == "win32":
         return _on_path() + _windows_folders()
     if sys.platform == "darwin":
-        return _on_path() + ["/Applications/LibreOffice.app/Contents/MacOS/soffice"]
+        return [*_on_path(), "/Applications/LibreOffice.app/Contents/MacOS/soffice"]
     return _on_path() + _linux_folders() + ["/snap/bin/libreoffice"]
 
 
-def find_office(override: str = "") -> Optional[Office]:
+def find_office(override: str = "") -> Office | None:
     """The LibreOffice to convert with, or None; override is the path chosen in Settings."""
     global _found, _searched
     if os.environ.get("RIEMANN_NO_OFFICE") == "1":
@@ -262,7 +275,7 @@ def open_in_office(path: str, office: Office) -> None:
     env = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
     detach = {"start_new_session": True} if os.name != "nt" else {}
     subprocess.Popen(
-        list(office.command) + [os.path.abspath(path)],
+        [*office.command, os.path.abspath(path)],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         env=env, **NO_WINDOW, **detach,
     )
@@ -275,7 +288,7 @@ def cache_key(path: str, target: str, office: Office) -> str:
     return hashlib.sha256(text.encode("utf-8", "surrogateescape")).hexdigest()
 
 
-def cached(path: str, target: str, office: Office, folder: Optional[str] = None) -> Optional[str]:
+def cached(path: str, target: str, office: Office, folder: str | None = None) -> str | None:
     try:
         name = os.path.join(folder or files_dir(), f"{cache_key(path, target, office)}.{target}")
     except OSError:
@@ -289,7 +302,7 @@ def cached(path: str, target: str, office: Office, folder: Optional[str] = None)
     return None
 
 
-def prune(folder: Optional[str] = None, limit: int = CACHE_LIMIT) -> None:
+def prune(folder: str | None = None, limit: int = CACHE_LIMIT) -> None:
     folder = folder or files_dir()
     try:
         entries = [os.path.join(folder, e) for e in os.listdir(folder)]
@@ -321,20 +334,30 @@ def clear_cache() -> None:
 class OfficeConversion:
     """One conversion of path into target ("pdf", "xlsx"); run() returns the converted file."""
 
-    def __init__(self, path: str, target: str = "pdf", office: Optional[Office] = None,
-                 folder: Optional[str] = None, timeout: float = TIMEOUT):
+    def __init__(self, path: str, target: str = "pdf", office: Office | None = None,
+                 folder: str | None = None, timeout: float = TIMEOUT):
         self.path, self.target, self.timeout = os.path.abspath(path), target, timeout
         self.office = office
         self.folder = folder
-        self._proc: Optional[subprocess.Popen] = None
+        self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._cancelled = False
 
     def command(self, outdir: str) -> list:
-        return list(self.office.command) + [
+        return [
+            *self.office.command,
             f"-env:UserInstallation={_profile_url(profile_dir())}",
-            "--headless", "--invisible", "--norestore", "--nologo", "--nodefault", "--nolockcheck",
-            "--convert-to", self.target, "--outdir", outdir, self.path,
+            "--headless",
+            "--invisible",
+            "--norestore",
+            "--nologo",
+            "--nodefault",
+            "--nolockcheck",
+            "--convert-to",
+            self.target,
+            "--outdir",
+            outdir,
+            self.path,
         ]
 
     def run(self) -> str:
@@ -372,7 +395,9 @@ class OfficeConversion:
         except subprocess.TimeoutExpired:
             _kill(self._proc)
             self._proc.wait()
-            raise OfficeError(f"LibreOffice took more than {int(self.timeout)} seconds to convert {name}, so Riemann stopped it.")
+            raise OfficeError(
+                f"LibreOffice took more than {int(self.timeout)} seconds to convert {name}, so Riemann stopped it."
+            ) from None
         if self._cancelled:
             raise OfficeError("Cancelled.")
         produced = [e for e in os.listdir(outdir) if e.lower().endswith("." + self.target)]

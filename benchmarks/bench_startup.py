@@ -32,10 +32,10 @@ from _common import BENCH_DIR, REPO_ROOT, corpus_path, machine_info, median, wri
 
 def child(doc):
     t_start = float(os.environ["BENCH_T0"])
+    from _common import rss_mb, tree_pss_mb
     from PySide6.QtCore import QTimer
 
     import riemann.app as A
-    from _common import rss_mb, tree_pss_mb
 
     marks = {"imports_ms": (time.time() - t_start) * 1000}
     orig_show = A.RiemannWindow.show

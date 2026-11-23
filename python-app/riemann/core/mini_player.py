@@ -20,9 +20,10 @@ from PySide6.QtWidgets import (
     QSlider,
     QWidget,
 )
-from .log import log
+
 from ..ui.palette import tokens
 from .assets import icon_path
+from .log import log
 
 
 class MiniAudioPlayer(QWidget):
@@ -78,7 +79,8 @@ class MiniAudioPlayer(QWidget):
 
         self.time_label = QLabel("00:00 / 00:00")
         self.time_label.setStyleSheet(
-            f"color: {tokens(getattr(self.main_window, 'dark_mode', False))['muted']}; font-size: 11px; font-weight: bold;"
+            f"color: {tokens(getattr(self.main_window, 'dark_mode', False))['muted']}; font-size: 11px; font-weight: "
+            "bold;"
         )
 
         layout.addWidget(self.btn_play_pause)
@@ -246,7 +248,8 @@ class MiniAudioPlayer(QWidget):
         (function() {
             try {
                 let mediaElements = [...document.querySelectorAll('audio, video')];
-                let media = mediaElements.find(e => !e.paused && e.duration > 0) || mediaElements.find(e => e.duration > 0);
+                let media = mediaElements.find(e => !e.paused && e.duration > 0)
+                    || mediaElements.find(e => e.duration > 0);
                 if (media && !isNaN(media.duration)) {
                     let isPaused = media.paused ? "1" : "0";
                     return media.currentTime + "|" + media.duration + "|" + isPaused;

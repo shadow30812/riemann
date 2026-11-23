@@ -112,7 +112,8 @@ def word_file(path: str) -> None:
         para("Bring one figure from either paper that you found hard to read, and we will redraw it together."),
     ])
     styles = "".join(
-        f'<w:style w:type="paragraph" w:styleId="{sid}"><w:name w:val="{name}"/><w:rPr><w:b/><w:sz w:val="{size}"/></w:rPr></w:style>'
+        f'<w:style w:type="paragraph" w:styleId="{sid}"><w:name w:val="{name}"/><w:rPr><w:b/><w:sz '
+        f'w:val="{size}"/></w:rPr></w:style>'
         for sid, name, size in (("Title", "Title", 48), ("Heading1", "heading 1", 32))
     )
     with zipfile.ZipFile(path, "w") as z:
@@ -129,7 +130,8 @@ def word_file(path: str) -> None:
         z.writestr(
             "_rels/.rels",
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="r1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+            '<Relationship Id="r1" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
             'Target="word/document.xml"/></Relationships>',
         )
         z.writestr(
@@ -282,12 +284,11 @@ def play(name, scene, win, paths):
 
     def step(waiting=None):
         try:
-            if waiting is not None:
-                if callable(waiting) and not waiting():
-                    if time.time() - started[0] > WAIT:
-                        raise TimeoutError(f"{name}: a condition never came true")
-                    QTimer.singleShot(100, lambda: step(waiting))
-                    return
+            if waiting is not None and callable(waiting) and not waiting():
+                if time.time() - started[0] > WAIT:
+                    raise TimeoutError(f"{name}: a condition never came true")
+                QTimer.singleShot(100, lambda: step(waiting))
+                return
             item = next(steps)
         except StopIteration:
             from riemann.ui.toast import Toast
@@ -354,8 +355,9 @@ def main() -> int:
         state["paths"] = samples(home)
         state["scenes"] = [(name, SCENES[name]) for name in wanted]
         sys.path.insert(0, APP)
-        import riemann.app as app_module
         from PySide6.QtCore import QSettings, QTimer
+
+        import riemann.app as app_module
 
         settings = QSettings("Riemann", "PDFReader")
         settings.setValue("darkMode", True)

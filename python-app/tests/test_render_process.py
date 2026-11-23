@@ -128,7 +128,9 @@ def test_reader_tab_renders_through_its_own_process(qapp, qtbot):
     try:
         tab.load_document(ATTENTION)
         end = time.time() + 20
-        while time.time() < end and (tab.current_doc is None or tab.page_renderer is None or tab.page_renderer.in_process):
+        while time.time() < end and (
+            tab.current_doc is None or tab.page_renderer is None or tab.page_renderer.in_process
+        ):
             qapp.processEvents()
             time.sleep(0.01)
         assert tab.page_renderer is not None and not tab.page_renderer.in_process

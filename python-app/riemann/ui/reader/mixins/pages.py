@@ -32,7 +32,6 @@ import os
 import re
 import shutil
 import tempfile
-from typing import List, Optional
 
 from PySide6.QtCore import QStandardPaths, Qt, QTimer
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMenu, QMessageBox
@@ -43,7 +42,7 @@ from ...palette import dialog_icon
 from .host import ReaderHostBase
 
 
-def parse_page_ranges(text: str, count: int) -> List[int]:
+def parse_page_ranges(text: str, count: int) -> list[int]:
     """'1-3, 5' -> [0, 1, 2, 4] (1-based ranges in, 0-based pages out)."""
     pages = set()
     for part in re.split(r"[,\s]+", text.strip()):
@@ -62,7 +61,7 @@ def parse_page_ranges(text: str, count: int) -> List[int]:
     return sorted(pages)
 
 
-def format_page_ranges(pages: List[int]) -> str:
+def format_page_ranges(pages: list[int]) -> str:
     out, run = [], []
     for p in sorted(set(pages)):
         if run and p == run[-1] + 1:
@@ -84,11 +83,14 @@ def scratch_root() -> str:
 
 
 class PagesMixin(ReaderHostBase):
-    edit_scratch: Optional[str] = None
+    edit_scratch: str | None = None
     _edit_snapshot = None
 
     def pdf_path(self) -> str:
-        """The file the reader shows and writes: the scratch copy while page edits wait for Save, the converted PDF of an Office file."""
+        """
+        The file the reader shows and writes: the scratch copy while page edits wait for Save, the converted PDF of
+        an Office file.
+        """
         return self.edit_scratch or self.converted_pdf or self.current_path or ""
 
     def has_unsaved_page_edits(self) -> bool:
@@ -135,7 +137,8 @@ class PagesMixin(ReaderHostBase):
             answer = QMessageBox.question(
                 self,
                 "Save page changes",
-                f"{os.path.basename(path)} was changed by another app since it was opened. Replace it with the edited pages?",
+                f"{os.path.basename(path)} was changed by another app since it was opened. Replace it with the edited "
+                "pages?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             )
             if answer != QMessageBox.StandardButton.Yes:
@@ -198,7 +201,7 @@ class PagesMixin(ReaderHostBase):
             return True
         return False
 
-    def _target_pages(self) -> List[int]:
+    def _target_pages(self) -> list[int]:
         thumbs = getattr(self.sidebar_nav, "thumbs", None)
         if thumbs is not None and thumbs.isVisible():
             chosen = [int(i.data(Qt.ItemDataRole.UserRole)) for i in thumbs.selectedItems()]
@@ -206,7 +209,7 @@ class PagesMixin(ReaderHostBase):
                 return sorted(chosen)
         return [self.current_page_index]
 
-    def build_pages_menu(self, menu: QMenu, pages: List[int]) -> None:
+    def build_pages_menu(self, menu: QMenu, pages: list[int]) -> None:
         label = format_page_ranges(pages)
         noun = "page" if len(pages) == 1 else "pages"
         menu.addAction(f"Rotate {noun} {label} clockwise", lambda: self.rotate_pages(pages, 90))
@@ -292,10 +295,10 @@ class PagesMixin(ReaderHostBase):
             self.show_toast(f"{done} Save to keep it in the file.")
         return True
 
-    def rotate_pages(self, pages: List[int], degrees: int) -> None:
+    def rotate_pages(self, pages: list[int], degrees: int) -> None:
         self._edit_pages(page_edit.rotate_pages, pages, degrees, done="Rotated.")
 
-    def delete_pages(self, pages: List[int]) -> None:
+    def delete_pages(self, pages: list[int]) -> None:
         noun = "page" if len(pages) == 1 else "pages"
         answer = QMessageBox.question(
             self,
@@ -312,9 +315,11 @@ class PagesMixin(ReaderHostBase):
         if ok and to - 1 != page:
             self._edit_pages(page_edit.move_page, page, to - 1, done=f"Moved page {page + 1} to {to}.")
 
-    def extract_pages(self, pages: List[int]) -> None:
+    def extract_pages(self, pages: list[int]) -> None:
         count = self.current_doc.page_count if self.current_doc else 0
-        text, ok = QInputDialog.getText(self, "Extract pages", "Pages (for example 1-3, 5):", text=format_page_ranges(pages))
+        text, ok = QInputDialog.getText(
+            self, "Extract pages", "Pages (for example 1-3, 5):", text=format_page_ranges(pages)
+        )
         if not ok:
             return
         try:

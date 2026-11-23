@@ -47,7 +47,7 @@ import subprocess
 import sys
 import threading
 import weakref
-from typing import Any, Optional
+from typing import Any
 
 from .assets import PACKAGE_DIR, executable, is_frozen
 from .processes import NO_WINDOW
@@ -141,7 +141,7 @@ def serve(stdin=None, stdout=None) -> None:
 class RenderedPage:
     """The parts of riemann_core.RenderResult the reader reads, for a page from a child."""
 
-    __slots__ = ("data", "width", "height", "scale")
+    __slots__ = ("data", "height", "scale", "width")
 
     def __init__(self, data: bytes, width: int, height: int, scale: float) -> None:
         self.data = data
@@ -162,7 +162,7 @@ def _child_env() -> dict:
     if not is_frozen():
         paths = [p for p in sys.path if p and os.path.isdir(p)]
         package_root = os.path.dirname(PACKAGE_DIR)
-        env["PYTHONPATH"] = os.pathsep.join([package_root] + paths)
+        env["PYTHONPATH"] = os.pathsep.join([package_root, *paths])
     env["PYTHONUNBUFFERED"] = "1"
     return env
 
@@ -170,12 +170,12 @@ def _child_env() -> dict:
 class RenderProcess:
     """One child process with one document open in it."""
 
-    def __init__(self, path: str, password: Optional[str]) -> None:
+    def __init__(self, path: str, password: str | None) -> None:
         self.path = path
         self.lock = threading.Lock()
         self.ready = threading.Event()
-        self.failed: Optional[str] = None
-        self.proc: Optional[subprocess.Popen] = None
+        self.failed: str | None = None
+        self.proc: subprocess.Popen | None = None
         try:
             self.proc = subprocess.Popen(
                 child_command(),
@@ -190,7 +190,7 @@ class RenderProcess:
         threading.Thread(target=self._open, args=(path, password), daemon=True).start()
 
     @property
-    def pid(self) -> Optional[int]:
+    def pid(self) -> int | None:
         return self.proc.pid if self.proc is not None else None
 
     def _fail(self, reason: str) -> None:
@@ -200,7 +200,7 @@ class RenderProcess:
         self.ready.clear()
         self._kill()
 
-    def _open(self, path: str, password: Optional[str]) -> None:
+    def _open(self, path: str, password: str | None) -> None:
         with self.lock:
             try:
                 _write(self.proc.stdin, ("open", path, password))
@@ -250,14 +250,13 @@ class RenderProcess:
 
     def close(self) -> None:
         self.ready.clear()
-        if self.proc is not None and self.proc.poll() is None:
-            if self.lock.acquire(timeout=0.5):
-                try:
-                    _write(self.proc.stdin, ("quit",))
-                except (OSError, ValueError):
-                    pass
-                finally:
-                    self.lock.release()
+        if self.proc is not None and self.proc.poll() is None and self.lock.acquire(timeout=0.5):
+            try:
+                _write(self.proc.stdin, ("quit",))
+            except (OSError, ValueError):
+                pass
+            finally:
+                self.lock.release()
         self._kill()
 
 
@@ -269,9 +268,9 @@ class PageRenderer:
 
     enabled = os.environ.get("RIEMANN_RENDER_PROCESS", "1") != "0"
 
-    def __init__(self, doc: Any, path: str, password: Optional[str] = None) -> None:
+    def __init__(self, doc: Any, path: str, password: str | None = None) -> None:
         self.doc = doc
-        self.process: Optional[RenderProcess] = None
+        self.process: RenderProcess | None = None
         if self.enabled and path and os.path.exists(path):
             self.process = RenderProcess(path, password)
         _LIVE.add(self)

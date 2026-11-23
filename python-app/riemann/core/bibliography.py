@@ -14,7 +14,8 @@ with a, b, c... added when two papers would share a key.
 import json
 import re
 import unicodedata
-from typing import Any, Dict, List
+from typing import Any
+
 from .endpoints import arxiv_url
 
 STOPWORDS = {"a", "an", "the", "on", "of", "in", "for", "and", "to", "with", "towards", "toward"}
@@ -24,7 +25,7 @@ def _ascii(text: str) -> str:
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
 
 
-def split_authors(authors: str) -> List[Dict[str, str]]:
+def split_authors(authors: str) -> list[dict[str, str]]:
     """Authors as [{"family": ..., "given": ...}], from either common way of writing them."""
     text = (authors or "").strip()
     if not text:
@@ -49,7 +50,7 @@ def split_authors(authors: str) -> List[Dict[str, str]]:
     return out
 
 
-def citation_key(entry: Dict[str, Any]) -> str:
+def citation_key(entry: dict[str, Any]) -> str:
     authors = split_authors(str(entry.get("authors") or ""))
     family = re.sub(r"[^a-z]", "", _ascii(authors[0]["family"]).lower()) if authors else "anon"
     year = re.sub(r"\D", "", str(entry.get("year") or ""))[:4]
@@ -58,7 +59,7 @@ def citation_key(entry: Dict[str, Any]) -> str:
     return f"{family or 'anon'}{year}{word}"
 
 
-def _unique_keys(entries: List[Dict[str, Any]]) -> List[str]:
+def _unique_keys(entries: list[dict[str, Any]]) -> list[str]:
     keys, seen = [], {}
     for entry in entries:
         base = citation_key(entry)
@@ -75,10 +76,10 @@ def _bib_escape(value: str) -> str:
     return value.replace("{", "\\{").replace("}", "\\}")
 
 
-def to_bibtex(entries: List[Dict[str, Any]]) -> str:
+def to_bibtex(entries: list[dict[str, Any]]) -> str:
     """The entries as a BibTeX file."""
     out = []
-    for key, entry in zip(_unique_keys(entries), entries):
+    for key, entry in zip(_unique_keys(entries), entries, strict=False):
         arxiv = str(entry.get("arxiv_id") or "").strip()
         fields = []
         title = str(entry.get("title") or "").strip()
@@ -86,7 +87,9 @@ def to_bibtex(entries: List[Dict[str, Any]]) -> str:
             fields.append(("title", "{" + _bib_escape(title) + "}"))
         authors = split_authors(str(entry.get("authors") or ""))
         if authors:
-            fields.append(("author", _bib_escape(" and ".join(f"{a['family']}, {a['given']}".rstrip(", ") for a in authors))))
+            fields.append(
+                ("author", _bib_escape(" and ".join(f"{a['family']}, {a['given']}".rstrip(", ") for a in authors)))
+            )
         year = re.sub(r"\D", "", str(entry.get("year") or ""))[:4]
         if year:
             fields.append(("year", year))
@@ -104,12 +107,12 @@ def to_bibtex(entries: List[Dict[str, Any]]) -> str:
     return "\n\n".join(out) + ("\n" if out else "")
 
 
-def to_csl_json(entries: List[Dict[str, Any]]) -> str:
+def to_csl_json(entries: list[dict[str, Any]]) -> str:
     """The entries as CSL-JSON, the format Zotero and Pandoc import."""
     items = []
-    for key, entry in zip(_unique_keys(entries), entries):
+    for key, entry in zip(_unique_keys(entries), entries, strict=False):
         arxiv = str(entry.get("arxiv_id") or "").strip()
-        item: Dict[str, Any] = {"id": key, "type": "article-journal" if entry.get("doi") else "article"}
+        item: dict[str, Any] = {"id": key, "type": "article-journal" if entry.get("doi") else "article"}
         if entry.get("title"):
             item["title"] = str(entry["title"]).strip()
         authors = split_authors(str(entry.get("authors") or ""))

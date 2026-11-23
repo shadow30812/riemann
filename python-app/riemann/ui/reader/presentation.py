@@ -160,7 +160,9 @@ class PresentationWindow(QWidget):
         if pix is not None and not pix.isNull():
             w = pix.width() / pix.devicePixelRatio()
             h = pix.height() / pix.devicePixelRatio()
-            target = self.page_rect() if self.zoom > 1.0 else QRectF((self.width() - w) / 2, (self.height() - h) / 2, w, h)
+            target = (
+                self.page_rect() if self.zoom > 1.0 else QRectF((self.width() - w) / 2, (self.height() - h) / 2, w, h)
+            )
             p.drawPixmap(QRectF(target.topLeft(), QSizeF(w, h)), pix, QRectF(pix.rect()))
         if self._label_timer.isActive() or self.typed:
             text = f"Go to {self.typed}" if self.typed else f"{self.page + 1} / {self.count}"

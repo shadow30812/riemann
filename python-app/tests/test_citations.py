@@ -37,7 +37,10 @@ LSTM = {
     "title": "Long Short-Term Memory",
     "publication_year": 1997,
     "cited_by_count": 100000,
-    "authorships": [{"author": {"display_name": "Sepp Hochreiter"}}, {"author": {"display_name": "Jürgen Schmidhuber"}}],
+    "authorships": [
+        {"author": {"display_name": "Sepp Hochreiter"}},
+        {"author": {"display_name": "Jürgen Schmidhuber"}},
+    ],
     "ids": {"doi": "https://doi.org/10.1162/neco.1997.9.8.1735"},
     "locations": [],
     "open_access": {"oa_url": ""},
@@ -61,7 +64,9 @@ def test_lookup_keeps_only_close_title_matches():
     assert "publication_year:1996-1998" in str(session.calls[0][1])
     assert citations.best_link(info) == "https://doi.org/10.1162/neco.1997.9.8.1735"
 
-    nothing = FakeSession([("title.search", FakeResponse(200, {"results": [TUTORIAL]})), ("search", FakeResponse(200, {"results": []}))])
+    nothing = FakeSession(
+        [("title.search", FakeResponse(200, {"results": [TUTORIAL]})), ("search", FakeResponse(200, {"results": []}))]
+    )
     assert citations.lookup(ref, session=nothing) is None
 
 
@@ -109,7 +114,13 @@ def test_hovering_a_citation_shows_its_reference(qapp):
     assert "Long short-term memory" in tab.citation_card.text.text()
     opened = []
     tab.window().open_url_beside = opened.append
-    tab.citation_card.info = {"title": "Long Short-Term Memory", "arxiv": "", "doi": "10.1162/x", "authors": [], "cited_by": 1}
+    tab.citation_card.info = {
+        "title": "Long Short-Term Memory",
+        "arxiv": "",
+        "doi": "10.1162/x",
+        "authors": [],
+        "cited_by": 1,
+    }
     tab.citation_card._show_info()
     tab.citation_card._open()
     assert opened == ["https://doi.org/10.1162/x"]

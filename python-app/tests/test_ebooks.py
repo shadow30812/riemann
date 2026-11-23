@@ -210,7 +210,7 @@ def test_epub_is_an_ebook_kind_even_without_its_suffix(tmp_path):
 def test_the_converter_child_returns_the_book(tmp_path):
     path = make_epub(tmp_path / "book.epub", book_files())
     result = convert("ebook", path)
-    assert [tuple(s) for s in result["sections"]][0] == (0, "One", "#c0")
+    assert next(tuple(s) for s in result["sections"]) == (0, "One", "#c0")
     with pytest.raises(ConvertError, match="container"):
         junk = tmp_path / "junk.epub"
         with zipfile.ZipFile(junk, "w") as z:
@@ -268,7 +268,9 @@ def test_the_reader_shows_a_book_with_its_sections(qtbot, tmp_path):
     from riemann.ui.reader.tab import ReaderTab
 
     files = book_files()
-    files["OEBPS/text/one.xhtml"] = files["OEBPS/text/one.xhtml"].replace("</body>", "<p>Long text.</p>" * 300 + "</body>")
+    files["OEBPS/text/one.xhtml"] = files["OEBPS/text/one.xhtml"].replace(
+        "</body>", "<p>Long text.</p>" * 300 + "</body>"
+    )
     path = make_epub(tmp_path / "book.epub", files)
     window = RiemannWindow(incognito=False, restore_session=False)
     qtbot.addWidget(window)
@@ -291,7 +293,10 @@ def test_the_reader_shows_a_book_with_its_sections(qtbot, tmp_path):
     tab.sidebar_nav._on_outline_clicked(tab.sidebar_nav.tree.topLevelItem(1), 0)
     scrolled = []
     assert wait_for(
-        lambda: (tab.web.page().runJavaScript("window.scrollY", 0, scrolled.append), bool(scrolled) and scrolled[-1] > 0)[1]
+        lambda: (
+            tab.web.page().runJavaScript("window.scrollY", 0, scrolled.append),
+            bool(scrolled) and scrolled[-1] > 0,
+        )[1]
     )
 
     tab.toggle_theme()

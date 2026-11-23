@@ -19,8 +19,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 from riemann.app import RiemannWindow
 from riemann.core import tables
 from riemann.core.tables import open_delimited, write_delimited
-from riemann.ui.viewers import TableTab
-from riemann.ui.viewers import table_tab
+from riemann.ui.viewers import TableTab, table_tab
 from riemann.ui.viewers.table_tab import CHUNK_ROWS
 
 

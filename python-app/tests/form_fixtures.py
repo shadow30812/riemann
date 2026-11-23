@@ -36,7 +36,9 @@ def make_form_pdf(path):
         ))
         kids.append(kid)
     radio.Kids = Array(kids)
-    page.obj.Annots = Array([name, agree] + kids)
-    pdf.Root.AcroForm = Dictionary(Fields=Array([name, agree, radio]), DR=Dictionary(Font=Dictionary(Helv=helv)), DA=String("/Helv 12 Tf 0 g"))
+    page.obj.Annots = Array([name, agree, *kids])
+    pdf.Root.AcroForm = Dictionary(
+        Fields=Array([name, agree, radio]), DR=Dictionary(Font=Dictionary(Helv=helv)), DA=String("/Helv 12 Tf 0 g")
+    )
     pdf.save(path)
     return path

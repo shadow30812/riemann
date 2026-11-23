@@ -22,8 +22,9 @@ from _common import CORPUS, corpus_path, machine_info, median, percentile, write
 if "--core-path" in sys.argv:
     sys.path.insert(0, os.path.abspath(sys.argv[sys.argv.index("--core-path") + 1]))
 
-import pymupdf  # noqa: E402
-import riemann_core  # noqa: E402
+import pymupdf
+
+import riemann_core
 
 SEARCH_TERMS = {
     "attention.pdf": "attention",

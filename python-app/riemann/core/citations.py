@@ -11,15 +11,17 @@ characters.
 lookup asks OpenAlex (a free, open catalogue of scholarly works) about one
 reference: by arXiv id or DOI when the text holds one, otherwise by its
 guessed title within a year of its date, keeping only a close title match
-(a loose full-text search happily returns a tutorial about the cited paper). It only runs when the user asks, since it sends the
-reference to openalex.org. best_link picks where to read the work: its arXiv
-page, an open-access copy, or its DOI.
+(a loose full-text search happily returns a tutorial about the cited paper).
+It only runs when the user asks, since it sends the reference to openalex.org.
+best_link picks where to read the work: its arXiv page, an open-access copy,
+or its DOI.
 """
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import requests
+
 from .endpoints import OPENALEX_WORKS, USER_AGENT, arxiv_url, doi_url
 
 OPENALEX = OPENALEX_WORKS
@@ -30,10 +32,10 @@ DOI = re.compile(r"\b(10\.\d{4,9}/[^\s\"<>]+[^\s\"<>.,;])", re.I)
 YEAR = re.compile(r"\b(19|20)\d{2}\b")
 
 
-def _lines(chars: List[Tuple[str, Tuple[float, float, float, float]]]) -> List[Tuple[float, float, str]]:
+def _lines(chars: list[tuple[str, tuple[float, float, float, float]]]) -> list[tuple[float, float, str]]:
     """(top, bottom, text) per text line, top to bottom, from PDFium character boxes."""
-    lines: List[List[Any]] = []
-    for ch, (left, top, right, bottom) in chars:
+    lines: list[list[Any]] = []
+    for ch, (_left, top, _right, bottom) in chars:
         if top == bottom == 0 and ch not in " \r\n":
             continue
         hi, lo = max(top, bottom), min(top, bottom)
@@ -50,7 +52,7 @@ def _lines(chars: List[Tuple[str, Tuple[float, float, float, float]]]) -> List[T
     return [(t, b, " ".join(text.split())) for t, b, text in lines if text.strip()]
 
 
-def reference_text_at(doc, page: int, top: Optional[float], limit: int = 600) -> str:
+def reference_text_at(doc, page: int, top: float | None, limit: int = 600) -> str:
     """The reference entry that starts at top on page (or the page's first lines)."""
     try:
         lines = _lines(doc.get_char_boxes(page))
@@ -60,11 +62,11 @@ def reference_text_at(doc, page: int, top: Optional[float], limit: int = 600) ->
         return ""
     start = 0
     if top is not None:
-        for i, (line_top, line_bottom, _) in enumerate(lines):
+        for i, (line_top, _bottom, _) in enumerate(lines):
             if line_top <= top + 3:
                 start = i
                 break
-    out: List[str] = []
+    out: list[str] = []
     prev_bottom = None
     height = None
     for i in range(start, len(lines)):
@@ -95,7 +97,7 @@ def _search_terms(reference: str) -> str:
     return " ".join(text.split())[:300]
 
 
-def _summary(work: Dict[str, Any]) -> Dict[str, Any]:
+def _summary(work: dict[str, Any]) -> dict[str, Any]:
     authors = [a.get("author", {}).get("display_name", "") for a in work.get("authorships", [])]
     ids = work.get("ids") or {}
     arxiv = ""
@@ -118,7 +120,7 @@ def _summary(work: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def guess_title_and_year(reference: str) -> Tuple[str, Optional[int]]:
+def guess_title_and_year(reference: str) -> tuple[str, int | None]:
     """
     The likely title and year of a reference in the usual "Authors. Title.
     Venue, year." shape: the first sentence after the authors (which are the
@@ -140,11 +142,13 @@ def guess_title_and_year(reference: str) -> Tuple[str, Optional[int]]:
 def _similar(a: str, b: str) -> float:
     from difflib import SequenceMatcher
 
-    norm = lambda t: " ".join(re.sub(r"[^\w\s]", " ", t.lower()).split())
+    def norm(t: str) -> str:
+        return " ".join(re.sub(r"[^\w\s]", " ", t.lower()).split())
+
     return SequenceMatcher(None, norm(a), norm(b)).ratio()
 
 
-def lookup(reference: str, session: Optional[requests.Session] = None, timeout: float = 8.0) -> Optional[Dict[str, Any]]:
+def lookup(reference: str, session: requests.Session | None = None, timeout: float = 8.0) -> dict[str, Any] | None:
     """
     What OpenAlex knows about the cited work, or None when nothing matches
     well. Exact identifiers win; otherwise the guessed title is searched among
@@ -171,7 +175,9 @@ def lookup(reference: str, session: Optional[requests.Session] = None, timeout: 
         r = http.get(OPENALEX, params={"filter": filters, "per-page": 5}, headers=headers, timeout=timeout)
         candidates = r.json().get("results") or [] if r.status_code == 200 else []
         if not candidates:
-            r = http.get(OPENALEX, params={"search": _search_terms(reference), "per-page": 5}, headers=headers, timeout=timeout)
+            r = http.get(
+                OPENALEX, params={"search": _search_terms(reference), "per-page": 5}, headers=headers, timeout=timeout
+            )
             candidates = r.json().get("results") or [] if r.status_code == 200 else []
         scored = sorted(
             ((_similar(title, str(w.get("title") or "")), w) for w in candidates),
@@ -184,7 +190,7 @@ def lookup(reference: str, session: Optional[requests.Session] = None, timeout: 
         return None
 
 
-def best_link(info: Dict[str, Any]) -> str:
+def best_link(info: dict[str, Any]) -> str:
     if info.get("arxiv"):
         return arxiv_url(info["arxiv"])
     if info.get("open_access_url"):

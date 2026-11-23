@@ -15,12 +15,11 @@ from typing import Any
 from PySide6.QtCore import QThread, Signal
 
 from ...core import ai_engine
-from ...core.settings import AI_TAGS_KEY, OCR_LANGUAGES_KEY, app_settings, string_list
-from ...core.processes import NO_WINDOW
 from ...core.dependencies import LATEX_OCR_LOCK, pip_install_command, setup_and_get_venv
-from ...core.log import log
 from ...core.endpoints import CROSSREF_WORKS, OPENALEX_WORKS, USER_AGENT, loopback_url
-
+from ...core.log import log
+from ...core.processes import NO_WINDOW
+from ...core.settings import AI_TAGS_KEY, OCR_LANGUAGES_KEY, app_settings, string_list
 
 METADATA_TIMEOUT = (3.0, 5.0)
 
@@ -153,7 +152,7 @@ class LoaderThread(QThread):
         except ImportError:
             self.error_occurred.emit("Module 'pix2tex' not found.")
         except Exception as e:
-            self.error_occurred.emit(f"AI Initialization Failed:\n{str(e)}")
+            self.error_occurred.emit(f"AI Initialization Failed:\n{e!s}")
 
 
 def available_ocr_languages() -> list[str]:
@@ -226,7 +225,7 @@ class OcrPagesThread(QThread):
             except Exception as e:
                 problem = str(e) or type(e).__name__
                 break
-            results.extend(zip(batch, texts))
+            results.extend(zip(batch, texts, strict=False))
             self.progress.emit(len(results), len(self.pages))
         self.finished_ocr.emit(results, problem)
 
@@ -266,7 +265,7 @@ class InferenceThread(QThread):
             code = self.model(self.image)
             self.finished_inference.emit(code)
         except Exception as e:
-            self.error_occurred.emit(f"Inference Error: {str(e)}")
+            self.error_occurred.emit(f"Inference Error: {e!s}")
 
 
 class SignatureValidationWorker(QThread):
@@ -407,7 +406,7 @@ class SignatureValidationWorker(QThread):
                     )
         except Exception as e:
             self.finished_validation.emit(
-                "ERROR", f"Error reading signatures: {str(e)}", []
+                "ERROR", f"Error reading signatures: {e!s}", []
             )
 
 

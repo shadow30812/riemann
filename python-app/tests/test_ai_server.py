@@ -142,9 +142,8 @@ def test_endpoints_wait_while_the_model_loads_and_report_a_failure(client, monke
 def test_websocket_endpoint_is_gone(client):
     from starlette.websockets import WebSocketDisconnect
 
-    with pytest.raises(WebSocketDisconnect):
-        with client.websocket_connect("/ws/ai") as websocket:
-            websocket.receive_text()
+    with pytest.raises(WebSocketDisconnect), client.websocket_connect("/ws/ai") as websocket:
+        websocket.receive_text()
 
 
 def test_model_download_rejects_a_file_with_the_wrong_hash(tmp_path, monkeypatch):
@@ -165,12 +164,16 @@ def test_model_download_rejects_a_file_with_the_wrong_hash(tmp_path, monkeypatch
     assert not any(p.name.endswith((".onnx", ".json", ".part")) for p in tmp_path.rglob("*") if p.is_file())
 
 
-@pytest.mark.skipif(not os.environ.get("RIEMANN_TEST_AI_MODELS"), reason="set RIEMANN_TEST_AI_MODELS to a folder with the model")
+@pytest.mark.skipif(
+    not os.environ.get("RIEMANN_TEST_AI_MODELS"), reason="set RIEMANN_TEST_AI_MODELS to a folder with the model"
+)
 def test_onnx_embeddings_rank_related_text_first():
     model_dir = os.environ["RIEMANN_TEST_AI_MODELS"]
     srv.ensure_model(model_dir)
     emb = srv.OnnxEmbedder(model_dir)
-    vecs = emb.encode(["Transformers use self-attention.", "Roses need sunlight and water.", "attention mechanism in neural networks"])
+    vecs = emb.encode(
+        ["Transformers use self-attention.", "Roses need sunlight and water.", "attention mechanism in neural networks"]
+    )
     assert vecs.shape == (3, 384)
     assert np.allclose(np.linalg.norm(vecs, axis=1), 1, atol=1e-5)
     assert vecs[2] @ vecs[0] > vecs[2] @ vecs[1] + 0.2
@@ -265,7 +268,9 @@ def test_library_search_reads_unseen_papers_and_skips_unreadable_ones(tmp_path, 
     assert data["needs_text"] == []
 
 
-@pytest.mark.skipif(not os.environ.get("RIEMANN_TEST_AI_MODELS"), reason="set RIEMANN_TEST_AI_MODELS to a folder with the model")
+@pytest.mark.skipif(
+    not os.environ.get("RIEMANN_TEST_AI_MODELS"), reason="set RIEMANN_TEST_AI_MODELS to a folder with the model"
+)
 def test_the_engine_starts_as_a_child_process_and_loads_the_model(tmp_path, monkeypatch):
     import shutil
     import time
@@ -283,7 +288,9 @@ def test_the_engine_starts_as_a_child_process_and_loads_the_model(tmp_path, monk
         end, status = time.time() + 60, None
         while time.time() < end:
             try:
-                status = requests.get(f"http://127.0.0.1:{port}/status", headers={"X-Riemann-Token": token}, timeout=2).json()
+                status = requests.get(
+                    f"http://127.0.0.1:{port}/status", headers={"X-Riemann-Token": token}, timeout=2
+                ).json()
                 if status["status"] in ("ready", "failed"):
                     break
             except requests.ConnectionError:

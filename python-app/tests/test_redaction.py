@@ -17,10 +17,10 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
+from text_fixtures import all_stream_bytes, make_text_pdf, rel_box
 
 from riemann.core import annotation_store, pdf_annotations, redaction
 from riemann.ui.reader.tab import ReaderTab
-from text_fixtures import all_stream_bytes, make_text_pdf, rel_box
 
 
 @pytest.fixture(scope="session")
@@ -63,7 +63,9 @@ def open_pdf(qapp, reader, path):
 
 def mouse(kind, pos):
     point = QPointF(pos)
-    return QMouseEvent(kind, point, point, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    return QMouseEvent(
+        kind, point, point, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+    )
 
 
 def test_dragging_with_the_redact_tool_marks_a_box(qapp, reader, tmp_path):
@@ -137,7 +139,9 @@ def shrink(box, by=1.0):
 
 
 def test_redacted_text_is_gone_from_the_file_and_the_rest_stays_put(tmp_path):
-    path = make_text_pdf(tmp_path / "a.pdf", [(72, 700, 24, "KEEP SECRET KEEP"), (72, 650, 12, "next line")], compress=False)
+    path = make_text_pdf(
+        tmp_path / "a.pdf", [(72, 700, 24, "KEEP SECRET KEEP"), (72, 650, 12, "next line")], compress=False
+    )
     before = chars(path)
     box = shrink(word_box(path, "SECRET"))
     redaction.apply_redactions(path, {0: [rel_box(*box)]})
@@ -146,8 +150,8 @@ def test_redacted_text_is_gone_from_the_file_and_the_rest_stays_put(tmp_path):
     after = chars(path)
     assert "".join(t for t, _ in after) == "KEEPKEEPnextline"
     kept = [(t, b) for t, b in before if t in "KEEPnextline" and not (box[0] - 1 < b[0] < box[2] + 1)]
-    for (t, b), (t2, b2) in zip(kept, after):
-        assert t == t2 and all(abs(x - y) <= 0.01 for x, y in zip(b, b2))
+    for (t, b), (t2, b2) in zip(kept, after, strict=False):
+        assert t == t2 and all(abs(x - y) <= 0.01 for x, y in zip(b, b2, strict=False))
 
 
 def test_redaction_paints_a_black_box(tmp_path):
@@ -158,7 +162,10 @@ def test_redaction_paints_a_black_box(tmp_path):
     doc = riemann_core.PdfEngine().load_document(path, None)
     r = doc.render_page(0, 1.0, 0)
     data = bytes(r.data)
-    pixel = lambda x, y: data[(y * r.width + x) * 4 : (y * r.width + x) * 4 + 3]
+
+    def pixel(x, y):
+        return data[(y * r.width + x) * 4 : (y * r.width + x) * 4 + 3]
+
     assert pixel(150, 792 - 350) == b"\0\0\0"
     assert pixel(400, 792 - 350) == b"\xff\xff\xff"
 

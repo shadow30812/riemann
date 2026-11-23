@@ -21,9 +21,10 @@ the same selection, which Apply redactions then removes, leaving the box.
 """
 
 import colorsys
+import itertools
 from collections import Counter
+from collections.abc import Sequence
 from statistics import median
-from typing import Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -79,7 +80,7 @@ def standard_font(name: str, serif: bool, fixed: bool, bold: bool, italic: bool)
     return STANDARD[(family, bold, italic)]
 
 
-def qt_families(font: str) -> List[str]:
+def qt_families(font: str) -> list[str]:
     return QT_FAMILIES[font.split("-")[0]]
 
 
@@ -91,7 +92,7 @@ def text_width(text: str, font: str, size: float) -> float:
     return sum(widths.get(ch, fallback) for ch in text) * size / 1000.0
 
 
-def ring_colour(pixels: bytes, width: int, height: int, box: Tuple[int, int, int, int], ring: int = 3) -> str:
+def ring_colour(pixels: bytes, width: int, height: int, box: tuple[int, int, int, int], ring: int = 3) -> str:
     """
     The most common colour in a ring just outside box (pixel coordinates,
     BGRA pixels). Colours are counted in coarse buckets so anti-aliasing
@@ -99,7 +100,7 @@ def ring_colour(pixels: bytes, width: int, height: int, box: Tuple[int, int, int
     """
     x1, y1, x2, y2 = box
     counts: Counter = Counter()
-    sums: Dict[tuple, List[int]] = {}
+    sums: dict[tuple, list[int]] = {}
 
     def add(x: int, y: int) -> None:
         if 0 <= x < width and 0 <= y < height:
@@ -138,12 +139,12 @@ def themed(colour: str, theme_mode: int) -> QColor:
 
 
 def overlay_from_selection(
-    rects: Sequence[Tuple[float, float, float, float]],
+    rects: Sequence[tuple[float, float, float, float]],
     styles: Sequence[tuple],
-    page_size: Tuple[float, float],
+    page_size: tuple[float, float],
     text: str,
     background: str,
-) -> Dict:
+) -> dict:
     """
     A "replace" annotation for text over a selection. rects are the
     selection's line boxes (relative, top-left); styles are get_char_styles
@@ -171,7 +172,7 @@ def overlay_from_selection(
     first_height = (lines[0][3] - lines[0][1]) * height
     baseline = max(size * 0.7, first_height - DESCENT * size)
     tops = [ln[1] * height for ln in lines]
-    pitches = [b2 - a2 for a2, b2 in zip(tops, tops[1:]) if b2 - a2 > size * 0.5]
+    pitches = [b2 - a2 for a2, b2 in itertools.pairwise(tops) if b2 - a2 > size * 0.5]
     leading = median(pitches) if pitches else size * 1.2
 
     new_lines = text.splitlines() or [""]
@@ -195,7 +196,7 @@ def overlay_from_selection(
 class ReplaceTextDialog(QDialog):
     """Asks for the new text; remove_original is whether to mark the old text for redaction."""
 
-    def __init__(self, original: str, parent: Optional[QWidget] = None):
+    def __init__(self, original: str, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle("Replace text")
         layout = QVBoxLayout(self)
@@ -204,11 +205,14 @@ class ReplaceTextDialog(QDialog):
         self.editor.selectAll()
         layout.addWidget(self.editor)
         note = QLabel(
-            "The new text covers the old. The old text stays in the file, so search, copy and the AI tools still find it."
+            "The new text covers the old. The old text stays in the file, so search, copy and the AI tools still find "
+            "it."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
-        self.remove_box = QCheckBox("Remove the original text too (marks it for redaction; Apply redactions removes it)")
+        self.remove_box = QCheckBox(
+            "Remove the original text too (marks it for redaction; Apply redactions removes it)"
+        )
         layout.addWidget(self.remove_box)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)

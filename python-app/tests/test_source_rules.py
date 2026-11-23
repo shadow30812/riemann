@@ -58,11 +58,17 @@ def test_text_files_are_opened_with_an_encoding():
         func = node.func
         name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
         if name in ("read_text", "write_text") and isinstance(func, ast.Attribute):
-            if not any(k.arg == "encoding" for k in node.keywords) and len(node.args) < (1 if name == "read_text" else 2):
+            if not any(k.arg == "encoding" for k in node.keywords) and len(node.args) < (
+                1 if name == "read_text" else 2
+            ):
                 loose.append(f"{path}:{node.lineno}")
-        elif name == "open" and isinstance(func, ast.Name) and "b" not in str(mode_of(node)):
-            if not any(k.arg == "encoding" for k in node.keywords):
-                loose.append(f"{path}:{node.lineno}")
+        elif (
+            name == "open"
+            and isinstance(func, ast.Name)
+            and "b" not in str(mode_of(node))
+            and not any(k.arg == "encoding" for k in node.keywords)
+        ):
+            loose.append(f"{path}:{node.lineno}")
     assert loose == []
 
 
@@ -148,10 +154,18 @@ def test_workers_are_tracked_before_they_start():
                 continue
             made, tracked = set(), set()
             for node in ast.walk(fn):
-                if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
-                    if ast.unparse(node.value.func).split(".")[-1] in workers:
-                        made.update(ast.unparse(t) for t in node.targets)
-                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "track" and node.args:
+                if (
+                    isinstance(node, ast.Assign)
+                    and isinstance(node.value, ast.Call)
+                    and ast.unparse(node.value.func).split(".")[-1] in workers
+                ):
+                    made.update(ast.unparse(t) for t in node.targets)
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "track"
+                    and node.args
+                ):
                     tracked.add(ast.unparse(node.args[0]))
             for node in ast.walk(fn):
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "start":

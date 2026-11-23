@@ -2,6 +2,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from riemann.ui.palette import DARK, banner_style
 from riemann.ui.reader.mixins.signatures import SignaturesMixin
 

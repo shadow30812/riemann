@@ -251,7 +251,14 @@ def _note(i, text, color="#ff0000"):
 def test_merge_keeps_edits_from_both_sides():
     base = pa.written_form({"0": [_note("a", "A"), _note("b", "B"), _note("c", "C"), _note("d", "D")]})
     local = {"0": [_note("a", "A local"), _note("b", "B"), _note("d", "D"), _note("new", "mine")]}
-    stored = {"0": [pa.as_read_back(_note("a", "A")), pa.as_read_back(_note("b", "B theirs")), pa.as_read_back(_note("c", "C")), pa.as_read_back(_note("x", "theirs"))]}
+    stored = {
+        "0": [
+            pa.as_read_back(_note("a", "A")),
+            pa.as_read_back(_note("b", "B theirs")),
+            pa.as_read_back(_note("c", "C")),
+            pa.as_read_back(_note("x", "theirs")),
+        ]
+    }
     merged = pa.merge_annotations(local, stored, base)
     texts = {a["id"]: a["text"] for a in merged["0"]}
     assert texts == {"a": "A local", "b": "B theirs", "new": "mine", "x": "theirs"}
@@ -261,7 +268,11 @@ def test_merge_without_a_base_keeps_everything_and_prefers_the_file():
     local = {"0": [_note("a", "mine"), _note("b", "only mine")]}
     stored = {"1": [_note("a", "theirs")], "0": [_note("c", "only theirs")]}
     merged = pa.merge_annotations(local, stored, None)
-    assert {a["id"]: a["text"] for p in merged.values() for a in p} == {"a": "theirs", "b": "only mine", "c": "only theirs"}
+    assert {a["id"]: a["text"] for p in merged.values() for a in p} == {
+        "a": "theirs",
+        "b": "only mine",
+        "c": "only theirs",
+    }
     assert [a["id"] for a in merged["1"]] == ["a"]
 
 

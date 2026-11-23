@@ -39,9 +39,9 @@ from PySide6.QtWidgets import (
 )
 
 from ...core import ai_engine
+from ...core.assets import icon_path
 from ...core.bibliography import to_bibtex, to_csl_json
 from ...core.doctypes import DOCUMENT_CLASSES, document_class
-from ...core.assets import icon_path
 from ..file_icons import CLASS_ICONS, FOLDER_ICON, TEXT_ICON
 from ..threads import release as release_thread
 from ..threads import track
@@ -140,7 +140,7 @@ class HistoryTab(SystemTab):
                     columns = [os.path.basename(trimmed) or trimmed, os.path.dirname(trimmed)]
                     if kind == "pdf":
                         columns.insert(1, document_class(path))
-                item = QTreeWidgetItem(columns + [when(entry.get("timestamp", ""))])
+                item = QTreeWidgetItem([*columns, when(entry.get("timestamp", ""))])
                 if kind == "pdf":
                     item.setIcon(1, QIcon(icon_path(CLASS_ICONS.get(columns[1], TEXT_ICON))))
                 elif kind == "folder":

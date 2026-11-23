@@ -9,9 +9,10 @@ three smaller stores kept apart on purpose.
 Keys read or written by more than one module are named here (the *_KEY
 constants), with any default two modules must agree on. Their strings are what
 existing installs have stored, so they never change; a key one module owns
-stays a literal in that module. tests/test_settings_keys.py enforces both. string_list and set_string_list smooth over how QSettings returns
-lists: None when unset, a bare string for a one-item list on some platforms,
-and a list otherwise.
+stays a literal in that module. tests/test_settings_keys.py enforces both.
+string_list and set_string_list smooth over how QSettings returns lists: None
+when unset, a bare string for a one-item list on some platforms, and a list
+otherwise.
 
 get_dialog_directory and save_last_directory remember the folder file dialogs
 open in ("app/default_dir" when set, else the last folder used).

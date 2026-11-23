@@ -51,7 +51,7 @@ Ctrl+C in either of them copies their text.
 import dataclasses
 import os
 import re
-from typing import Callable, Iterator, Optional
+from collections.abc import Callable, Iterator
 
 import shiboken6
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSize, Qt, QTimer, Signal
@@ -60,9 +60,9 @@ from PySide6.QtWidgets import (
     QAbstractItemDelegate,
     QAbstractItemView,
     QApplication,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
-    QFileDialog,
     QLabel,
     QLineEdit,
     QMenu,
@@ -95,7 +95,7 @@ def shown(text: str) -> str:
 
 
 class TableSheet:
-    def __init__(self, name: str, rows: Iterator[list], header: Optional[list] = None, first_row: int = 1):
+    def __init__(self, name: str, rows: Iterator[list], header: list | None = None, first_row: int = 1):
         self.name = name
         self.header = header
         self.rows: list = []
@@ -155,7 +155,7 @@ class TableModel(QAbstractTableModel):
     def __init__(self, sheet: TableSheet, parent=None):
         super().__init__(parent)
         self.sheet = sheet
-        self.sort_state: Optional[tuple] = None
+        self.sort_state: tuple | None = None
         self.editable = False
         self.modified = False
         self.undo_stack: list = []
@@ -217,7 +217,7 @@ class TableModel(QAbstractTableModel):
         self.modified = False
         self.edited.emit()
 
-    def _write(self, row: int, column: int, text: str) -> Optional[tuple]:
+    def _write(self, row: int, column: int, text: str) -> tuple | None:
         """Sets one cell; returns (row entry, column, old text) for undo, or None when nothing changed."""
         entry = self.sheet.rows[row]
         cells = entry[1]
@@ -282,7 +282,7 @@ class TableModel(QAbstractTableModel):
             self.endInsertRows()
         return len(added)
 
-    def sort_rows(self, column: int, descending: Optional[bool]) -> None:
+    def sort_rows(self, column: int, descending: bool | None) -> None:
         self.layoutAboutToBeChanged.emit()
         if descending is None:
             self.sheet.rows.sort(key=lambda row: row[0])
@@ -307,19 +307,19 @@ class TableTab(QWidget):
         path: str,
         dark_mode: bool = False,
         preview: bool = False,
-        sheets: Optional[list] = None,
+        sheets: list | None = None,
         parent=None,
-        loader: Optional[Callable[[str], list]] = None,
+        loader: Callable[[str], list] | None = None,
     ):
         super().__init__(parent)
         self.current_path = os.path.abspath(path)
         self.is_preview = preview
         self.dark_mode = dark_mode
-        self.lbl_toast: Optional[Toast] = None
+        self.lbl_toast: Toast | None = None
         self.models: list = []
         self.error = ""
         self.editable = False
-        self._pending: Optional[Callable[[], bool]] = None
+        self._pending: Callable[[], bool] | None = None
         self._step_timer = QTimer(self)
         self._step_timer.setInterval(0)
         self._step_timer.timeout.connect(self._load_step)
@@ -444,7 +444,7 @@ class TableTab(QWidget):
             self.status.setText(self.error or "This file has no rows.")
 
     @property
-    def model(self) -> Optional[TableModel]:
+    def model(self) -> TableModel | None:
         index = self.sheet_tabs.currentIndex() if self.sheet_tabs.count() else 0
         return self.models[index] if 0 <= index < len(self.models) else None
 
@@ -487,7 +487,7 @@ class TableTab(QWidget):
             return
         state = model.sort_state
         if state is None or state[0] != column:
-            order: Optional[bool] = False
+            order: bool | None = False
         elif state[1] is False:
             order = True
         else:
@@ -542,7 +542,13 @@ class TableTab(QWidget):
 
     def eventFilter(self, obj, event) -> bool:
         view = getattr(self, "view", None)
-        if view is not None and obj is view and event.type() == event.Type.KeyPress and self.model and self.model.editable:
+        if (
+            view is not None
+            and obj is view
+            and event.type() == event.Type.KeyPress
+            and self.model
+            and self.model.editable
+        ):
             if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and not event.modifiers():
                 count = self.model.clear_cells(self.view.selectionModel().selectedIndexes())
                 if count > 1:
@@ -556,7 +562,10 @@ class TableTab(QWidget):
             if event.key() == Qt.Key.Key_Escape:
                 self.hide_find()
                 return True
-            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            if (
+                event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+                and event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            ):
                 self.find_next(backwards=True)
                 return True
         return super().eventFilter(obj, event)
@@ -621,7 +630,10 @@ class TableTab(QWidget):
         columns = sorted({i.column() for i in indexes})
         chosen = {(i.row(), i.column()) for i in indexes}
         lines = [
-            "\t".join(shown(model.cell(r, c)).replace("\t", " ").replace("\n", " ") if (r, c) in chosen else "" for c in columns)
+            "\t".join(
+                shown(model.cell(r, c)).replace("\t", " ").replace("\n", " ") if (r, c) in chosen else ""
+                for c in columns
+            )
             for r in rows
         ]
         QApplication.clipboard().setText("\n".join(lines))
@@ -634,7 +646,7 @@ class TableTab(QWidget):
     def _update_save(self) -> None:
         self.btn_save.setVisible(self.modified)
 
-    def cell_editor(self) -> Optional[QLineEdit]:
+    def cell_editor(self) -> QLineEdit | None:
         """The editor of the cell being changed, if one is open."""
         if self.view.state() != QAbstractItemView.State.EditingState:
             return None
@@ -766,7 +778,8 @@ class TableTab(QWidget):
             f"QLabel {{ color: {t['muted']}; background: transparent; }}"
             f"QLabel#tableStatus {{ background: {t['surface']}; color: {t['text']}; padding: 4px 10px;"
             f" border-top: 1px solid {t['border']}; }}"
-            f"QToolButton {{ color: {t['text']}; border: 1px solid transparent; border-radius: 4px; padding: 5px; background: transparent; }}"
+            f"QToolButton {{ color: {t['text']}; border: 1px solid transparent; border-radius: 4px; padding: 5px; "
+            f"background: transparent; }}"
             f"QToolButton:hover {{ background: {t['raised']}; }}"
             "QToolButton::menu-indicator { image: none; width: 0px; }"
             f"QTableView {{ background: {t['surface']}; color: {t['text']}; gridline-color: {t['border']};"
@@ -775,8 +788,7 @@ class TableTab(QWidget):
             f" border-right: 1px solid {t['border']}; border-bottom: 1px solid {t['border']}; padding: 3px 6px; }}"
             f"QTableCornerButton::section {{ background: {t['raised']}; border: none; }}"
             f"QLineEdit {{ background: {t['canvas']}; color: {t['text']}; border: 1px solid {t['border_strong']};"
-            f" border-radius: 6px; padding: 4px; }}"
-            + scrollbar_style(t)
+            f" border-radius: 6px; padding: 4px; }}" + scrollbar_style(t)
         )
         self._update_icons()
 

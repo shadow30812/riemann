@@ -29,7 +29,6 @@ SVG is drawn into the PDF as vectors through QSvgRenderer.
 
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 from PySide6.QtCore import QMarginsF, QSize, QSizeF, Qt
 from PySide6.QtGui import QImage, QImageReader, QMovie, QPageSize, QPainter, QPdfWriter
@@ -88,7 +87,7 @@ def pil_to_qimage(img) -> QImage:
     return QImage(data, rgba.width, rgba.height, rgba.width * 4, QImage.Format.Format_RGBA8888).copy()
 
 
-def _decode_pillow(path: str, frame: int) -> Optional[DecodedImage]:
+def _decode_pillow(path: str, frame: int) -> DecodedImage | None:
     from PIL import Image, ImageOps, UnidentifiedImageError
 
     try:
@@ -106,7 +105,7 @@ def _decode_pillow(path: str, frame: int) -> Optional[DecodedImage]:
     return DecodedImage(image, image.width(), image.height(), frames, name)
 
 
-def _decode_qt(path: str, frame: int, size: Optional[QSize]) -> DecodedImage:
+def _decode_qt(path: str, frame: int, size: QSize | None) -> DecodedImage:
     reader = QImageReader(path)
     reader.setAutoTransform(True)
     if not reader.canRead():
@@ -126,7 +125,7 @@ def _decode_qt(path: str, frame: int, size: Optional[QSize]) -> DecodedImage:
     return DecodedImage(image, width, height, frames, name, vector)
 
 
-def decode_image(path: str, frame: int = 0, size: Optional[QSize] = None) -> DecodedImage:
+def decode_image(path: str, frame: int = 0, size: QSize | None = None) -> DecodedImage:
     """One frame of path; size is how big to draw a vector image."""
     from PIL import Image
 
@@ -141,11 +140,11 @@ def decode_image(path: str, frame: int = 0, size: Optional[QSize] = None) -> Dec
     except ImageError:
         raise
     except Image.DecompressionBombError:
-        raise ImageError("This image is too large to open safely.")
+        raise ImageError("This image is too large to open safely.") from None
     except MemoryError:
-        raise ImageError("There isn't enough memory to open this image.")
+        raise ImageError("There isn't enough memory to open this image.") from None
     except Exception as error:
-        raise ImageError(f"The image is damaged or not fully supported ({error}).")
+        raise ImageError(f"The image is damaged or not fully supported ({error}).") from error
 
 
 def _pillow_pages(path: str):
@@ -192,10 +191,12 @@ def save_as_pdf(path: str, output: str) -> None:
         from PIL import Image
 
         rgba = image.convertToFormat(QImage.Format.Format_RGBA8888)
-        page = Image.frombuffer("RGBA", (rgba.width(), rgba.height()), bytes(rgba.constBits()), "raw", "RGBA", rgba.bytesPerLine(), 1)
+        page = Image.frombuffer(
+            "RGBA", (rgba.width(), rgba.height()), bytes(rgba.constBits()), "raw", "RGBA", rgba.bytesPerLine(), 1
+        )
         flat = Image.new("RGB", page.size, "white")
         flat.paste(page, mask=page.getchannel("A"))
         pages = [flat]
     except Exception as error:
-        raise ImageError(f"The image couldn't be read ({error}).")
+        raise ImageError(f"The image couldn't be read ({error}).") from error
     pages[0].save(output, "PDF", resolution=72.0, save_all=True, append_images=pages[1:])

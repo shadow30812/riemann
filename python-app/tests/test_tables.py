@@ -49,8 +49,12 @@ def test_csv_and_tsv_are_tables_and_spreadsheets_in_history(tmp_path):
 
 @pytest.mark.parametrize(
     "text,delimiter",
-    [("name,age\nAda,36\nAlan,41\n", ","), ("name;age\nAda;36\nAlan;41\n", ";"), ("name\tage\nAda\t36\nAlan\t41\n", "\t"),
-     ("name|age\nAda|36\nAlan|41\n", "|")],
+    [
+        ("name,age\nAda,36\nAlan,41\n", ","),
+        ("name;age\nAda;36\nAlan;41\n", ";"),
+        ("name\tage\nAda\t36\nAlan\t41\n", "\t"),
+        ("name|age\nAda|36\nAlan|41\n", "|"),
+    ],
 )
 def test_the_delimiter_and_header_are_detected(tmp_path, text, delimiter):
     source = open_delimited(write(tmp_path / "people.csv", text))

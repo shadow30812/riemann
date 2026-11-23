@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 from PySide6.QtWebEngineCore import QWebEngineScript
+
 from riemann.ui.browser_handlers import ScriptInjector
 
 

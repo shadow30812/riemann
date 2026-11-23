@@ -34,11 +34,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .palette import FONT_STACK, GridCanvas, path_row, short_folder, tinted_icon, tinted_pixmap, tokens
-from ..core.settings import FAVOURITE_FOLDERS_KEY, favourites_settings
 from ..core.assets import icon_path
+from ..core.settings import FAVOURITE_FOLDERS_KEY, favourites_settings
 from .file_icons import BLANK_ICON, name_icon
-
+from .palette import FONT_STACK, GridCanvas, path_row, short_folder, tinted_icon, tinted_pixmap, tokens
 
 
 class FileIconProxyModel(QSortFilterProxyModel):
@@ -150,14 +149,16 @@ class FileExplorerPanel(QWidget):
         t = tokens(dark_mode)
         self.header.setStyleSheet(
             f"#ExplorerHeader {{ background-color: {t['surface']}; border-bottom: 1px solid {t['border']}; }}"
-            f"#ExplorerHeader QLabel {{ color: {t['text']}; font-weight: 600; font-size: 12px; background: transparent; }}"
+            "#ExplorerHeader QLabel "
+            f"{{ color: {t['text']}; font-weight: 600; font-size: 12px; background: transparent; }}"
             f"#ExplorerHeader QToolButton {{ border: none; border-radius: 6px; padding: 2px; }}"
             f"#ExplorerHeader QToolButton:hover {{ background: {t['raised']}; }}"
         )
         self.lbl_folder_icon.setPixmap(tinted_pixmap("folder", t["accent"], 16))
         self.btn_collapse.setIcon(tinted_icon("chevron-left", t["muted"], 16))
         self.tree.setStyleSheet(
-            f"QTreeView {{ background-color: {t['canvas']}; color: {t['text']}; border: none; outline: none; padding: 4px; }} "
+            "QTreeView "
+            f"{{ background-color: {t['canvas']}; color: {t['text']}; border: none; outline: none; padding: 4px; }} "
             f"QTreeView::item {{ padding: 3px 2px; border-radius: 6px; }} "
             f"QTreeView::item:hover {{ background-color: {t['raised']}; }} "
             f"QTreeView::item:selected {{ background-color: {t['accent_soft']}; color: {t['text']}; }}"
@@ -349,7 +350,8 @@ class FolderHomeTab(QWidget):
                 margin: 0 12px 12px 0; padding: 18px 10px 12px 10px; color: {t["text"]};
             }}
             QListWidget#FavList::item:hover {{ border-color: {t["accent"]}; background-color: {t["raised"]}; }}
-            QListWidget#FavList::item:selected {{ border-color: {t["accent"]}; background-color: {t["accent_soft"]}; color: {t["text"]}; }}
+            QListWidget#FavList::item:selected {{ border-color: {t["accent"]}; background-color: {t["accent_soft"]};
+                color: {t["text"]}; }}
 
             QListWidget#RecentList::item {{ border: none; border-radius: 10px; margin: 1px 0; padding: 0; }}
             QListWidget#RecentList::item:hover {{ background-color: {t["raised"]}; }}
@@ -357,7 +359,8 @@ class FolderHomeTab(QWidget):
             #recentName {{ font-size: 14px; color: {t["text"]}; }}
             #recentDir {{ font-size: 12px; color: {t["faint"]}; }}
             QScrollBar:vertical {{ background: transparent; width: 14px; }}
-            QScrollBar::handle:vertical {{ background: {t["border_strong"]}; border-radius: 5px; margin: 2px; min-height: 24px; }}
+            QScrollBar::handle:vertical {{ background: {t["border_strong"]}; border-radius: 5px; margin: 2px;
+                min-height: 24px; }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
         """)
         self.btn_open.setIcon(tinted_icon("folder", t["accent_text"], 18))

@@ -22,7 +22,7 @@ characters: a letter is only included once the pointer passes its middle, as in
 text editors.
 """
 
-from typing import List, Optional, Tuple
+
 from PySide6.QtCore import (
     QPoint,
     QRect,
@@ -34,9 +34,10 @@ from PySide6.QtGui import (
     QKeyEvent,
 )
 from PySide6.QtWebEngineCore import QWebEnginePage
+
 from ....core.constants import ViewMode
-from .host import ReaderHostBase
 from ....core.settings import search_url
+from .host import ReaderHostBase
 
 
 class SelectionMixin(ReaderHostBase):
@@ -180,7 +181,7 @@ class SelectionMixin(ReaderHostBase):
             ra, rb = all_chars[a][1], all_chars[b][1]
             return abs(ra.center().y() - rb.center().y()) < max(ra.height(), 1) * 0.5
 
-        def line_bounds(i: int) -> Tuple[int, int]:
+        def line_bounds(i: int) -> tuple[int, int]:
             start = end = i
             while start > 0 and same_line(start - 1, i):
                 start -= 1
@@ -255,7 +256,7 @@ class SelectionMixin(ReaderHostBase):
         self._apply_keyboard_selection()
         return True
 
-    def _get_page_chars(self, page_idx: int) -> List[tuple]:
+    def _get_page_chars(self, page_idx: int) -> list[tuple]:
         """
         Returns the page's characters in reading order as (char, QRect, run)
         tuples in widget coordinates, built from PDFium's glyph boxes and
@@ -281,7 +282,7 @@ class SelectionMixin(ReaderHostBase):
             raw_segments = []
             for seg_idx, (text, boxes) in enumerate(self.text_segments_cache[page_idx]):
                 char_boxes = []
-                for ch, box in zip(text, boxes):
+                for ch, box in zip(text, boxes, strict=False):
                     rect = self._pdf_box_to_widget(box, scale, logical_w, logical_h, rotation)
                     char_boxes.append((ch, rect))
                 if not char_boxes:
@@ -303,7 +304,7 @@ class SelectionMixin(ReaderHostBase):
                     }
                 )
 
-            lines: List[List[dict]] = []
+            lines: list[list[dict]] = []
             for seg_item in raw_segments:
                 placed = False
                 for line in lines:
@@ -321,7 +322,7 @@ class SelectionMixin(ReaderHostBase):
 
             lines.sort(key=lambda ln: sum(s["y"] for s in ln) / len(ln))
 
-            all_chars: List[tuple[str, QRect, int]] = []
+            all_chars: list[tuple[str, QRect, int]] = []
             for line in lines:
                 line.sort(key=lambda s: s["x"])
                 for s_idx, s in enumerate(line):
@@ -350,7 +351,7 @@ class SelectionMixin(ReaderHostBase):
 
     @staticmethod
     def _pdf_box_to_widget(
-        box: Tuple[float, float, float, float],
+        box: tuple[float, float, float, float],
         scale: float,
         logical_w: float,
         logical_h: float,
@@ -374,7 +375,7 @@ class SelectionMixin(ReaderHostBase):
 
     def _page_char_runs(
         self, page_idx: int
-    ) -> List[Tuple[str, List[Tuple[float, float, float, float]]]]:
+    ) -> list[tuple[str, list[tuple[float, float, float, float]]]]:
         """
         Splits a page's characters into runs of text on one line, each with a
         box per character in PDF points. Uses PDFium's own glyph boxes when the
@@ -387,10 +388,10 @@ class SelectionMixin(ReaderHostBase):
         return self._runs_from_segments(doc.get_text_segments(page_idx))
 
     @staticmethod
-    def _runs_from_char_boxes(chars: List[tuple]) -> List[tuple]:
-        runs: List[tuple] = []
-        text: List[str] = []
-        boxes: List[list] = []
+    def _runs_from_char_boxes(chars: list[tuple]) -> list[tuple]:
+        runs: list[tuple] = []
+        text: list[str] = []
+        boxes: list[list] = []
 
         def flush():
             while text and text[-1].isspace():
@@ -428,7 +429,7 @@ class SelectionMixin(ReaderHostBase):
         return runs
 
     @staticmethod
-    def _runs_from_segments(segments: List[tuple]) -> List[tuple]:
+    def _runs_from_segments(segments: list[tuple]) -> list[tuple]:
         from PySide6.QtGui import QFont, QFontMetricsF
 
         metrics = QFontMetricsF(QFont("Serif", 100))
@@ -447,7 +448,7 @@ class SelectionMixin(ReaderHostBase):
         return runs
 
     @staticmethod
-    def _closest_char_index(all_chars: List[tuple], pos: QPoint) -> Optional[int]:
+    def _closest_char_index(all_chars: list[tuple], pos: QPoint) -> int | None:
         """Finds the character under pos, or the nearest one on the same line."""
         if not all_chars:
             return None
@@ -482,14 +483,14 @@ class SelectionMixin(ReaderHostBase):
 
     @staticmethod
     def _rects_for_char_range(
-        all_chars: List[tuple], min_idx: int, max_idx: int
-    ) -> tuple[List[QRect], str]:
+        all_chars: list[tuple], min_idx: int, max_idx: int
+    ) -> tuple[list[QRect], str]:
         """Merges the boxes of a character range into per-line highlight rects."""
-        selected_rects: List[QRect] = []
-        selected_chars: List[str] = []
+        selected_rects: list[QRect] = []
+        selected_chars: list[str] = []
 
-        current_box: Optional[QRect] = None
-        prev_cy: Optional[float] = None
+        current_box: QRect | None = None
+        prev_cy: float | None = None
 
         for i in range(min_idx, max_idx + 1):
             ch, rect, _ = all_chars[i]
@@ -521,7 +522,7 @@ class SelectionMixin(ReaderHostBase):
 
     def _get_linear_text_selection(
         self, page_idx: int, start_pos: QPoint, end_pos: QPoint
-    ) -> tuple[List[QRect], str]:
+    ) -> tuple[list[QRect], str]:
         """
         Calculates the character-level linear text selection between two points
         and remembers it as the anchor/focus of the keyboard selection.
@@ -552,7 +553,7 @@ class SelectionMixin(ReaderHostBase):
 
     def _get_word_at_pos(
         self, page_idx: int, pos: QPoint
-    ) -> tuple[List[QRect], str]:
+    ) -> tuple[list[QRect], str]:
         """Returns the bounding rectangle and text for the single word under pos."""
         widget = self.page_widgets.get(page_idx)
         if not widget:
@@ -618,7 +619,7 @@ class SelectionMixin(ReaderHostBase):
 
     def _get_paragraph_at_pos(
         self, page_idx: int, pos: QPoint
-    ) -> tuple[List[QRect], str]:
+    ) -> tuple[list[QRect], str]:
         """
         Returns the bounding rectangles and text for the entire sentence/paragraph under pos.
         Selection extends until a line break or horizontal whitespace is encountered.
@@ -678,17 +679,14 @@ class SelectionMixin(ReaderHostBase):
             end_i -= 1
         self._sel_page, self._sel_anchor, self._sel_focus = page_idx, start_i, end_i + 1
 
-        selected_rects: List[QRect] = []
-        selected_chars: List[str] = []
-        current_box: Optional[QRect] = None
+        selected_rects: list[QRect] = []
+        selected_chars: list[str] = []
+        current_box: QRect | None = None
 
         for i in range(start_i, end_i + 1):
             ch, rect, _ = all_chars[i]
             selected_chars.append(ch)
-            if current_box is None:
-                current_box = QRect(rect)
-            else:
-                current_box = current_box.united(rect)
+            current_box = QRect(rect) if current_box is None else current_box.united(rect)
 
         if current_box is not None:
             selected_rects.append(current_box)

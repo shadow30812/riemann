@@ -29,8 +29,8 @@ No Qt imports.
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
 
 from .endpoints import FLATHUB_REPO
 from .office import FLATPAK_ID
@@ -38,9 +38,16 @@ from .office import FLATPAK_ID
 PACKAGES = ("libreoffice-writer", "libreoffice-calc", "libreoffice-impress")
 FAMILIES = (
     (("fedora", "rhel", "centos", "rocky", "almalinux", "ol"), "dnf", ["dnf", "install", "-y", *PACKAGES]),
-    (("debian", "ubuntu", "linuxmint", "pop", "elementary", "zorin"), "apt-get", ["apt-get", "install", "-y", *PACKAGES]),
-    (("opensuse", "suse", "sles", "opensuse-leap", "opensuse-tumbleweed"), "zypper",
-     ["zypper", "--non-interactive", "install", *PACKAGES]),
+    (
+        ("debian", "ubuntu", "linuxmint", "pop", "elementary", "zorin"),
+        "apt-get",
+        ["apt-get", "install", "-y", *PACKAGES],
+    ),
+    (
+        ("opensuse", "suse", "sles", "opensuse-leap", "opensuse-tumbleweed"),
+        "zypper",
+        ["zypper", "--non-interactive", "install", *PACKAGES],
+    ),
     (("arch", "manjaro", "endeavouros"), "pacman", ["pacman", "-S", "--noconfirm", "libreoffice-fresh"]),
 )
 WINGET = ["winget", "install", "--exact", "--id", "TheDocumentFoundation.LibreOffice", "--source", "winget",
@@ -51,14 +58,14 @@ WINGET = ["winget", "install", "--exact", "--id", "TheDocumentFoundation.LibreOf
 class InstallPlan:
     name: str
     note: str
-    steps: List[List[str]] = field(default_factory=list)
+    steps: list[list[str]] = field(default_factory=list)
 
     def shown(self) -> str:
         return "\n".join(" ".join(step) for step in self.steps)
 
 
-def os_release(path: str = "/etc/os-release") -> Dict[str, str]:
-    values: Dict[str, str] = {}
+def os_release(path: str = "/etc/os-release") -> dict[str, str]:
+    values: dict[str, str] = {}
     try:
         with open(path, encoding="utf-8") as f:
             for line in f:
@@ -70,8 +77,8 @@ def os_release(path: str = "/etc/os-release") -> Dict[str, str]:
     return values
 
 
-def system_plan(release: Dict[str, str], which: Callable[[str], Optional[str]] = shutil.which) -> Optional[InstallPlan]:
-    ids = [release.get("ID", "").lower()] + release.get("ID_LIKE", "").lower().split()
+def system_plan(release: dict[str, str], which: Callable[[str], str | None] = shutil.which) -> InstallPlan | None:
+    ids = [release.get("ID", "").lower(), *release.get("ID_LIKE", "").lower().split()]
     if not which("pkexec"):
         return None
     for names, tool, command in FAMILIES:
@@ -85,12 +92,13 @@ def system_plan(release: Dict[str, str], which: Callable[[str], Optional[str]] =
     return None
 
 
-def flatpak_plan(which: Callable[[str], Optional[str]] = shutil.which) -> Optional[InstallPlan]:
+def flatpak_plan(which: Callable[[str], str | None] = shutil.which) -> InstallPlan | None:
     if not which("flatpak"):
         return None
     return InstallPlan(
         "Flatpak from Flathub",
-        "Installs LibreOffice for you only, with no password. The download is larger, since it brings its own libraries.",
+        "Installs LibreOffice for you only, with no password. The download is larger, since it brings its own "
+        "libraries.",
         [
             ["flatpak", "remote-add", "--user", "--if-not-exists", "flathub", FLATHUB_REPO],
             ["flatpak", "install", "--user", "-y", "--noninteractive", "flathub", FLATPAK_ID],
@@ -100,9 +108,9 @@ def flatpak_plan(which: Callable[[str], Optional[str]] = shutil.which) -> Option
 
 def install_plans(
     platform: str = sys.platform,
-    release: Optional[Dict[str, str]] = None,
-    which: Callable[[str], Optional[str]] = shutil.which,
-) -> List[InstallPlan]:
+    release: dict[str, str] | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+) -> list[InstallPlan]:
     if platform == "win32":
         if which("winget"):
             return [InstallPlan(
@@ -117,7 +125,7 @@ def install_plans(
     return []
 
 
-def install_env() -> Dict[str, str]:
+def install_env() -> dict[str, str]:
     """The environment for the installers: Riemann's own library paths left out, as for LibreOffice."""
     from .office import STRIPPED_ENV
 

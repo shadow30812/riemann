@@ -58,7 +58,14 @@ def container_of(layout, widget):
     return None
 
 
-EXPECTED = {tl.BAR: "bar", tl.RAIL: "rail", tl.RIBBON: "ribbon", tl.PILL: "pill", tl.MENU: "parking", tl.HIDDEN: "parking"}
+EXPECTED = {
+    tl.BAR: "bar",
+    tl.RAIL: "rail",
+    tl.RIBBON: "ribbon",
+    tl.PILL: "pill",
+    tl.MENU: "parking",
+    tl.HIDDEN: "parking",
+}
 
 
 def test_custom_layout_round_trips_and_ignores_invalid_places(store):
@@ -139,7 +146,9 @@ def test_rail_follows_the_toolbar_and_can_be_hidden(qapp, reader, store):
 
 
 @pytest.mark.skipif(not os.path.exists(CORPUS), reason="benchmark corpus not downloaded")
-@pytest.mark.parametrize("fit,mode", [("Fit Width", "FIT_WIDTH"), ("Fit Height", "FIT_HEIGHT"), ("Auto Fit", "AUTO_FIT")])
+@pytest.mark.parametrize(
+    "fit,mode", [("Fit Width", "FIT_WIDTH"), ("Fit Height", "FIT_HEIGHT"), ("Auto Fit", "AUTO_FIT")]
+)
 def test_fit_modes_refit_when_full_screen_hides_the_bars(qapp, reader, store, fit, mode):
     """Pure full screen hides the toolbar and the side rail: the pages get more room though the tab keeps its size."""
     from riemann.core.constants import ZoomMode
@@ -275,7 +284,14 @@ def test_reader_bars_take_their_colours_from_the_palette(qapp, store):
             tab.theme_mode = mode
             tab.apply_theme()
             tab.show_toast("x")
-            for widget in (tab.toolbar, tab.search_bar, tab.ai_search_bar, tab.link_tooltip, tab.scroll_content, tab.lbl_toast):
+            for widget in (
+                tab.toolbar,
+                tab.search_bar,
+                tab.ai_search_bar,
+                tab.link_tooltip,
+                tab.scroll_content,
+                tab.lbl_toast,
+            ):
                 sheet = widget.styleSheet()
                 for colour in re.findall(r"#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)", sheet):
                     assert colour.lower() in allowed, (widget.objectName(), colour)
@@ -358,7 +374,9 @@ def test_rail_menus_are_readable_in_every_theme(qapp, store, ui_dark, page_mode)
 
     tl.set_layout("C")
     window = QWidget()
-    with open(os.path.join(asset_path("theme"), "modern_dark.css" if ui_dark else "modern_light.css"), encoding="utf-8") as f:
+    with open(
+        os.path.join(asset_path("theme"), "modern_dark.css" if ui_dark else "modern_light.css"), encoding="utf-8"
+    ) as f:
         window.setStyleSheet(f.read())
     QVBoxLayout(window).setContentsMargins(0, 0, 0, 0)
     tab = ReaderTab()
@@ -371,7 +389,11 @@ def test_rail_menus_are_readable_in_every_theme(qapp, store, ui_dark, page_mode)
         tab.theme_mode = page_mode
         tab.apply_theme()
         pump(qapp, 0.2)
-        button = next(b for b in tab.toolbar_layout.rail.findChildren(QToolButton, "railFlyout") if b.property("riemannGroup") == "File")
+        button = next(
+            b
+            for b in tab.toolbar_layout.rail.findChildren(QToolButton, "railFlyout")
+            if b.property("riemannGroup") == "File"
+        )
         menu = button.findChild(QMenu)
         tab.toolbar_layout._fill_menu(menu, [c.key for c in tl.COMMANDS if c.group == "File"])
         menu.popup(button.mapToGlobal(QPoint(-menu.sizeHint().width() - 6, 0)))

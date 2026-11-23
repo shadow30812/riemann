@@ -39,7 +39,6 @@ from PySide6.QtWidgets import (
 
 from ..palette import tinted_icon, tinted_pixmap, tokens, ui_font
 
-
 WHEEL_CONTROLS = (QComboBox, QAbstractSpinBox, QAbstractSlider)
 
 

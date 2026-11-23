@@ -64,15 +64,15 @@ import os
 import shutil
 import sys
 import tempfile
-from typing import Optional
+
 import shiboken6
 from PySide6.QtCore import (
     QStandardPaths,
+    Qt,
     QThread,
+    QTimer,
     QUrl,
     Signal,
-    Qt,
-    QTimer,
 )
 from PySide6.QtGui import (
     QColor,
@@ -92,18 +92,16 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
 )
-from ....core.constants import ViewMode
+
 from ....core import page_edit, pdf_annotations, pdf_forms
-from ....core.managers import PasswordDialog
-from ..render_worker import PAGE_CACHE, PageRenderWorker
-from ....core.render_process import PageRenderer
-from ..utils import generate_document_html, generate_markdown_html, generate_text_html
+from ....core.constants import ViewMode
 from ....core.convert_process import CONVERTERS, Conversion, ConvertError
-from ....core.office_basic import basic_format, is_spreadsheet, packages_ready
-from ....core.office import OfficeConversion, OfficeError, find_office, open_in_office
 from ....core.doctypes import MARKDOWN_SUFFIXES, dialog_filter, document_kind, is_text_document
-from ...threads import release, track
 from ....core.log import log
+from ....core.managers import PasswordDialog
+from ....core.office import OfficeConversion, OfficeError, find_office, open_in_office
+from ....core.office_basic import basic_format, is_spreadsheet, packages_ready
+from ....core.render_process import PageRenderer
 from ....core.settings import (
     NOTES_VISIBLE_KEY,
     OFFICE_PATH_KEY,
@@ -113,6 +111,9 @@ from ....core.settings import (
     save_last_directory,
 )
 from ...palette import tokens
+from ...threads import release, track
+from ..render_worker import PAGE_CACHE, PageRenderWorker
+from ..utils import generate_document_html, generate_markdown_html, generate_text_html
 from .host import ReaderHostBase
 
 TEXT_VIEW_LIMIT = 20 * 1024 * 1024
@@ -167,7 +168,7 @@ class OfficeWorker(QThread):
     failed = Signal(str, str)
     missing = Signal(str)
 
-    def __init__(self, path: str, override: str = "", folder: Optional[str] = None):
+    def __init__(self, path: str, override: str = "", folder: str | None = None):
         super().__init__()
         self.path = path
         self.override = override
@@ -197,19 +198,19 @@ class DocumentMixin(ReaderHostBase):
     pending_initial_page = None
     _char_geometry_cache = None
     text_document = False
-    _text_page_file: Optional[str] = None
-    convert_worker: Optional[ConvertWorker] = None
-    _converted: Optional[dict] = None
+    _text_page_file: str | None = None
+    convert_worker: ConvertWorker | None = None
+    _converted: dict | None = None
     _convert_error = ""
     _document_sections: tuple = ()
     _converter_kind = ""
-    converted_pdf: Optional[str] = None
+    converted_pdf: str | None = None
     converted_banner = None
-    _office_folder: Optional[str] = None
+    _office_folder: str | None = None
     incognito = False
-    _office_timer: Optional[QTimer] = None
-    _office_seen_mtime: Optional[float] = None
-    document_password: Optional[str] = None
+    _office_timer: QTimer | None = None
+    _office_seen_mtime: float | None = None
+    document_password: str | None = None
     document_encrypted = False
     document_signed = False
     _signed_edit_accepted = False
@@ -217,13 +218,15 @@ class DocumentMixin(ReaderHostBase):
     def load_document(
         self,
         path: str,
-        password: Optional[str] = None,
+        password: str | None = None,
         is_retry: bool = False,
     ) -> None:
-        """Loads a PDF on a background thread, or shows a Markdown or text file; set pending_initial_page first to open at a page."""
-        if self.has_unsaved_page_edits() and path != self.current_path:
-            if not self.resolve_page_edits():
-                return
+        """
+        Loads a PDF on a background thread, or shows a Markdown or text file; set pending_initial_page first to open
+        at a page.
+        """
+        if self.has_unsaved_page_edits() and path != self.current_path and not self.resolve_page_edits():
+            return
         if not is_retry and self.current_path:
             self.flush_annotations_to_pdf()
         if path != self.current_path:
@@ -240,7 +243,7 @@ class DocumentMixin(ReaderHostBase):
         source = self.edit_scratch if self.edit_scratch and path == self.current_path else path
         self._load_pdf(path, source, password, is_retry)
 
-    def _load_pdf(self, path: str, source: str, password: Optional[str], is_retry: bool) -> None:
+    def _load_pdf(self, path: str, source: str, password: str | None, is_retry: bool) -> None:
         self.load_progress = QProgressDialog(
             f"Loading {os.path.basename(path)}...", None, 0, 0, self
         )
@@ -353,7 +356,7 @@ class DocumentMixin(ReaderHostBase):
             self._render_worker.start()
         self._render_worker.set_document(self.page_renderer, self._render_owner())
 
-    def _replace_page_renderer(self, renderer: Optional[PageRenderer]) -> None:
+    def _replace_page_renderer(self, renderer: PageRenderer | None) -> None:
         old, self.page_renderer = self.page_renderer, renderer
         if old is not None:
             old.close()
@@ -474,7 +477,10 @@ class DocumentMixin(ReaderHostBase):
         self.show_toast("Refreshed document 🔄")
 
     def _show_text_document(self, path: str, converter: str = "") -> None:
-        """Shows a Markdown or plain text file as a page in the web view, in place of a PDF; converter names a CONVERTERS kind to turn it into HTML first."""
+        """
+        Shows a Markdown or plain text file as a page in the web view, in place of a PDF; converter names a
+        CONVERTERS kind to turn it into HTML first.
+        """
         if self.current_doc is not None:
             self._release_document()
         self.current_path = path
@@ -511,7 +517,10 @@ class DocumentMixin(ReaderHostBase):
         self._update_protect_button()
 
     def _convert_office(self, path: str) -> None:
-        """Starts converting an Office file; the tab shows a message until the PDF loads, or keeps the old pages on reload."""
+        """
+        Starts converting an Office file; the tab shows a message until the PDF loads, or keeps the old pages on
+        reload.
+        """
         self._forget_conversion()
         reloading = path == self.current_path and self.current_doc is not None
         self.current_path = path
@@ -777,7 +786,10 @@ class DocumentMixin(ReaderHostBase):
                 pass
 
     def save_document(self) -> None:
-        """Saves a copy of the document, with its annotations embedded when it has any; with page edits waiting, offers to save them into the file."""
+        """
+        Saves a copy of the document, with its annotations embedded when it has any; with page edits waiting, offers
+        to save them into the file.
+        """
         if not self.current_path or not os.path.exists(self.current_path):
             QMessageBox.warning(self, "Save Error", "No document loaded.")
             return
@@ -790,7 +802,10 @@ class DocumentMixin(ReaderHostBase):
         if self.has_unsaved_page_edits():
             box = QMessageBox(self)
             box.setWindowTitle("Save")
-            box.setText(f"Save the page changes to {os.path.basename(self.current_path)}, or save the edited document as a copy?")
+            box.setText(
+                f"Save the page changes to {os.path.basename(self.current_path)}, or save the edited document as a "
+                "copy?"
+            )
             save = box.addButton("Save", QMessageBox.ButtonRole.AcceptRole)
             box.addButton("Save a Copy…", QMessageBox.ButtonRole.ActionRole)
             cancel = box.addButton(QMessageBox.StandardButton.Cancel)
@@ -832,9 +847,7 @@ class DocumentMixin(ReaderHostBase):
                 QMessageBox.critical(self, "Error", f"Could not save file:\n{e}")
 
     def export_annotations(self) -> None:
-        """
-        Traverses deeply nested annotation JSON layouts outputting clean markdown textual variants suitable for academic review.
-        """
+        """Writes the document's annotations to a Markdown file the person chooses."""
         if not self.current_path or not self.annotations:
             QMessageBox.information(self, "Export", "No annotations to export.")
             return
@@ -1028,7 +1041,7 @@ class DocumentMixin(ReaderHostBase):
 
         except Exception as e:
             QMessageBox.critical(
-                self, "Export Error", f"Failed to encrypt PDF:\n{str(e)}"
+                self, "Export Error", f"Failed to encrypt PDF:\n{e!s}"
             )
 
     def _get_or_create_web_view(self) -> QWebEngineView:
@@ -1126,7 +1139,7 @@ class DocumentMixin(ReaderHostBase):
                             raise Exception
 
                     except Exception as e:
-                        self.show_toast(f"Print failed: {str(e)}")
+                        self.show_toast(f"Print failed: {e!s}")
                         print(e)
                     finally:
                         painter.end()

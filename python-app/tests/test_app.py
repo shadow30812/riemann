@@ -8,6 +8,7 @@ import pytest
 from PySide6.QtCore import QUrl, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
+
 from riemann.app import (
     LibrarySearchDialog,
     RiemannWindow,
@@ -308,7 +309,7 @@ def test_system_tabs_are_saved_in_sessions_and_closed_tab_history(qtbot):
     qtbot.addWidget(window)
     window.show_history()
     assert {"type": "system", "data": "history"} in window._serialize_tab_state(window.tabs_main)
-    tabs, index = window.find_system_tab("history")
+    _tabs, index = window.find_system_tab("history")
     window.close_tab(index)
     assert window.find_system_tab("history")[0] is None
     window.restore_last_closed_tab()
@@ -869,10 +870,9 @@ def test_frozen_build_never_uses_itself_as_the_venv_python():
 
     with (
         patch.object(dependencies, "_is_frozen", return_value=True),
-        patch.object(dependencies.shutil, "which", return_value=None),
+        patch.object(dependencies.shutil, "which", return_value=None),pytest.raises(RuntimeError)
     ):
-        with pytest.raises(RuntimeError):
-            dependencies._find_base_python()
+        dependencies._find_base_python()
 
     with patch.object(dependencies, "_is_frozen", return_value=False):
         assert dependencies._find_base_python() == sys.executable
@@ -1173,10 +1173,14 @@ def test_document_history_sorts_files_into_classes(qtbot, tmp_path):
     page.tabs.setCurrentIndex([k for k, _ in page.KINDS].index("pdf"))
     assert not page.doc_class.isHidden()
     page.doc_class.setCurrentIndex(page.doc_class.findData("Code"))
-    shown = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount()) if not tree.topLevelItem(i).isHidden()]
+    shown = [
+        tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount()) if not tree.topLevelItem(i).isHidden()
+    ]
     assert shown == ["build.py", "Makefile"]
     page.search.setText("make")
-    shown = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount()) if not tree.topLevelItem(i).isHidden()]
+    shown = [
+        tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount()) if not tree.topLevelItem(i).isHidden()
+    ]
     assert shown == ["Makefile"]
 
     page.tabs.setCurrentIndex([k for k, _ in page.KINDS].index("web"))

@@ -127,7 +127,7 @@ def test_text_lines_follow_reading_order_and_columns():
     def word(text, x, y):
         return [(ch, QRect(x + i * 8, y, 8, 12), 0) for i, ch in enumerate(text)]
 
-    chars = word("Left one", 10, 10) + [(" ", QRect(), 0)] + word("Left two", 10, 30)
+    chars = [*word("Left one", 10, 10), (" ", QRect(), 0), *word("Left two", 10, 30)]
     chars += word("Right one", 300, 10) + word("Right two", 300, 30)
     lines = text_lines(chars)
     assert len(lines) == 4

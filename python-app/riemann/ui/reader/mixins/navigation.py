@@ -19,7 +19,8 @@ jumped to an unrelated size.
 """
 
 import urllib.parse
-from typing import Any, Optional, Tuple
+from typing import Any
+
 from PySide6.QtCore import (
     QEasingCurve,
     QPoint,
@@ -31,11 +32,11 @@ from PySide6.QtWidgets import (
     QScroller,
     QScrollerProperties,
 )
+
 from ....core.constants import FALLBACK_PAGE_SIZE, MAX_ZOOM, ViewMode, ZoomMode, clamp_zoom
 from ....core.log import log
-from .host import ReaderHostBase
 from ....core.settings import AUTOSCROLL_SPEED_KEY, DEFAULT_AUTOSCROLL_SPEED
-
+from .host import ReaderHostBase
 
 NAV_HISTORY_LIMIT = 100
 
@@ -337,7 +338,7 @@ class NavigationMixin(ReaderHostBase):
         bar.setValue(int(bar.value() + (direction * ph)))
 
     @staticmethod
-    def _parse_internal_link(url: str) -> Optional[Tuple[int, Optional[float]]]:
+    def _parse_internal_link(url: str) -> tuple[int, float | None] | None:
         """
         Parses '#page=N' or '#page=N&top=Y' into a 0-based page index and an
         optional vertical target in PDF points (origin at the page bottom).
@@ -350,7 +351,7 @@ class NavigationMixin(ReaderHostBase):
         except (KeyError, ValueError, IndexError):
             return None
 
-    def jump_to_page(self, idx: int, top_pts: Optional[float] = None) -> None:
+    def jump_to_page(self, idx: int, top_pts: float | None = None) -> None:
         """
         Jumps to the given 0-based page. The page top is aligned with the top of
         the viewport, or, when top_pts is given, that position on the page is.
@@ -506,7 +507,7 @@ class NavigationMixin(ReaderHostBase):
         self.zoom_mode = ZoomMode.MANUAL
         self.on_zoom_changed_internal()
 
-    def _map_to_unrotated(self, rx: float, ry: float) -> Tuple[float, float]:
+    def _map_to_unrotated(self, rx: float, ry: float) -> tuple[float, float]:
         """Maps a point on the rotated page to the unrotated pixmap."""
         rotation = self.rotation
         if rotation == 90:
@@ -532,18 +533,17 @@ class NavigationMixin(ReaderHostBase):
         if (
             self.current_doc
             and self.view_mode == ViewMode.IMAGE
+        ) and self.zoom_mode in (
+            ZoomMode.FIT_WIDTH,
+            ZoomMode.FIT_HEIGHT,
+            ZoomMode.AUTO_FIT,
         ):
-            if self.zoom_mode in (
-                ZoomMode.FIT_WIDTH,
-                ZoomMode.FIT_HEIGHT,
-                ZoomMode.AUTO_FIT,
-            ):
-                if self._resize_timer is None:
-                    self._resize_timer = QTimer(self)
-                    self._resize_timer.setSingleShot(True)
-                    self._resize_timer.setInterval(150)
-                    self._resize_timer.timeout.connect(self.on_zoom_changed_internal)
-                self._resize_timer.start()
+            if self._resize_timer is None:
+                self._resize_timer = QTimer(self)
+                self._resize_timer.setSingleShot(True)
+                self._resize_timer.setInterval(150)
+                self._resize_timer.timeout.connect(self.on_zoom_changed_internal)
+            self._resize_timer.start()
 
     def toggle_autoscroll(self, direction: int) -> None:
         """Toggles the document auto-scrolling state and direction."""
@@ -601,7 +601,7 @@ class NavigationMixin(ReaderHostBase):
 
     on_page_text_submitted = on_page_input_return
 
-    def _reading_position(self) -> Optional[Tuple[int, float]]:
+    def _reading_position(self) -> tuple[int, float] | None:
         """Where the reader is: (page index, fraction of that page above the viewport top)."""
         if not self.current_doc:
             return None
@@ -613,7 +613,7 @@ class NavigationMixin(ReaderHostBase):
         value = self.scroll.verticalScrollBar().value()
         return idx, max(0.0, min(1.0, (value - top) / widget.height()))
 
-    def _restore_position(self, position: Tuple[int, float]) -> None:
+    def _restore_position(self, position: tuple[int, float]) -> None:
         idx, fraction = position
         self.jump_to_page(idx)
         widget = self.page_widgets.get(idx)
@@ -622,7 +622,7 @@ class NavigationMixin(ReaderHostBase):
             self._set_scroll_value_silently(int(top + fraction * widget.height()))
             self.update_view()
 
-    def navigate_to(self, idx: int, top_pts: Optional[float] = None) -> None:
+    def navigate_to(self, idx: int, top_pts: float | None = None) -> None:
         """Jumps to a page and remembers where the reader was, for go_back."""
         here = self._reading_position()
         if here is not None:

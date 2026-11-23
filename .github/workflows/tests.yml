@@ -1,8 +1,7 @@
 # Runs every test suite on pushes and pull requests: the Python app (offscreen
 # Qt), the start page's JavaScript (Jest, versions from package-lock.json), the
-# Rust OCR worker and the Rust core, plus a lint for undefined and unused names
-# in the Python code, and rustfmt
-# and clippy on the Rust code.
+# Rust OCR worker and the Rust core, plus ruff on the Python code (rules in
+# pyproject.toml) and rustfmt and clippy on the Rust code.
 # LibreOffice comes from Ubuntu's packages, so the Office conversion tests run.
 # PDFium and the benchmark PDFs are downloaded by their own scripts, each
 # pinned by SHA-256. The AI model's tests download it the way
@@ -79,7 +78,7 @@ jobs:
           pip install --no-deps dist-wheels/*.whl
 
       - name: Lint Python
-        run: pipx run ruff check --select F python-app/riemann python-app/tests
+        run: pipx run ruff==0.17.6 check python-app/riemann python-app/tests scripts benchmarks
 
       - name: Lint Rust
         run: |

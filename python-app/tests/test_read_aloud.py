@@ -15,7 +15,6 @@ import re
 import time
 
 import pytest
-
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from riemann.ui.reader.mixins.read_aloud import collapse_spaces, split_sentences, word_at
@@ -164,7 +163,7 @@ def _pump(qapp, seconds, until=lambda: False):
 
 
 def _word_under_highlight(tab):
-    page, chars, text, offsets = tab._spoken
+    _page, chars, text, offsets = tab._spoken
     start, length = tab._word_shown
     return text[start:start + length], "".join(chars[offsets[i]][0] for i in range(start, start + length))
 

@@ -63,11 +63,11 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
 )
-from .log import log
-from .assets import asset_path, is_frozen
-from .processes import NO_WINDOW
-from ..ui.palette import app_is_dark, dialog_icon, tokens
 
+from ..ui.palette import app_is_dark, dialog_icon, tokens
+from .assets import asset_path, is_frozen
+from .log import log
+from .processes import NO_WINDOW
 
 _NO_WINDOW = NO_WINDOW
 PYTHON_PROBE_TIMEOUT = 5
@@ -90,10 +90,7 @@ def _find_base_python() -> str:
     """
     if not _is_frozen():
         return sys.executable
-    if os.name == "nt":
-        candidates = [["py", "-3"], ["python"], ["python3"]]
-    else:
-        candidates = [["python3"], ["python"]]
+    candidates = [["py", "-3"], ["python"], ["python3"]] if os.name == "nt" else [["python3"], ["python"]]
     for cmd in candidates:
         exe = shutil.which(cmd[0])
         if not exe:
@@ -168,7 +165,8 @@ def _venv_site_paths(venv_dir: str, python_exe: str) -> list:
             python_exe,
             "-c",
             "import site, sysconfig, json; "
-            "paths = list(dict.fromkeys(site.getsitepackages() + [sysconfig.get_path('purelib'), sysconfig.get_path('platlib')])); "
+            "paths = list(dict.fromkeys(site.getsitepackages() + [sysconfig.get_path('purelib'), "
+            "sysconfig.get_path('platlib')])); "
             "print(json.dumps(paths))",
         ],
         text=True,
@@ -267,7 +265,7 @@ def installed_names() -> set:
 
 
 def _normalise(name: str) -> str:
-    return re.sub(r"[-_.]+", "-", re.split(r"[\[<>=! ]", name, 1)[0]).lower()
+    return re.sub(r"[-_.]+", "-", re.split(r"[\[<>=! ]", name, maxsplit=1)[0]).lower()
 
 
 def _remove_from_folder(folder: str, pip_name: str) -> bool:
@@ -372,7 +370,7 @@ OFFICE_VIEWERS_LOCK = "office-viewers"
 
 def lock_file(pip_name: str) -> str:
     """The hashed lock a catalogue package (or LATEX_OCR_LOCK) is installed from."""
-    name = re.split(r"[\[<>=! ]", pip_name, 1)[0].lower().replace("_", "-")
+    name = re.split(r"[\[<>=! ]", pip_name, maxsplit=1)[0].lower().replace("_", "-")
     return asset_path("requirements", f"{name}.txt")
 
 

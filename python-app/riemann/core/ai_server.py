@@ -54,12 +54,14 @@ import re
 import sys
 import threading
 import urllib.request
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 import numpy as np
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, model_validator
+
 from .endpoints import HUGGINGFACE, LOOPBACK
 
 MODEL_NAME = "all-MiniLM-L6-v2-onnx"
@@ -97,9 +99,9 @@ MAX_TAG_SETS = 8
 embedder: Any = None
 load_status = "loading"
 load_error = ""
-vectors: Optional[np.ndarray] = None
+vectors: np.ndarray | None = None
 chunk_metadata: list[dict[str, Any]] = []
-indexes: dict[str, tuple[np.ndarray, list[dict[str, Any]], Optional[float]]] = {}
+indexes: dict[str, tuple[np.ndarray, list[dict[str, Any]], float | None]] = {}
 tag_embeddings: dict[tuple[str, ...], np.ndarray] = {}
 
 
@@ -191,7 +193,7 @@ def require_model() -> None:
 
 class IndexRequest(BaseModel):
     pdf_path: str
-    pages: Optional[list[str]] = Field(None, max_length=MAX_PAGES)
+    pages: list[str] | None = Field(None, max_length=MAX_PAGES)
     chunk_size: int = Field(200, ge=1, le=10_000)
     chunk_overlap: int = Field(50, ge=0)
 
@@ -205,7 +207,7 @@ class IndexRequest(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     top_k: int = Field(5, ge=1, le=100)
-    pdf_path: Optional[str] = None
+    pdf_path: str | None = None
 
 
 class SearchResult(BaseModel):
@@ -217,7 +219,7 @@ class SearchResult(BaseModel):
 class TagRequest(BaseModel):
     text_chunk: str
     threshold: float = 0.25
-    tags: Optional[list[str]] = Field(None, max_length=200)
+    tags: list[str] | None = Field(None, max_length=200)
 
 
 class LibrarySearchRequest(BaseModel):
@@ -226,13 +228,13 @@ class LibrarySearchRequest(BaseModel):
     top_k: int = Field(20, ge=1, le=200)
 
 
-def token_ok(token: Optional[str]) -> bool:
+def token_ok(token: str | None) -> bool:
     if not AUTH_TOKEN:
         return False
     return hmac.compare_digest((token or "").encode(), AUTH_TOKEN.encode())
 
 
-def require_token(x_riemann_token: Optional[str] = Header(default=None)) -> None:
+def require_token(x_riemann_token: str | None = Header(default=None)) -> None:
     if not token_ok(x_riemann_token):
         raise HTTPException(status_code=403, detail="Invalid or missing token.")
 
@@ -257,7 +259,7 @@ def chunk_text(text: str, page_num: int, chunk_size: int, overlap: int) -> list[
     return chunks
 
 
-def _mtime(path: str) -> Optional[float]:
+def _mtime(path: str) -> float | None:
     try:
         return os.path.getmtime(path)
     except OSError:
@@ -273,7 +275,7 @@ def _cache_key(pdf_path: str, chunk_size: int, chunk_overlap: int) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _load_cached(key: str) -> Optional[tuple[np.ndarray, list[dict[str, Any]]]]:
+def _load_cached(key: str) -> tuple[np.ndarray, list[dict[str, Any]]] | None:
     if not CACHE_DIR or not key:
         return None
     try:
@@ -304,7 +306,7 @@ def _save_cached(key: str, embeddings: np.ndarray, chunks: list[dict[str, Any]])
         pass
 
 
-def _remember(pdf_path: str, matrix: np.ndarray, chunks: list[dict[str, Any]], mtime: Optional[float]) -> None:
+def _remember(pdf_path: str, matrix: np.ndarray, chunks: list[dict[str, Any]], mtime: float | None) -> None:
     global vectors, chunk_metadata
     indexes.pop(pdf_path, None)
     indexes[pdf_path] = (matrix, chunks, mtime)
@@ -313,7 +315,7 @@ def _remember(pdf_path: str, matrix: np.ndarray, chunks: list[dict[str, Any]], m
     vectors, chunk_metadata = matrix, chunks
 
 
-def load_index(pdf_path: str, chunk_size: int, chunk_overlap: int) -> Optional[int]:
+def load_index(pdf_path: str, chunk_size: int, chunk_overlap: int) -> int | None:
     """The chunk count of a document already in memory or on disk, else None."""
     mtime = _mtime(pdf_path)
     cached = indexes.get(pdf_path)
@@ -342,7 +344,7 @@ def build_index(pdf_path: str, pages: list[str], chunk_size: int, chunk_overlap:
     return len(chunks)
 
 
-def run_search(query: str, top_k: int, pdf_path: Optional[str]) -> Optional[list[dict[str, Any]]]:
+def run_search(query: str, top_k: int, pdf_path: str | None) -> list[dict[str, Any]] | None:
     """Searches one document, or the last one indexed when pdf_path is None; None if it has no index."""
     if pdf_path:
         entry = indexes.get(pdf_path)
@@ -362,7 +364,9 @@ def run_search(query: str, top_k: int, pdf_path: Optional[str]) -> Optional[list
     ]
 
 
-def search_many(query: str, pdf_paths: list[str], top_k: int, chunk_size: int = 200, chunk_overlap: int = 50) -> dict[str, Any]:
+def search_many(
+    query: str, pdf_paths: list[str], top_k: int, chunk_size: int = 200, chunk_overlap: int = 50
+) -> dict[str, Any]:
     """Best passages across the papers with vectors; the others are listed in needs_text."""
     results: list[dict[str, Any]] = []
     skipped: list[str] = []
@@ -460,7 +464,10 @@ def main() -> None:
 
     port = os.environ.get("RIEMANN_AI_PORT", "")
     if not AUTH_TOKEN or not port.isdigit():
-        sys.exit("The AI engine is started by Riemann, which sets RIEMANN_AI_PORT and RIEMANN_AI_TOKEN; refusing to run without them.")
+        sys.exit(
+            "The AI engine is started by Riemann, which sets RIEMANN_AI_PORT and RIEMANN_AI_TOKEN; refusing to run "
+            "without them."
+        )
     uvicorn.run(app, host=LOOPBACK, port=int(port), log_level="info")
 
 

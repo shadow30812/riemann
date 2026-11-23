@@ -6,6 +6,7 @@ the window's attributes freely, as they did when they lived in one class.
 """
 
 import os
+
 from PySide6.QtGui import (
     QIcon,
 )
@@ -13,10 +14,11 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QMessageBox,
 )
-from ..ui.explorer import FolderHomeTab
+
 from ..core.assets import icon_path
 from ..core.doctypes import TAB_KINDS, document_kind
 from ..core.settings import get_dialog_directory, save_last_directory
+from ..ui.explorer import FolderHomeTab
 
 
 class FoldersMixin:

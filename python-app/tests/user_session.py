@@ -159,7 +159,9 @@ def choose(menu, text):
     from PySide6.QtTest import QTest
 
     action = next(a for a in menu.actions() if a.text() == text)
-    QTest.mouseClick(menu, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, menu.actionGeometry(action).center())
+    QTest.mouseClick(
+        menu, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, menu.actionGeometry(action).center()
+    )
 
 
 def dialog(kind=None):
@@ -196,7 +198,10 @@ def click(widget):
 
 
 def open_with_dialog(path):
-    """Ctrl+O, then types path into the file dialog and clicks Open; returns False when Open stays disabled (and cancels)."""
+    """
+    Ctrl+O, then types path into the file dialog and clicks Open; returns False when Open stays disabled (and
+    cancels).
+    """
     from PySide6.QtWidgets import QFileDialog, QLineEdit
 
     later(key, "Ctrl+O", window())
@@ -285,7 +290,9 @@ def scenario_open_text(files):
     yield lambda: getattr(current_tab(), "page", None) == "history"
     page = current_tab()
     tree = page.trees["pdf"]
-    notes["history"] = {tree.topLevelItem(i).text(0): tree.topLevelItem(i).text(1) for i in range(tree.topLevelItemCount())}
+    notes["history"] = {
+        tree.topLevelItem(i).text(0): tree.topLevelItem(i).text(1) for i in range(tree.topLevelItemCount())
+    }
 
 
 def scenario_quit_with_edits(files):
@@ -536,8 +543,13 @@ def tab_showing(target):
         for i in range(tabs.count()):
             tab = tabs.widget(i)
             if web or isinstance(tab, BrowserTab):
-                if isinstance(tab, BrowserTab) and tab.web.title() and (
-                    tab.web.url().toString().rstrip("/") == target.rstrip("/") or tab.web.url().toLocalFile() == os.path.abspath(target)
+                if (
+                    isinstance(tab, BrowserTab)
+                    and tab.web.title()
+                    and (
+                        tab.web.url().toString().rstrip("/") == target.rstrip("/")
+                        or tab.web.url().toLocalFile() == os.path.abspath(target)
+                    )
                 ):
                     return tab
                 continue
@@ -613,7 +625,7 @@ def scenario_tour(files):
     from riemann.ui.office_install import OfficePrompt
 
     notes["rounds"] = []
-    for round_ in range(2):
+    for _round in range(2):
         shown = []
         for target in files:
             if target.startswith("http"):
@@ -723,8 +735,9 @@ def main():
     threading.Thread(target=watchdog, args=(DEADLINES.get(name, DEADLINE),), daemon=True).start()
 
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    import riemann.app as app_module
     from PySide6.QtWidgets import QApplication
+
+    import riemann.app as app_module
 
     app_module.CHROMIUM_FLAGS += " --disable-gpu"
     shown = app_module.RiemannWindow.show

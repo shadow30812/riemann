@@ -24,14 +24,15 @@ from PySide6.QtWebEngineCore import (
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QWidget
+
 from riemann.core.settings import AUTO_OPEN_DOWNLOADS_KEY, app_settings
 from riemann.ui.browser import (
     BrowserTab,
     RequestInterceptor,
     WebPage,
-    YtDlpWorker,
-    YtDlpStreamWorker,
     YtDlpSettingsDialog,
+    YtDlpStreamWorker,
+    YtDlpWorker,
 )
 
 
@@ -519,7 +520,10 @@ def download_server():
 
 
 def _download(webengine, qtbot, tmp_path, url, tabs=1):
-    """Downloads url from the first of tabs browser tabs sharing one profile, through the real QWebEngineDownloadRequest."""
+    """
+    Downloads url from the first of tabs browser tabs sharing one profile, through the real
+    QWebEngineDownloadRequest.
+    """
     profile = webengine.profile()
     profile.setDownloadPath(str(tmp_path))
     opened, toasts, dialogs = [], [], []
@@ -546,7 +550,7 @@ def _download(webengine, qtbot, tmp_path, url, tabs=1):
 
 @patch("riemann.ui.browser.tab.ScriptInjector")
 def test_download_completes_and_opens_the_pdf(mock_injector, qtbot, webengine, tmp_path, download_server):
-    target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/report.pdf")
+    target, opened, toasts, _dialogs = _download(webengine, qtbot, tmp_path, download_server + "/report.pdf")
     assert "Download complete!" in toasts
     assert target.read_bytes().startswith(b"%PDF")
     assert opened == [str(target)]
@@ -554,14 +558,14 @@ def test_download_completes_and_opens_the_pdf(mock_injector, qtbot, webengine, t
 
 @patch("riemann.ui.browser.tab.ScriptInjector")
 def test_one_download_asks_once_with_several_tabs_open(mock_injector, qtbot, webengine, tmp_path, download_server):
-    target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/report.pdf", tabs=3)
+    _target, _opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/report.pdf", tabs=3)
     assert len(dialogs) == 1
     assert toasts.count("Download complete!") == 1
 
 
 @patch("riemann.ui.browser.tab.ScriptInjector")
 def test_finished_download_that_is_not_a_pdf_is_not_opened(mock_injector, qtbot, webengine, tmp_path, download_server):
-    target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/bundle.zip")
+    target, opened, toasts, _dialogs = _download(webengine, qtbot, tmp_path, download_server + "/bundle.zip")
     assert "Download complete!" in toasts
     assert target.exists()
     assert opened == []
@@ -569,9 +573,9 @@ def test_finished_download_that_is_not_a_pdf_is_not_opened(mock_injector, qtbot,
 
 @patch("riemann.ui.browser.tab.ScriptInjector")
 def test_a_downloaded_ebook_opens_and_source_code_does_not(mock_injector, qtbot, webengine, tmp_path, download_server):
-    target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/book.epub")
+    target, opened, *_ = _download(webengine, qtbot, tmp_path, download_server + "/book.epub")
     assert opened == [str(target)]
-    target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/script.py")
+    target, opened, *_ = _download(webengine, qtbot, tmp_path, download_server + "/script.py")
     assert target.exists() and opened == []
 
 
@@ -579,7 +583,7 @@ def test_a_downloaded_ebook_opens_and_source_code_does_not(mock_injector, qtbot,
 def test_downloads_stay_closed_when_the_setting_is_off(mock_injector, qtbot, webengine, tmp_path, download_server):
     app_settings().setValue(AUTO_OPEN_DOWNLOADS_KEY, False)
     try:
-        target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/report.pdf")
+        _target, opened, toasts, _dialogs = _download(webengine, qtbot, tmp_path, download_server + "/report.pdf")
     finally:
         app_settings().remove(AUTO_OPEN_DOWNLOADS_KEY)
     assert "Download complete!" in toasts and opened == []
@@ -712,7 +716,9 @@ def test_local_pages_may_only_load_static_files_from_their_folder(tmp_path):
     assert local_load_allowed(QUrl("https://site.example/"), QUrl("https://cdn.example/x.js"), T.ResourceTypeScript)
 
     home = QUrl.fromLocalFile(HOMEPAGE_PATH)
-    font = QUrl.fromLocalFile(os.path.join(os.path.dirname(os.path.dirname(HOMEPAGE_PATH)), "fonts", "Inter-Variable.ttf"))
+    font = QUrl.fromLocalFile(
+        os.path.join(os.path.dirname(os.path.dirname(HOMEPAGE_PATH)), "fonts", "Inter-Variable.ttf")
+    )
     assert local_load_allowed(home, font, T.ResourceTypeFontResource)
     assert not local_load_allowed(home, other, T.ResourceTypeXhr)
     icon = QUrl("https://www.google.com/s2/favicons?domain=example.com&sz=64")

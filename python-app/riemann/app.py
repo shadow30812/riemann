@@ -32,11 +32,10 @@ if bundle_dir():
     os.environ.setdefault("RIEMANN_PDFIUM_DIR", bundle_dir())
 
 import importlib
+import time
+from typing import ClassVar
 
 import shiboken6
-import time
-from typing import List, Optional, Tuple
-
 from PySide6.QtCore import (
     QEvent,
     QObject,
@@ -72,6 +71,9 @@ from PySide6.QtWidgets import (
     QTreeWidget,
 )
 
+from .core.assets import asset_path, icon_path
+from .core.log import log
+from .core.log import setup as setup_logging
 from .core.managers import (
     BookmarksManager,
     DownloadManager,
@@ -79,11 +81,23 @@ from .core.managers import (
     LibraryManager,
     YtDlpDownloadManager,
 )
+from .core.settings import (
+    CLEAN_EXIT_KEY,
+    DARK_MODE_KEY,
+    DEFAULT_UI_SCALE,
+    HIGH_CONTRAST_KEY,
+    SCREEN_READER_NAMES_KEY,
+    TABS_COLLAPSED_KEY,
+    UI_SCALE_KEY,
+    VERTICAL_TABS_KEY,
+    app_settings,
+)
 from .core.window_snap import (
     WindowSnapper,
     prefer_xwayland_for_snapping,
     snapping_default,
 )
+from .ui import accessibility
 from .ui.browser import BrowserTab
 from .ui.components import (
     DraggableTabWidget,
@@ -92,17 +106,13 @@ from .ui.components import (
 from .ui.explorer import FileExplorerPanel
 from .ui.palette import UI_FONT, set_high_contrast
 from .ui.reader.render_worker import stop_all_render_workers
-from .ui.shortcuts import share_keys
 from .ui.reader.tab import ReaderTab
-from .ui.viewers import TableTab
-from .ui.threads import wait_for_released
+from .ui.shortcuts import share_keys
 from .ui.sidecar import AiSidecarPanel
-from .ui import accessibility
+from .ui.threads import wait_for_released
 from .ui.tooltip import TooltipSkin
-from .core.log import log
-from .core.log import setup as setup_logging
+from .ui.viewers import TableTab
 from .window.chrome import ChromeMixin
-from .core.assets import asset_path, icon_path
 from .window.desktop import install_linux_integration
 from .window.dialogs import LibrarySearchDialog
 from .window.documents import DocumentsMixin
@@ -120,25 +130,13 @@ from .window.panes import PanesMixin
 from .window.session import SessionMixin
 from .window.system import SystemMixin
 from .window.tabs import TabsMixin
-from .core.settings import (
-    CLEAN_EXIT_KEY,
-    DARK_MODE_KEY,
-    HIGH_CONTRAST_KEY,
-    SCREEN_READER_NAMES_KEY,
-    DEFAULT_UI_SCALE,
-    TABS_COLLAPSED_KEY,
-    UI_SCALE_KEY,
-    VERTICAL_TABS_KEY,
-    app_settings,
-)
-
 
 __all__ = [
     "LibrarySearchDialog",
     "RiemannWindow",
+    "asset_path",
     "decode_ipc_message",
     "encode_ipc_paths",
-    "asset_path",
     "hand_off_to_running_instance",
     "listen_for_instances",
     "run",
@@ -163,14 +161,14 @@ class RiemannWindow(
     shortcuts, and session persistence.
     """
 
-    _all_open_windows: List["RiemannWindow"] = []
-    _recently_closed_windows: List[Tuple[float, dict]] = []
+    _all_open_windows: ClassVar[list["RiemannWindow"]] = []
+    _recently_closed_windows: ClassVar[list[tuple[float, dict]]] = []
 
     def __init__(
         self,
         incognito: bool = False,
         restore_session: bool = True,
-        external_files: Optional[List[str]] = None,
+        external_files: list[str] | None = None,
         is_secondary_restoration: bool = False,
     ) -> None:
         """
@@ -212,7 +210,7 @@ class RiemannWindow(
         self.history_model = QStringListModel(self.history_manager.get_model_data())
         self.bookmarks_manager = BookmarksManager()
 
-        self.closed_tabs_stack: List[dict] = []
+        self.closed_tabs_stack: list[dict] = []
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
         self.main_splitter.setHandleWidth(8)
@@ -491,13 +489,12 @@ class RiemannWindow(
             if w != self and not getattr(w, "incognito", False)
         ]
         win_state = self._serialize_window_state()
-        if other_open:
-            if (
-                win_state.get("main_tabs")
-                or win_state.get("side_tabs")
-                or win_state.get("active_folder")
-            ):
-                RiemannWindow._recently_closed_windows.append((time.time(), win_state))
+        if other_open and (
+            win_state.get("main_tabs")
+            or win_state.get("side_tabs")
+            or win_state.get("active_folder")
+        ):
+            RiemannWindow._recently_closed_windows.append((time.time(), win_state))
 
         if self in RiemannWindow._all_open_windows:
             RiemannWindow._all_open_windows.remove(self)
@@ -605,9 +602,10 @@ def run() -> None:
 
     server_name = single_instance_name()
 
-    if not is_new_window:
-        if hand_off_to_running_instance(server_name, encode_ipc_paths(files_to_open + folders_to_open)):
-            sys.exit(0)
+    if not is_new_window and hand_off_to_running_instance(
+        server_name, encode_ipc_paths(files_to_open + folders_to_open)
+    ):
+        sys.exit(0)
 
     server = QLocalServer()
     if not listen_for_instances(server, server_name):

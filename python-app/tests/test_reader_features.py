@@ -5,6 +5,7 @@ import pytest
 from PySide6.QtCore import QEvent, QRect, Qt
 from PySide6.QtGui import QImage, QKeyEvent
 from PySide6.QtWidgets import QApplication
+
 from riemann.core.constants import ViewMode
 from riemann.ui.reader.render_worker import PageImageCache
 from riemann.ui.reader.tab import ReaderTab

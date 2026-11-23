@@ -31,6 +31,7 @@ icon-only controls for screen readers from their tooltips
 """
 
 import re
+from typing import ClassVar
 
 import shiboken6
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, Qt, QTimer
@@ -281,7 +282,7 @@ class TooltipSkin(QObject):
 
     instance: "TooltipSkin | None" = None
     HIDE_AFTER_MS = 10_000
-    HIDE_ON = {
+    HIDE_ON: ClassVar[set] = {
         QEvent.Type.Leave,
         QEvent.Type.MouseButtonPress,
         QEvent.Type.MouseButtonDblClick,

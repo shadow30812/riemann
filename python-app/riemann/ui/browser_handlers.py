@@ -16,6 +16,7 @@ import base64
 import json
 
 from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineScript
+
 from ..core.assets import asset_path
 
 WHATSAPP_HOST = "whatsapp.com"
@@ -35,7 +36,7 @@ def get_injection_script(filename: str) -> str:
     script_path = asset_path("injections", filename)
 
     try:
-        with open(script_path, "r", encoding="utf-8") as f:
+        with open(script_path, encoding="utf-8") as f:
             return f.read()
     except Exception as e:
         print(f"[Riemann Error] Could not load injection script {filename}: {e}")

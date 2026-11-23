@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 
 from ...core import office, permissions
 from ...core.dependencies import DependenciesDialog
+from ...core.endpoints import DEFAULT_SEARCH_URL
 from ...core.log import log_folder
 from ...core.settings import (
     AI_TAGS_KEY,
@@ -64,10 +65,9 @@ from ...core.settings import (
     string_list,
 )
 from ...core.window_snap import is_wayland_session, snapping_default
-from .base import SectionedSystemTab, card, row_container, setting_row
 from ..reader.mixins.read_aloud import NO_ENGINE, READ_RATE_KEY, READ_VOICE_KEY, make_speech
+from .base import SectionedSystemTab, card, row_container, setting_row
 from .widgets import PermissionsEditor, StringListEditor, ToolbarLayoutEditor, VoicePicker
-from ...core.endpoints import DEFAULT_SEARCH_URL
 
 
 def app_version() -> str:
@@ -127,7 +127,9 @@ class SettingsTab(SectionedSystemTab):
             "the black pixels are switched off. Turning it on turns on dark mode.",
         )
         self.cb_vertical_tabs = self._check(self._bool(VERTICAL_TABS_KEY, False), self._set_vertical_tabs)
-        setting_row(c, "Vertical tabs", self.cb_vertical_tabs, "Tabs in a column on the left, like a browser's side bar.")
+        setting_row(
+            c, "Vertical tabs", self.cb_vertical_tabs, "Tabs in a column on the left, like a browser's side bar."
+        )
         self.cb_floating_fs = self._check(
             self._bool("app/floating_fs_btn", True), lambda v: self._set_value("app/floating_fs_btn", v)
         )
@@ -287,7 +289,9 @@ class SettingsTab(SectionedSystemTab):
         voice_row.setContentsMargins(0, 0, 0, 0)
         self.combo_voice = VoicePicker(str(self.settings.value(READ_VOICE_KEY, "") or ""), self._voice_names)
         self.combo_voice.setMinimumWidth(220)
-        self.combo_voice.currentIndexChanged.connect(lambda _: self._set_value(READ_VOICE_KEY, self.combo_voice.voice()))
+        self.combo_voice.currentIndexChanged.connect(
+            lambda _: self._set_value(READ_VOICE_KEY, self.combo_voice.voice())
+        )
         try_voice = QPushButton("Try it")
         try_voice.clicked.connect(self._try_voice)
         voice_row.addWidget(self.combo_voice, 1)
@@ -311,7 +315,11 @@ class SettingsTab(SectionedSystemTab):
         c = card(layout, "Downloads")
         self.cb_auto_pdf = self._check(
             self._bool(AUTO_OPEN_DOWNLOADS_KEY, True),
-            lambda v: win.toggle_auto_pdf(v) if hasattr(win, "toggle_auto_pdf") else self._set_value(AUTO_OPEN_DOWNLOADS_KEY, v),
+            lambda v: (
+                win.toggle_auto_pdf(v)
+                if hasattr(win, "toggle_auto_pdf")
+                else self._set_value(AUTO_OPEN_DOWNLOADS_KEY, v)
+            ),
         )
         setting_row(
             c,
@@ -392,7 +400,11 @@ class SettingsTab(SectionedSystemTab):
         clear_office = QPushButton("Delete converted copies")
         clear_office.clicked.connect(self.clear_converted)
         c.addWidget(clear_office, 0, Qt.AlignmentFlag.AlignLeft)
-        c = card(layout, "Optional components", "Extra Python packages for snipping maths to LaTeX, captions and video downloads.")
+        c = card(
+            layout,
+            "Optional components",
+            "Extra Python packages for snipping maths to LaTeX, captions and video downloads.",
+        )
         deps = QPushButton("Manage optional components")
         deps.clicked.connect(lambda: DependenciesDialog(self).exec())
         c.addWidget(deps, 0, Qt.AlignmentFlag.AlignLeft)
@@ -521,7 +533,7 @@ class SettingsTab(SectionedSystemTab):
         self._set_value("app/window_snapping", bool(checked))
         from ...app import RiemannWindow
 
-        for win in list(RiemannWindow._all_open_windows) + [self.window_ref]:
+        for win in [*RiemannWindow._all_open_windows, self.window_ref]:
             snapper = getattr(win, "window_snapper", None)
             if snapper is not None:
                 snapper.set_enabled(bool(checked))

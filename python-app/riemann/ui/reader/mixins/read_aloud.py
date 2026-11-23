@@ -26,7 +26,6 @@ highlight drifts at most within a sentence.
 """
 
 import re
-from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QElapsedTimer, QTimer
 
@@ -49,15 +48,15 @@ NO_ENGINE = (
 )
 
 
-def split_sentences(text: str) -> List[Tuple[int, int]]:
+def split_sentences(text: str) -> list[tuple[int, int]]:
     """(start, end) character offsets of each sentence in text."""
     return [(m.start(), m.end()) for m in SENTENCE.finditer(text) if m.group().strip()]
 
 
-def collapse_spaces(text: str, start: int, end: int) -> Tuple[str, List[int]]:
+def collapse_spaces(text: str, start: int, end: int) -> tuple[str, list[int]]:
     """text[start:end] with whitespace runs made one space, and the index in text of each kept character."""
-    out: List[str] = []
-    offsets: List[int] = []
+    out: list[str] = []
+    offsets: list[int] = []
     gap = False
     for i in range(start, end):
         ch = text[i]
@@ -73,7 +72,7 @@ def collapse_spaces(text: str, start: int, end: int) -> Tuple[str, List[int]]:
     return "".join(out), offsets
 
 
-def word_at(text: str, position: int) -> Optional[Tuple[int, int]]:
+def word_at(text: str, position: int) -> tuple[int, int] | None:
     """(start, length) of the word in text at or after position, or None past the end."""
     for match in WORD.finditer(text):
         if match.end() > position:
@@ -130,7 +129,7 @@ class ReadAloudMixin(ReaderHostBase):
         else:
             self.start_read_aloud()
 
-    def start_read_aloud(self, page: Optional[int] = None) -> None:
+    def start_read_aloud(self, page: int | None = None) -> None:
         if not self.current_doc:
             return
         tts = self._speech()
@@ -162,7 +161,7 @@ class ReadAloudMixin(ReaderHostBase):
         if button is not None:
             button.setChecked(on)
 
-    def _sentences(self, page: int) -> List[Tuple[str, int, int]]:
+    def _sentences(self, page: int) -> list[tuple[str, int, int]]:
         if page not in self.page_widgets:
             self.jump_to_page(page)
         chars = self._get_page_chars(page)
@@ -195,7 +194,7 @@ class ReadAloudMixin(ReaderHostBase):
         self._read_waiting = True
         self._tts.say(text)
 
-    def _show_spoken(self, page: Optional[int], rects: list) -> None:
+    def _show_spoken(self, page: int | None, rects: list) -> None:
         for idx, widget in self.page_widgets.items():
             if hasattr(widget, "set_spoken_rects"):
                 widget.set_spoken_rects(rects if idx == page else [])
@@ -235,7 +234,7 @@ class ReadAloudMixin(ReaderHostBase):
         if self.is_reading_aloud() and self._words_on():
             self._show_word((start, length))
 
-    def _show_word(self, span: Optional[Tuple[int, int]]) -> None:
+    def _show_word(self, span: tuple[int, int] | None) -> None:
         spoken = self._spoken
         if span == self._word_shown:
             return
@@ -243,7 +242,7 @@ class ReadAloudMixin(ReaderHostBase):
         rects = []
         page = None
         if spoken is not None and span is not None:
-            page, chars, text, offsets = spoken
+            page, chars, _text, offsets = spoken
             first, length = span
             last = min(first + max(length, 1), len(offsets)) - 1
             if chars and 0 <= first <= last:

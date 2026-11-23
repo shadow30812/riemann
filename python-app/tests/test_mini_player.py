@@ -12,6 +12,7 @@ is left polling.
 import gc
 import sys
 from unittest.mock import MagicMock, patch
+
 import pytest
 import shiboken6
 from PySide6.QtWidgets import QApplication, QTabWidget, QWidget
@@ -21,7 +22,6 @@ if not QApplication.instance():
 
 from riemann.app import RiemannWindow
 from riemann.core.mini_player import MiniAudioPlayer
-
 
 STAND_INS: list = []
 

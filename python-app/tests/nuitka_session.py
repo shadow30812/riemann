@@ -8,8 +8,9 @@ scenario runs through the same compiled Riemann as a release. Point
 tests/test_user_sessions.py at the result with RIEMANN_SESSION_DRIVER.
 """
 
-import build_entry  # noqa: F401
 import user_session
+
+import build_entry  # noqa: F401
 
 if __name__ == "__main__":
     user_session.main()

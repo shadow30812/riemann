@@ -52,13 +52,14 @@ import os
 import shutil
 import tempfile
 import zlib
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 from .page_edit import PageEditError, _open
 from .pdf_annotations import NAME_PREFIX, _inherited, _page_space
 
-Box = Tuple[float, float, float, float]
-Matrix = Tuple[float, float, float, float, float, float]
+Box = tuple[float, float, float, float]
+Matrix = tuple[float, float, float, float, float, float]
 
 IDENTITY: Matrix = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 MAX_DEPTH = 12
@@ -82,7 +83,7 @@ def mul(m: Matrix, n: Matrix) -> Matrix:
     return (a * A + b * C, a * B + b * D, c * A + d * C, c * B + d * D, e * A + f * C + E, e * B + f * D + F)
 
 
-def transform(m: Matrix, x: float, y: float) -> Tuple[float, float]:
+def transform(m: Matrix, x: float, y: float) -> tuple[float, float]:
     return x * m[0] + y * m[2] + m[4], x * m[1] + y * m[3] + m[5]
 
 
@@ -118,7 +119,7 @@ class _Font:
     def __init__(self, font: Any):
         self.problem = ""
         self.two_byte = False
-        self.widths: Dict[int, float] = {}
+        self.widths: dict[int, float] = {}
         self.default = 0.0
         self.scale = 0.001
         self.ascent, self.descent = 0.8, -0.2
@@ -229,7 +230,7 @@ class _Font:
         self.descent = min(descriptor.descent * 0.001, -0.2)
         return True
 
-    def codes(self, data: bytes) -> List[bytes]:
+    def codes(self, data: bytes) -> list[bytes]:
         if not self.two_byte:
             return [data[i : i + 1] for i in range(len(data))]
         return [data[i : i + 2] for i in range(0, len(data) - 1, 2)]
@@ -239,11 +240,11 @@ class _Font:
 
 
 class _State:
-    __slots__ = ("ctm", "font", "size", "tc", "tw", "th", "tl", "rise", "tr")
+    __slots__ = ("ctm", "font", "rise", "size", "tc", "th", "tl", "tr", "tw")
 
     def __init__(self, ctm: Matrix = IDENTITY):
         self.ctm = ctm
-        self.font: Optional[_Font] = None
+        self.font: _Font | None = None
         self.size = 0.0
         self.tc = self.tw = self.tl = self.rise = 0.0
         self.th = 1.0
@@ -259,11 +260,11 @@ class _State:
 class _Redactor:
     """Rewrites one page's content (and the forms it draws) so nothing remains under the boxes."""
 
-    def __init__(self, pdf: Any, page_no: int, boxes: List[Box]):
+    def __init__(self, pdf: Any, page_no: int, boxes: list[Box]):
         self.pdf = pdf
         self.page_no = page_no
         self.boxes = boxes
-        self.fonts: Dict[Any, _Font] = {}
+        self.fonts: dict[Any, _Font] = {}
         self.fresh = 0
 
     def stop(self, reason: str) -> None:
@@ -275,7 +276,7 @@ class _Redactor:
     def covered(self, box: Box) -> bool:
         return any(contains(b, box) for b in self.boxes)
 
-    def font(self, resources: Any, name: Any) -> Optional[_Font]:
+    def font(self, resources: Any, name: Any) -> _Font | None:
         try:
             obj = resources.Font[name]
         except Exception:
@@ -294,17 +295,19 @@ class _Redactor:
             if name not in xobjects:
                 return name
 
-    def run(self, instructions: Sequence[Any], resources: Any, state: _State, depth: int) -> Tuple[List[Any], Any, bool]:
+    def run(
+        self, instructions: Sequence[Any], resources: Any, state: _State, depth: int
+    ) -> tuple[list[Any], Any, bool]:
         """Returns (new instructions, resources to use with them, whether anything changed)."""
         import pikepdf
 
         if depth > MAX_DEPTH:
             self.stop("its content nests too deeply.")
-        out: List[Any] = []
-        stack: List[_State] = []
+        out: list[Any] = []
+        stack: list[_State] = []
         tm = tlm = IDENTITY
-        path: List[Any] = []
-        path_points: List[Tuple[float, float]] = []
+        path: list[Any] = []
+        path_points: list[tuple[float, float]] = []
         clipping = False
         changed = False
         xobjects_copy = None
@@ -317,12 +320,16 @@ class _Redactor:
                 path.append(instruction)
                 if op == "re":
                     x, y, w, h = (_num(v) for v in operands)
-                    path_points += [transform(state.ctm, px, py) for px, py in ((x, y), (x + w, y), (x, y + h), (x + w, y + h))]
+                    path_points += [
+                        transform(state.ctm, px, py) for px, py in ((x, y), (x + w, y), (x, y + h), (x + w, y + h))
+                    ]
                 elif op in ("W", "W*"):
                     clipping = True
                 elif op != "h":
                     values = [_num(v) for v in operands]
-                    path_points += [transform(state.ctm, values[i], values[i + 1]) for i in range(0, len(values) - 1, 2)]
+                    path_points += [
+                        transform(state.ctm, values[i], values[i + 1]) for i in range(0, len(values) - 1, 2)
+                    ]
                 continue
             if op in PAINT_OPS:
                 drop = False
@@ -436,12 +443,16 @@ class _Redactor:
     def copy_resources(self, resources: Any) -> Any:
         import pikepdf
 
-        copy = pikepdf.Dictionary({k: v for k, v in resources.items()}) if resources is not None else pikepdf.Dictionary()
+        copy = (
+            pikepdf.Dictionary({k: v for k, v in resources.items()}) if resources is not None else pikepdf.Dictionary()
+        )
         xobjects = copy.get("/XObject")
-        copy.XObject = pikepdf.Dictionary({k: v for k, v in xobjects.items()}) if xobjects is not None else pikepdf.Dictionary()
+        copy.XObject = (
+            pikepdf.Dictionary({k: v for k, v in xobjects.items()}) if xobjects is not None else pikepdf.Dictionary()
+        )
         return copy
 
-    def show(self, instruction: Any, op: str, operands: List[Any], state: _State, tm: Matrix):
+    def show(self, instruction: Any, op: str, operands: list[Any], state: _State, tm: Matrix):
         """Moves tm past a text-showing operator; returns (replacement instructions or None, new tm)."""
         import pikepdf
 
@@ -458,7 +469,7 @@ class _Redactor:
             self._check_unknown(font, items, state, tm)
             return None, tm
         trm_base = (size * th, 0.0, 0.0, size, 0.0, state.rise)
-        pieces: List[Tuple[str, Any]] = []
+        pieces: list[tuple[str, Any]] = []
         removed_any = False
         for item in items:
             if isinstance(item, pikepdf.String):
@@ -485,7 +496,7 @@ class _Redactor:
             return None, tm
         if size * th == 0:
             self.stop("text under a mark has a zero font size.")
-        array: List[Any] = []
+        array: list[Any] = []
         kept = b""
         gap = 0.0
         for kind, value in pieces:
@@ -517,7 +528,7 @@ class _Redactor:
         replacement.append(pikepdf.ContentStreamInstruction([pikepdf.Array(array)], pikepdf.Operator("TJ")))
         return replacement, tm
 
-    def _check_unknown(self, font: _Font, items: List[Any], state: _State, tm: Matrix) -> None:
+    def _check_unknown(self, font: _Font, items: list[Any], state: _State, tm: Matrix) -> None:
         """A font whose glyph widths are unknown is fine only while its text starts well clear of every mark."""
         import pikepdf
 
@@ -622,7 +633,7 @@ class _Redactor:
         return self.pdf.make_indirect(stream)
 
 
-def _remove_annotations(pdf: Any, page: Any, boxes: List[Box], keep: Iterable[str]) -> None:
+def _remove_annotations(pdf: Any, page: Any, boxes: list[Box], keep: Iterable[str]) -> None:
     import pikepdf
 
     annots = page.obj.get("/Annots")
@@ -651,7 +662,7 @@ def _remove_annotations(pdf: Any, page: Any, boxes: List[Box], keep: Iterable[st
         acro.Fields = pikepdf.Array(_prune_fields(acro.Fields, gone))
 
 
-def _prune_fields(fields: Any, gone: set) -> List[Any]:
+def _prune_fields(fields: Any, gone: set) -> list[Any]:
     import pikepdf
 
     out = []
@@ -668,11 +679,11 @@ def _prune_fields(fields: Any, gone: set) -> List[Any]:
     return out
 
 
-def _display_size(space: Any) -> Tuple[float, float]:
+def _display_size(space: Any) -> tuple[float, float]:
     return (space.h, space.w) if space.rotate % 180 == 90 else (space.w, space.h)
 
 
-def _display_boxes(space: Any, rects: List[List[float]]) -> List[Box]:
+def _display_boxes(space: Any, rects: list[list[float]]) -> list[Box]:
     width, height = _display_size(space)
     out = []
     for u1, v1, u2, v2 in rects:
@@ -680,7 +691,7 @@ def _display_boxes(space: Any, rects: List[List[float]]) -> List[Box]:
     return out
 
 
-def _chars(path: str, password: Optional[str], pages: Iterable[int]) -> Dict[int, List[Tuple[str, Box]]]:
+def _chars(path: str, password: str | None, pages: Iterable[int]) -> dict[int, list[tuple[str, Box]]]:
     import riemann_core
 
     doc = riemann_core.PdfEngine().load_document(path, password)
@@ -697,7 +708,7 @@ def _chars(path: str, password: Optional[str], pages: Iterable[int]) -> Dict[int
         del doc
 
 
-def _mostly_inside(char: Box, boxes: List[Box]) -> bool:
+def _mostly_inside(char: Box, boxes: list[Box]) -> bool:
     area = max((char[2] - char[0]) * (char[3] - char[1]), 1e-9)
     for b in boxes:
         w = min(char[2], b[2]) - max(char[0], b[0])
@@ -707,19 +718,21 @@ def _mostly_inside(char: Box, boxes: List[Box]) -> bool:
     return False
 
 
-def _clear_of(char: Box, boxes: List[Box]) -> bool:
+def _clear_of(char: Box, boxes: list[Box]) -> bool:
     pad = max(2.0, (char[3] - char[1]) * 0.25)
     grown = (char[0] - pad, char[1] - pad, char[2] + pad, char[3] + pad)
     return not any(overlaps(grown, b) for b in boxes)
 
 
-def verify_redaction(before: Dict[int, List[Tuple[str, Box]]], after: Dict[int, List[Tuple[str, Box]]], boxes: Dict[int, List[Box]]) -> None:
+def verify_redaction(
+    before: dict[int, list[tuple[str, Box]]], after: dict[int, list[tuple[str, Box]]], boxes: dict[int, list[Box]]
+) -> None:
     """Raises RedactionError unless the marks are empty of text and nothing else moved or went missing."""
     for page, marks in boxes.items():
         for text, box in after.get(page, []):
             if _mostly_inside(box, marks):
                 raise RedactionError(page, f"text ({text!r}) was still found under a mark after removing it.")
-        remaining: Dict[str, List[Box]] = {}
+        remaining: dict[str, list[Box]] = {}
         for text, box in after.get(page, []):
             remaining.setdefault(text, []).append(box)
         for text, box in before.get(page, []):
@@ -727,7 +740,11 @@ def verify_redaction(before: Dict[int, List[Tuple[str, Box]]], after: Dict[int, 
                 continue
             candidates = remaining.get(text, [])
             match = next(
-                (i for i, c in enumerate(candidates) if all(abs(c[k] - box[k]) <= POSITION_TOLERANCE for k in range(4))),
+                (
+                    i
+                    for i, c in enumerate(candidates)
+                    if all(abs(c[k] - box[k]) <= POSITION_TOLERANCE for k in range(4))
+                ),
                 None,
             )
             if match is None:
@@ -737,10 +754,10 @@ def verify_redaction(before: Dict[int, List[Tuple[str, Box]]], after: Dict[int, 
 
 def apply_redactions(
     path: str,
-    marks: Dict[int, List[List[float]]],
+    marks: dict[int, list[list[float]]],
     keep: Iterable[str] = (),
-    password: Optional[str] = None,
-) -> Dict[int, Optional[int]]:
+    password: str | None = None,
+) -> dict[int, int | None]:
     """
     Removes everything under marks ({page index: [relative rects]}) from the PDF
     at path, which is replaced only after the result checks out. keep lists
@@ -752,8 +769,8 @@ def apply_redactions(
     with _open(path, password) as pdf:
         count = len(pdf.pages)
         encrypted = pdf.is_encrypted
-        user_boxes: Dict[int, List[Box]] = {}
-        display_boxes: Dict[int, List[Box]] = {}
+        user_boxes: dict[int, list[Box]] = {}
+        display_boxes: dict[int, list[Box]] = {}
         for page_no in pages:
             if not 0 <= page_no < count:
                 raise PageEditError("Page out of range.")
@@ -769,7 +786,9 @@ def apply_redactions(
             ops, new_resources, _ = redactor.run(pikepdf.parse_content_stream(page), resources, _State(), 0)
             black = "\n".join(f"{x1:.4f} {y1:.4f} {x2 - x1:.4f} {y2 - y1:.4f} re f" for x1, y1, x2, y2 in boxes)
             content = b"q\n" + pikepdf.unparse_content_stream(ops) + b"\nQ\nq 0 g\n" + black.encode() + b"\nQ\n"
-            page.obj.Contents = pdf.make_indirect(pikepdf.Stream(pdf, zlib.compress(content), Filter=pikepdf.Name.FlateDecode))
+            page.obj.Contents = pdf.make_indirect(
+                pikepdf.Stream(pdf, zlib.compress(content), Filter=pikepdf.Name.FlateDecode)
+            )
             if new_resources is not None:
                 page.obj.Resources = new_resources
             if "/Thumb" in page.obj:
@@ -781,7 +800,7 @@ def apply_redactions(
         fd, tmp = tempfile.mkstemp(prefix=".riemann-", suffix=".pdf", dir=folder)
         os.close(fd)
         try:
-            pdf.save(tmp, encryption=True if encrypted else False)
+            pdf.save(tmp, encryption=bool(encrypted))
         except BaseException:
             os.remove(tmp)
             raise

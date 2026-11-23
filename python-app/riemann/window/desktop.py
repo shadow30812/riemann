@@ -15,9 +15,9 @@ making it the default. scripts/install_icon.sh writes the same list.
 """
 
 import os
-import sys
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from ..core.assets import icon_path, is_frozen
@@ -36,9 +36,17 @@ OFFICE_MIME_TYPES = (
     "application/rtf", "text/rtf"
 )
 MIME_TYPES = (
-    "application/pdf", "text/markdown", "text/plain", "text/html", "inode/directory", "application/epub+zip",
-    "text/csv", "text/tab-separated-values"
-) + OFFICE_MIME_TYPES + IMAGE_MIME_TYPES
+    "application/pdf",
+    "text/markdown",
+    "text/plain",
+    "text/html",
+    "inode/directory",
+    "application/epub+zip",
+    "text/csv",
+    "text/tab-separated-values",
+    *OFFICE_MIME_TYPES,
+    *IMAGE_MIME_TYPES,
+)
 
 
 def install_linux_integration():

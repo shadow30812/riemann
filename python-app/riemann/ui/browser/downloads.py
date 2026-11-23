@@ -23,8 +23,8 @@ from ...core.settings import (
     get_dialog_directory,
     save_last_directory,
 )
-from .ytdlp import YtDlpWorker, YtDlpSettingsDialog
-from .page import DOWNLOAD_CLAIMED, owning_tab, opens_after_download
+from .page import DOWNLOAD_CLAIMED, opens_after_download, owning_tab
+from .ytdlp import YtDlpSettingsDialog, YtDlpWorker
 
 
 class DownloadsMixin:

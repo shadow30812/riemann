@@ -16,7 +16,6 @@ def key(widget, k, text=""):
 @pytest.mark.skipif(not os.path.exists(CORPUS), reason="benchmark corpus not downloaded")
 def test_presentation_keys_laser_and_blanking(qapp):
     import riemann_core
-
     from riemann.ui.reader.presentation import PresentationWindow
 
     doc = riemann_core.PdfEngine().load_document(os.path.abspath(CORPUS), None)
@@ -43,7 +42,16 @@ def test_presentation_keys_laser_and_blanking(qapp):
     assert w.page == w.count - 1
 
     key(w, Qt.Key.Key_L)
-    w.mouseMoveEvent(QMouseEvent(QEvent.Type.MouseMove, QPointF(100, 100), QPointF(100, 100), Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+    w.mouseMoveEvent(
+        QMouseEvent(
+            QEvent.Type.MouseMove,
+            QPointF(100, 100),
+            QPointF(100, 100),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+    )
     dot = w.grab().toImage().pixelColor(100, 100)
     assert dot.red() > 200 and dot.green() < 120
 
@@ -67,7 +75,6 @@ def mouse(widget, kind, x, y, button=Qt.MouseButton.LeftButton):
 @pytest.mark.skipif(not os.path.exists(CORPUS), reason="benchmark corpus not downloaded")
 def test_presentation_zooms_around_the_pointer_and_pans(qapp):
     import riemann_core
-
     from riemann.ui.reader.presentation import PresentationWindow
 
     doc = riemann_core.PdfEngine().load_document(os.path.abspath(CORPUS), None)
@@ -78,7 +85,16 @@ def test_presentation_zooms_around_the_pointer_and_pans(qapp):
     fitted = w.page_rect()
 
     anchor = QPointF(fitted.x() + fitted.width() * 0.25, fitted.y() + fitted.height() * 0.3)
-    w.mouseMoveEvent(QMouseEvent(QEvent.Type.MouseMove, anchor, anchor, Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+    w.mouseMoveEvent(
+        QMouseEvent(
+            QEvent.Type.MouseMove,
+            anchor,
+            anchor,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+    )
     w.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Equal, Qt.KeyboardModifier.ControlModifier, "="))
     assert w.zoom == pytest.approx(1.25)
     zoomed = w.page_rect()

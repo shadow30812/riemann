@@ -1,4 +1,5 @@
 import pytest
+
 from riemann.ui.palette import DARK, LIGHT
 from riemann.ui.reader.utils import generate_markdown_html, generate_reflow_html
 

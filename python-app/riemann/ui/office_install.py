@@ -27,7 +27,6 @@ runs kills it.
 
 import importlib
 import os
-from typing import List, Optional
 
 from PySide6.QtCore import QEventLoop, QProcess, QProcessEnvironment, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QFontDatabase
@@ -48,8 +47,8 @@ from ..core import office
 from ..core.endpoints import LIBREOFFICE_DOWNLOAD
 from ..core.office_install import InstallPlan, install_env, install_plans
 from ..core.settings import OFFICE_ASK_KEY, OFFICE_PATH_KEY, app_settings
-from .threads import track
 from .palette import dialog_icon
+from .threads import track
 
 
 class OfficePrompt(QDialog):
@@ -106,14 +105,14 @@ class OfficePrompt(QDialog):
 
 
 class InstallDialog(QDialog):
-    def __init__(self, parent=None, plans: Optional[List[InstallPlan]] = None):
+    def __init__(self, parent=None, plans: list[InstallPlan] | None = None):
         super().__init__(parent)
         self.setWindowTitle("Install LibreOffice")
         self.resize(620, 440)
         self.plans = install_plans() if plans is None else plans
         self.plan_index = 0
-        self.steps: List[List[str]] = []
-        self.process: Optional[QProcess] = None
+        self.steps: list[list[str]] = []
+        self.process: QProcess | None = None
         self.found = False
 
         layout = QVBoxLayout(self)
@@ -156,7 +155,7 @@ class InstallDialog(QDialog):
         layout.addLayout(buttons)
         self._show_plan()
 
-    def plan(self) -> Optional[InstallPlan]:
+    def plan(self) -> InstallPlan | None:
         return self.plans[self.plan_index] if self.plan_index < len(self.plans) else None
 
     def _show_plan(self) -> None:
@@ -294,7 +293,9 @@ def offer_basic_packages(parent) -> bool:
         outcome["error"] = error
         loop.quit()
 
-    worker.progress_update.connect(lambda text: progress.setLabelText(f"Installing the basic-view packages…\n{text[:70]}"))
+    worker.progress_update.connect(
+        lambda text: progress.setLabelText(f"Installing the basic-view packages…\n{text[:70]}")
+    )
     worker.finished_task.connect(finished)
     worker.error_occurred.connect(failed)
     progress.show()

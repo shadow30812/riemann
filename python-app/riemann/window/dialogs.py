@@ -8,19 +8,20 @@ from PySide6.QtCore import (
     QUrl,
 )
 from PySide6.QtWidgets import (
-    QMainWindow,
     QDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
+    QMainWindow,
     QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
 )
+
 from ..core.log import log
 from ..ui.palette import dialog_icon
 

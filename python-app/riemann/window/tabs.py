@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QTabWidget,
 )
+
 from ..ui.browser import BrowserTab, is_local_homepage
 from ..ui.components import (
     build_open_with_menu,
@@ -56,7 +57,10 @@ class TabsMixin:
             self.tabs_main.setCurrentIndex(self.tabs_main.count() - 1)
 
     def may_close(self, widget) -> bool:
-        """Asks about a reader's page edits or a table's cell changes waiting for Save, or lets a web page with unsaved changes ask."""
+        """
+        Asks about a reader's page edits or a table's cell changes waiting for Save, or lets a web page with unsaved
+        changes ask.
+        """
         if isinstance(widget, ReaderTab):
             return widget.resolve_page_edits()
         if isinstance(widget, TableTab):
@@ -84,7 +88,7 @@ class TabsMixin:
                     widget.web.page().setAudioMuted(True)
                     widget.web.page().deleteLater()
                 widget.web.deleteLater()
-            elif isinstance(widget, (ReaderTab,) + VIEWER_TABS):
+            elif isinstance(widget, (ReaderTab, *VIEWER_TABS)):
                 widget.cleanup()
             elif getattr(widget, "is_system_tab", False):
                 widget.release()
@@ -116,7 +120,7 @@ class TabsMixin:
                 if widget.web.page():
                     widget.web.page().setAudioMuted(True)
                     widget.web.page().deleteLater()
-            elif isinstance(widget, (ReaderTab,) + VIEWER_TABS):
+            elif isinstance(widget, (ReaderTab, *VIEWER_TABS)):
                 widget.cleanup()
             elif getattr(widget, "is_system_tab", False):
                 widget.release()
@@ -143,9 +147,8 @@ class TabsMixin:
         """
         Checks if all tabs are closed and exits fullscreen if necessary.
         """
-        if self.tabs_main.count() == 0 and self.tabs_side.count() == 0:
-            if getattr(self, "_reader_fullscreen", False):
-                self.exit_fullscreen()
+        if self.tabs_main.count() == 0 and self.tabs_side.count() == 0 and getattr(self, "_reader_fullscreen", False):
+            self.exit_fullscreen()
 
     def _handle_escape(self) -> None:
         """
@@ -172,11 +175,7 @@ class TabsMixin:
             curr = curr.parent()
 
         if not target:
-            target = (
-                self.tabs_main
-                if not (self.tabs_side.isVisible() and self.tabs_side.count() > 0)
-                else self.tabs_main
-            )
+            target = self.tabs_main
 
         idx = target.currentIndex()
         if idx != -1:
@@ -189,10 +188,7 @@ class TabsMixin:
         title = browser.web.title()
         if not title:
             url_str = browser.web.url().toString()
-            if url_str and url_str != "about:blank":
-                title = QUrl(url_str).host()
-            else:
-                title = "New Tab"
+            title = QUrl(url_str).host() if url_str and url_str != "about:blank" else "New Tab"
         idx = self.tabs_main.indexOf(browser)
         if idx != -1:
             self.tabs_main.setTabText(idx, title)

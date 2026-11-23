@@ -73,6 +73,7 @@ dev = [
     "pyinstaller==6.18.0",
     "pytest==9.1.1",
     "pytest-qt==4.5.0",
+    "ruff==0.17.6",
 ]
 
 [tool.maturin]
@@ -80,3 +81,28 @@ manifest-path = "rust-core/Cargo.toml"
 
 [tool.pytest.ini_options]
 addopts = "--capture=fd"
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "B", "UP", "I", "SIM", "RUF"]
+# Typographic quotes and dashes in text are meant (RUF001-003); try/except/pass
+# reads as plainly as contextlib.suppress (SIM105); l, t, r, b are a box's
+# edges and h, l, s a colour throughout (E741).
+ignore = ["E741", "RUF001", "RUF002", "RUF003", "SIM105"]
+
+[tool.ruff.lint.per-file-ignores]
+# app.py sets up the environment Qt reads before importing it.
+"python-app/riemann/app.py" = ["E402"]
+# The AI engine's log file stays open while the engine runs.
+"python-app/riemann/core/ai_engine.py" = ["SIM115"]
+"python-app/tests/**" = ["RUF012", "SIM115"]
+# The PDF modules import only once importorskip has found them.
+"python-app/tests/test_compression.py" = ["E402"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["PySide6.QtCore.QModelIndex", "PySide6.QtCore.QPoint"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["riemann", "riemann_core"]

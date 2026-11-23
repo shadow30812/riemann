@@ -29,14 +29,13 @@ import socket
 import subprocess
 import sys
 import time
-from typing import List, Optional, Tuple
 
-from .log import log
 from .assets import PACKAGE_DIR, executable, is_frozen
 from .endpoints import LOOPBACK, loopback_url
+from .log import log
 
-_process: Optional[subprocess.Popen] = None
-_port: Optional[int] = None
+_process: subprocess.Popen | None = None
+_port: int | None = None
 _token: str = ""
 _log_file = None
 
@@ -60,7 +59,7 @@ def _free_port() -> int:
 SERVER_FLAG = "--riemann-ai-sidecar"
 
 
-def _command() -> Tuple[List[str], str]:
+def _command() -> tuple[list[str], str]:
     """The command that starts the engine, and its working directory."""
     if is_frozen():
         return [executable(), SERVER_FLAG], os.path.dirname(executable())
@@ -68,7 +67,7 @@ def _command() -> Tuple[List[str], str]:
     return [sys.executable, "-m", "riemann.core.ai_server"], package_root
 
 
-def page_texts(pdf_path: str, password: Optional[str] = None) -> List[str]:
+def page_texts(pdf_path: str, password: str | None = None) -> list[str]:
     """The text of every page, through the Rust core."""
     import riemann_core
 
@@ -80,7 +79,7 @@ def is_running() -> bool:
     return _process is not None and _process.poll() is None
 
 
-def ensure_started() -> Optional[Tuple[int, str]]:
+def ensure_started() -> tuple[int, str] | None:
     """
     Starts the engine unless it is already running. Returns (port, token), or None when
     it could not start.
@@ -130,7 +129,7 @@ def ensure_started() -> Optional[Tuple[int, str]]:
     return port, token
 
 
-def connection() -> Optional[Tuple[int, str]]:
+def connection() -> tuple[int, str] | None:
     """(port, token) of the running engine, or None when it is not running."""
     return (_port, _token) if is_running() else None
 
@@ -145,7 +144,7 @@ def stop() -> None:
             import psutil
 
             parent = psutil.Process(process.pid)
-            procs = parent.children(recursive=True) + [parent]
+            procs = [*parent.children(recursive=True), parent]
             for p in procs:
                 try:
                     p.terminate()
@@ -188,7 +187,7 @@ def _post(port: int, token: str, endpoint: str, payload: dict, timeout: float, p
             )
         except requests.ConnectionError:
             if time.time() - started > 120:
-                raise RuntimeError("The AI engine did not start.")
+                raise RuntimeError("The AI engine did not start.") from None
             time.sleep(1)
             continue
         if response.status_code == 503 and time.time() - started < patience:

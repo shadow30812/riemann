@@ -4,12 +4,12 @@ PreviewTextTab: the lightweight view of Markdown, HTML and text files.
 
 import os
 import re
-from ..reader.utils import render_markdown_safely
 
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from ..palette import tokens
+from ..reader.utils import render_markdown_safely
 
 
 class PreviewTextTab(QWidget):
@@ -44,7 +44,7 @@ class PreviewTextTab(QWidget):
         self._load()
 
     def _read_text(self) -> str:
-        with open(self.current_path, "r", encoding="utf-8", errors="replace") as f:
+        with open(self.current_path, encoding="utf-8", errors="replace") as f:
             content = f.read(self.MAX_BYTES)
             if len(content) == self.MAX_BYTES:
                 content += "\n\n[... File truncated for preview ...]"

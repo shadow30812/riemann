@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from PySide6.QtCore import QObject
+
 from riemann.core.constants import ViewMode, ZoomMode
 from riemann.ui.reader.mixins.rendering import RenderingMixin
 

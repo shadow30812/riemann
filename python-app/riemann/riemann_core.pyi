@@ -6,7 +6,6 @@ compiled Rust backend. It ensures type safety for rendering, OCR, and
 document interaction features.
 """
 
-from typing import List, Optional, Tuple
 
 class RenderResult:
     """
@@ -57,7 +56,7 @@ class RiemannDocument:
         """
         ...
 
-    def get_page_size(self, page_index: int) -> Tuple[float, float]:
+    def get_page_size(self, page_index: int) -> tuple[float, float]:
         """
         Returns the size of a page in PDF points.
 
@@ -71,7 +70,7 @@ class RiemannDocument:
 
     def get_links(
         self, page_index: int
-    ) -> List[Tuple[str, Tuple[float, float, float, float]]]:
+    ) -> list[tuple[str, tuple[float, float, float, float]]]:
         """
         Extracts clickable links from the page.
 
@@ -97,9 +96,9 @@ class RiemannDocument:
 
     def get_comments(
         self, page_index: int
-    ) -> Tuple[
-        Tuple[float, float, float, float],
-        List[Tuple[str, str, str, str, Tuple[float, float, float, float]]],
+    ) -> tuple[
+        tuple[float, float, float, float],
+        list[tuple[str, str, str, str, tuple[float, float, float, float]]],
     ]:
         """
         Lists comments left on a page by other applications: every annotation
@@ -143,13 +142,13 @@ class RiemannDocument:
         """
         ...
 
-    def ocr_pages(self, page_indices: List[int], scale: float, languages: str = "eng") -> List[str]:
+    def ocr_pages(self, page_indices: list[int], scale: float, languages: str = "eng") -> list[str]:
         """Reads several pages with one Tesseract process; one string per page, in order."""
         ...
 
     def search_page(
         self, page_index: int, query: str
-    ) -> List[Tuple[float, float, float, float]]:
+    ) -> list[tuple[float, float, float, float]]:
         """
         Searches for a text query on the page.
 
@@ -164,7 +163,7 @@ class RiemannDocument:
 
     def get_text_segments(
         self, page_index: int
-    ) -> List[Tuple[str, Tuple[float, float, float, float]]]:
+    ) -> list[tuple[str, tuple[float, float, float, float]]]:
         """
         Retrieves granular text segments and their positions.
 
@@ -178,7 +177,7 @@ class RiemannDocument:
 
     def get_char_boxes(
         self, page_index: int
-    ) -> List[Tuple[str, Tuple[float, float, float, float]]]:
+    ) -> list[tuple[str, tuple[float, float, float, float]]]:
         """
         Retrieves every character on the page with its loose bounding box, in
         content order. Generated characters (spaces and line breaks PDFium
@@ -194,7 +193,7 @@ class RiemannDocument:
 
     def get_char_styles(
         self, page_index: int
-    ) -> List[Tuple[str, Tuple[float, float, float, float], float, str, bool, bool, bool, bool, str]]:
+    ) -> list[tuple[str, tuple[float, float, float, float], float, str, bool, bool, bool, bool, str]]:
         """
         The look of every character, in the same order and with the same
         filtering as get_char_boxes.
@@ -210,7 +209,7 @@ class RiemannDocument:
         """
         ...
 
-    def get_outline(self) -> List[Tuple[int, str, int]]:
+    def get_outline(self) -> list[tuple[int, str, int]]:
         """
         Returns the document outline (bookmarks), flattened depth-first.
 
@@ -222,7 +221,7 @@ class RiemannDocument:
 
     def get_form_widgets(
         self, page_index: int
-    ) -> List[Tuple[int, Tuple[float, float, float, float], str, str, bool]]:
+    ) -> list[tuple[int, tuple[float, float, float, float], str, str, bool]]:
         """
         Retrieves interactive form widgets from the page.
 
@@ -243,7 +242,7 @@ class PdfEngine:
         """Initialize the PDF engine and internal libraries."""
         ...
 
-    def load_document(self, path: str, password: Optional[str] = None) -> RiemannDocument:
+    def load_document(self, path: str, password: str | None = None) -> RiemannDocument:
         """
         Loads a PDF document from the file system.
 

@@ -16,4 +16,4 @@ from .table_tab import TableTab
 
 VIEWER_TABS = (ImageTab, TableTab, HexTab)
 
-__all__ = ["HexTab", "ImageTab", "SpreadsheetTab", "TableTab", "VIEWER_TABS"]
+__all__ = ["VIEWER_TABS", "HexTab", "ImageTab", "SpreadsheetTab", "TableTab"]

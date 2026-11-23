@@ -30,7 +30,6 @@ as a document (ui/viewers/__init__.py).
 
 import os
 import re
-from typing import Optional
 
 import shiboken6
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QThread, QTimer, Signal
@@ -84,7 +83,7 @@ class DecodeWorker(QThread):
     decoded = Signal(object, int)
     failed = Signal(str, int)
 
-    def __init__(self, path: str, frame: int, size: Optional[QSize], request: int, parent=None):
+    def __init__(self, path: str, frame: int, size: QSize | None, request: int, parent=None):
         super().__init__(parent)
         self.path, self.frame, self.size, self.request = path, frame, size, request
 
@@ -123,15 +122,15 @@ class ImageCanvas(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
-        self.pixmap: Optional[QPixmap] = None
+        self.pixmap: QPixmap | None = None
         self.natural = QSize()
-        self.fit: Optional[str] = FIT_PAGE
+        self.fit: str | None = FIT_PAGE
         self.scale = 1.0
         self.rotation = 0
         self.offset = QPointF(0, 0)
         self.background = "dark"
         self.message = ""
-        self._drag_from: Optional[QPointF] = None
+        self._drag_from: QPointF | None = None
         self._settle = QTimer(self)
         self._settle.setSingleShot(True)
         self._settle.setInterval(REDRAW_MS)
@@ -163,7 +162,7 @@ class ImageCanvas(QWidget):
         size = self.rotated_size()
         return QSize(max(1, round(size.width() * self.scale)), max(1, round(size.height() * self.scale)))
 
-    def set_fit(self, fit: Optional[str]) -> None:
+    def set_fit(self, fit: str | None) -> None:
         self.fit = fit
         self._refit()
         self.update()
@@ -188,7 +187,7 @@ class ImageCanvas(QWidget):
             self.zoom_changed.emit(scale)
             self._settle.start()
 
-    def zoom_by(self, factor: float, anchor: Optional[QPointF] = None) -> None:
+    def zoom_by(self, factor: float, anchor: QPointF | None = None) -> None:
         if not self.natural.isValid():
             return
         anchor = anchor if anchor is not None else QPointF(self.width() / 2, self.height() / 2)
@@ -266,7 +265,11 @@ class ImageCanvas(QWidget):
         if self.pixmap is None or self.pixmap.isNull():
             if self.message:
                 painter.setPen(qcolor(theme["muted"]))
-                painter.drawText(self.rect().adjusted(24, 24, -24, -24), Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, self.message)
+                painter.drawText(
+                    self.rect().adjusted(24, 24, -24, -24),
+                    Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+                    self.message,
+                )
             return
         target = self.image_rect()
         if self.background == "checker":
@@ -325,14 +328,14 @@ class ImageTab(QWidget):
         self.current_path = os.path.abspath(path)
         self.is_preview = preview
         self.dark_mode = dark_mode
-        self.decoded: Optional[DecodedImage] = None
+        self.decoded: DecodedImage | None = None
         self.frame = 0
-        self.movie: Optional[QMovie] = None
-        self.lbl_toast: Optional[Toast] = None
+        self.movie: QMovie | None = None
+        self.lbl_toast: Toast | None = None
         self._request = 0
         self._images: list = []
         self._workers: list = []
-        self._pdf_worker: Optional[PdfWorker] = None
+        self._pdf_worker: PdfWorker | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -350,7 +353,9 @@ class ImageTab(QWidget):
         layout.addWidget(self.toolbar)
         layout.addWidget(self.canvas, 1)
 
-        self.btn_prev = self._button(bar, "chevron-left.svg", "Previous image in the folder (Left)", lambda: self.step(-1))
+        self.btn_prev = self._button(
+            bar, "chevron-left.svg", "Previous image in the folder (Left)", lambda: self.step(-1)
+        )
         self.btn_next = self._button(bar, "chevron-right.svg", "Next image in the folder (Right)", lambda: self.step(1))
         self.lbl_position = QLabel()
         bar.addWidget(self.lbl_position)
@@ -373,9 +378,15 @@ class ImageTab(QWidget):
         bar.addWidget(self.btn_zoom)
         self.btn_zoom_in = self._button(bar, "plus.svg", "Zoom in (Ctrl+=)", self.zoom_in)
         bar.addSpacing(10)
-        self.btn_rotate_ccw = self._button(bar, "rotate-ccw.svg", "Rotate anticlockwise (Ctrl+Shift+R)", lambda: self.canvas.rotate(-90))
-        self.btn_rotate_cw = self._button(bar, "rotate-cw.svg", "Rotate clockwise (Ctrl+R)", lambda: self.canvas.rotate(90))
-        self.btn_background = self._button(bar, "palette.svg", "Background: dark, light or a checkerboard (N)", self.toggle_theme)
+        self.btn_rotate_ccw = self._button(
+            bar, "rotate-ccw.svg", "Rotate anticlockwise (Ctrl+Shift+R)", lambda: self.canvas.rotate(-90)
+        )
+        self.btn_rotate_cw = self._button(
+            bar, "rotate-cw.svg", "Rotate clockwise (Ctrl+R)", lambda: self.canvas.rotate(90)
+        )
+        self.btn_background = self._button(
+            bar, "palette.svg", "Background: dark, light or a checkerboard (N)", self.toggle_theme
+        )
         self.btn_copy = self._button(bar, "file.svg", "Copy the image (Ctrl+C)", self.copy_image)
         self.btn_pdf = self._button(bar, "file-output.svg", "Save as PDF", self.save_as_pdf)
         self.btn_open_with = QToolButton()
@@ -425,7 +436,8 @@ class ImageTab(QWidget):
         self.toolbar.setStyleSheet(
             f"QWidget#imageToolbar {{ background: {t['surface']}; border-bottom: 1px solid {t['border']}; }}"
             f"QLabel {{ color: {t['muted']}; background: transparent; }}"
-            f"QToolButton {{ color: {t['text']}; border: 1px solid transparent; border-radius: 4px; padding: 5px; background: transparent; }}"
+            f"QToolButton {{ color: {t['text']}; border: 1px solid transparent; border-radius: 4px; padding: 5px; "
+            f"background: transparent; }}"
             f"QToolButton:hover {{ background: {t['raised']}; }}"
             "QToolButton::menu-indicator { image: none; width: 0px; }"
         )
@@ -451,7 +463,7 @@ class ImageTab(QWidget):
             self._decode(keep_view=False)
         self._update_labels()
 
-    def _decode(self, keep_view: bool, size: Optional[QSize] = None) -> None:
+    def _decode(self, keep_view: bool, size: QSize | None = None) -> None:
         self._request += 1
         worker = DecodeWorker(self.current_path, self.frame, size or self._vector_size(), self._request, self)
         worker.decoded.connect(lambda result, request, k=keep_view: self._on_decoded(result, request, k))
@@ -466,7 +478,7 @@ class ImageTab(QWidget):
         if shiboken6.isValid(worker):
             worker.deleteLater()
 
-    def _vector_size(self) -> Optional[QSize]:
+    def _vector_size(self) -> QSize | None:
         if not is_vector(self.current_path):
             return None
         if self.decoded is None:
@@ -506,7 +518,9 @@ class ImageTab(QWidget):
         self.movie.start()
         if self.movie.isValid():
             image = self.movie.currentImage()
-            self.decoded = DecodedImage(image, image.width(), image.height(), 1, bytes(self.movie.format()).decode().upper())
+            self.decoded = DecodedImage(
+                image, image.width(), image.height(), 1, bytes(self.movie.format()).decode().upper()
+            )
             self.canvas.set_image(image, image.size())
         else:
             self._stop_movie()

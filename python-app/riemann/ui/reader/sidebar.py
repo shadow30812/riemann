@@ -19,7 +19,7 @@ import atexit
 import queue
 import threading
 import weakref
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, ClassVar
 
 from PySide6.QtCore import QObject, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
@@ -46,7 +46,7 @@ MAX_THUMBS = 160
 ANCHOR_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
-def read_outline(doc: Any, path: str) -> List[Tuple[int, str, int]]:
+def read_outline(doc: Any, path: str) -> list[tuple[int, str, int]]:
     """The outline as (depth, title, page_index) tuples, from the core or pypdf."""
     if hasattr(doc, "get_outline"):
         return [tuple(e) for e in doc.get_outline()]
@@ -54,7 +54,7 @@ def read_outline(doc: Any, path: str) -> List[Tuple[int, str, int]]:
     import pypdf
 
     reader = pypdf.PdfReader(path)
-    out: List[Tuple[int, str, int]] = []
+    out: list[tuple[int, str, int]] = []
 
     def walk(items, depth):
         for it in items:
@@ -83,14 +83,14 @@ class _ThumbRenderer:
     joined at interpreter exit before it can be killed inside PDFium.
     """
 
-    live: "weakref.WeakSet[_ThumbRenderer]" = weakref.WeakSet()
+    live: ClassVar["weakref.WeakSet[_ThumbRenderer]"] = weakref.WeakSet()
 
     def __init__(self, bridge: _Bridge):
         _ThumbRenderer.live.add(self)
         self.bridge = bridge
-        self.requests: "queue.Queue[Optional[tuple]]" = queue.Queue()
+        self.requests: queue.Queue[tuple | None] = queue.Queue()
         self.generation = 0
-        self.thread: Optional[threading.Thread] = None
+        self.thread: threading.Thread | None = None
 
     def request(self, generation: int, doc: Any, page: int, theme_mode: int, dpr: float) -> None:
         if self.thread is None:
@@ -155,8 +155,8 @@ class PdfSidebarWidget(QWidget):
         self.mode = "outline"
         self._generation = 0
         self._requested: set = set()
-        self._rendered: Dict[int, None] = {}
-        self._outline_pages: List[Tuple[int, QTreeWidgetItem]] = []
+        self._rendered: dict[int, None] = {}
+        self._outline_pages: list[tuple[int, QTreeWidgetItem]] = []
 
         self._bridge = _Bridge(self)
         self._bridge.outline_ready.connect(self._on_outline_ready)
@@ -257,14 +257,16 @@ class PdfSidebarWidget(QWidget):
             f"QToolButton {{ border: none; border-radius: 8px; background: transparent; }}"
             f"QToolButton:hover {{ background: {t['raised']}; }}"
             f"QToolButton:checked {{ background: {t['accent_soft']}; }}"
-            f"QTreeWidget, QListWidget {{ background: {t['surface']}; color: {t['text']}; border: none; outline: none; }}"
+            "QTreeWidget, QListWidget "
+            f"{{ background: {t['surface']}; color: {t['text']}; border: none; outline: none; }}"
             f"QTreeWidget::item {{ padding: 5px 4px; border-radius: 6px; }}"
             f"QTreeWidget::item:hover, QListWidget::item:hover {{ background: {t['raised']}; }}"
             f"QTreeWidget::item:selected {{ background: {t['accent_soft']}; color: {t['text']}; }}"
-            f"QListWidget::item {{ border: 2px solid transparent; border-radius: 6px; padding: 4px; color: {t['muted']}; }}"
-            f"QListWidget::item:selected {{ border-color: {t['accent']}; background: {t['accent_soft']}; color: {t['text']}; }}"
-            f"QLabel {{ color: {t['faint']}; padding: 24px 12px; }}"
-            + scrollbar_style(t)
+            "QListWidget::item "
+            f"{{ border: 2px solid transparent; border-radius: 6px; padding: 4px; color: {t['muted']}; }}"
+            "QListWidget::item:selected "
+            f"{{ border-color: {t['accent']}; background: {t['accent_soft']}; color: {t['text']}; }}"
+            f"QLabel {{ color: {t['faint']}; padding: 24px 12px; }}" + scrollbar_style(t)
         )
         self.btn_thumbs.setIcon(tinted_icon("image", t["text"], 18))
         self.btn_outline.setIcon(tinted_icon("list-tree", t["text"], 18))
@@ -343,7 +345,7 @@ class PdfSidebarWidget(QWidget):
             return
         self.tree.clear()
         self._outline_pages = []
-        parents: List[QTreeWidgetItem] = []
+        parents: list[QTreeWidgetItem] = []
         for depth, title, page, *anchor in entries:
             item = QTreeWidgetItem([title or "Untitled"])
             item.setToolTip(0, title)

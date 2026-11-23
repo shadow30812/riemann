@@ -65,7 +65,7 @@ LEAVE_PROMPT = "Are you sure you want to leave this page? Changes that you made 
 LEAVE_WAIT_MS = 3000
 
 
-def owning_tab(page: Optional[QObject]) -> Optional["BrowserTab"]:
+def owning_tab(page: QObject | None) -> Optional["BrowserTab"]:
     """The BrowserTab whose view shows page, or None for pop-ups and pages outside a tab."""
     from .tab import BrowserTab
 
@@ -82,19 +82,21 @@ def opens_after_download(path: str, mime_type: str = "") -> bool:
     return document_kind(path) in ("pdf", "ebook", "office")
 
 
-def show_tab(tab: Optional[QWidget]) -> None:
+def show_tab(tab: QWidget | None) -> None:
     """Makes tab the current page of the tab widget holding it."""
     stack = tab.parentWidget() if tab is not None else None
     if isinstance(stack, QStackedWidget) and isinstance(stack.parentWidget(), QTabWidget):
         stack.parentWidget().setCurrentWidget(tab)
 
 
-def ask_to_leave(parent: Optional[QWidget], site: str) -> bool:
+def ask_to_leave(parent: QWidget | None, site: str) -> bool:
     """The Leave or Stay question for a page with unsaved changes; True for Leave."""
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Question)
     box.setWindowTitle("Leave page?")
-    box.setText(f"Changes you made on {site} may not be saved." if site else "Changes you made on this page may not be saved.")
+    box.setText(
+        f"Changes you made on {site} may not be saved." if site else "Changes you made on this page may not be saved."
+    )
     box.setInformativeText("Leave the page anyway?")
     leave = box.addButton("Leave", QMessageBox.ButtonRole.AcceptRole)
     stay = box.addButton("Stay", QMessageBox.ButtonRole.RejectRole)
@@ -114,12 +116,12 @@ class WebPage(QWebEnginePage):
     asking_to_leave = False
 
     def __init__(
-        self, profile: QWebEngineProfile, parent: Optional[QObject] = None
+        self, profile: QWebEngineProfile, parent: QObject | None = None
     ) -> None:
         super().__init__(profile, parent)
         self._popups = []
         self.store = app_settings()
-        self.site_permissions: Optional[permissions.SitePermissions] = None
+        self.site_permissions: permissions.SitePermissions | None = None
 
     def createWindow(self, _type: QWebEnginePage.WebWindowType) -> QWebEnginePage:
         """
@@ -134,10 +136,9 @@ class WebPage(QWebEnginePage):
                 new_tab = main_win.new_browser_tab(url="", background=True)
                 return new_tab.web.page()
 
-        elif _type == QWebEnginePage.WebWindowType.WebBrowserTab:
-            if hasattr(main_win, "new_browser_tab"):
-                new_tab = main_win.new_browser_tab(url="", background=False)
-                return new_tab.web.page()
+        elif _type == QWebEnginePage.WebWindowType.WebBrowserTab and hasattr(main_win, "new_browser_tab"):
+            new_tab = main_win.new_browser_tab(url="", background=False)
+            return new_tab.web.page()
 
         popup_view = QWebEngineView()
         popup_view.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -207,7 +208,10 @@ class WebPage(QWebEnginePage):
 def apply_content_settings(settings: QWebEngineSettings, store, url: QUrl) -> None:
     """Sets the page attributes behind the content settings for url's site."""
     A = QWebEngineSettings.WebAttribute
-    allowed = lambda key: store.get(url, key) == permissions.ALLOW
+
+    def allowed(key: str) -> bool:
+        return store.get(url, key) == permissions.ALLOW
+
     settings.setAttribute(A.JavascriptCanOpenWindows, allowed("popups"))
     settings.setAttribute(A.PlaybackRequiresUserGesture, not allowed("autoplay"))
     settings.setAttribute(A.JavascriptEnabled, allowed("javascript"))

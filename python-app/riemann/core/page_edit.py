@@ -22,14 +22,13 @@ pages on their own.
 import os
 import shutil
 import tempfile
-from typing import Dict, List, Optional, Tuple
 
 
 class PageEditError(Exception):
     pass
 
 
-def _open(path: str, password: Optional[str] = None):
+def _open(path: str, password: str | None = None):
     """Opens path with pikepdf, trying the password only when the file asks for one (pikepdf warns otherwise)."""
     import pikepdf
 
@@ -52,7 +51,7 @@ def _is_signed(pdf) -> bool:
         return True
 
 
-def document_state(path: str, password: Optional[str] = None) -> Tuple[bool, bool]:
+def document_state(path: str, password: str | None = None) -> tuple[bool, bool]:
     """(encrypted, signed) for the PDF at path; (False, False) when it can't be read."""
     try:
         with _open(path, password) as pdf:
@@ -62,9 +61,12 @@ def document_state(path: str, password: Optional[str] = None) -> Tuple[bool, boo
 
 
 def _save_over(pdf, path: str, keep_encryption: bool = True) -> None:
-    """Saves pdf over path through a temporary file, keeping path's permission bits (and its encryption when keep_encryption); pdf is closed either way."""
+    """
+    Saves pdf over path through a temporary file, keeping path's permission bits (and its encryption when
+    keep_encryption); pdf is closed either way.
+    """
     folder = os.path.dirname(os.path.abspath(path))
-    encryption = True if keep_encryption and pdf.is_encrypted else False
+    encryption = bool(keep_encryption and pdf.is_encrypted)
     try:
         fd, tmp = tempfile.mkstemp(prefix=".riemann-", suffix=".pdf", dir=folder)
         os.close(fd)
@@ -100,19 +102,19 @@ def replace_with(path: str, source: str) -> None:
         raise
 
 
-def _check(indices: List[int], count: int) -> List[int]:
+def _check(indices: list[int], count: int) -> list[int]:
     clean = sorted({int(i) for i in indices})
     if not clean or clean[0] < 0 or clean[-1] >= count:
         raise PageEditError("Page out of range.")
     return clean
 
 
-def page_count(path: str, password: Optional[str] = None) -> int:
+def page_count(path: str, password: str | None = None) -> int:
     with _open(path, password) as pdf:
         return len(pdf.pages)
 
 
-def delete_pages(path: str, indices: List[int], password: Optional[str] = None) -> Dict[int, Optional[int]]:
+def delete_pages(path: str, indices: list[int], password: str | None = None) -> dict[int, int | None]:
     with _open(path, password) as pdf:
         count = len(pdf.pages)
         doomed = _check(indices, count)
@@ -131,7 +133,7 @@ def delete_pages(path: str, indices: List[int], password: Optional[str] = None) 
     return mapping
 
 
-def rotate_pages(path: str, indices: List[int], degrees: int, password: Optional[str] = None) -> Dict[int, Optional[int]]:
+def rotate_pages(path: str, indices: list[int], degrees: int, password: str | None = None) -> dict[int, int | None]:
     if degrees % 90:
         raise PageEditError("Pages turn in steps of 90 degrees.")
     with _open(path, password) as pdf:
@@ -142,7 +144,7 @@ def rotate_pages(path: str, indices: List[int], degrees: int, password: Optional
     return {i: i for i in range(count)}
 
 
-def reorder_pages(path: str, order: List[int], password: Optional[str] = None) -> Dict[int, Optional[int]]:
+def reorder_pages(path: str, order: list[int], password: str | None = None) -> dict[int, int | None]:
     """Puts the pages in the given order (a permutation of the old indices)."""
     with _open(path, password) as pdf:
         count = len(pdf.pages)
@@ -153,7 +155,7 @@ def reorder_pages(path: str, order: List[int], password: Optional[str] = None) -
     return {old: pos for pos, old in enumerate(order)}
 
 
-def move_page(path: str, index: int, to: int, password: Optional[str] = None) -> Dict[int, Optional[int]]:
+def move_page(path: str, index: int, to: int, password: str | None = None) -> dict[int, int | None]:
     count = page_count(path, password)
     order = list(range(count))
     _check([index, to], count)
@@ -161,7 +163,7 @@ def move_page(path: str, index: int, to: int, password: Optional[str] = None) ->
     return reorder_pages(path, order, password)
 
 
-def extract_pages(path: str, indices: List[int], dest: str, password: Optional[str] = None) -> None:
+def extract_pages(path: str, indices: list[int], dest: str, password: str | None = None) -> None:
     """Writes the chosen pages to a new PDF, without a password; the original is not changed."""
     import pikepdf
 
@@ -173,7 +175,7 @@ def extract_pages(path: str, indices: List[int], dest: str, password: Optional[s
         out.save(dest)
 
 
-def insert_pdf(path: str, other: str, at: int, password: Optional[str] = None) -> Dict[int, Optional[int]]:
+def insert_pdf(path: str, other: str, at: int, password: str | None = None) -> dict[int, int | None]:
     """Inserts every page of other before page at (at == page count appends)."""
     with _open(path, password) as pdf:
         count = len(pdf.pages)
@@ -187,7 +189,7 @@ def insert_pdf(path: str, other: str, at: int, password: Optional[str] = None) -
     return {old: (old if old < at else old + added) for old in range(count)}
 
 
-def remove_password(path: str, password: Optional[str] = None) -> Dict[int, Optional[int]]:
+def remove_password(path: str, password: str | None = None) -> dict[int, int | None]:
     """Rewrites path without encryption; the pages stay where they are."""
     with _open(path, password) as pdf:
         count = len(pdf.pages)
@@ -195,7 +197,7 @@ def remove_password(path: str, password: Optional[str] = None) -> Dict[int, Opti
     return {i: i for i in range(count)}
 
 
-def save_unlocked_copy(path: str, dest: str, password: Optional[str] = None) -> None:
+def save_unlocked_copy(path: str, dest: str, password: str | None = None) -> None:
     """Writes a copy of path without encryption to dest; path is not changed."""
     if os.path.exists(dest) and os.path.samefile(path, dest):
         raise PageEditError("Choose a new name for the unlocked copy.")
@@ -203,9 +205,9 @@ def save_unlocked_copy(path: str, dest: str, password: Optional[str] = None) -> 
         pdf.save(dest, encryption=False)
 
 
-def remap_pages(pages: Dict[str, list], mapping: Dict[int, Optional[int]]) -> Dict[str, list]:
+def remap_pages(pages: dict[str, list], mapping: dict[int, int | None]) -> dict[str, list]:
     """Moves per-page data ({"3": [...]}) to new page numbers, dropping deleted pages."""
-    out: Dict[str, list] = {}
+    out: dict[str, list] = {}
     for key, items in (pages or {}).items():
         try:
             new = mapping.get(int(key), int(key))

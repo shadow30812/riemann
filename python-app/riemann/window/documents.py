@@ -26,7 +26,7 @@ which shows the workbook as LibreOffice prints it.
 """
 
 import os
-from typing import Optional, Tuple
+
 import shiboken6
 from PySide6.QtCore import (
     QTimer,
@@ -46,20 +46,27 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem,
     QWidget,
 )
+
+from ..core import office
+from ..core.assets import icon_path
+from ..core.doctypes import HTML_SUFFIXES, VIEWER_KINDS, dialog_filter, document_kind, is_reader_name, office_type
 from ..core.features import (
     CompressDialog,
     ConvertDialog,
 )
+from ..core.office_basic import basic_format, packages_ready
+from ..core.settings import (
+    AUTO_OPEN_DOWNLOADS_KEY,
+    OFFICE_ASK_KEY,
+    OFFICE_PATH_KEY,
+    get_dialog_directory,
+    save_last_directory,
+)
 from ..ui.browser import BrowserTab, PreviewTextTab
+from ..ui.file_icons import BLANK_ICON, TEXT_ICON, document_icon
 from ..ui.palette import tinted_icon, tokens
 from ..ui.reader.tab import PreviewReaderTab, ReaderTab
 from ..ui.viewers import HexTab, ImageTab, SpreadsheetTab, TableTab
-from ..core.assets import icon_path
-from ..core import office
-from ..core.office_basic import basic_format, packages_ready
-from ..core.doctypes import HTML_SUFFIXES, VIEWER_KINDS, dialog_filter, document_kind, is_reader_name, office_type
-from ..core.settings import AUTO_OPEN_DOWNLOADS_KEY, OFFICE_ASK_KEY, OFFICE_PATH_KEY, get_dialog_directory, save_last_directory
-from ..ui.file_icons import BLANK_ICON, TEXT_ICON, document_icon
 
 
 class DocumentsMixin:
@@ -235,10 +242,7 @@ class DocumentsMixin:
                 item.setText(0, f"  {sig.get('subject', 'Unknown')}")
 
                 if sig.get("valid"):
-                    if sig.get("is_trusted"):
-                        icon_name = "circle-check"
-                    else:
-                        icon_name = "circle-question-mark"
+                    icon_name = "circle-check" if sig.get("is_trusted") else "circle-question-mark"
                 else:
                     icon_name = "circle-slash"
 
@@ -273,7 +277,7 @@ class DocumentsMixin:
         self,
         path: str,
         target_widget: QTabWidget,
-        is_preview: Optional[bool] = None,
+        is_preview: bool | None = None,
     ) -> None:
         """
         Opens a document in a new tab of target_widget (kept for callers that predate
@@ -347,7 +351,12 @@ class DocumentsMixin:
         """The ImageTab, TableTab, SpreadsheetTab or HexTab for path."""
         viewer = {"image": ImageTab, "spreadsheet": SpreadsheetTab, "binary": HexTab}.get(kind, TableTab)
         if viewer is SpreadsheetTab:
-            widget = viewer(path, getattr(self, "dark_mode", False), preview=preview, incognito=bool(getattr(self, "incognito", False)))
+            widget = viewer(
+                path,
+                getattr(self, "dark_mode", False),
+                preview=preview,
+                incognito=bool(getattr(self, "incognito", False)),
+            )
         else:
             widget = viewer(path, getattr(self, "dark_mode", False), preview=preview)
         if isinstance(widget, TableTab):
@@ -363,7 +372,7 @@ class DocumentsMixin:
                 self._update_tab_tooltip(tab_widget, idx)
                 self._auto_save_session()
 
-    def show_as_pages(self, table: QWidget) -> Optional[QWidget]:
+    def show_as_pages(self, table: QWidget) -> QWidget | None:
         """Opens a reader tab next to a SpreadsheetTab, showing its workbook as LibreOffice prints it."""
         tab_widget = next((tw for tw in (self.tabs_main, self.tabs_side) if tw.indexOf(table) != -1), None)
         if tab_widget is None:
@@ -387,7 +396,7 @@ class DocumentsMixin:
     def _document_icon(self, path: str = "", text: bool = False) -> QIcon:
         return QIcon(icon_path(self._document_icon_name(path, text), getattr(self, "dark_mode", False)))
 
-    def open_as_text(self, table: QWidget) -> Optional[QWidget]:
+    def open_as_text(self, table: QWidget) -> QWidget | None:
         """Replaces a TableTab, in the same spot, by a reader showing its file as plain text."""
         tab_widget = next((tw for tw in (self.tabs_main, self.tabs_side) if tw.indexOf(table) != -1), None)
         if tab_widget is None:
@@ -395,7 +404,9 @@ class DocumentsMixin:
         idx = tab_widget.indexOf(table)
         reader = self._create_reader(False)
         reader.load_document(table.current_path)
-        tab_widget.insertTab(idx, reader, self._document_icon(table.current_path, text=True), os.path.basename(table.current_path))
+        tab_widget.insertTab(
+            idx, reader, self._document_icon(table.current_path, text=True), os.path.basename(table.current_path)
+        )
         tab_widget.removeTab(tab_widget.indexOf(table))
         if getattr(self, "preview_tab_widget", None) is table:
             self.preview_tab_widget = None
@@ -414,12 +425,12 @@ class DocumentsMixin:
     def _open_document(
         self,
         path: str,
-        target_widget: Optional[QTabWidget] = None,
-        preview: Optional[bool] = None,
-        page: Optional[int] = None,
-        insert_idx: Optional[int] = None,
+        target_widget: QTabWidget | None = None,
+        preview: bool | None = None,
+        page: int | None = None,
+        insert_idx: int | None = None,
         activate: bool = True,
-    ) -> Optional[QWidget]:
+    ) -> QWidget | None:
         """
         Opens any supported file as a tab. PDFs, Office files, e-books, Markdown and
         other text files go to the reader, images to an ImageTab, CSV and TSV to a
@@ -438,7 +449,9 @@ class DocumentsMixin:
         kind = self._document_kind(path)
         if kind == "office" and not preview:
             if not self.isVisible() and self._office_prompt_due(path):
-                QTimer.singleShot(0, self, lambda: self._open_document(path, target_widget, False, page, None, activate))
+                QTimer.singleShot(
+                    0, self, lambda: self._open_document(path, target_widget, False, page, None, activate)
+                )
                 return None
             if not self._office_ready(path):
                 return None
@@ -534,7 +547,7 @@ class DocumentsMixin:
 
     def _replace_tab_document(
         self, tab_widget: QTabWidget, idx: int, preview: bool
-    ) -> Optional[QWidget]:
+    ) -> QWidget | None:
         """
         Reopens the document shown in tab idx in preview or full mode, keeping
         its position in the tab bar and, for PDFs, the current page.
@@ -580,12 +593,7 @@ class DocumentsMixin:
         Adds a BrowserTab on the shared profile; separate profiles would lock the same
         database.
         """
-        if self.incognito:
-            use_profile = self.web_profile
-        else:
-            use_profile = self.web_profile
-
-        browser = BrowserTab(url, profile=use_profile, dark_mode=self.dark_mode)
+        browser = BrowserTab(url, profile=self.web_profile, dark_mode=self.dark_mode)
         browser.completer.setModel(self.history_model)
 
         default_icon = QIcon(icon_path("browser.png"))
@@ -602,7 +610,7 @@ class DocumentsMixin:
         browser.web.titleChanged.connect(lambda title: self._update_tab_title(browser))
         return browser
 
-    def new_pdf_tab(self, path: Optional[str] = None) -> None:
+    def new_pdf_tab(self, path: str | None = None) -> None:
         """With no path, opens an empty reader tab."""
         if path:
             self._open_document(path, self.tabs_main)
@@ -749,7 +757,7 @@ class DocumentsMixin:
             path, self.tabs_main, insert_idx=None if insert_idx == -1 else insert_idx
         )
 
-    def _find_document_tab(self, path: str) -> Tuple[Optional[QTabWidget], int]:
+    def _find_document_tab(self, path: str) -> tuple[QTabWidget | None, int]:
         """The pane and index of the tab showing path, or (None, -1)."""
         target = os.path.normcase(os.path.abspath(path))
         for tab_widget in (self.tabs_main, self.tabs_side):
@@ -762,7 +770,7 @@ class DocumentsMixin:
                     return tab_widget, i
         return None, -1
 
-    def _live_preview_tab(self) -> Optional[QWidget]:
+    def _live_preview_tab(self) -> QWidget | None:
         """The explorer's preview tab, if it is still open."""
         widget = getattr(self, "preview_tab_widget", None)
         if widget is not None and not shiboken6.isValid(widget):

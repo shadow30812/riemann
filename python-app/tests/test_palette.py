@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from PySide6.QtWidgets import QApplication
+
 from riemann.ui.explorer import FolderHomeTab
 from riemann.ui.palette import CONTRAST, DARK, LIGHT, short_folder, tinted_pixmap
 
@@ -147,7 +148,18 @@ def _ratio(a, b):
 
 @pytest.mark.parametrize("background", ["canvas", "raised"])
 def test_high_contrast_text_is_7_to_1_and_borders_3_to_1(background):
-    for kind in ("text", "muted", "faint", "accent", "accent_hover", "danger", "success", "warning", "system", "private"):
+    for kind in (
+        "text",
+        "muted",
+        "faint",
+        "accent",
+        "accent_hover",
+        "danger",
+        "success",
+        "warning",
+        "system",
+        "private",
+    ):
         assert _ratio(CONTRAST[kind], CONTRAST[background]) >= 7, kind
     for kind in ("border", "border_strong"):
         assert _ratio(CONTRAST[kind], CONTRAST["canvas"]) >= 3, kind

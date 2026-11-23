@@ -15,7 +15,7 @@ screen.
 """
 
 import os
-from typing import Optional
+
 from PySide6.QtCore import (
     QSize,
     Qt,
@@ -37,8 +37,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from ..widgets import DropZoneLabel
-from ...toast import Toast
+
+from ....core.assets import icon_path
+from ....core.settings import DARK_MODE_KEY, NOTES_VISIBLE_KEY, app_settings
 from ...palette import (
     FONT_STACK,
     GridCanvas,
@@ -51,10 +52,10 @@ from ...palette import (
     toast_style,
     tokens,
 )
+from ...toast import Toast
 from ..notes import notes_path_for as _notes_for
-from ....core.settings import DARK_MODE_KEY, NOTES_VISIBLE_KEY, app_settings
+from ..widgets import DropZoneLabel
 from .host import ReaderHostBase
-from ....core.assets import icon_path
 
 
 class AppearanceMixin(ReaderHostBase):
@@ -108,11 +109,14 @@ class AppearanceMixin(ReaderHostBase):
 
         arrow_url = arrow_path.replace("\\", "/")
 
-        self.toolbar.setStyleSheet(f"""
+        self.toolbar.setStyleSheet(
+            f"""
             QWidget {{ background: {color.name()}; color: {fg}; }}
-            QPushButton, QToolButton {{ border: 1px solid transparent; padding: 6px; border-radius: 4px; background: transparent; }}
+            QPushButton, QToolButton {{ border: 1px solid transparent; padding: 6px; border-radius: 4px;
+                background: transparent; }}
             QPushButton:hover, QToolButton:hover {{ background: {hover_bg}; }}
-            QPushButton:checked, QToolButton:checked {{ background-color: {checked_bg}; border: 1px solid {checked_border}; }}
+            QPushButton:checked, QToolButton:checked {{ background-color: {checked_bg};
+                border: 1px solid {checked_border}; }}
             QToolButton#groupMenu {{ padding: 6px 24px 6px 10px; }}
             QToolButton#groupMenu::menu-indicator {{ image: url("{arrow_url}"); width: 12px; height: 12px;
                 subcontrol-origin: padding; subcontrol-position: right center; right: 6px; }}
@@ -122,26 +126,30 @@ class AppearanceMixin(ReaderHostBase):
             QFrame#toolbarRail {{ border-left: 1px solid {input_border}; }}
             QFrame#toolbarPill {{ border: 1px solid {input_border}; border-radius: 22px; }}
             QWidget#toolbarRibbon {{ border-top: 1px solid {input_border}; }}
-            QLineEdit {{ background-color: {input_bg}; color: {fg}; border: 1px solid {input_border}; border-radius: 6px; padding: 4px; }}
+            QLineEdit {{ background-color: {input_bg}; color: {fg}; border: 1px solid {input_border};
+                border-radius: 6px; padding: 4px; }}
             QLineEdit:focus {{ border: 1px solid {checked_border}; }}
-            QComboBox {{ background-color: {input_bg}; color: {sb_fg}; border: 1px solid {input_border}; border-radius: 4px; padding: 4px; }}
+            QComboBox {{ background-color: {input_bg}; color: {sb_fg}; border: 1px solid {input_border};
+                border-radius: 4px; padding: 4px; }}
             QComboBox::drop-down {{ border: none; width: 24px; }}
             QComboBox::down-arrow {{ image: url("{arrow_url}"); width: 16px; height: 16px; }}
-        """ + menu_style(t))
+        """
+            + menu_style(t)
+        )
         if self.toolbar_layout is not None:
             self.toolbar_layout.restyle()
 
         self.search_bar.setStyleSheet(f"""
             QWidget {{ background-color: {sb_bg};
                 color: {sb_fg}; }}
-            QLineEdit {{ background-color: {input_bg}; 
-                color: {sb_fg}; 
-                border: 1px solid {input_border}; 
-                border-radius: 4px; 
+            QLineEdit {{ background-color: {input_bg};
+                color: {sb_fg};
+                border: 1px solid {input_border};
+                border-radius: 4px;
                 padding: 4px; }}
-            QPushButton {{ background: transparent; 
+            QPushButton {{ background: transparent;
                 border: none; }}
-            QPushButton:hover {{ background: {t['border']}; 
+            QPushButton:hover {{ background: {t['border']};
                 border-radius: 4px; }}
         """ + menu_style(t))
 
@@ -224,7 +232,7 @@ class AppearanceMixin(ReaderHostBase):
         self._home_dark = app_settings().value(
             DARK_MODE_KEY, False, type=bool
         )
-        self._home_dark_override: Optional[bool] = None
+        self._home_dark_override: bool | None = None
         self.home_page_widget = GridCanvas(self._home_dark)
         self.home_page_widget.setObjectName("pdfHome")
         self.home_page_widget.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
@@ -353,7 +361,8 @@ class AppearanceMixin(ReaderHostBase):
         self._home_dark = dark
         t = tokens(dark)
         self.home_page_widget.set_dark(dark)
-        self.home_page_widget.setStyleSheet(f"""
+        self.home_page_widget.setStyleSheet(
+            f"""
             QWidget {{ background: transparent; color: {t["text"]}; font-family: {FONT_STACK}; }}
             #homeWordmark {{ font-size: 44px; font-weight: 300; letter-spacing: 3px; color: {t["text"]}; }}
             #homeTagline {{ font-size: 15px; color: {t["muted"]}; }}
@@ -390,9 +399,12 @@ class AppearanceMixin(ReaderHostBase):
             #recentName {{ font-size: 14px; color: {t["text"]}; }}
             #recentDir {{ font-size: 12px; color: {t["faint"]}; }}
             QScrollBar:vertical {{ background: transparent; width: 14px; }}
-            QScrollBar::handle:vertical {{ background: {t["border_strong"]}; border-radius: 5px; margin: 2px; min-height: 24px; }}
+            QScrollBar::handle:vertical {{ background: {t["border_strong"]}; border-radius: 5px; margin: 2px;
+                min-height: 24px; }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-        """ + menu_style(t))
+        """
+            + menu_style(t)
+        )
         self.lbl_drop_icon.setPixmap(tinted_pixmap("file-text", t["accent"], 36))
         if self.list_recent.count():
             self._populate_home_recents()

@@ -44,8 +44,8 @@ import os
 import re
 import shutil
 import tempfile
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from typing import Iterable, Iterator, Optional
 
 SAMPLE_BYTES = 64 * 1024
 DELIMITERS = ",;\t|"
@@ -64,7 +64,7 @@ class DelimitedFile:
     has_header: bool
 
     def rows(self) -> Iterator[list]:
-        with open(self.path, "r", encoding=self.encoding, errors="surrogateescape", newline="") as handle:
+        with open(self.path, encoding=self.encoding, errors="surrogateescape", newline="") as handle:
             yield from csv.reader(handle, self.dialect)
 
 
@@ -127,7 +127,7 @@ def _numbers_under_names(text: str, dialect: type) -> bool:
     return False
 
 
-def number_value(text: str) -> Optional[float]:
+def number_value(text: str) -> float | None:
     text = text.strip()
     if not text or not NUMBER.match(text):
         return None

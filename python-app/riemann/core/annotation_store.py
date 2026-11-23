@@ -31,7 +31,6 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Optional
 
 from .storage import app_data_dir, write_json_atomic
 
@@ -39,7 +38,7 @@ _ID = re.compile(rb"/ID\s*\[\s*<\s*([0-9A-Fa-f\s]+?)\s*>")
 _SCAN = 256 * 1024
 
 
-def pdf_identifier(path: str) -> Optional[str]:
+def pdf_identifier(path: str) -> str | None:
     """The first /ID string of the PDF's newest trailer, as lower-case hex."""
     try:
         size = os.path.getsize(path)
@@ -73,7 +72,7 @@ def legacy_json_path(pdf_path: str) -> str:
 class AnnotationStore:
     """Maps document paths to their annotation JSON files."""
 
-    def __init__(self, folder: Optional[str] = None) -> None:
+    def __init__(self, folder: str | None = None) -> None:
         self.folder = folder or os.path.join(app_data_dir(), "annotations")
         self.index_path = os.path.join(self.folder, "index.json")
 
@@ -142,7 +141,7 @@ class AnnotationStore:
         self._save_index(index)
 
 
-_shared: Optional[AnnotationStore] = None
+_shared: AnnotationStore | None = None
 
 
 def shared() -> AnnotationStore:

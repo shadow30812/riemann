@@ -4,6 +4,7 @@ import pytest
 from PySide6.QtCore import QPoint
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import QColorDialog, QInputDialog, QMenu, QWidget
+
 from riemann.ui.components import AnnotationToolbar, DraggableTabBar, DraggableTabWidget
 
 
@@ -151,7 +152,7 @@ def test_drop_back_into_same_strip_moves_tab(qtbot):
     widget = DraggableTabWidget()
     qtbot.addWidget(widget)
     pages = [QWidget() for _ in range(3)]
-    for page, name in zip(pages, "ABC"):
+    for page, name in zip(pages, "ABC", strict=False):
         widget.addTab(page, name)
     DraggableTabBar._dragged_widget = pages[0]
     DraggableTabBar._dragged_source = widget

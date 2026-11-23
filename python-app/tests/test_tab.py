@@ -5,19 +5,19 @@ reader_tab: No event loop runs under pytest, so flush the deletion explicitly;
 otherwise the tab's QWebEngineView outlives the default profile.
 """
 
-from contextlib import contextmanager
 import os
 import sys
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication
+
 from riemann.core.constants import ViewMode, ZoomMode
 from riemann.ui.reader.tab import ReaderTab
 from riemann.ui.reader.widgets import PageWidget
-
 
 
 @pytest.fixture(scope="session")
@@ -40,7 +40,7 @@ def patched_settings():
 
 def fake_setting(key, default=None, type=None):
     """Every setting reads True except the notes panel, which would narrow the page."""
-    return False if key == "reader/notes_visible" else True
+    return key != "reader/notes_visible"
 
 
 @pytest.fixture
@@ -217,11 +217,10 @@ def test_save_document(mock_copy, mock_get_save, mock_info, reader_tab):
     reader_tab.current_path = "/tmp/test.pdf"
     mock_get_save.return_value = ("/tmp/saved.pdf", "")
 
-    with patch.object(reader_tab.settings, "value", return_value=""):
-        with patch("os.path.exists", return_value=True):
-            reader_tab.save_document()
-            mock_copy.assert_called_once_with("/tmp/test.pdf", "/tmp/saved.pdf")
-            mock_info.assert_called_once()
+    with patch.object(reader_tab.settings, "value", return_value=""), patch("os.path.exists", return_value=True):
+        reader_tab.save_document()
+        mock_copy.assert_called_once_with("/tmp/test.pdf", "/tmp/saved.pdf")
+        mock_info.assert_called_once()
 
 
 @patch("riemann.ui.reader.mixins.document.QMessageBox.warning")
@@ -485,7 +484,9 @@ def test_deleting_a_page_moves_annotations_with_it(reader_tab, qapp, tmp_path, m
     from riemann.core import annotation_store, pdf_annotations
 
     monkeypatch.setattr(annotation_store, "_shared", annotation_store.AnnotationStore(str(tmp_path / "store")))
-    monkeypatch.setattr("riemann.ui.reader.mixins.pages.QMessageBox.question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(
+        "riemann.ui.reader.mixins.pages.QMessageBox.question", lambda *a, **k: QMessageBox.StandardButton.Yes
+    )
 
     def pump(seconds, until=lambda: False):
         end = time.time() + seconds
@@ -500,7 +501,9 @@ def test_deleting_a_page_moves_annotations_with_it(reader_tab, qapp, tmp_path, m
     reader_tab.load_document(path)
     pump(15, lambda: reader_tab.current_doc is not None)
     pump(1)
-    reader_tab.annotations = {"2": [{"id": "n1", "type": "note", "rel_pos": [0.5, 0.5], "text": "keep me", "color": "#ff0000"}]}
+    reader_tab.annotations = {
+        "2": [{"id": "n1", "type": "note", "rel_pos": [0.5, 0.5], "text": "keep me", "color": "#ff0000"}]
+    }
     reader_tab.save_annotations()
     reader_tab.flush_annotations_to_pdf()
     reader_tab._store_annotations_in_pdf(blocking=True)
@@ -544,7 +547,9 @@ def test_discarded_page_edits_leave_the_file_and_annotations_as_they_were(reader
     reader_tab.show()
     reader_tab.load_document(path)
     pump(15, lambda: reader_tab.current_doc is not None)
-    reader_tab.annotations = {"3": [{"id": "n1", "type": "note", "rel_pos": [0.5, 0.5], "text": "stay", "color": "#ff0000"}]}
+    reader_tab.annotations = {
+        "3": [{"id": "n1", "type": "note", "rel_pos": [0.5, 0.5], "text": "stay", "color": "#ff0000"}]
+    }
     reader_tab.save_annotations()
     reader_tab.flush_annotations_to_pdf()
     reader_tab._store_annotations_in_pdf(blocking=True)
@@ -593,9 +598,9 @@ def test_cancelling_the_unsaved_edits_question_keeps_the_tab_open(qtbot, tmp_pat
 def test_form_entries_are_saved_into_the_pdf(reader_tab, qapp, tmp_path, monkeypatch):
     import time
 
+    from form_fixtures import make_form_pdf
     from PySide6.QtWidgets import QCheckBox, QLineEdit
 
-    from form_fixtures import make_form_pdf
     from riemann.core import annotation_store
     from riemann.core.pdf_forms import read_form_values
 
@@ -648,6 +653,7 @@ def _icon_is_light(icon) -> bool:
 
 def test_reader_chrome_follows_the_page_theme_not_the_app_theme(reader_tab):
     from PySide6.QtWidgets import QToolButton
+
     from riemann.ui.palette import DARK
 
     reader_tab.theme_mode = 1

@@ -15,6 +15,7 @@ screen hides the toolbar and the side rail, and the pages get wider.
 import os
 import time
 from typing import Any
+
 from PySide6.QtCore import (
     QEvent,
     QObject,
@@ -36,6 +37,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QRubberBand,
 )
+
 from ....core.constants import ViewMode, ZoomMode, clamp_zoom
 from ....core.doctypes import TAB_KINDS, document_kind
 from ...palette import CONTENT
@@ -94,15 +96,14 @@ class InputMixin(ReaderHostBase):
                 self.stop_middle_click_scroll()
                 return True
 
-        if event.type() == QEvent.Type.MouseButtonPress:
-            if event.button() == Qt.MouseButton.MiddleButton:
-                if self._autoscroll_active:
-                    self.stop_middle_click_scroll()
-                else:
-                    self.start_middle_click_scroll(
-                        event.globalPosition().toPoint()
-                    )
-                return True
+        if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.MiddleButton:
+            if self._autoscroll_active:
+                self.stop_middle_click_scroll()
+            else:
+                self.start_middle_click_scroll(
+                    event.globalPosition().toPoint()
+                )
+            return True
 
         if (
             event.type() == QEvent.Type.MouseButtonPress
@@ -129,53 +130,52 @@ class InputMixin(ReaderHostBase):
         ):
             return True
 
-        if event.type() == QEvent.Type.KeyPress:
-            if source == self.scroll or isinstance(
-                source, PageWidget
+        if event.type() == QEvent.Type.KeyPress and (source == self.scroll or isinstance(
+            source, PageWidget
+        )):
+            if self._handle_selection_key(event):
+                return True
+            if (
+                event.modifiers() & Qt.KeyboardModifier.ControlModifier
+                and event.key() == Qt.Key.Key_C
+                and self.current_selected_text
             ):
-                if self._handle_selection_key(event):
+                QApplication.clipboard().setText(self.current_selected_text)
+                self.show_toast("Copied text to clipboard! 📋")
+                return True
+            key = event.key()
+            if self.view_mode == ViewMode.IMAGE:
+                if key == Qt.Key.Key_Left:
+                    self.prev_view()
                     return True
-                if (
-                    event.modifiers() & Qt.KeyboardModifier.ControlModifier
-                    and event.key() == Qt.Key.Key_C
-                    and self.current_selected_text
-                ):
-                    QApplication.clipboard().setText(self.current_selected_text)
-                    self.show_toast("Copied text to clipboard! 📋")
+                elif key == Qt.Key.Key_Right:
+                    self.next_view()
                     return True
-                key = event.key()
-                if self.view_mode == ViewMode.IMAGE:
-                    if key == Qt.Key.Key_Left:
-                        self.prev_view()
-                        return True
-                    elif key == Qt.Key.Key_Right:
-                        self.next_view()
-                        return True
 
-                    if not self.continuous_scroll:
-                        vbar = self.scroll.verticalScrollBar()
-                        if vbar.maximum() == 0:
-                            if key == Qt.Key.Key_Up:
-                                self.prev_view()
-                                return True
-                            elif key == Qt.Key.Key_Down:
-                                self.next_view()
-                                return True
+                if not self.continuous_scroll:
+                    vbar = self.scroll.verticalScrollBar()
+                    if vbar.maximum() == 0:
+                        if key == Qt.Key.Key_Up:
+                            self.prev_view()
+                            return True
+                        elif key == Qt.Key.Key_Down:
+                            self.next_view()
+                            return True
 
-                    if key == Qt.Key.Key_Up:
-                        vbar = self.scroll.verticalScrollBar()
-                        vbar.setValue(vbar.value() - 50)
-                        return True
-                    elif key == Qt.Key.Key_Down:
-                        vbar = self.scroll.verticalScrollBar()
-                        vbar.setValue(vbar.value() + 50)
-                        return True
-                    elif key == Qt.Key.Key_Space:
-                        mod = event.modifiers()
-                        self.scroll_page(
-                            -1 if mod & Qt.KeyboardModifier.ShiftModifier else 1
-                        )
-                        return True
+                if key == Qt.Key.Key_Up:
+                    vbar = self.scroll.verticalScrollBar()
+                    vbar.setValue(vbar.value() - 50)
+                    return True
+                elif key == Qt.Key.Key_Down:
+                    vbar = self.scroll.verticalScrollBar()
+                    vbar.setValue(vbar.value() + 50)
+                    return True
+                elif key == Qt.Key.Key_Space:
+                    mod = event.modifiers()
+                    self.scroll_page(
+                        -1 if mod & Qt.KeyboardModifier.ShiftModifier else 1
+                    )
+                    return True
 
         if isinstance(source, PageWidget):
             page_idx = source.property("pageIndex")
@@ -395,10 +395,11 @@ class InputMixin(ReaderHostBase):
                 self._press_on_link = any(
                     r.contains(event.pos()) for r, _ in getattr(source, "link_rects", [])
                 )
-                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                    if self._extend_selection_to_pos(page_idx, event.pos()):
-                        self._just_selected_multi_click = True
-                        return True
+                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier and self._extend_selection_to_pos(
+                    page_idx, event.pos()
+                ):
+                    self._just_selected_multi_click = True
+                    return True
                 self._set_caret_at_pos(page_idx, event.pos())
 
                 now = time.time()
@@ -532,27 +533,26 @@ class InputMixin(ReaderHostBase):
                     and not self.active_drawing
                     and not self.is_snipping
                     and not self.is_selecting_text
-                ):
-                    if hasattr(source, "link_rects"):
-                        pos = event.pos()
-                        for rect, url in source.link_rects:
-                            if rect.contains(pos):
-                                self.clear_all_text_selections()
-                                if url.startswith("#page="):
-                                    target = self._parse_internal_link(url)
-                                    if target is not None:
-                                        self.navigate_to(target[0], top_pts=target[1])
-                                        return True
-                                elif (
-                                    event.modifiers()
-                                    == Qt.KeyboardModifier.ControlModifier
-                                ):
-                                    main_win = self.window()
-                                    if hasattr(main_win, "new_browser_tab"):
-                                        main_win.new_browser_tab(url)
-                                    else:
-                                        QDesktopServices.openUrl(QUrl(url))
+                ) and hasattr(source, "link_rects"):
+                    pos = event.pos()
+                    for rect, url in source.link_rects:
+                        if rect.contains(pos):
+                            self.clear_all_text_selections()
+                            if url.startswith("#page="):
+                                target = self._parse_internal_link(url)
+                                if target is not None:
+                                    self.navigate_to(target[0], top_pts=target[1])
                                     return True
+                            elif (
+                                event.modifiers()
+                                == Qt.KeyboardModifier.ControlModifier
+                            ):
+                                main_win = self.window()
+                                if hasattr(main_win, "new_browser_tab"):
+                                    main_win.new_browser_tab(url)
+                                else:
+                                    QDesktopServices.openUrl(QUrl(url))
+                                return True
 
                 if event.button() == Qt.MouseButton.LeftButton:
                     if self.is_selecting_text:
@@ -736,15 +736,17 @@ class InputMixin(ReaderHostBase):
 
     def event(self, event: QEvent) -> bool:
         """Handles trackpad pinch-to-zoom."""
-        if event.type() == QEvent.Type.NativeGesture:
-            if event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
-                delta = event.value()
-                self.manual_scale = clamp_zoom(self.manual_scale * (1.0 + delta))
-                self.zoom_mode = ZoomMode.MANUAL
-                self.apply_visual_zoom()
+        if (
+            event.type() == QEvent.Type.NativeGesture
+            and event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture
+        ):
+            delta = event.value()
+            self.manual_scale = clamp_zoom(self.manual_scale * (1.0 + delta))
+            self.zoom_mode = ZoomMode.MANUAL
+            self.apply_visual_zoom()
 
-                self._schedule_zoom_finished()
-                return True
+            self._schedule_zoom_finished()
+            return True
         return super().event(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:

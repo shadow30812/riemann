@@ -28,7 +28,7 @@ import os
 import shutil
 import tempfile
 import threading
-from typing import Iterator, Optional
+from collections.abc import Iterator
 
 import shiboken6
 from PySide6.QtCore import QSize, Qt, QThread, Signal
@@ -46,7 +46,7 @@ class SpreadsheetWorker(QThread):
     loaded = Signal(str, object, bool)
     failed = Signal(str, str)
 
-    def __init__(self, path: str, override: str = "", folder: Optional[str] = None):
+    def __init__(self, path: str, override: str = "", folder: str | None = None):
         super().__init__()
         self.path = path
         self.override = override
@@ -108,7 +108,7 @@ def _jsonl_rows(file: str) -> Iterator[list]:
 class SpreadsheetTab(TableTab):
     def __init__(self, path: str, dark_mode: bool = False, preview: bool = False, parent=None, incognito: bool = False):
         super().__init__(path, dark_mode, preview, sheets=[], parent=parent)
-        self.folder: Optional[str] = None
+        self.folder: str | None = None
         self.office_folder = tempfile.mkdtemp(prefix="riemann-office-") if incognito else None
         self.btn_pages = QToolButton()
         self.btn_pages.setProperty("icon_name", "file-text.svg")
@@ -123,7 +123,7 @@ class SpreadsheetTab(TableTab):
         bar.insertWidget(bar.indexOf(self.btn_open_with), self.btn_pages)
         self.apply_ui_theme(dark_mode)
         self.status.setText(f"Opening {os.path.basename(self.current_path)}…")
-        self.worker: Optional[SpreadsheetWorker] = SpreadsheetWorker(
+        self.worker: SpreadsheetWorker | None = SpreadsheetWorker(
             self.current_path, app_settings().value(OFFICE_PATH_KEY, "", type=str), self.office_folder
         )
         self.worker.loaded.connect(self._on_loaded)

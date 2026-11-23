@@ -27,10 +27,9 @@ finished is emitted while the thread still counts as running.
 
 import atexit
 import warnings
-from typing import Optional
 
 import shiboken6
-from PySide6.QtCore import QThread, Qt, SignalInstance
+from PySide6.QtCore import Qt, QThread, SignalInstance
 
 RELEASE_WAIT_MS = 10000
 
@@ -58,7 +57,7 @@ def _forget(thread: QThread) -> None:
     _RELEASED.discard(thread)
 
 
-def release(thread: Optional[QThread], *signals: SignalInstance) -> None:
+def release(thread: QThread | None, *signals: SignalInstance) -> None:
     """Detaches thread from its owner and lets it finish in the background; signals are disconnected first."""
     if thread is None or not shiboken6.isValid(thread):
         return

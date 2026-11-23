@@ -7,6 +7,7 @@ the window's attributes freely, as they did when they lived in one class.
 
 import os
 import time
+
 import psutil
 from PySide6.QtCore import (
     QUrl,
@@ -19,15 +20,16 @@ from PySide6.QtWebEngineCore import (
     QWebEnginePage,
     QWebEngineSettings,
 )
-from ..ui.browser import BrowserTab
-from ..ui.reader.tab import ReaderTab
-from ..ui.viewers import VIEWER_TABS
-from ..ui import accessibility, tooltip
-from ..ui.palette import high_contrast, set_high_contrast, toast_style, tokens
-from ..ui.toast import Toast
-from ..core.log import log
+
 from ..core.assets import asset_path, icon_path
+from ..core.log import log
 from ..core.settings import DARK_MODE_KEY, HIGH_CONTRAST_KEY, READING_RULER_KEY, SCREEN_READER_NAMES_KEY
+from ..ui import accessibility, tooltip
+from ..ui.browser import BrowserTab
+from ..ui.palette import high_contrast, set_high_contrast, toast_style, tokens
+from ..ui.reader.tab import ReaderTab
+from ..ui.toast import Toast
+from ..ui.viewers import VIEWER_TABS
 
 
 class ChromeMixin:
@@ -242,7 +244,7 @@ class ChromeMixin:
                     tab_widget.setTabIcon(i, w.tab_icon(self.dark_mode))
                 if getattr(w, "is_preview", False):
                     tab_widget.setTabIcon(i, self._preview_icon())
-                elif isinstance(w, (ReaderTab,) + VIEWER_TABS):
+                elif isinstance(w, (ReaderTab, *VIEWER_TABS)):
                     tab_widget.setTabIcon(i, self._document_icon(w.current_path or ""))
 
         self.refresh_signature_panel()
@@ -314,7 +316,7 @@ class ChromeMixin:
         css_path = os.path.join(theme_dir, css_file)
 
         if os.path.exists(css_path):
-            with open(css_path, "r", encoding="utf-8") as f:
+            with open(css_path, encoding="utf-8") as f:
                 stylesheet = f.read()
 
             theme_dir_css = theme_dir.replace("\\", "/")
@@ -339,7 +341,8 @@ class ChromeMixin:
         uptime_str = f"{h:02d}:{m:02d}:{s:02d}"
 
         mem_str = "--"
-        net_str = f"{self._get_icon_img_tag('arrow-big-down-dash')} -- MB/s &nbsp; {self._get_icon_img_tag('arrow-big-up-dash')} -- MB/s"
+        down, up = self._get_icon_img_tag("arrow-big-down-dash"), self._get_icon_img_tag("arrow-big-up-dash")
+        net_str = f"{down} -- MB/s &nbsp; {up} -- MB/s"
         bat_str = f"{self._get_icon_img_tag('battery')} --%"
 
         if psutil:
@@ -367,7 +370,7 @@ class ChromeMixin:
                             / dt
                             / (1024 * 1024)
                         )
-                        net_str = f"{self._get_icon_img_tag('arrow-big-down-dash')} {recv_speed:.2f} MB/s &nbsp; {self._get_icon_img_tag('arrow-big-up-dash')} {sent_speed:.2f} MB/s"
+                        net_str = f"{down} {recv_speed:.2f} MB/s &nbsp; {up} {sent_speed:.2f} MB/s"
 
                 self._last_net_io = current_net_io
                 self._last_net_time = current_time
@@ -403,7 +406,8 @@ class ChromeMixin:
         """Applies dynamic theme styling to the floating fullscreen button."""
         t = tokens(self.dark_mode)
         self.floating_fs_btn.setStyleSheet(
-            f"background: {t['raised']}; color: {t['text']}; border: 1px solid {t['border_strong']}; border-radius: 8px;"
+            f"background: {t['raised']}; color: {t['text']}; border: 1px solid {t['border_strong']}; border-radius: "
+            "8px;"
         )
         self._update_floating_fs_btn_icon()
 

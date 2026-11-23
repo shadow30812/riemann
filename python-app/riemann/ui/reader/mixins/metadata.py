@@ -9,13 +9,12 @@ import os
 import re
 
 import shiboken6
-
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from ....core import annotation_store
+from ...threads import track
 from ..notes import notes_path_for
 from ..workers import MetadataExtractionWorker
-from ...threads import track
 from .host import ReaderHostBase
 
 

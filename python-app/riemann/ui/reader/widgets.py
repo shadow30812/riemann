@@ -9,7 +9,6 @@ first paint whenever the render was a pixel off the slot size (rounding makes
 that the usual case), about 12 ms per page while scrolling.
 """
 
-from typing import List, Optional
 
 from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QPolygon
@@ -78,21 +77,21 @@ class PageWidget(QLabel):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        self.temp_points: List[QPoint] = []
+        self.temp_points: list[QPoint] = []
         self.temp_pen = QPen()
-        self.markup_rects: List[QRect] = []
+        self.markup_rects: list[QRect] = []
         self.markup_color: QColor = QColor()
 
-        self.selected_text_rects: List[QRect] = []
-        self.link_rects: List[tuple[QRect, str]] = []
+        self.selected_text_rects: list[QRect] = []
+        self.link_rects: list[tuple[QRect, str]] = []
 
-        self.temp_shape_p1: Optional[QPoint] = None
-        self.temp_shape_p2: Optional[QPoint] = None
+        self.temp_shape_p1: QPoint | None = None
+        self.temp_shape_p2: QPoint | None = None
         self.temp_shape_type: str = ""
         self.temp_shape_color: str = ""
         self.temp_shape_thick: int = 1
 
-        self._page_pixmap: Optional[QPixmap] = None
+        self._page_pixmap: QPixmap | None = None
 
 
     def setPixmap(self, pixmap: QPixmap) -> None:
@@ -123,30 +122,30 @@ class PageWidget(QLabel):
             painter.drawPixmap(self.rect(), pix)
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
 
-    def set_text_selection(self, rects: List[QRect]) -> None:
+    def set_text_selection(self, rects: list[QRect]) -> None:
         self.selected_text_rects = rects
         self.update()
 
-    def set_spoken_rects(self, rects: List[QRect]) -> None:
+    def set_spoken_rects(self, rects: list[QRect]) -> None:
         """Marks the sentence read aloud right now (empty to clear)."""
         if rects or getattr(self, "spoken_rects", None):
             self.spoken_rects = rects
             self.update()
 
-    def set_ruler(self, band: Optional[QRect]) -> None:
+    def set_ruler(self, band: QRect | None) -> None:
         """Dims the page outside band, the line the reading ruler is on (None to clear)."""
         if band != getattr(self, "ruler_band", None):
             self.ruler_band = band
             self.update()
 
-    def set_word_rects(self, rects: List[QRect]) -> None:
+    def set_word_rects(self, rects: list[QRect]) -> None:
         """Marks the word read aloud right now, over the sentence (empty to clear)."""
         if rects or getattr(self, "word_rects", None):
             self.word_rects = rects
             self.update()
 
     def set_temp_stroke(
-        self, points: List[QPoint], color_str: str, thickness: int, is_highlight: bool
+        self, points: list[QPoint], color_str: str, thickness: int, is_highlight: bool
     ) -> None:
         """Shows the stroke being drawn; is_highlight makes it translucent."""
         self.temp_points = points
@@ -166,7 +165,7 @@ class PageWidget(QLabel):
         )
         self.update()
 
-    def set_markup_preview(self, rects: List[QRect], color: QColor) -> None:
+    def set_markup_preview(self, rects: list[QRect], color: QColor) -> None:
         self.markup_rects = rects
         self.markup_color = color
         self.update()
@@ -223,7 +222,9 @@ class PageWidget(QLabel):
             painter.fillRect(0, 0, self.width(), max(0, band.top()), shade)
             painter.fillRect(0, band.bottom() + 1, self.width(), max(0, self.height() - band.bottom() - 1), shade)
             painter.fillRect(0, band.top(), max(0, band.left()), band.height(), shade)
-            painter.fillRect(band.right() + 1, band.top(), max(0, self.width() - band.right() - 1), band.height(), shade)
+            painter.fillRect(
+                band.right() + 1, band.top(), max(0, self.width() - band.right() - 1), band.height(), shade
+            )
             painter.fillRect(band.left(), band.bottom() - 1, band.width(), 2, qcolor(CONTENT["selection"]))
 
         if getattr(self, "spoken_rects", None):

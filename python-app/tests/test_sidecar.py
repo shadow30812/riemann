@@ -88,9 +88,11 @@ def test_ollama_models_and_streaming(fake_ollama):
 
 
 def test_http_errors_are_reported(fake_ollama):
-    with patch.object(sidecar, "ollama_url", return_value="http://127.0.0.1:9"):
-        with pytest.raises(sidecar.ProviderError):
-            sidecar.list_models("ollama", "")
+    with (
+        patch.object(sidecar, "ollama_url", return_value="http://127.0.0.1:9"),
+        pytest.raises(sidecar.ProviderError),
+    ):
+        sidecar.list_models("ollama", "")
 
 
 def test_panel_asks_for_a_document_first(qtbot):

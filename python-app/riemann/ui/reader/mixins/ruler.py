@@ -16,7 +16,6 @@ character list they came from, which _get_page_chars replaces when the zoom
 changes. Pages without text (scans before OCR) get no ruler.
 """
 
-from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QPoint, QRect
 
@@ -26,11 +25,11 @@ from .host import ReaderHostBase
 RULER_PAD = 3
 
 
-def text_lines(chars: List[tuple]) -> List[QRect]:
+def text_lines(chars: list[tuple]) -> list[QRect]:
     """The bounding box of each line of text, in reading order."""
-    lines: List[QRect] = []
-    current: Optional[QRect] = None
-    last: Optional[QRect] = None
+    lines: list[QRect] = []
+    current: QRect | None = None
+    last: QRect | None = None
     for ch, rect, *_ in chars:
         if rect is None or rect.isEmpty() or not ch.strip():
             continue
@@ -52,7 +51,7 @@ def text_lines(chars: List[tuple]) -> List[QRect]:
     return lines
 
 
-def line_at(lines: List[QRect], pos: QPoint) -> Optional[int]:
+def line_at(lines: list[QRect], pos: QPoint) -> int | None:
     """The line under pos, else the nearest one above or below in pos's column, else the nearest."""
     if not lines:
         return None
@@ -65,9 +64,9 @@ def line_at(lines: List[QRect], pos: QPoint) -> Optional[int]:
 
 
 class RulerMixin(ReaderHostBase):
-    _ruler_on: Optional[bool] = None
-    _ruler: Optional[Tuple[int, int]] = None
-    _ruler_cache: Optional[Dict[int, Tuple[int, List[QRect]]]] = None
+    _ruler_on: bool | None = None
+    _ruler: tuple[int, int] | None = None
+    _ruler_cache: dict[int, tuple[int, list[QRect]]] | None = None
 
     def ruler_enabled(self) -> bool:
         if self._ruler_on is None:
@@ -87,7 +86,7 @@ class RulerMixin(ReaderHostBase):
             self.ruler_step(0)
         self.show_toast("Reading ruler on (Alt+Down and Alt+Up move it)" if on else "Reading ruler off")
 
-    def _ruler_lines(self, page: int) -> List[QRect]:
+    def _ruler_lines(self, page: int) -> list[QRect]:
         chars = self._get_page_chars(page)
         if self._ruler_cache is None:
             self._ruler_cache = {}
@@ -124,7 +123,7 @@ class RulerMixin(ReaderHostBase):
                 return
             page, index = (page + 1, 0) if forward else (page - 1, None)
 
-    def _show_ruler(self, where: Optional[Tuple[int, int]], scroll: bool = True) -> None:
+    def _show_ruler(self, where: tuple[int, int] | None, scroll: bool = True) -> None:
         self._ruler = where
         band = None
         if where is not None:

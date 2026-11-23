@@ -27,13 +27,13 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..render_worker import PAGE_IMAGE_FORMAT
-from ..workers import SignatureValidationWorker
+from ....core.features import unused_path
 from ....core.log import log
 from ....core.settings import app_settings, get_dialog_directory, save_last_directory
 from ...palette import banner_style, dialog_icon, tokens
-from ....core.features import unused_path
 from ...threads import release, track
+from ..render_worker import PAGE_IMAGE_FORMAT
+from ..workers import SignatureValidationWorker
 from .host import ReaderHostBase
 
 
@@ -170,7 +170,7 @@ class SignaturesMixin(ReaderHostBase):
         trusted_pems = self.settings.value("trusted_certs_pem", [], type=list)
 
         try:
-            with open(certifi.where(), "r", encoding="utf-8") as f:
+            with open(certifi.where(), encoding="utf-8") as f:
                 ca_bundle = f.read()
 
             mozilla_pems = [
@@ -391,7 +391,7 @@ class SignaturesMixin(ReaderHostBase):
 
         except Exception as e:
             QMessageBox.critical(
-                self, "Signing Error", f"Failed to sign document:\n{str(e)}"
+                self, "Signing Error", f"Failed to sign document:\n{e!s}"
             )
 
     def update_signature_banner(self, status: str, message: str) -> None:

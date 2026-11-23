@@ -66,7 +66,9 @@ def test_tooltip_is_drawn_by_the_skin_not_qt(qapp, skin):
     assert not [w for w in qapp.topLevelWidgets() if w.metaObject().className() == "QTipLabel" and w.isVisible()]
     assert "AI Semantic Search" in visible_texts(skin.window)
     assert [k.text() for k in skin.window.findChildren(KeyCap) if k.isVisibleTo(skin.window)] == ["Ctrl", "I"]
-    title = next(l for l in skin.window.findChildren(QLabel) if l.text() == "AI Semantic Search" and l.isVisibleTo(skin.window))
+    title = next(
+        l for l in skin.window.findChildren(QLabel) if l.text() == "AI Semantic Search" and l.isVisibleTo(skin.window)
+    )
     assert "#9b59b6" not in title.styleSheet()
     qapp.sendEvent(button, QEvent(QEvent.Type.Leave))
     assert not skin.window.isVisible()
@@ -85,10 +87,14 @@ def test_tooltip_follows_new_text_and_theme(qapp, skin):
     assert "more detail" in visible_texts(skin.window)
 
     tooltip.set_dark(False)
-    title = next(l for l in skin.window.findChildren(QLabel) if l.text() == "Second line one" and l.isVisibleTo(skin.window))
+    title = next(
+        l for l in skin.window.findChildren(QLabel) if l.text() == "Second line one" and l.isVisibleTo(skin.window)
+    )
     assert tooltip.COLOURS[False]["text"] in title.styleSheet()
     tooltip.set_dark(True)
-    title = next(l for l in skin.window.findChildren(QLabel) if l.text() == "Second line one" and l.isVisibleTo(skin.window))
+    title = next(
+        l for l in skin.window.findChildren(QLabel) if l.text() == "Second line one" and l.isVisibleTo(skin.window)
+    )
     assert tooltip.COLOURS[True]["text"] in title.styleSheet()
     button.deleteLater()
 
@@ -138,9 +144,8 @@ def test_tabs_list_rows_and_late_children_are_covered(qapp, skin):
 
 
 def test_web_views_are_left_alone(qapp, skin):
-    from PySide6.QtWebEngineWidgets import QWebEngineView
-
     from PySide6.QtCore import QCoreApplication
+    from PySide6.QtWebEngineWidgets import QWebEngineView
 
     view = QWebEngineView()
     assert TooltipSkin._skipped(view)

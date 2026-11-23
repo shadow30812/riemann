@@ -55,9 +55,9 @@ import posixpath
 import re
 import tempfile
 import zipfile
-from typing import Dict, List, Optional
 
-from lxml import etree, html as lxml_html
+from lxml import etree
+from lxml import html as lxml_html
 
 from .html_clean import clean_html
 
@@ -67,7 +67,9 @@ MAX_ROWS = 1_048_576
 MAX_COLUMNS = 16_384
 MAX_FORMULAS = 200_000
 CONTENT_LIMIT = 256 * 1024 * 1024
-BASIC_NOTE = "LibreOffice isn't installed, so this is a basic view: the text, tables and pictures, without the page layout."
+BASIC_NOTE = (
+    "LibreOffice isn't installed, so this is a basic view: the text, tables and pictures, without the page layout."
+)
 
 FORMATS = {
     ".docx": "docx", ".docm": "docx", ".dotx": "docx", ".dotm": "docx",
@@ -109,7 +111,7 @@ def _q(prefix: str, name: str) -> str:
     return f"{{{NS[prefix]}}}{name}"
 
 
-def basic_format(path: str) -> Optional[str]:
+def basic_format(path: str) -> str | None:
     suffix = os.path.splitext(path)[1].lower()
     if suffix in FORMATS:
         return FORMATS[suffix]
@@ -132,18 +134,18 @@ def basic_format(path: str) -> Optional[str]:
     return next((fmt for part, fmt in OOXML_FORMATS if part in names), None)
 
 
-def packages_ready(fmt: Optional[str]) -> bool:
+def packages_ready(fmt: str | None) -> bool:
     if fmt is None:
         return False
     module = MODULES.get(fmt)
     return module is None or importlib.util.find_spec(module) is not None
 
 
-def is_spreadsheet(fmt: Optional[str]) -> bool:
+def is_spreadsheet(fmt: str | None) -> bool:
     return fmt in SPREADSHEETS
 
 
-def _data_uri(data: bytes, name: str) -> Optional[str]:
+def _data_uri(data: bytes, name: str) -> str | None:
     media = IMAGE_TYPES.get(posixpath.splitext(name.lower())[1])
     if media is None or len(data) > IMAGE_LIMIT:
         return None
@@ -196,7 +198,7 @@ def _runs_html(paragraph) -> str:
     return "".join(parts)
 
 
-def _pptx_shapes(shapes, title_id) -> List[str]:
+def _pptx_shapes(shapes, title_id) -> list[str]:
     from pptx.enum.shapes import MSO_SHAPE_TYPE
 
     ordered = sorted(shapes, key=lambda s: ((s.top or 0), (s.left or 0)))
@@ -279,13 +281,13 @@ class _OdfReader:
         try:
             self.archive = zipfile.ZipFile(path)
         except (zipfile.BadZipFile, OSError) as error:
-            raise OfficeReadError(f"The file can't be opened ({error}).")
+            raise OfficeReadError(f"The file can't be opened ({error}).") from error
         self.content = self._xml("content.xml")
         if self.content is None:
             raise OfficeReadError("The file has no content.xml.")
-        self.styles: Dict[str, set] = {}
-        self.parents: Dict[str, str] = {}
-        self.levels: Dict[str, int] = {}
+        self.styles: dict[str, set] = {}
+        self.parents: dict[str, str] = {}
+        self.levels: dict[str, int] = {}
         self.hidden_tables: set = set()
         for source in (self._xml("styles.xml"), self.content):
             if source is not None:
@@ -327,7 +329,7 @@ class _OdfReader:
             if name and marks:
                 self.styles[name] = marks
 
-    def heading_level(self, style: Optional[str]) -> int:
+    def heading_level(self, style: str | None) -> int:
         for _ in range(12):
             if not style:
                 return 0
@@ -340,7 +342,7 @@ class _OdfReader:
             style = self.parents.get(style)
         return 0
 
-    def _picture(self, href: str) -> Optional[str]:
+    def _picture(self, href: str) -> str | None:
         if not href or ":" in href.split("/")[0]:
             return None
         name = posixpath.normpath(href.lstrip("./"))
@@ -390,7 +392,7 @@ class _OdfReader:
     def block_text(self, element) -> str:
         return " ".join(self.inline(p) for p in element.iter(_q("text", "p"), _q("text", "h")))
 
-    def frame(self, frame) -> List[str]:
+    def frame(self, frame) -> list[str]:
         out = []
         for child in frame:
             if child.tag == _q("draw", "image"):
@@ -404,7 +406,7 @@ class _OdfReader:
                 out.append(self.table_html(child))
         return out
 
-    def blocks(self, parent) -> List[str]:
+    def blocks(self, parent) -> list[str]:
         out = []
         for child in parent:
             tag = child.tag
@@ -457,7 +459,9 @@ class _OdfReader:
                     spans.append((column, min(rows, MAX_ROWS), min(columns, MAX_COLUMNS)))
                 formula = cell.get(_q("table", "formula"))
                 if formula:
-                    formulas[column] = re.sub(r"\[\.?([A-Z$]+[0-9$]+(?::\.?[A-Z$]+[0-9$]+)?)\]", r"\1", formula.split(":", 1)[-1])
+                    formulas[column] = re.sub(
+                        r"\[\.?([A-Z$]+[0-9$]+(?::\.?[A-Z$]+[0-9$]+)?)\]", r"\1", formula.split(":", 1)[-1]
+                    )
                 repeat = _repeat(cell, "number-columns-repeated")
                 if not text:
                     pending += repeat
@@ -503,7 +507,9 @@ class _OdfReader:
             for frame in page.findall(_q("draw", "frame")):
                 if frame.get(_q("presentation", "class")) == "title" and not title:
                     box = frame.find(_q("draw", "text-box"))
-                    title = " ".join(re.sub(r"<[^>]+>", "", "".join(self.blocks(box if box is not None else frame))).split())
+                    title = " ".join(
+                        re.sub(r"<[^>]+>", "", "".join(self.blocks(box if box is not None else frame))).split()
+                    )
                     continue
                 content += self.frame(frame)
             notes_html = ""

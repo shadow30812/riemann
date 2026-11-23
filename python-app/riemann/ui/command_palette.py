@@ -20,8 +20,8 @@ action, and shown as keycaps.
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from .palette import tokens, ui_font
-from .tooltip import KeyCap, COLOURS, parse_tip
+from .tooltip import COLOURS, KeyCap, parse_tip
 
 SHORTCUT_SUFFIX = re.compile(r"\s*\(([^()]*(?:Ctrl|Alt|Shift|F\d)[^()]*)\)\s*$")
 
@@ -282,7 +282,6 @@ class CommandPalette(QFrame):
             if key == Qt.Key.Key_Escape:
                 self.hide()
                 return True
-        if obj is self.input and event.type() == QEvent.Type.FocusOut:
-            if not self.list.underMouse():
-                self.hide()
+        if obj is self.input and event.type() == QEvent.Type.FocusOut and not self.list.underMouse():
+            self.hide()
         return False

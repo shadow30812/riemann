@@ -24,8 +24,9 @@ import re
 import threading
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any
 
 from PySide6.QtCore import QObject, QSettings, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -47,11 +48,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .palette import dialog_icon, tinted_icon, tokens
-from .shortcuts import share_keys
-from .reader.utils import render_markdown_safely
-from ..core.log import log
-from ..core.settings import app_settings
 from ..core.endpoints import (
     ANTHROPIC_API,
     GEMINI_API,
@@ -59,18 +55,23 @@ from ..core.endpoints import (
     OPENAI_API,
     OPENROUTER_API,
 )
+from ..core.log import log
+from ..core.settings import app_settings
+from .palette import dialog_icon, tinted_icon, tokens
+from .reader.utils import render_markdown_safely
+from .shortcuts import share_keys
 
 
 @dataclass(frozen=True)
 class Provider:
     key: str
     label: str
-    env: Tuple[str, ...] = ()
+    env: tuple[str, ...] = ()
     needs_key: bool = True
-    fallback_models: Tuple[str, ...] = field(default_factory=tuple)
+    fallback_models: tuple[str, ...] = field(default_factory=tuple)
 
 
-PROVIDERS: Dict[str, Provider] = {
+PROVIDERS: dict[str, Provider] = {
     p.key: p
     for p in (
         Provider(
@@ -117,7 +118,7 @@ def _tighten(path: str, mode: int) -> None:
         os.chmod(path, mode)
 
 
-def read_keys_file() -> Dict[str, str]:
+def read_keys_file() -> dict[str, str]:
     """
     Parses ai.env (NAME=value lines, # comments). If someone loosened its
     permissions, they are put back to owner-only before the keys are used.
@@ -143,7 +144,7 @@ def read_keys_file() -> Dict[str, str]:
     return values
 
 
-def write_keys_file(values: Dict[str, str]) -> None:
+def write_keys_file(values: dict[str, str]) -> None:
     """
     Replaces ai.env atomically. The folder is created owner-only (0700) and
     the file is born 0600, so the keys are never readable by other users,
@@ -212,7 +213,7 @@ class ProviderError(Exception):
     pass
 
 
-def _request(url: str, headers: Dict[str, str], body: Optional[dict] = None, timeout: float = 30):
+def _request(url: str, headers: dict[str, str], body: dict | None = None, timeout: float = 30):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method="POST" if data else "GET")
     req.add_header("Content-Type", "application/json")
@@ -233,7 +234,7 @@ def _request(url: str, headers: Dict[str, str], body: Optional[dict] = None, tim
         raise ProviderError(f"Could not connect: {e.reason}") from None
 
 
-def _headers(provider: str, key: str) -> Dict[str, str]:
+def _headers(provider: str, key: str) -> dict[str, str]:
     if provider == "anthropic":
         return {"x-api-key": key, "anthropic-version": "2023-06-01"}
     if provider == "google":
@@ -246,10 +247,24 @@ def _headers(provider: str, key: str) -> Dict[str, str]:
     return {}
 
 
-_OPENAI_SKIP = ("audio", "realtime", "transcribe", "tts", "image", "embedding", "search", "moderation", "instruct", "dall-e", "whisper", "davinci", "babbage")
+_OPENAI_SKIP = (
+    "audio",
+    "realtime",
+    "transcribe",
+    "tts",
+    "image",
+    "embedding",
+    "search",
+    "moderation",
+    "instruct",
+    "dall-e",
+    "whisper",
+    "davinci",
+    "babbage",
+)
 
 
-def list_models(provider: str, key: str) -> List[str]:
+def list_models(provider: str, key: str) -> list[str]:
     """Asks the provider which chat models this key can use, newest names first."""
     if provider == "anthropic":
         with _request(f"{ANTHROPIC_API}/models?limit=100", _headers(provider, key)) as r:
@@ -294,7 +309,7 @@ def _sse_events(response) -> Iterator[dict]:
 
 
 def stream_chat(
-    provider: str, key: str, model: str, system: str, messages: List[Dict[str, str]]
+    provider: str, key: str, model: str, system: str, messages: list[dict[str, str]]
 ) -> Iterator[str]:
     """Sends the conversation and yields the reply as it arrives."""
     if provider == "anthropic":
@@ -309,7 +324,7 @@ def stream_chat(
 
     if provider in ("openai", "openrouter"):
         base = OPENAI_API if provider == "openai" else OPENROUTER_API
-        body = {"model": model, "messages": [{"role": "system", "content": system}] + messages, "stream": True}
+        body = {"model": model, "messages": [{"role": "system", "content": system}, *messages], "stream": True}
         with _request(f"{base}/chat/completions", _headers(provider, key), body, timeout=120) as r:
             for event in _sse_events(r):
                 for choice in event.get("choices", []):
@@ -333,7 +348,7 @@ def stream_chat(
         return
 
     if provider == "ollama":
-        body = {"model": model, "messages": [{"role": "system", "content": system}] + messages, "stream": True}
+        body = {"model": model, "messages": [{"role": "system", "content": system}, *messages], "stream": True}
         with _request(f"{ollama_url()}/api/chat", {}, body, timeout=300) as r:
             for raw in r:
                 try:
@@ -355,7 +370,7 @@ def document_context(doc: Any, current_page: int, budget: int = CONTEXT_CHARS) -
     """
     count = getattr(doc, "page_count", 0)
     order = sorted(range(count), key=lambda i: (abs(i - current_page), i))
-    chosen: Dict[int, str] = {}
+    chosen: dict[int, str] = {}
     used = 0
     for i in order:
         try:
@@ -408,7 +423,7 @@ class KeysDialog(QDialog):
         note.setWordWrap(True)
         layout.addWidget(note)
         form = QFormLayout()
-        self.fields: Dict[str, QLineEdit] = {}
+        self.fields: dict[str, QLineEdit] = {}
         for p in PROVIDERS.values():
             if not p.needs_key:
                 continue
@@ -452,12 +467,12 @@ class AiSidecarPanel(QWidget):
         super().__init__(parent)
         self.dark_mode = dark_mode
         self.reader = None
-        self.messages: List[Dict[str, str]] = []
+        self.messages: list[dict[str, str]] = []
         self._pending = ""
         self._request_id = 0
         self._busy = False
-        self._context_cache: Dict[Tuple[str, int], str] = {}
-        self._models_loaded: Dict[str, List[str]] = {}
+        self._context_cache: dict[tuple[str, int], str] = {}
+        self._models_loaded: dict[str, list[str]] = {}
         try:
             _migrate_settings_keys()
         except OSError as e:
@@ -585,12 +600,14 @@ class AiSidecarPanel(QWidget):
         share_keys(self)
 
     def eventFilter(self, obj, event) -> bool:
-        if obj is self.input and event.type() == event.Type.KeyPress:
-            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (
-                event.modifiers() & Qt.KeyboardModifier.ShiftModifier
-            ):
-                self._send_or_stop()
-                return True
+        if (
+            obj is self.input
+            and event.type() == event.Type.KeyPress
+            and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+            and not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        ):
+            self._send_or_stop()
+            return True
         return super().eventFilter(obj, event)
 
     def update_theme(self, dark: bool) -> None:
@@ -601,9 +618,11 @@ class AiSidecarPanel(QWidget):
             f"#AiHeader {{ background: {t['surface']}; border-bottom: 1px solid {t['border']}; }}"
             f"#AiTitle {{ color: {t['text']}; font-weight: 600; font-size: 13px; }}"
             f"#AiDoc {{ color: {t['faint']}; font-size: 11px; }}"
-            f"QComboBox {{ background: {t['canvas']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 6px; padding: 3px 6px; }}"
+            f"QComboBox {{ background: {t['canvas']}; color: {t['text']}; border: 1px solid {t['border']}; "
+            f"border-radius: 6px; padding: 3px 6px; }}"
             f"QTextBrowser {{ background: {t['canvas']}; color: {t['text']}; border: none; padding: 8px; }}"
-            f"#AiChip {{ background: {t['surface']}; color: {t['muted']}; border: 1px solid {t['border']}; border-radius: 12px; padding: 3px 10px; font-size: 11px; }}"
+            f"#AiChip {{ background: {t['surface']}; color: {t['muted']}; border: 1px solid {t['border']}; "
+            f"border-radius: 12px; padding: 3px 10px; font-size: 11px; }}"
             f"#AiChip:hover {{ border-color: {t['accent']}; color: {t['text']}; }}"
             f"#AiInput {{ background: {t['surface']}; border: 1px solid {t['border_strong']}; border-radius: 14px; }}"
             f"QPlainTextEdit {{ background: transparent; color: {t['text']}; border: none; font-size: 13px; }}"
@@ -628,7 +647,9 @@ class AiSidecarPanel(QWidget):
         path = getattr(reader, "current_path", "") or ""
         has_doc = bool(path) and getattr(reader, "current_doc", None) is not None
         self.lbl_doc.setText(
-            f"About: {os.path.basename(path)}" if has_doc else "Open a PDF, or an Office file shown as pages, to ask about it."
+            f"About: {os.path.basename(path)}"
+            if has_doc
+            else "Open a PDF, or an Office file shown as pages, to ask about it."
         )
         self.lbl_doc.setToolTip(path)
 
@@ -652,7 +673,7 @@ class AiSidecarPanel(QWidget):
     def _provider(self) -> str:
         return self.combo_provider.currentData()
 
-    def _fill_models(self, models: List[str]) -> None:
+    def _fill_models(self, models: list[str]) -> None:
         provider = self._provider()
         saved = str(_settings().value(f"ai/model/{provider}", "") or "")
         self.combo_model.blockSignals(True)
@@ -735,7 +756,9 @@ class AiSidecarPanel(QWidget):
         reader = self.reader
         doc = getattr(reader, "current_doc", None)
         if doc is None or not getattr(reader, "current_path", None):
-            self._notice("Open a PDF, or an Office file shown as pages, first; the assistant answers questions about it.")
+            self._notice(
+                "Open a PDF, or an Office file shown as pages, first; the assistant answers questions about it."
+            )
             return
         if PROVIDERS[provider].needs_key and not key:
             self._notice(

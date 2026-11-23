@@ -18,7 +18,7 @@ default on the mixin that owns it, usually None, so the mixins test it with
 here too.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Set, Tuple
+from typing import TYPE_CHECKING, Any, Protocol
 
 from PySide6.QtCore import QPoint, QSettings, QTimer
 from PySide6.QtGui import QIcon
@@ -45,7 +45,7 @@ class ReaderHost(Protocol):
     settings: QSettings
     engine: Any
     current_doc: Any
-    current_path: Optional[str]
+    current_path: str | None
     current_page_index: int
 
     theme_mode: int
@@ -59,32 +59,32 @@ class ReaderHost(Protocol):
     current_tool: str
     pen_color: str
     pen_thickness: int
-    active_drawing: List[QPoint]
-    annotations: Dict[str, List[Dict[str, Any]]]
+    active_drawing: list[QPoint]
+    annotations: dict[str, list[dict[str, Any]]]
     is_snipping: bool
-    snip_band: Optional[QRubberBand]
+    snip_band: QRubberBand | None
 
-    page_widgets: Dict[int, "PageWidget"]
-    rendered_pages: Set[int]
-    form_widgets: Dict[int, List[QWidget]]
-    _cached_base_size: Optional[Tuple[int, int]]
-    _virtual_range: Tuple[int, int]
+    page_widgets: dict[int, "PageWidget"]
+    rendered_pages: set[int]
+    form_widgets: dict[int, list[QWidget]]
+    _cached_base_size: tuple[int, int] | None
+    _virtual_range: tuple[int, int]
     rotation: int
-    web: Optional[Any]
-    metadata_worker: Optional[Any]
-    edit_scratch: Optional[str]
+    web: Any | None
+    metadata_worker: Any | None
+    edit_scratch: str | None
     text_document: bool
-    converted_pdf: Optional[str]
-    converted_banner: Optional[QWidget]
-    _document_sections: Tuple[Any, ...]
-    document_password: Optional[str]
+    converted_pdf: str | None
+    converted_banner: QWidget | None
+    _document_sections: tuple[Any, ...]
+    document_password: str | None
     document_encrypted: bool
     document_signed: bool
     _signed_edit_accepted: bool
-    sig_worker: Optional[Any]
-    _rebuild_debounce_timer: Optional[QTimer]
-    _zoom_debounce_timer: Optional[QTimer]
-    _char_geometry_cache: Optional[Dict[Any, Any]]
+    sig_worker: Any | None
+    _rebuild_debounce_timer: QTimer | None
+    _zoom_debounce_timer: QTimer | None
+    _char_geometry_cache: dict[Any, Any] | None
 
     toolbar: QWidget
     toolbar_layout: "ToolbarLayout"
@@ -130,7 +130,7 @@ class ReaderHost(Protocol):
 
     def _render_text_page(self) -> None: ...
 
-    def _live_metadata_worker(self) -> Optional[Any]: ...
+    def _live_metadata_worker(self) -> Any | None: ...
 
     def ruler_enabled(self) -> bool: ...
 

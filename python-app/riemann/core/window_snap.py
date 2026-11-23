@@ -44,7 +44,6 @@ import ctypes.util
 import os
 import sys
 import time
-from typing import Optional
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QCursor, QGuiApplication, QPainter, QPen
@@ -136,7 +135,7 @@ class _ButtonState:
             except Exception:
                 self._x11 = None
 
-    def left_down(self) -> Optional[bool]:
+    def left_down(self) -> bool | None:
         """True/False when the platform can tell, None when it cannot."""
         if self._win_user32 is not None:
             try:
@@ -201,14 +200,14 @@ class WindowSnapper(QObject):
         super().__init__(window)
         self.window = window
         self.enabled = enabled
-        self._buttons: Optional[_ButtonState] = None
-        self._preview: Optional[SnapPreview] = None
+        self._buttons: _ButtonState | None = None
+        self._preview: SnapPreview | None = None
 
-        self._last_offset: Optional[QPoint] = None
-        self._last_pos: Optional[QPoint] = None
+        self._last_offset: QPoint | None = None
+        self._last_pos: QPoint | None = None
         self._last_move_time = 0.0
         self._dragging = False
-        self._zone: Optional[str] = None
+        self._zone: str | None = None
         self._suppress_until = 0.0
         self._restore_size = None
 
@@ -238,7 +237,7 @@ class WindowSnapper(QObject):
             self._on_window_moved()
         return False
 
-    def _left_down(self) -> Optional[bool]:
+    def _left_down(self) -> bool | None:
         if self._buttons is None:
             self._buttons = _ButtonState()
         return self._buttons.left_down()
@@ -307,7 +306,7 @@ class WindowSnapper(QObject):
     def _screen_at(self, point: QPoint):
         return QGuiApplication.screenAt(point) or self.window.screen()
 
-    def _zone_at(self, point: QPoint) -> Optional[str]:
+    def _zone_at(self, point: QPoint) -> str | None:
         screen = self._screen_at(point)
         if screen is None:
             return None
@@ -330,7 +329,7 @@ class WindowSnapper(QObject):
             return "bottom"
         return None
 
-    def _target_rect(self, zone: str, point: QPoint) -> Optional[QRect]:
+    def _target_rect(self, zone: str, point: QPoint) -> QRect | None:
         screen = self._screen_at(point)
         if screen is None:
             return None

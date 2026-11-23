@@ -44,7 +44,6 @@ then go to the menus.
 
 import json
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 import shiboken6
 from PySide6.QtCore import QEvent, QObject, QPoint, QPropertyAnimation, QSize, Qt, QTimer, Signal
@@ -94,7 +93,7 @@ class Command:
     fold: int
 
 
-COMMANDS: List[Command] = [
+COMMANDS: list[Command] = [
     Command("sidebar", ("btn_toggle_sidebar",), "Sidebar", "Sidebar", "Ctrl+Alt+S", "View", 90),
     Command("back", ("btn_nav_back",), "Back", "Back", "Alt+Left", "Tools", 30),
     Command("forward", ("btn_nav_forward",), "Forward", "Forward", "Alt+Right", "Tools", 30),
@@ -127,13 +126,13 @@ COMMANDS: List[Command] = [
     Command("sign", ("btn_sign",), "Sign…", "Sign", "", "File", 2),
     Command("secure_export", ("btn_secure_export",), "Password-protected copy…", "Protect", "Ctrl+Shift+S", "File", 2),
 ]
-BY_KEY: Dict[str, Command] = {c.key: c for c in COMMANDS}
+BY_KEY: dict[str, Command] = {c.key: c for c in COMMANDS}
 CLUSTERS = ("page", "zoom")
 LEFT = ("sidebar", "back", "forward", "page", "zoom")
 FIXED_ON_BAR = ("sidebar", "page")
 
 
-def _places(bar=(), rail=(), ribbon=(), pill=(), rest=MENU) -> Dict[str, str]:
+def _places(bar=(), rail=(), ribbon=(), pill=(), rest=MENU) -> dict[str, str]:
     out = {c.key: rest for c in COMMANDS}
     for place, keys in ((BAR, bar), (RAIL, rail), (RIBBON, ribbon), (PILL, pill)):
         for key in keys:
@@ -142,16 +141,21 @@ def _places(bar=(), rail=(), ribbon=(), pill=(), rest=MENU) -> Dict[str, str]:
 
 
 CORE = ("sidebar", "back", "forward", "page", "zoom", "search", "ai_search")
-PRESETS: Dict[str, dict] = {
-    "A": {"places": _places(bar=CORE + ("annotate", "notes", "present")), "menus": "groups", "fullscreen_pill": False},
+PRESETS: dict[str, dict] = {
+    "A": {"places": _places(bar=(*CORE, "annotate", "notes", "present")), "menus": "groups", "fullscreen_pill": False},
     "B": {"places": _places(bar=CORE, rest=RIBBON), "menus": "more", "fullscreen_pill": False},
     "C": {
-        "places": _places(bar=CORE, rail=("annotate", "notes", "read_aloud", "snip", "cite", "ocr", "present", "fullscreen")),
+        "places": _places(
+            bar=CORE, rail=("annotate", "notes", "read_aloud", "snip", "cite", "ocr", "present", "fullscreen")
+        ),
         "menus": "rail",
         "fullscreen_pill": False,
     },
     "D": {
-        "places": _places(bar=("sidebar", "back", "forward", "search", "ai_search", "annotate", "notes", "present"), pill=("page", "zoom", "fullscreen")),
+        "places": _places(
+            bar=("sidebar", "back", "forward", "search", "ai_search", "annotate", "notes", "present"),
+            pill=("page", "zoom", "fullscreen"),
+        ),
         "menus": "more",
         "fullscreen_pill": False,
     },
@@ -159,7 +163,7 @@ PRESETS: Dict[str, dict] = {
 PRESETS["default"] = dict(PRESETS["C"], fullscreen_pill=True)
 
 
-def allowed_places(key: str) -> List[str]:
+def allowed_places(key: str) -> list[str]:
     if key in FIXED_ON_BAR:
         return [BAR, PILL] if key == "page" else [BAR]
     if key in CLUSTERS:
@@ -186,12 +190,12 @@ def custom_layout() -> dict:
     return {"places": places, "menus": "auto", "fullscreen_pill": bool(data.get("fullscreen_pill", True))}
 
 
-def save_custom_layout(places: Dict[str, str], fullscreen_pill: bool) -> None:
+def save_custom_layout(places: dict[str, str], fullscreen_pill: bool) -> None:
     clean = {k: v for k, v in places.items() if k in BY_KEY and v in allowed_places(k)}
     app_settings().setValue(CUSTOM_KEY, json.dumps({"places": clean, "fullscreen_pill": bool(fullscreen_pill)}))
 
 
-def resolve(name: Optional[str] = None) -> dict:
+def resolve(name: str | None = None) -> dict:
     name = name or current_layout_name()
     if name == "custom":
         spec = custom_layout()
@@ -207,7 +211,7 @@ class _Notifier(QObject):
     changed = Signal()
 
 
-_notifier: Optional[_Notifier] = None
+_notifier: _Notifier | None = None
 
 
 def notifier() -> _Notifier:
@@ -232,8 +236,8 @@ class OverflowBox(QWidget):
         super().__init__(parent)
         self.owner = layout_owner
         self.vertical = vertical
-        self.items: List[tuple] = []
-        self.extra_menu: List[str] = []
+        self.items: list[tuple] = []
+        self.extra_menu: list[str] = []
         self.extra_actions = []
         box = QVBoxLayout(self) if vertical else QHBoxLayout(self)
         box.setContentsMargins(*((5, 8, 5, 8) if vertical else (8, 0, 8, 0)))
@@ -247,7 +251,7 @@ class OverflowBox(QWidget):
         self.more_menu = QMenu(self.more)
         self.more_menu.aboutToShow.connect(self._fill_more)
         self.more.setMenu(self.more_menu)
-        self.folded: List[tuple] = []
+        self.folded: list[tuple] = []
         self._pending = False
 
     def add(self, widget: QWidget, commands=(), fold: int = 0) -> None:
@@ -258,7 +262,9 @@ class OverflowBox(QWidget):
         self.box.addStretch(1)
 
     def finish(self) -> None:
-        self.box.addWidget(self.more, 0, Qt.AlignmentFlag.AlignHCenter if self.vertical else Qt.AlignmentFlag.AlignVCenter)
+        self.box.addWidget(
+            self.more, 0, Qt.AlignmentFlag.AlignHCenter if self.vertical else Qt.AlignmentFlag.AlignVCenter
+        )
         self.refit()
 
     def _length(self, widget: QWidget) -> int:
@@ -290,7 +296,7 @@ class OverflowBox(QWidget):
         for i in order:
             if total <= budget:
                 break
-            widget, commands, fold = self.items[i]
+            widget, _commands, fold = self.items[i]
             if fold >= 100:
                 continue
             if not needs_more:
@@ -320,7 +326,7 @@ class OverflowBox(QWidget):
                 self.owner.add_command_action(target, key)
         if self.folded and (self.extra_menu or self.extra_actions):
             menu.addSeparator()
-        groups: Dict[str, List[str]] = {}
+        groups: dict[str, list[str]] = {}
         for key in self.extra_menu:
             groups.setdefault(BY_KEY[key].group, []).append(key)
         for group in GROUPS:
@@ -361,12 +367,12 @@ class ToolbarLayout:
         self.tab = tab
         self.parking = QWidget(tab)
         self.parking.hide()
-        self.bar: Optional[OverflowBox] = None
-        self.ribbon: Optional[QWidget] = None
-        self.ribbon_box: Optional[OverflowBox] = None
-        self.rail: Optional[QFrame] = None
-        self.rail_box: Optional[OverflowBox] = None
-        self.pill: Optional[QFrame] = None
+        self.bar: OverflowBox | None = None
+        self.ribbon: QWidget | None = None
+        self.ribbon_box: OverflowBox | None = None
+        self.rail: QFrame | None = None
+        self.rail_box: OverflowBox | None = None
+        self.pill: QFrame | None = None
         self.spec: dict = {}
         self.fullscreen = False
         self._pill_effect = None
@@ -388,7 +394,7 @@ class ToolbarLayout:
             for widget in self.widgets(key):
                 widget.setProperty("riemannCommand", key)
 
-    def widgets(self, key: str) -> List[QWidget]:
+    def widgets(self, key: str) -> list[QWidget]:
         return [getattr(self.tab, name) for name in BY_KEY[key].widgets if hasattr(self.tab, name)]
 
     def button(self, key: str):
@@ -409,7 +415,7 @@ class ToolbarLayout:
             self._cursor_poll.stop()
             self.wake_pill()
 
-    def effective_places(self) -> Dict[str, str]:
+    def effective_places(self) -> dict[str, str]:
         places = dict(self.spec["places"])
         if app_settings().value(RAIL_HIDDEN_KEY, False, type=bool):
             places = {k: (MENU if v == RAIL else v) for k, v in places.items()}
@@ -436,11 +442,11 @@ class ToolbarLayout:
         self.ribbon_box = self.rail_box = None
         self._pill_effect = self._pill_anim = None
 
-    def apply(self, name: Optional[str] = None) -> None:
+    def apply(self, name: str | None = None) -> None:
         self.spec = resolve(name)
         self._park()
         places = self.effective_places()
-        by_place: Dict[str, List[str]] = {}
+        by_place: dict[str, list[str]] = {}
         for c in COMMANDS:
             by_place.setdefault(places[c.key], []).append(c.key)
         menus = self.spec["menus"]
@@ -485,7 +491,7 @@ class ToolbarLayout:
         row.addWidget(self._separator())
         return holder
 
-    def _build_bar(self, keys: List[str], menu_keys: List[str], menus: str) -> None:
+    def _build_bar(self, keys: list[str], menu_keys: list[str], menus: str) -> None:
         bar = OverflowBox(self)
         left = [k for k in LEFT if k in keys]
         right = [k for k in keys if k not in LEFT]
@@ -499,7 +505,7 @@ class ToolbarLayout:
         for key in right:
             bar.add(self._item(key), [key], BY_KEY[key].fold)
         if menus == "groups":
-            grouped: Dict[str, List[str]] = {}
+            grouped: dict[str, list[str]] = {}
             for key in menu_keys:
                 grouped.setdefault(BY_KEY[key].group, []).append(key)
             if grouped:
@@ -509,13 +515,17 @@ class ToolbarLayout:
                     bar.add(self._group_button(group, grouped[group]), grouped[group], 25)
         elif menus == "more":
             bar.extra_menu = list(menu_keys)
-        if self.spec.get("places") and app_settings().value(RAIL_HIDDEN_KEY, False, type=bool) and RAIL in self.spec["places"].values():
+        if (
+            self.spec.get("places")
+            and app_settings().value(RAIL_HIDDEN_KEY, False, type=bool)
+            and RAIL in self.spec["places"].values()
+        ):
             bar.extra_actions = [("Show side rail", self.show_rail)]
         self.tab.toolbar.layout().addWidget(bar)
         bar.finish()
         self.bar = bar
 
-    def _group_button(self, group: str, keys: List[str]) -> QToolButton:
+    def _group_button(self, group: str, keys: list[str]) -> QToolButton:
         button = QToolButton()
         button.setObjectName("groupMenu")
         button.setText(group)
@@ -525,12 +535,12 @@ class ToolbarLayout:
         button.setMenu(menu)
         return button
 
-    def _fill_menu(self, menu: QMenu, keys: List[str]) -> None:
+    def _fill_menu(self, menu: QMenu, keys: list[str]) -> None:
         menu.clear()
         for key in keys:
             self.add_command_action(menu, key)
 
-    def add_command_action(self, menu: QMenu, key: str) -> Optional[QAction]:
+    def add_command_action(self, menu: QMenu, key: str) -> QAction | None:
         c = BY_KEY[key]
         if key == "zoom":
             for label, name in (("Zoom in", "btn_zoom_in"), ("Zoom out", "btn_zoom_out")):
@@ -553,7 +563,7 @@ class ToolbarLayout:
         action.triggered.connect(lambda _=False, b=button: QTimer.singleShot(0, b, b.click))
         return action
 
-    def _build_ribbon(self, keys: List[str]) -> None:
+    def _build_ribbon(self, keys: list[str]) -> None:
         if not keys:
             return
         groups = [g for g in GROUPS if any(BY_KEY[k].group == g for k in keys)]
@@ -592,7 +602,7 @@ class ToolbarLayout:
         app_settings().setValue(RIBBON_GROUP_KEY, group)
         QTimer.singleShot(0, self.tab, self.apply)
 
-    def _build_rail(self, keys: List[str], flyout_keys: List[str]) -> None:
+    def _build_rail(self, keys: list[str], flyout_keys: list[str]) -> None:
         if not keys:
             return
         rail = QFrame()
@@ -612,7 +622,7 @@ class ToolbarLayout:
             last_group = group
             box.add(self._item(key), [key], BY_KEY[key].fold)
         box.add_stretch()
-        grouped: Dict[str, List[str]] = {}
+        grouped: dict[str, list[str]] = {}
         for key in flyout_keys:
             grouped.setdefault(BY_KEY[key].group, []).append(key)
         for group in GROUPS:
@@ -628,7 +638,7 @@ class ToolbarLayout:
         box.finish()
         self.rail, self.rail_box = rail, box
 
-    def _flyout(self, group: str, keys: List[str]) -> QToolButton:
+    def _flyout(self, group: str, keys: list[str]) -> QToolButton:
         button = QToolButton()
         button.setObjectName("railFlyout")
         button.setIcon(self.tab._get_icon(GROUP_ICONS[group]))
@@ -658,7 +668,7 @@ class ToolbarLayout:
         app_settings().setValue(RAIL_HIDDEN_KEY, False)
         notifier().changed.emit()
 
-    def _build_pill(self, keys: List[str]) -> None:
+    def _build_pill(self, keys: list[str]) -> None:
         if not keys:
             return
         pill = QFrame(self.tab)

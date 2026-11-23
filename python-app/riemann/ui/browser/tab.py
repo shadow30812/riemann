@@ -30,8 +30,7 @@ import json
 import os
 import sys
 import urllib.parse
-from typing import Any, Optional
-from ...core.assets import icon_path
+from typing import Any
 
 import shiboken6
 from PySide6.QtCore import (
@@ -62,10 +61,8 @@ from PySide6.QtWidgets import (
 )
 
 from ...core import permissions
+from ...core.assets import icon_path
 from ...core.captions_server import CaptionsServer
-from ..browser_handlers import ScriptInjector
-from ..palette import icon_tone, incognito_url_style, legible_icon, link_tip_style, page_theme, tokens
-from ..toast import Toast
 from ...core.log import log
 from ...core.settings import (
     HOMEPAGE_LINKS_KEY,
@@ -76,18 +73,20 @@ from ...core.settings import (
     search_template,
     search_url,
 )
+from ..browser_handlers import ScriptInjector
+from ..palette import icon_tone, incognito_url_style, legible_icon, link_tip_style, page_theme, tokens
+from ..toast import Toast
+from .chrome import ChromeMixin
+from .downloads import DownloadsMixin
 from .interceptor import (
     HOMEPAGE_PATH,
+    RequestInterceptor,
     is_local_homepage,
     sanitize_homepage_links,
-    RequestInterceptor,
 )
-from .page import LEAVE_WAIT_MS, WebPage, PermissionBar
-from .chrome import ChromeMixin
 from .media import MediaMixin
+from .page import LEAVE_WAIT_MS, PermissionBar, WebPage
 from .stream import StreamMixin
-from .downloads import DownloadsMixin
-
 
 LOAD_BAR_HEIGHT = 2
 
@@ -137,7 +136,9 @@ def homepage_icon_tones(links_json: str, cached_icons: dict) -> dict:
             continue
         if image.isNull():
             continue
-        tone = icon_tone(image.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        tone = icon_tone(
+            image.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        )
         if tone:
             tones[host] = tone
     return tones
@@ -147,8 +148,8 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
     def __init__(
         self,
         start_url: str = "",
-        parent: Optional[QWidget] = None,
-        profile: Optional[QWebEngineProfile] = None,
+        parent: QWidget | None = None,
+        profile: QWebEngineProfile | None = None,
         dark_mode: bool = False,
         incognito: bool = False,
     ) -> None:
@@ -192,19 +193,19 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
         self.progress = QProgressBar()
         self.progress.setFixedHeight(LOAD_BAR_HEIGHT)
         self.progress.setTextVisible(False)
-        self.progress.setStyleSheet("""
-            QProgressBar {
+        self.progress.setStyleSheet(f"""
+            QProgressBar {{
                 border: none;
                 border-radius: 0px;
                 background-color: transparent;
-                min-height: %dpx;
-                max-height: %dpx;
-            }
-            QProgressBar::chunk {
-                background-color: %s;
+                min-height: {LOAD_BAR_HEIGHT}px;
+                max-height: {LOAD_BAR_HEIGHT}px;
+            }}
+            QProgressBar::chunk {{
+                background-color: {tokens(self.dark_mode)["accent"]};
                 border-radius: 1px;
-            }
-        """ % (LOAD_BAR_HEIGHT, LOAD_BAR_HEIGHT, tokens(self.dark_mode)["accent"]))
+            }}
+        """)
         layout.insertWidget(0, self.progress)
 
         self.lbl_toast = Toast(self)
@@ -339,7 +340,8 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
             theme = page_theme(self.dark_mode)
             js_code = (
                 f"window.setTheme && window.setTheme('{theme}'); "
-                f"window.cachedIcons = {icons_json}; window.iconTones = {tones_json}; window.searchTemplate = {json.dumps(search_template())}; "
+                f"window.cachedIcons = {icons_json}; window.iconTones = {tones_json}; window.searchTemplate = "
+                f"{json.dumps(search_template())}; "
                 f"window.initHomepage({json.dumps(name)}, {links});"
             )
             self.web.page().runJavaScript(js_code)
@@ -534,7 +536,9 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
             if isinstance(parent, QTabWidget):
                 idx = parent.indexOf(self)
                 if idx != -1 and not icon.isNull():
-                    parent.setTabIcon(idx, legible_icon(icon, bool(getattr(self.window(), "dark_mode", self.dark_mode))))
+                    parent.setTabIcon(
+                        idx, legible_icon(icon, bool(getattr(self.window(), "dark_mode", self.dark_mode)))
+                    )
                 else:
                     parent.setTabIcon(idx, page_icon)
                 break

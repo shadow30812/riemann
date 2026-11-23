@@ -4,7 +4,7 @@
 #   just fetch-pdfium  download PDFium into libs/, checked against pinned SHA-256s
 #   just build   rebuild the Rust extension (release) into the active environment
 #   just test    run every test suite (scripts/test_runner.sh)
-#   just lint    rustfmt and clippy on the Rust code (as CI runs them)
+#   just lint    ruff on the Python code, rustfmt and clippy on the Rust code (as CI runs them)
 #   just version 7.2.0  set the version in every file (or major, minor, patch)
 #   just clean   remove build output and caches inside the project's own folders
 #
@@ -31,6 +31,7 @@ test:
 	bash scripts/test_runner.sh
 
 lint:
+	{{python}} -m ruff check python-app/riemann python-app/tests scripts benchmarks
 	cargo fmt --all --check
 	PYO3_PYTHON="$(realpath {{python}})" cargo clippy --workspace --all-targets --no-default-features -- -D warnings
 

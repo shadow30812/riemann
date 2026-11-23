@@ -45,7 +45,7 @@ OFFICE_VIEWERS = ["mammoth", "python-pptx", "openpyxl", "xlrd", "striprtf"]
 
 
 def dist_name(requirement: str) -> str:
-    return re.split(r"[\[<>=! @;]", requirement, 1)[0].strip().lower().replace("_", "-")
+    return re.split(r"[\[<>=! @;]", requirement, maxsplit=1)[0].strip().lower().replace("_", "-")
 
 
 def compile_lock(requirements: list, output: str, constraints: list) -> None:
@@ -86,7 +86,7 @@ def main() -> int:
             if name in ONLY_AS_COMPANION:
                 continue
             extra = [by_name[c] for c in COMPANIONS.get(name, [])]
-            compile_lock([requirement] + extra, os.path.join(OUT, f"{name}.txt"), [core, shared])
+            compile_lock([requirement, *extra], os.path.join(OUT, f"{name}.txt"), [core, shared])
         compile_lock([by_name[n] for n in LATEX_OCR], os.path.join(OUT, "latex-ocr.txt"), [core, shared])
         compile_lock([by_name[n] for n in OFFICE_VIEWERS], os.path.join(OUT, "office-viewers.txt"), [core, shared])
     print(f"Wrote the locks in {os.path.relpath(OUT, ROOT)}")

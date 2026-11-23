@@ -18,9 +18,9 @@ name is a PDF, Markdown, HTML, EPUB, Office, CSV, TSV, image or listed text or s
 just because its content looks like text.
 """
 
-import os
 import hashlib
-from typing import List, Tuple
+import os
+
 from PySide6.QtCore import QUrl
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
@@ -34,7 +34,6 @@ from ..core.doctypes import (
     has_text_name,
 )
 from ..core.log import log
-
 
 ACTIVATE_MESSAGE = "--activate"
 
@@ -51,12 +50,12 @@ def single_instance_name() -> str:
     return f"RiemannSingleInstance-{digest}"
 
 
-def encode_ipc_paths(paths: List[str]) -> bytes:
+def encode_ipc_paths(paths: list[str]) -> bytes:
     """The message a second launch sends: NUL-terminated paths (NUL cannot occur in a path)."""
     return ("".join(p + "\0" for p in paths) if paths else ACTIVATE_MESSAGE).encode("utf-8")
 
 
-def decode_ipc_message(data: bytes) -> List[str]:
+def decode_ipc_message(data: bytes) -> list[str]:
     """The paths in a message from a second launch; empty when it only asks to come forward."""
     msg = data.decode("utf-8", "replace")
     if not msg or msg == ACTIVATE_MESSAGE:
@@ -85,7 +84,7 @@ def hand_off_to_running_instance(server_name: str, payload: bytes, attempts: int
 
 
 HANDOFF_SUFFIXES = (
-    (".pdf",) + MARKDOWN_SUFFIXES + HTML_SUFFIXES + EBOOK_SUFFIXES + OFFICE_SUFFIXES + TABLE_SUFFIXES + IMAGE_SUFFIXES
+    (".pdf", *MARKDOWN_SUFFIXES, *HTML_SUFFIXES, *EBOOK_SUFFIXES, *OFFICE_SUFFIXES, *TABLE_SUFFIXES, *IMAGE_SUFFIXES)
 )
 PROBE_TIMEOUT_MS = 500
 
@@ -125,7 +124,7 @@ def listen_for_instances(server: QLocalServer, server_name: str) -> bool:
     return server.listen(server_name)
 
 
-def handed_over_paths(data: bytes) -> Tuple[List[str], List[str]]:
+def handed_over_paths(data: bytes) -> tuple[list[str], list[str]]:
     """The files and folders in a message from a second launch that the running instance should open."""
     files, folders = [], []
     for path in decode_ipc_message(data):

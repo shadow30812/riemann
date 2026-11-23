@@ -39,9 +39,10 @@ sniffs content).
 
 document_class(path) sorts the Documents history into DOCUMENT_CLASSES (PDF,
 Word, Slides, Spreadsheet, Markdown, E-book, Code, Text, Image, and Other for
-binary files; a file that is gone and whose name says nothing counts as Text): CODE_SUFFIXES and CODE_NAMES are source, build and
-style files; PROSE_SUFFIXES and PROSE_NAMES are prose, data, configuration
-and logs, which count as Text. It goes by name first, since history lists
+binary files; a file that is gone and whose name says nothing counts as Text):
+CODE_SUFFIXES and CODE_NAMES are source, build and style files;
+PROSE_SUFFIXES and PROSE_NAMES are prose, data, configuration and logs, which
+count as Text. It goes by name first, since history lists
 files that may be gone, and reads only a file whose name says nothing.
 """
 
@@ -74,7 +75,11 @@ ODF_MIMETYPES = {
     b"application/vnd.oasis.opendocument.spreadsheet": "spreadsheet",
     b"application/vnd.oasis.opendocument.graphics": "drawing",
 }
-OOXML_PARTS = (("word/document.xml", "document"), ("ppt/presentation.xml", "presentation"), ("xl/workbook.xml", "spreadsheet"))
+OOXML_PARTS = (
+    ("word/document.xml", "document"),
+    ("ppt/presentation.xml", "presentation"),
+    ("xl/workbook.xml", "spreadsheet"),
+)
 
 IMAGE_SUFFIXES = (
     ".apng", ".avif", ".avifs", ".blp", ".bmp", ".bw", ".cur", ".dcx", ".dds", ".dib", ".fit",
@@ -204,7 +209,9 @@ def office_type(path: str):
 
 
 def is_reader_name(path: str) -> bool:
-    """True when the name alone says a document tab shows this file (PDF, Markdown, listed text, a table or an image)."""
+    """
+    True when the name alone says a document tab shows this file (PDF, Markdown, listed text, a table or an image).
+    """
     lower = path.lower()
     return (
         lower.endswith(".pdf")
@@ -266,7 +273,10 @@ def document_kind(path: str) -> str:
 
 
 def is_text_document(path: str) -> bool:
-    """True for files the reader shows as one HTML page (Markdown, plain text, a table as text, an e-book) rather than as a PDF."""
+    """
+    True for files the reader shows as one HTML page (Markdown, plain text, a table as text, an e-book) rather than
+    as a PDF.
+    """
     return document_kind(path) in ("markdown", "text", "table", "ebook")
 
 
