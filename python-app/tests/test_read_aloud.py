@@ -1,5 +1,5 @@
 """
-Tests for read aloud (riemann/ui/reader/mixins/read_aloud.py).
+Tests for read aloud (ReadAloud in riemann/ui/reader/mixins/read_aloud.py).
 
 FakeSpeech stands in for QTextToSpeech: say() goes to Speaking and back to
 Ready a moment later, which is all the reader relies on. With words=True it
@@ -105,21 +105,53 @@ def test_reads_sentence_by_sentence_with_highlight(qapp, monkeypatch):
     pump(15, lambda: tab.current_doc is not None)
     pump(1)
     spoken = []
-    tab.start_read_aloud(page=1)
+    tab.read_aloud.start(1)
     assert speech.rate == 1.0
-    assert tab.is_reading_aloud()
+    assert tab.read_aloud.is_reading()
     assert tab.btn_read_aloud.isChecked()
-    first_queue = len(tab._read_queue)
-    pump(10, lambda: len(tab._read_queue) < first_queue - 2)
-    spoken.append(len(tab._read_queue))
+    first_queue = len(tab.read_aloud._read_queue)
+    pump(10, lambda: len(tab.read_aloud._read_queue) < first_queue - 2)
+    spoken.append(len(tab.read_aloud._read_queue))
     assert spoken[0] < first_queue
     assert len(speech.said) >= 2 and speech.said[0].strip()
     widget = tab.page_widgets[1]
     assert widget.spoken_rects
-    tab.stop_read_aloud()
-    assert not tab.is_reading_aloud()
+    tab.read_aloud.stop()
+    assert not tab.read_aloud.is_reading()
     assert not widget.spoken_rects
     tab.cleanup()
+    store.clear()
+
+
+def test_read_aloud_works_without_a_reader(qapp, monkeypatch):
+    from PySide6.QtCore import QRect, QSettings
+
+    from riemann.ui.reader.mixins.read_aloud import ReadAloud
+
+    store = QSettings("RiemannTest", "BareReadAloud")
+    store.clear()
+    store.setValue("accessibility/read_aloud_words", False)
+    monkeypatch.setattr("riemann.ui.reader.mixins.read_aloud.app_settings", lambda: store)
+    speech = FakeSpeech(speak_ms=20)
+    monkeypatch.setattr("riemann.ui.reader.mixins.read_aloud.make_speech", lambda engine="": speech)
+
+    def chars(text):
+        return [(ch, QRect(i * 8, 10, 8, 12), 0) for i, ch in enumerate(text)]
+
+    pages = {0: chars("First page. Second."), 1: chars("Last page.")}
+    reader = ReadAloud(lambda page: pages[page], lambda: len(pages))
+    shown, turned, needed, states = [], [], [], []
+    reader.sentence_shown.connect(lambda page, rects: shown.append((page, len(rects))))
+    reader.page_turned.connect(turned.append)
+    reader.page_needed.connect(needed.append)
+    reader.reading_changed.connect(states.append)
+
+    reader.start(0)
+    assert _pump(qapp, 5, lambda: not reader.is_reading())
+    assert speech.said == ["First page.", "Second.", "Last page."]
+    assert turned == [1] and needed == [0, 1]
+    assert (0, 1) in shown and (1, 1) in shown and shown[-1] == (None, 0)
+    assert states == [True, False]
     store.clear()
 
 
@@ -150,7 +182,7 @@ def _reader_reading(qapp, monkeypatch, speech, words_setting=True):
     tab.load_document(os.path.abspath(CORPUS))
     _pump(qapp, 15, lambda: tab.current_doc is not None)
     _pump(qapp, 1)
-    tab.start_read_aloud(page=1)
+    tab.read_aloud.start(1)
     return tab, store
 
 
@@ -163,8 +195,8 @@ def _pump(qapp, seconds, until=lambda: False):
 
 
 def _word_under_highlight(tab):
-    _page, chars, text, offsets = tab._spoken
-    start, length = tab._word_shown
+    _page, chars, text, offsets = tab.read_aloud._spoken
+    start, length = tab.read_aloud._word_shown
     return text[start:start + length], "".join(chars[offsets[i]][0] for i in range(start, start + length))
 
 
@@ -175,12 +207,12 @@ def test_the_word_being_spoken_is_highlighted_on_the_page(qapp, monkeypatch, eng
     speech = FakeSpeech(words=engine_words, speak_ms=3000)
     tab, store = _reader_reading(qapp, monkeypatch, speech)
     if not engine_words:
-        tab.chars_per_second = 40.0
+        tab.read_aloud.chars_per_second = 40.0
     widget = tab.page_widgets[1]
     seen = []
 
     def advanced():
-        if tab._word_shown is not None and getattr(widget, "word_rects", None):
+        if tab.read_aloud._word_shown is not None and getattr(widget, "word_rects", None):
             seen.append(_word_under_highlight(tab))
         return len({w for w, _ in seen}) >= 3
 
@@ -190,7 +222,7 @@ def test_the_word_being_spoken_is_highlighted_on_the_page(qapp, monkeypatch, eng
     sentence = widget.spoken_rects
     for rect in widget.word_rects:
         assert any(line.intersects(rect) for line in sentence)
-    tab.stop_read_aloud()
+    tab.read_aloud.stop()
     assert not getattr(widget, "word_rects", None)
     tab.cleanup()
     store.clear()
@@ -204,7 +236,7 @@ def test_word_highlight_follows_its_setting(qapp, monkeypatch):
     _pump(qapp, 0.3)
     assert widget.spoken_rects
     assert not getattr(widget, "word_rects", None)
-    tab.stop_read_aloud()
+    tab.read_aloud.stop()
     tab.cleanup()
     store.clear()
 
@@ -216,7 +248,7 @@ def test_pacing_learns_the_speaking_speed_from_finished_sentences(qapp, monkeypa
     first = speech.said
     assert _pump(qapp, 5, lambda: len(first) >= 3)
     expected = len(first[0]) / 0.6
-    assert 0.5 * expected < tab.chars_per_second < 1.5 * expected
-    tab.stop_read_aloud()
+    assert 0.5 * expected < tab.read_aloud.chars_per_second < 1.5 * expected
+    tab.read_aloud.stop()
     tab.cleanup()
     store.clear()

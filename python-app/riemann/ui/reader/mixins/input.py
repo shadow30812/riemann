@@ -633,8 +633,8 @@ class InputMixin(ReaderHostBase):
             return
 
         if key == Qt.Key.Key_Escape:
-            if self.is_reading_aloud():
-                self.stop_read_aloud()
+            if self.read_aloud.is_reading():
+                self.read_aloud.stop()
                 event.accept()
                 return
             if self._reader_fullscreen:

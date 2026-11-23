@@ -55,7 +55,7 @@ from .mixins.input import InputMixin
 from .mixins.metadata import MetadataMixin
 from .mixins.navigation import NavigationMixin
 from .mixins.pages import PagesMixin
-from .mixins.read_aloud import ReadAloudMixin
+from .mixins.read_aloud import ReadAloud
 from .mixins.rendering import RenderingMixin
 from .mixins.ruler import ReadingRuler
 from .mixins.search import SearchMixin
@@ -80,7 +80,6 @@ class ReaderTab(
     AppearanceMixin,
     DocumentMixin,
     PagesMixin,
-    ReadAloudMixin,
     FormsMixin,
     CitationsMixin,
     QWidget,
@@ -166,6 +165,13 @@ class ReaderTab(
         self.ruler.page_needed.connect(self._lay_out_page)
         self.ruler.band_changed.connect(self._show_ruler_band)
         self.ruler.toast.connect(self.show_toast)
+        self.read_aloud = ReadAloud(self._get_page_chars, self._page_count, self)
+        self.read_aloud.page_needed.connect(self._lay_out_page)
+        self.read_aloud.page_turned.connect(self.jump_to_page)
+        self.read_aloud.sentence_shown.connect(self._show_spoken)
+        self.read_aloud.word_shown.connect(self._show_spoken_word)
+        self.read_aloud.reading_changed.connect(self._show_reading_aloud)
+        self.read_aloud.toast.connect(self.show_toast)
 
         self._init_backend()
         self.setup_ui()
@@ -272,6 +278,26 @@ class ReaderTab(
                 widget.set_ruler(band if page is not None and idx == page else None)
         if page is not None and scroll:
             self._scroll_to_box(page, band, 160)
+
+    def toggle_read_aloud(self) -> None:
+        self.read_aloud.toggle(self.current_page_index)
+
+    def _show_spoken(self, page: int | None, rects: list) -> None:
+        for idx, widget in self.page_widgets.items():
+            if hasattr(widget, "set_spoken_rects"):
+                widget.set_spoken_rects(rects if idx == page else [])
+        if page is not None and rects:
+            self._scroll_to_box(page, rects[0], 120)
+
+    def _show_spoken_word(self, page: int | None, rects: list) -> None:
+        for idx, widget in self.page_widgets.items():
+            if hasattr(widget, "set_word_rects"):
+                widget.set_word_rects(rects if idx == page else [])
+
+    def _show_reading_aloud(self, on: bool) -> None:
+        button = self.btn_read_aloud
+        if button is not None:
+            button.setChecked(on)
 
     def _get_tab_widget(self) -> QTabWidget | None:
         """The QTabWidget this tab sits in, or None."""

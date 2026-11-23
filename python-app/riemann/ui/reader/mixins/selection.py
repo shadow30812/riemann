@@ -40,6 +40,45 @@ from ....core.settings import search_url
 from .host import ReaderHostBase
 
 
+def rects_for_char_range(
+    all_chars: list[tuple], min_idx: int, max_idx: int
+) -> tuple[list[QRect], str]:
+    """Merges the boxes of a character range into per-line highlight rects."""
+    selected_rects: list[QRect] = []
+    selected_chars: list[str] = []
+
+    current_box: QRect | None = None
+    prev_cy: float | None = None
+
+    for i in range(min_idx, max_idx + 1):
+        ch, rect, _ = all_chars[i]
+
+        if current_box is None:
+            current_box = QRect(rect)
+            prev_cy = rect.center().y()
+        else:
+            same_line = abs(rect.center().y() - prev_cy) < rect.height() * 0.5
+            if same_line and rect.left() <= current_box.right() + 8:
+                current_box = current_box.united(rect)
+            else:
+                selected_rects.append(current_box)
+                current_box = QRect(rect)
+                prev_cy = rect.center().y()
+                if (
+                    not same_line
+                    and selected_chars
+                    and not selected_chars[-1].isspace()
+                    and not ch.isspace()
+                ):
+                    selected_chars.append("\n")
+        selected_chars.append(ch)
+
+    if current_box is not None:
+        selected_rects.append(current_box)
+
+    return selected_rects, "".join(selected_chars)
+
+
 class SelectionMixin(ReaderHostBase):
     _sel_anchor = None
     _sel_at_line_end = False
@@ -481,44 +520,7 @@ class SelectionMixin(ReaderHostBase):
             return None
         return best_idx
 
-    @staticmethod
-    def _rects_for_char_range(
-        all_chars: list[tuple], min_idx: int, max_idx: int
-    ) -> tuple[list[QRect], str]:
-        """Merges the boxes of a character range into per-line highlight rects."""
-        selected_rects: list[QRect] = []
-        selected_chars: list[str] = []
-
-        current_box: QRect | None = None
-        prev_cy: float | None = None
-
-        for i in range(min_idx, max_idx + 1):
-            ch, rect, _ = all_chars[i]
-
-            if current_box is None:
-                current_box = QRect(rect)
-                prev_cy = rect.center().y()
-            else:
-                same_line = abs(rect.center().y() - prev_cy) < rect.height() * 0.5
-                if same_line and rect.left() <= current_box.right() + 8:
-                    current_box = current_box.united(rect)
-                else:
-                    selected_rects.append(current_box)
-                    current_box = QRect(rect)
-                    prev_cy = rect.center().y()
-                    if (
-                        not same_line
-                        and selected_chars
-                        and not selected_chars[-1].isspace()
-                        and not ch.isspace()
-                    ):
-                        selected_chars.append("\n")
-            selected_chars.append(ch)
-
-        if current_box is not None:
-            selected_rects.append(current_box)
-
-        return selected_rects, "".join(selected_chars)
+    _rects_for_char_range = staticmethod(rects_for_char_range)
 
     def _get_linear_text_selection(
         self, page_idx: int, start_pos: QPoint, end_pos: QPoint

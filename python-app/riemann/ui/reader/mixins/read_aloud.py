@@ -3,6 +3,13 @@ Read aloud: speaks the document from the current page with the system's
 text-to-speech engine (Qt TextToSpeech), one sentence at a time, highlighting
 the sentence being spoken and turning pages as it goes.
 
+ReadAloud is given two functions: page_chars(page), the character boxes of a
+page, and page_count(). It reports through signals: page_needed(page) before
+reading a page's sentences, so the reader can lay it out; page_turned(page)
+when it moves on to the next page; sentence_shown(page, rects) and
+word_shown(page, rects) for the highlights (page None and no rects to clear
+them); reading_changed(on) for the toolbar button; and toast for messages.
+
 Sentences come from the same character geometry text selection uses, so the
 highlight lines up with the text on the page. Speech rate and voice are user
 settings (READ_RATE_KEY, READ_VOICE_KEY). On Linux the engine is
@@ -26,11 +33,12 @@ highlight drifts at most within a sentence.
 """
 
 import re
+from collections.abc import Callable
 
-from PySide6.QtCore import QElapsedTimer, QTimer
+from PySide6.QtCore import QElapsedTimer, QObject, QTimer, Signal
 
 from ....core.settings import READ_WORDS_KEY, app_settings
-from .host import ReaderHostBase
+from .selection import rects_for_char_range
 
 READ_RATE_KEY = "reader/read_aloud_rate"
 READ_VOICE_KEY = "reader/read_aloud_voice"
@@ -46,7 +54,6 @@ NO_ENGINE = (
     "on Debian and Ubuntu) and a voice such as espeak-ng with your package "
     "manager, then restart Riemann."
 )
-
 
 def split_sentences(text: str) -> list[tuple[int, int]]:
     """(start, end) character offsets of each sentence in text."""
@@ -91,14 +98,44 @@ def make_speech(engine: str = ""):
     return tts
 
 
-class ReadAloudMixin(ReaderHostBase):
-    _tts = None
-    _reading = False
-    _spoken = None
-    _word_timer = None
-    _word_clock = None
-    _word_shown = None
-    chars_per_second = 0.0
+def sentences(chars: list[tuple]) -> list[tuple[str, int, int, list[int]]]:
+    """(spoken text, start, end, offsets) for each sentence with a word in it, from a page's characters."""
+    text = "".join(c[0] for c in chars)
+    out = []
+    for start, end in split_sentences(text):
+        spoken, offsets = collapse_spaces(text, start, end)
+        if re.search(r"\w", spoken):
+            out.append((spoken, start, end, offsets))
+    return out
+
+
+class ReadAloud(QObject):
+    sentence_shown = Signal(object, list)
+    word_shown = Signal(object, list)
+    page_turned = Signal(int)
+    page_needed = Signal(int)
+    reading_changed = Signal(bool)
+    toast = Signal(str)
+
+    def __init__(
+        self,
+        page_chars: Callable[[int], list],
+        page_count: Callable[[], int],
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.page_chars = page_chars
+        self.page_count = page_count
+        self.chars_per_second = 0.0
+        self._tts = None
+        self._reading = False
+        self._read_page = 0
+        self._read_queue: list = []
+        self._read_waiting = False
+        self._spoken = None
+        self._word_timer: QTimer | None = None
+        self._word_clock: QElapsedTimer | None = None
+        self._word_shown = None
 
     def _speech(self):
         tts = self._tts
@@ -120,101 +157,75 @@ class ReadAloudMixin(ReaderHostBase):
                     break
         return tts
 
-    def is_reading_aloud(self) -> bool:
+    def is_reading(self) -> bool:
         return bool(self._reading)
 
-    def toggle_read_aloud(self) -> None:
-        if self.is_reading_aloud():
-            self.stop_read_aloud()
+    def toggle(self, page: int) -> None:
+        if self.is_reading():
+            self.stop()
         else:
-            self.start_read_aloud()
+            self.start(page)
 
-    def start_read_aloud(self, page: int | None = None) -> None:
-        if not self.current_doc:
+    def start(self, page: int) -> None:
+        """Reads aloud from the start of page."""
+        if self.page_count() <= 0:
             return
         tts = self._speech()
         if tts is None:
-            self.show_toast(NO_ENGINE)
-            self._set_read_button(False)
+            self.toast.emit(NO_ENGINE)
+            self.reading_changed.emit(False)
             return
         self._reading = True
-        self._read_page = self.current_page_index if page is None else page
-        self._read_queue = self._sentences(self._read_page)
+        self._read_page = page
+        self.page_needed.emit(page)
+        self._read_queue = sentences(self.page_chars(page))
         self._read_waiting = False
-        self._set_read_button(True)
+        self.reading_changed.emit(True)
         self._speak_next()
 
-    def stop_read_aloud(self) -> None:
+    def stop(self) -> None:
         self._reading = False
         self._read_queue = []
         tts = self._tts
         if tts is not None:
             tts.stop()
-        self._show_spoken(None, [])
+        self.sentence_shown.emit(None, [])
         self._stop_word_pacing()
         self._show_word(None)
         self._spoken = None
-        self._set_read_button(False)
-
-    def _set_read_button(self, on: bool) -> None:
-        button = self.btn_read_aloud
-        if button is not None:
-            button.setChecked(on)
-
-    def _sentences(self, page: int) -> list[tuple[str, int, int]]:
-        if page not in self.page_widgets:
-            self.jump_to_page(page)
-        chars = self._get_page_chars(page)
-        text = "".join(c[0] for c in chars)
-        out = []
-        for start, end in split_sentences(text):
-            spoken, offsets = collapse_spaces(text, start, end)
-            if re.search(r"\w", spoken):
-                out.append((spoken, start, end, offsets))
-        return out
+        self.reading_changed.emit(False)
 
     def _speak_next(self) -> None:
-        if not self.is_reading_aloud():
+        if not self.is_reading():
             return
         while not self._read_queue:
-            if self._read_page + 1 >= self.current_doc.page_count:
-                self.stop_read_aloud()
+            if self._read_page + 1 >= self.page_count():
+                self.stop()
                 return
             self._read_page += 1
-            self.jump_to_page(self._read_page)
-            self._read_queue = self._sentences(self._read_page)
+            self.page_turned.emit(self._read_page)
+            self.page_needed.emit(self._read_page)
+            self._read_queue = sentences(self.page_chars(self._read_page))
         text, start, end, offsets = self._read_queue.pop(0)
-        chars = self._get_page_chars(self._read_page)
+        chars = self.page_chars(self._read_page)
         rects = []
         if chars and end > start:
-            rects, _ = self._rects_for_char_range(chars, start, min(end, len(chars)) - 1)
-        self._show_spoken(self._read_page, rects)
+            rects, _ = rects_for_char_range(chars, start, min(end, len(chars)) - 1)
+        self.sentence_shown.emit(self._read_page, rects)
         self._spoken = (self._read_page, chars, text, offsets)
         self._word_shown = None
         self._read_waiting = True
         self._tts.say(text)
 
-    def _show_spoken(self, page: int | None, rects: list) -> None:
-        for idx, widget in self.page_widgets.items():
-            if hasattr(widget, "set_spoken_rects"):
-                widget.set_spoken_rects(rects if idx == page else [])
-        if page is not None and rects:
-            top = self._page_top_y(page)
-            widget = self.page_widgets.get(page)
-            if top is not None and widget is not None:
-                row = widget.parentWidget()
-                x = (row.x() if row else 0) + widget.x() + rects[0].center().x()
-                self.scroll.ensureVisible(int(x), int(top + rects[0].center().y()), 40, 120)
-
     def _on_speech_state(self, state) -> None:
         from PySide6.QtTextToSpeech import QTextToSpeech
 
         if state == QTextToSpeech.State.Error:
-            self.stop_read_aloud()
-            self.show_toast("The speech engine stopped with an error.")
+            self.stop()
+            self.toast.emit("The speech engine stopped with an error.")
         elif state == QTextToSpeech.State.Speaking:
             self._start_word_pacing()
-        elif state == QTextToSpeech.State.Ready and self._read_waiting and self.is_reading_aloud():
+        elif state == QTextToSpeech.State.Ready and self._read_waiting and self.is_reading():
             self._read_waiting = False
             self._learn_speed()
             self._stop_word_pacing()
@@ -231,7 +242,7 @@ class ReadAloudMixin(ReaderHostBase):
         return tts is not None and bool(tts.engineCapabilities() & QTextToSpeech.Capability.WordByWordProgress)
 
     def _on_saying_word(self, word: str, _id: int, start: int, length: int) -> None:
-        if self.is_reading_aloud() and self._words_on():
+        if self.is_reading() and self._words_on():
             self._show_word((start, length))
 
     def _show_word(self, span: tuple[int, int] | None) -> None:
@@ -246,10 +257,8 @@ class ReadAloudMixin(ReaderHostBase):
             first, length = span
             last = min(first + max(length, 1), len(offsets)) - 1
             if chars and 0 <= first <= last:
-                rects, _ = self._rects_for_char_range(chars, offsets[first], min(offsets[last], len(chars) - 1))
-        for idx, widget in self.page_widgets.items():
-            if hasattr(widget, "set_word_rects"):
-                widget.set_word_rects(rects if idx == page else [])
+                rects, _ = rects_for_char_range(chars, offsets[first], min(offsets[last], len(chars) - 1))
+        self.word_shown.emit(page, rects)
 
     def _speaking_speed(self) -> float:
         if self.chars_per_second > 0:

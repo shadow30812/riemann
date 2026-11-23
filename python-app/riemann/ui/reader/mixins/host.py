@@ -39,6 +39,7 @@ from ....core.constants import ViewMode, ZoomMode
 if TYPE_CHECKING:
     from ..toolbar_layout import ToolbarLayout
     from ..widgets import PageWidget
+    from .read_aloud import ReadAloud
     from .ruler import ReadingRuler
 
 
@@ -99,6 +100,7 @@ class ReaderHost(Protocol):
     txt_page: QLineEdit
     combo_zoom: QComboBox
     ruler: "ReadingRuler"
+    read_aloud: "ReadAloud"
     link_tooltip: QLabel
     sidebar_nav: QWidget
     notes_panel: QWidget
