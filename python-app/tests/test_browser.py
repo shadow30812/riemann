@@ -27,6 +27,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QWidget
 
 from riemann.core.settings import AUTO_OPEN_DOWNLOADS_KEY, app_settings
+from riemann.ui import threads
 from riemann.ui.browser import (
     BrowserTab,
     RequestInterceptor,
@@ -39,6 +40,7 @@ from riemann.ui.browser import (
 from riemann.ui.browser.downloads import Downloads
 from riemann.ui.browser.media import MediaControls
 from riemann.ui.browser.stream import BUILT_IN_PLAYER, StreamLauncher, VideoPlayer, format_time
+from riemann.ui.threads import track
 
 
 @pytest.fixture
@@ -764,8 +766,22 @@ def test_ytdlp_stream_worker_reads_a_cookie_file():
     assert "remote_components" not in opts
 
 
+def test_a_stream_worker_leaves_the_tracked_threads_once_it_has_finished(qapp):
+    found = []
+    worker = YtDlpStreamWorker("https://youtube.com/watch?v=123")
+    worker.found.connect(found.append)
+    with patch("yt_dlp.YoutubeDL") as mock_ydl:
+        mock_ydl.return_value.__enter__.return_value.extract_info.return_value = {"url": "https://stream.url"}
+        track(worker).start()
+        assert worker.wait(10000)
+    for _ in range(5):
+        QCoreApplication.processEvents()
+    assert found == ["https://stream.url"]
+    assert worker not in threads._TRACKED
+
+
 class _FakeStreamWorker(QObject):
-    finished = Signal(str)
+    found = Signal(str)
     error = Signal(str)
     made = []
 
@@ -801,7 +817,7 @@ def test_stream_launcher_works_without_a_browser_tab(qtbot, monkeypatch):
     launcher.stream("https://example.com/watch")
     (worker,) = _FakeStreamWorker.made
     assert worker.started and worker.cookies_browser == "firefox" and worker.cookie_file is None
-    worker.finished.emit("https://cdn.example.com/video.mp4")
+    worker.found.emit("https://cdn.example.com/video.mp4")
     assert played == ["https://cdn.example.com/video.mp4"]
 
 
@@ -813,7 +829,7 @@ def test_vlc_that_fails_to_start_falls_back_to_the_built_in_player(qtbot, monkey
 
     monkeypatch.setattr("riemann.ui.browser.stream.subprocess.Popen", no_vlc)
     launcher.stream("https://example.com/watch")
-    _FakeStreamWorker.made[0].finished.emit("https://cdn.example.com/video.mp4")
+    _FakeStreamWorker.made[0].found.emit("https://cdn.example.com/video.mp4")
     assert played == ["https://cdn.example.com/video.mp4"]
     assert "Failed to start VLC. Falling back to native player." in toasts
 

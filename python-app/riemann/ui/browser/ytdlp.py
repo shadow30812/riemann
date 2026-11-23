@@ -5,6 +5,9 @@ yt-dlp comes from the optional packages (core/dependencies.py) with its pinned
 YouTube solver (yt-dlp-ejs), which runs in Deno; js_runtimes points yt-dlp at
 the pinned Deno, and yt-dlp is never given remote_components.
 
+YtDlpStreamWorker reports the stream URL through found. Named finished, the
+signal hid QThread.finished, so ui/threads.track never let the worker go.
+
 YtDlpWorker is yt-dlp's logger (debug, info, warning, error). With
 ignoreerrors on, a failed video (a 403 from the site, a format that is
 gone) is only reported to the logger and download returns normally, so the
@@ -65,7 +68,7 @@ class YtDlpStreamWorker(QThread):
     it can be handed to an external player such as VLC or mpv.
     """
 
-    finished = Signal(str)
+    found = Signal(str)
     error = Signal(str)
 
     def __init__(self, url, cookies_browser=None, cookie_file=None):
@@ -78,7 +81,7 @@ class YtDlpStreamWorker(QThread):
         """
         Executes the yt-dlp metadata extraction process asynchronously.
 
-        Runs yt-dlp to parse the media URL. Emits the `finished` signal with the raw
+        Runs yt-dlp to parse the media URL. Emits the `found` signal with the raw
         stream URL if successful, or emits the `error` signal with a description of the
         failure if extraction fails or no URL is found in the response.
         """
@@ -99,7 +102,7 @@ class YtDlpStreamWorker(QThread):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(self.url, download=False)
                 if info and "url" in info:
-                    self.finished.emit(info["url"])
+                    self.found.emit(info["url"])
                 else:
                     self.error.emit("No URL found in response")
         except Exception as e:

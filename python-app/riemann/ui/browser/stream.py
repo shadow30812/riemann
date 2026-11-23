@@ -201,7 +201,7 @@ class StreamLauncher(QObject):
             return
         self.toast.emit(f"Extracting stream for {choice}...")
         self.stream_worker = YtDlpStreamWorker(raw_url, cookies_browser=cookies_browser, cookie_file=cookie_file)
-        self.stream_worker.finished.connect(self._on_stream_extracted)
+        self.stream_worker.found.connect(self._on_stream_extracted)
         self.stream_worker.error.connect(lambda e: self.toast.emit(f"Stream error: {e}"))
         track(self.stream_worker).start()
 
