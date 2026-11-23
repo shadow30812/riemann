@@ -326,10 +326,12 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_prev = QPushButton()
         self.btn_prev.setIcon(self._get_icon("chevron-left.svg"))
         self.btn_prev.setIconSize(icon_size)
+        self.btn_prev.setToolTip("Previous Page (Page Up)")
         self.btn_prev.clicked.connect(self.prev_view)
 
         self.txt_page = QLineEdit()
         self.txt_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.txt_page.setToolTip("Page Number\nType a page and press Return to go there.")
         self.txt_page.returnPressed.connect(self.on_page_input_return)
 
         self.txt_page.textChanged.connect(self._update_page_input_width)
@@ -340,6 +342,7 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_next = QPushButton()
         self.btn_next.setIcon(self._get_icon("chevron-right.svg"))
         self.btn_next.setIconSize(icon_size)
+        self.btn_next.setToolTip("Next Page (Page Down)")
         self.btn_next.clicked.connect(self.next_view)
 
         self.btn_zoom_out = QPushButton()
@@ -350,6 +353,7 @@ class ToolbarMixin(ReaderHostBase):
 
         self.combo_zoom = QComboBox()
         self.combo_zoom.setEditable(True)
+        self.combo_zoom.setToolTip("Zoom\nPick a fit or a size, or type a percentage.")
         self.combo_zoom.addItems(
             [
                 "Auto Fit",
@@ -385,6 +389,7 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_fullscreen = QPushButton()
         self.btn_fullscreen.setIcon(self._get_icon("maximize.svg"))
         self.btn_fullscreen.setIconSize(icon_size)
+        self.btn_fullscreen.setToolTip("Full Screen (F11)")
         self.btn_fullscreen.clicked.connect(self.toggle_reader_fullscreen)
 
         self.btn_ocr = QPushButton()
@@ -397,6 +402,7 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_search.setIcon(self._get_icon("search.svg"))
         self.btn_search.setIconSize(icon_size)
         self.btn_search.setCheckable(True)
+        self.btn_search.setToolTip("Find in Document (Ctrl+F)")
         self.btn_search.clicked.connect(self.toggle_search_bar)
 
         self.btn_ai_search = QPushButton()
@@ -463,17 +469,20 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_find_prev = QPushButton()
         self.btn_find_prev.setIcon(self._get_icon("chevron-up.svg"))
         self.btn_find_prev.setIconSize(icon_size)
+        self.btn_find_prev.setToolTip("Previous Match")
         self.btn_find_prev.clicked.connect(self.find_prev)
 
         self.btn_find_next = QPushButton()
         self.btn_find_next.setIcon(self._get_icon("chevron-down.svg"))
         self.btn_find_next.setIconSize(icon_size)
+        self.btn_find_next.setToolTip("Next Match")
         self.btn_find_next.clicked.connect(self.find_next)
 
         self.btn_close_search = QPushButton()
         self.btn_close_search.setIcon(self._get_icon("x.svg"))
         self.btn_close_search.setIconSize(icon_size)
         self.btn_close_search.setFlat(True)
+        self.btn_close_search.setToolTip("Close Find")
         self.btn_close_search.clicked.connect(self.toggle_search_bar)
 
         sb_layout.addWidget(QLabel("Find:"))
@@ -512,17 +521,20 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_ai_prev = QPushButton()
         self.btn_ai_prev.setIcon(self._get_icon("chevron-up.svg"))
         self.btn_ai_prev.setIconSize(icon_size)
+        self.btn_ai_prev.setToolTip("Previous AI Result")
         self.btn_ai_prev.clicked.connect(self.ai_find_prev)
 
         self.btn_ai_next = QPushButton()
         self.btn_ai_next.setIcon(self._get_icon("chevron-down.svg"))
         self.btn_ai_next.setIconSize(icon_size)
+        self.btn_ai_next.setToolTip("Next AI Result")
         self.btn_ai_next.clicked.connect(self.ai_find_next)
 
         self.btn_close_ai_search = QPushButton()
         self.btn_close_ai_search.setIcon(self._get_icon("x-white.svg"))
         self.btn_close_ai_search.setIconSize(icon_size)
         self.btn_close_ai_search.setFlat(True)
+        self.btn_close_ai_search.setToolTip("Close AI Search")
         self.btn_close_ai_search.clicked.connect(self.toggle_ai_search_bar)
 
         lbl = QLabel("AI Search:")

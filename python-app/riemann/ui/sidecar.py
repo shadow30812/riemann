@@ -513,12 +513,14 @@ class AiSidecarPanel(QWidget):
         pick = QHBoxLayout()
         pick.setSpacing(6)
         self.combo_provider = QComboBox()
+        self.combo_provider.setToolTip("AI Provider")
         for p in PROVIDERS.values():
             self.combo_provider.addItem(p.label, p.key)
         self.combo_provider.currentIndexChanged.connect(
             lambda _: self._select_provider(self.combo_provider.currentData())
         )
         self.combo_model = QComboBox()
+        self.combo_model.setToolTip("Model")
         self.combo_model.setEditable(True)
         self.combo_model.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.combo_model.setMinimumContentsLength(14)

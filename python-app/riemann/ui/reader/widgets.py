@@ -133,6 +133,12 @@ class PageWidget(QLabel):
             self.spoken_rects = rects
             self.update()
 
+    def set_ruler(self, band: Optional[QRect]) -> None:
+        """Dims the page outside band, the line the reading ruler is on (None to clear)."""
+        if band != getattr(self, "ruler_band", None):
+            self.ruler_band = band
+            self.update()
+
     def set_word_rects(self, rects: List[QRect]) -> None:
         """Marks the word read aloud right now, over the sentence (empty to clear)."""
         if rects or getattr(self, "word_rects", None):
@@ -210,6 +216,15 @@ class PageWidget(QLabel):
                 painter.drawRect(rect)
             elif self.temp_shape_type == "oval":
                 painter.drawEllipse(rect)
+
+        band = getattr(self, "ruler_band", None)
+        if band is not None:
+            shade = qcolor(CONTENT["ruler_shade"], 140)
+            painter.fillRect(0, 0, self.width(), max(0, band.top()), shade)
+            painter.fillRect(0, band.bottom() + 1, self.width(), max(0, self.height() - band.bottom() - 1), shade)
+            painter.fillRect(0, band.top(), max(0, band.left()), band.height(), shade)
+            painter.fillRect(band.right() + 1, band.top(), max(0, self.width() - band.right() - 1), band.height(), shade)
+            painter.fillRect(band.left(), band.bottom() - 1, band.width(), 2, qcolor(CONTENT["selection"]))
 
         if getattr(self, "spoken_rects", None):
             painter.setPen(Qt.PenStyle.NoPen)

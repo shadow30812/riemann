@@ -57,6 +57,7 @@ class ChromeMixin:
         )
         self.btn_back.setIconSize(icon_size)
         self.btn_back.setFixedWidth(30)
+        self.btn_back.setToolTip("Back (Alt+Left)")
 
         self.btn_fwd = QPushButton()
         self.btn_fwd.setIcon(
@@ -66,6 +67,7 @@ class ChromeMixin:
         )
         self.btn_fwd.setIconSize(icon_size)
         self.btn_fwd.setFixedWidth(30)
+        self.btn_fwd.setToolTip("Forward (Alt+Right)")
 
         self.btn_reload = QPushButton()
         self.btn_reload.setIcon(
@@ -75,6 +77,7 @@ class ChromeMixin:
         )
         self.btn_reload.setIconSize(icon_size)
         self.btn_reload.setFixedWidth(30)
+        self.btn_reload.setToolTip("Reload (F5)")
 
         self.txt_url = QLineEdit()
         self.txt_url.setPlaceholderText("Enter URL or Search...")

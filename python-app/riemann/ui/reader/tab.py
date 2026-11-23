@@ -59,6 +59,7 @@ from .mixins.appearance import AppearanceMixin
 from .mixins.document import DocumentMixin
 from .mixins.pages import PagesMixin
 from .mixins.read_aloud import ReadAloudMixin
+from .mixins.ruler import RulerMixin
 from .mixins.forms import FormsMixin
 from .mixins.citations import CitationsMixin
 from ...core.settings import app_settings
@@ -79,6 +80,7 @@ class ReaderTab(
     DocumentMixin,
     PagesMixin,
     ReadAloudMixin,
+    RulerMixin,
     FormsMixin,
     CitationsMixin,
     QWidget,
@@ -226,6 +228,9 @@ class ReaderTab(
             ("Ctrl+Alt+N", self.toggle_notes),
             ("Alt+Left", self.go_back),
             ("Alt+Right", self.go_forward),
+            ("Ctrl+Alt+L", self.toggle_reading_ruler),
+            ("Alt+Down", lambda: self.ruler_step(1)),
+            ("Alt+Up", lambda: self.ruler_step(-1)),
         ]
         for seq, slot in shortcuts:
             QShortcut(QKeySequence(seq), self).activated.connect(slot)

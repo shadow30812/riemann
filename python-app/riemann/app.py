@@ -97,6 +97,7 @@ from .ui.reader.tab import ReaderTab
 from .ui.viewers import TableTab
 from .ui.threads import wait_for_released
 from .ui.sidecar import AiSidecarPanel
+from .ui import accessibility
 from .ui.tooltip import TooltipSkin
 from .core.log import log
 from .core.log import setup as setup_logging
@@ -123,6 +124,7 @@ from .core.settings import (
     CLEAN_EXIT_KEY,
     DARK_MODE_KEY,
     HIGH_CONTRAST_KEY,
+    SCREEN_READER_NAMES_KEY,
     DEFAULT_UI_SCALE,
     TABS_COLLAPSED_KEY,
     UI_SCALE_KEY,
@@ -197,6 +199,7 @@ class RiemannWindow(
         self.settings = app_settings()
         self.dark_mode: bool = self.settings.value(DARK_MODE_KEY, False, type=bool)
         set_high_contrast(self.settings.value(HIGH_CONTRAST_KEY, False, type=bool))
+        accessibility.set_enabled(self.settings.value(SCREEN_READER_NAMES_KEY, True, type=bool))
         self._was_unclean_exit: bool = not self.settings.value(
             CLEAN_EXIT_KEY, True, type=bool
         )
@@ -335,6 +338,7 @@ class RiemannWindow(
 
         self.floating_fs_btn = QPushButton(self)
         self.floating_fs_btn.setFixedSize(40, 40)
+        self.floating_fs_btn.setToolTip("Full Screen (F11)")
         self.floating_fs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.floating_fs_btn.clicked.connect(self.toggle_reader_fullscreen)
         self.floating_fs_btn.hide()

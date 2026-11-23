@@ -23,12 +23,12 @@ from PySide6.QtWebEngineCore import (
 from ..ui.browser import BrowserTab
 from ..ui.reader.tab import ReaderTab
 from ..ui.viewers import VIEWER_TABS
-from ..ui import tooltip
+from ..ui import accessibility, tooltip
 from ..ui.palette import high_contrast, set_high_contrast, toast_style, tokens
 from ..ui.toast import Toast
 from ..core.log import log
 from ..core.assets import asset_path, icon_path
-from ..core.settings import DARK_MODE_KEY, HIGH_CONTRAST_KEY
+from ..core.settings import DARK_MODE_KEY, HIGH_CONTRAST_KEY, READING_RULER_KEY, SCREEN_READER_NAMES_KEY
 
 
 class ChromeMixin:
@@ -201,6 +201,16 @@ class ChromeMixin:
                 w = tab_widget.widget(i)
                 if isinstance(w, (ReaderTab, BrowserTab)):
                     w.apply_theme()
+
+    def apply_accessibility(self) -> None:
+        """Passes the Accessibility settings to the screen-reader names and the open readers."""
+        accessibility.set_enabled(self.settings.value(SCREEN_READER_NAMES_KEY, True, type=bool))
+        ruler = self.settings.value(READING_RULER_KEY, False, type=bool)
+        for tab_widget in (self.tabs_main, self.tabs_side):
+            for i in range(tab_widget.count()):
+                w = tab_widget.widget(i)
+                if isinstance(w, ReaderTab):
+                    w.set_reading_ruler(ruler)
 
     def restyle_ui(self) -> None:
         """Applies the interface theme (dark_mode and high contrast) to the window and its tabs."""

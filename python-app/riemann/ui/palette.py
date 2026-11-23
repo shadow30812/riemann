@@ -28,7 +28,8 @@ document content in either theme, so it always uses the dark tokens.
 CONTENT holds colours that belong to the document or the projector rather than
 the interface theme, so they don't change with it: the presentation stage and
 its black and white blanks, the laser pointer, the default pen and text ink,
-search hits, note markers, text selection, the read-aloud highlight, the the
+search hits, note markers, text selection, the read-aloud highlight, the
+shade the reading ruler lays over the lines it doesn't cover, the
 outline of a redaction mark and the box a redaction leaves, and the glow of a
 tab playing media. qcolor turns any of these values into a QColor
 with alpha.
@@ -155,6 +156,7 @@ CONTENT = {
     "redact_mark": "#E53935",
     "redaction": "#000000",
     "spoken": DARK["system"],
+    "ruler_shade": "#000000",
     "playing_from": "#FF4500",
     "playing_to": "#8A2BE2",
 }

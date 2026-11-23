@@ -24,6 +24,10 @@ the window of the widget it describes.
 
 Colours follow set_dark, which the main window calls when the theme changes,
 and the high-contrast setting (palette.high_contrast) while dark.
+
+Since TooltipSkin sees every widget and every tooltip change, it also names
+icon-only controls for screen readers from their tooltips
+(ui/accessibility.py).
 """
 
 import re
@@ -34,9 +38,12 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter
 from PySide6.QtGui import Qt as GuiQt
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from .accessibility import name_from_tooltip
 from .palette import high_contrast, load_ui_font, ui_font
 
-SHORTCUT = re.compile(r"\s*\(((?:Ctrl|Alt|Shift|Meta|Cmd|Esc|F\d{1,2})(?:\+[^()]+)?)\)\s*$")
+SHORTCUT = re.compile(
+    r"\s*\(((?:Ctrl|Alt|Shift|Meta|Cmd|Esc|F\d{1,2}|Page Up|Page Down|Home|End|Space)(?:\+[^()]+)?)\)\s*$"
+)
 
 COLOURS = {
     True: {
@@ -316,6 +323,7 @@ class TooltipSkin(QObject):
         if widget is None or not shiboken6.isValid(widget) or self._skipped(widget):
             return
         key = id(widget)
+        name_from_tooltip(widget)
         if key not in self._attached:
             widget.installEventFilter(self)
             self._attached.add(key)
@@ -339,6 +347,9 @@ class TooltipSkin(QObject):
                 return False
             self.show_tip(obj, text, event.globalPos())
             return True
+        if kind == QEvent.Type.ToolTipChange:
+            name_from_tooltip(obj)
+            return False
         if kind == QEvent.Type.ChildPolished:
             child = event.child()
             if child is not None and child.isWidgetType():

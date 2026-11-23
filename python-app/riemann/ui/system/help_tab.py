@@ -124,6 +124,11 @@ TOPICS = [
                 [
                     "Read aloud (Ctrl+Shift+U) speaks the document with your computer's voice and "
                     "highlights each sentence as it goes, and the word being spoken inside it. Esc stops it.",
+                    "The reading ruler (Ctrl+Alt+L) dims every line but the one you're reading, so your eyes "
+                    "keep their place. It follows the mouse, and Alt+Down and Alt+Up move it a line.",
+                    "Settings has an Accessibility section to turn these on and off, along with the names "
+                    "screen readers such as Orca and NVDA read for the buttons. High contrast, under "
+                    "Appearance, makes the dark theme pure black with white text.",
                     "Presentation mode (Shift+F5) shows one page at a time on black. L turns the pointer "
                     "into a laser dot, B and W blank the screen, and Esc leaves.",
                     "Notes (Ctrl+Alt+N) opens a notes panel for the document. The notes are kept in a "
@@ -493,6 +498,8 @@ SHORTCUTS = [
             (("Ctrl+Shift+Z",), "Redo an annotation"),
             (("Ctrl+Alt+N",), "Notes panel"),
             (("Ctrl+Shift+U",), "Read aloud"),
+            (("Ctrl+Alt+L",), "Reading ruler: dims every line but the one you're reading"),
+            (("Alt+Down", "Alt+Up"), "Move the reading ruler down or up a line"),
             (("Shift+F5",), "Presentation mode"),
             (("Ctrl+S",), "Save a copy with your annotations"),
             (("Ctrl+Shift+S",), "Add or remove a password"),

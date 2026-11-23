@@ -8,8 +8,11 @@ of in a dialog. The window's own methods do the work (toggle_ui_theme,
 set_vertical_tabs, toggle_auto_pdf...), so a change made here and one made
 from a menu or shortcut behave the same.
 
-Sections: Appearance, Documents, Browser, Site permissions, AI and OCR,
-Privacy and data, About.
+Sections: Appearance, Accessibility, Documents, Browser, Site permissions,
+AI and OCR, Privacy and data, About. Accessibility holds the aids anyone may
+want off: names for screen readers, the word highlight while reading aloud
+and the reading ruler; RiemannWindow.apply_accessibility passes a change to
+open tabs.
 
 The Office files card looks for LibreOffice on a plain thread (the Flatpak
 check runs a program), and reports back through _OfficeBridge.
@@ -50,6 +53,9 @@ from ...core.settings import (
     OFFICE_ASK_KEY,
     OFFICE_PATH_KEY,
     POPULAR_SITES_KEY,
+    READ_WORDS_KEY,
+    READING_RULER_KEY,
+    SCREEN_READER_NAMES_KEY,
     SEARCH_URL_KEY,
     UI_SCALE_KEY,
     VERTICAL_TABS_KEY,
@@ -84,6 +90,7 @@ class SettingsTab(SectionedSystemTab):
     def build_sections(self) -> None:
         self.settings = app_settings()
         self._appearance(self.add_section("appearance", "Appearance", "monitor-cog"))
+        self._accessibility(self.add_section("accessibility", "Accessibility", "accessibility"))
         self._documents(self.add_section("documents", "Documents", "file-cog"))
         self._browser(self.add_section("browser", "Browser", "browser"))
         self._permissions(self.add_section("permissions", "Site permissions", "shield-cog-corner"))
@@ -454,6 +461,44 @@ class SettingsTab(SectionedSystemTab):
             self.cb_dark.blockSignals(False)
         else:
             self._set_value(HIGH_CONTRAST_KEY, bool(checked))
+
+    def _accessibility(self, layout) -> None:
+        c = card(layout, "Reading and screen readers")
+        self.cb_screen_reader = self._check(
+            self._bool(SCREEN_READER_NAMES_KEY, True), lambda v: self._set_accessibility(SCREEN_READER_NAMES_KEY, v)
+        )
+        setting_row(
+            c,
+            "Names for screen readers",
+            self.cb_screen_reader,
+            "Gives buttons that show only an icon the names screen readers such as Orca, NVDA and "
+            "VoiceOver read out, taken from their tooltips.",
+        )
+        self.cb_read_words = self._check(
+            self._bool(READ_WORDS_KEY, True), lambda v: self._set_accessibility(READ_WORDS_KEY, v)
+        )
+        setting_row(
+            c,
+            "Highlight each word read aloud",
+            self.cb_read_words,
+            "While a document is read aloud (Ctrl+Shift+U), marks the word being spoken as well as its sentence.",
+        )
+        self.cb_ruler = self._check(
+            self._bool(READING_RULER_KEY, False), lambda v: self._set_accessibility(READING_RULER_KEY, v)
+        )
+        setting_row(
+            c,
+            "Reading ruler",
+            self.cb_ruler,
+            "Dims every line of a document but the one you're reading. It follows the mouse; Alt+Down and "
+            "Alt+Up move it a line, and Ctrl+Alt+L turns it on and off.",
+        )
+
+    def _set_accessibility(self, key: str, checked: bool) -> None:
+        self._set_value(key, bool(checked))
+        win = self.window_ref
+        if hasattr(win, "apply_accessibility"):
+            win.apply_accessibility()
 
     def _set_vertical_tabs(self, checked: bool) -> None:
         win = self.window_ref

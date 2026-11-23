@@ -132,6 +132,10 @@ class ReaderHost(Protocol):
 
     def _live_metadata_worker(self) -> Optional[Any]: ...
 
+    def ruler_enabled(self) -> bool: ...
+
+    def ruler_follow_pointer(self, page: int, pos: QPoint) -> None: ...
+
 
 if TYPE_CHECKING:
     ReaderHostBase = ReaderHost

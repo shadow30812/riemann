@@ -63,12 +63,14 @@ class MiniAudioPlayer(QWidget):
         self.btn_play_pause = QPushButton(self)
         self.btn_play_pause.setIcon(self._get_icon("pause.svg"))
         self.btn_play_pause.setFixedSize(24, 24)
+        self.btn_play_pause.setToolTip("Play or Pause")
         self.btn_play_pause.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_play_pause.clicked.connect(self.toggle_playback)
 
         self.position_slider = QSlider(Qt.Orientation.Horizontal, self)
         self.position_slider.setRange(0, 100)
         self.position_slider.setFixedWidth(100)
+        self.position_slider.setToolTip("Playback Position")
         self.position_slider.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self.position_slider.sliderPressed.connect(self.slider_pressed)

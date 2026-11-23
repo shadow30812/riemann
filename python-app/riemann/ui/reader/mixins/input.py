@@ -179,6 +179,8 @@ class InputMixin(ReaderHostBase):
 
         if isinstance(source, PageWidget):
             page_idx = source.property("pageIndex")
+            if event.type() == QEvent.Type.MouseMove and self.ruler_enabled():
+                self.ruler_follow_pointer(page_idx, event.pos())
 
             if self.is_snipping:
                 if event.type() == QEvent.Type.MouseButtonPress:
