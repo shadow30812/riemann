@@ -22,6 +22,7 @@ from PySide6.QtCore import (
     QEvent,
     QPoint,
     QPropertyAnimation,
+    QRect,
     QSettings,
     Qt,
     QTimer,
@@ -56,7 +57,7 @@ from .mixins.navigation import NavigationMixin
 from .mixins.pages import PagesMixin
 from .mixins.read_aloud import ReadAloudMixin
 from .mixins.rendering import RenderingMixin
-from .mixins.ruler import RulerMixin
+from .mixins.ruler import ReadingRuler
 from .mixins.search import SearchMixin
 from .mixins.selection import SelectionMixin
 from .mixins.signatures import SignaturesMixin
@@ -80,7 +81,6 @@ class ReaderTab(
     DocumentMixin,
     PagesMixin,
     ReadAloudMixin,
-    RulerMixin,
     FormsMixin,
     CitationsMixin,
     QWidget,
@@ -162,6 +162,11 @@ class ReaderTab(
         self._last_click_pos: QPoint = QPoint()
         self._just_selected_multi_click: bool = False
 
+        self.ruler = ReadingRuler(self._get_page_chars, self._page_count, self)
+        self.ruler.page_needed.connect(self._lay_out_page)
+        self.ruler.band_changed.connect(self._show_ruler_band)
+        self.ruler.toast.connect(self.show_toast)
+
         self._init_backend()
         self.setup_ui()
         self.apply_theme()
@@ -228,9 +233,9 @@ class ReaderTab(
             ("Ctrl+Alt+N", self.toggle_notes),
             ("Alt+Left", self.go_back),
             ("Alt+Right", self.go_forward),
-            ("Ctrl+Alt+L", self.toggle_reading_ruler),
-            ("Alt+Down", lambda: self.ruler_step(1)),
-            ("Alt+Up", lambda: self.ruler_step(-1)),
+            ("Ctrl+Alt+L", lambda: self.ruler.toggle(self.current_page_index)),
+            ("Alt+Down", lambda: self.ruler.step(1, self.current_page_index)),
+            ("Alt+Up", lambda: self.ruler.step(-1, self.current_page_index)),
         ]
         for seq, slot in shortcuts:
             QShortcut(QKeySequence(seq), self).activated.connect(slot)
@@ -243,6 +248,30 @@ class ReaderTab(
         sc2.setContext(Qt.ShortcutContext.WindowShortcut)
         sc2.activated.connect(lambda: self.cycle_tab(-1))
         share_keys(self)
+
+    def _page_count(self) -> int:
+        return self.current_doc.page_count if self.current_doc else 0
+
+    def _lay_out_page(self, page: int) -> None:
+        """Builds page's widget when it hasn't been yet (only pages near the view are)."""
+        if page not in self.page_widgets:
+            self.jump_to_page(page)
+
+    def _scroll_to_box(self, page: int, box: QRect, margin_y: int) -> None:
+        """Scrolls so box, in page's coordinates, is in view."""
+        top = self._page_top_y(page)
+        widget = self.page_widgets.get(page)
+        if top is not None and widget is not None:
+            row = widget.parentWidget()
+            x = (row.x() if row else 0) + widget.x() + box.center().x()
+            self.scroll.ensureVisible(int(x), int(top + box.center().y()), 40, margin_y)
+
+    def _show_ruler_band(self, page: int | None, band: QRect | None, scroll: bool) -> None:
+        for idx, widget in self.page_widgets.items():
+            if hasattr(widget, "set_ruler"):
+                widget.set_ruler(band if page is not None and idx == page else None)
+        if page is not None and scroll:
+            self._scroll_to_box(page, band, 160)
 
     def _get_tab_widget(self) -> QTabWidget | None:
         """The QTabWidget this tab sits in, or None."""

@@ -149,6 +149,39 @@ def test_text_lines_follow_reading_order_and_columns():
     assert line_at(lines, QPoint(20, 200)) == 1
 
 
+def test_the_reading_ruler_works_without_a_reader(qapp, monkeypatch):
+    from PySide6.QtCore import QPoint, QRect, QSettings
+
+    from riemann.ui.reader.mixins.ruler import ReadingRuler
+
+    store = QSettings("RiemannTest", "BareRuler")
+    store.clear()
+    monkeypatch.setattr("riemann.ui.reader.mixins.ruler.app_settings", lambda: store)
+
+    def word(text, x, y):
+        return [(ch, QRect(x + i * 8, y, 8, 12), 0) for i, ch in enumerate(text)]
+
+    pages = {0: word("One line", 10, 10) + word("Two line", 10, 30), 1: word("Next page", 10, 10)}
+    ruler = ReadingRuler(lambda page: pages[page], lambda: len(pages))
+    bands, needed, toasts = [], [], []
+    ruler.band_changed.connect(lambda page, band, scroll: bands.append((page, band, scroll)))
+    ruler.page_needed.connect(needed.append)
+    ruler.toast.connect(toasts.append)
+
+    ruler.toggle(0)
+    assert store.value("accessibility/reading_ruler", type=bool)
+    assert bands[-1][0] == 0 and bands[-1][1].contains(pages[0][0][1]) and bands[-1][2]
+    ruler.step(1, 0)
+    ruler.step(1, 0)
+    assert bands[-1][0] == 1 and needed[-1] == 1
+    ruler.follow_pointer(0, QPoint(20, 35))
+    assert bands[-1][0] == 0 and bands[-1][1].contains(pages[0][-1][1]) and not bands[-1][2]
+    ruler.toggle(0)
+    assert bands[-1] == (None, None, False)
+    assert toasts == ["Reading ruler on (Alt+Down and Alt+Up move it)", "Reading ruler off"]
+    store.clear()
+
+
 def test_reading_ruler_follows_the_pointer_and_the_keys(qapp, qtbot, monkeypatch):
     from PySide6.QtCore import QPoint, QSettings
 
@@ -163,26 +196,26 @@ def test_reading_ruler_follows_the_pointer_and_the_keys(qapp, qtbot, monkeypatch
     assert wait_for(lambda: tab.current_doc is not None and 0 in tab.page_widgets)
     wait_for(lambda: False, timeout=0.5)
     page = tab.page_widgets[0]
-    assert not tab.ruler_enabled()
-    tab.ruler_follow_pointer(0, QPoint(page.width() // 2, page.height() // 3))
+    assert not tab.ruler.enabled()
+    tab.ruler.follow_pointer(0, QPoint(page.width() // 2, page.height() // 3))
     assert getattr(page, "ruler_band", None) is None
 
-    tab.toggle_reading_ruler()
+    tab.ruler.toggle(tab.current_page_index)
     assert store.value("accessibility/reading_ruler", type=bool)
     first = page.ruler_band
     assert first is not None and first.height() < page.height() / 10
-    tab.ruler_step(1)
+    tab.ruler.step(1, tab.current_page_index)
     second = page.ruler_band
     assert second.top() > first.top()
-    tab.ruler_step(-1)
+    tab.ruler.step(-1, tab.current_page_index)
     assert page.ruler_band == first
 
-    lines = tab._ruler_lines(0)
+    lines = tab.ruler.lines(0)
     target = lines[len(lines) // 2]
-    tab.ruler_follow_pointer(0, target.center())
+    tab.ruler.follow_pointer(0, target.center())
     assert page.ruler_band.contains(target)
 
-    tab.set_reading_ruler(False)
+    tab.ruler.set_enabled(False)
     assert page.ruler_band is None
     tab.cleanup()
     store.clear()
@@ -217,9 +250,9 @@ def test_settings_has_an_accessibility_section_that_reaches_open_readers(window)
         assert isinstance(box, QCheckBox)
     settings.cb_ruler.setChecked(True)
     assert window.settings.value(READING_RULER_KEY, type=bool)
-    assert reader.ruler_enabled()
+    assert reader.ruler.enabled()
     settings.cb_ruler.setChecked(False)
-    assert not reader.ruler_enabled()
+    assert not reader.ruler.enabled()
     settings.cb_screen_reader.setChecked(False)
     assert not window.settings.value(SCREEN_READER_NAMES_KEY, True, type=bool)
     assert reader.btn_next.accessibleName() == ""

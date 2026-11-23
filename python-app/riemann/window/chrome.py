@@ -211,7 +211,7 @@ class ChromeMixin:
             for i in range(tab_widget.count()):
                 w = tab_widget.widget(i)
                 if isinstance(w, ReaderTab):
-                    w.set_reading_ruler(ruler)
+                    w.ruler.set_enabled(ruler)
 
     def restyle_ui(self) -> None:
         """Applies the interface theme (dark_mode and high contrast) to the window and its tabs."""

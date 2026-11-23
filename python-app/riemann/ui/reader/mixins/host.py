@@ -39,6 +39,7 @@ from ....core.constants import ViewMode, ZoomMode
 if TYPE_CHECKING:
     from ..toolbar_layout import ToolbarLayout
     from ..widgets import PageWidget
+    from .ruler import ReadingRuler
 
 
 class ReaderHost(Protocol):
@@ -97,6 +98,7 @@ class ReaderHost(Protocol):
     ai_search_bar: QWidget
     txt_page: QLineEdit
     combo_zoom: QComboBox
+    ruler: "ReadingRuler"
     link_tooltip: QLabel
     sidebar_nav: QWidget
     notes_panel: QWidget
@@ -132,9 +134,6 @@ class ReaderHost(Protocol):
 
     def _live_metadata_worker(self) -> Any | None: ...
 
-    def ruler_enabled(self) -> bool: ...
-
-    def ruler_follow_pointer(self, page: int, pos: QPoint) -> None: ...
 
 
 if TYPE_CHECKING:
