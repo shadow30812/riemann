@@ -25,7 +25,7 @@ On the test machine (numbers and method under [Performance](#performance)):
 - Three page themes (N): light, fast dark (inverted) and smart dark, which inverts lightness and keeps hues, so figures stay readable.
 - Text reflow mode, find in page, OCR of the current page or a range of pages, and snipping an equation to LaTeX (needs the optional Pix2Tex component).
 - Notes per paper (Ctrl+Alt+N): a Markdown file kept next to the PDF, shown in a panel with an editor and a preview. "Link this page" inserts a link that jumps back to the page.
-- Read aloud (Ctrl+Shift+U) speaks the document with the system's text-to-speech voice. The sentence being spoken is highlighted, and pages turn as it goes.
+- Read aloud (Ctrl+Shift+U) speaks the document with the system's text-to-speech voice. The word being spoken is highlighted within its sentence, and pages turn as it goes.
 - Presentation mode (Shift+F5): one page at a time on black, with a laser pointer (L), blank screens (B and W), zoom around the pointer, and the next page rendered ahead.
 - AI semantic search (Ctrl+I) finds passages by meaning. It runs a small sentence-embedding model in a child process of the app; nothing leaves your machine. Password-protected files work too.
 
@@ -97,6 +97,14 @@ Turn on Settings > "Open Documents in Preview Mode" and every document opens as 
 - Light and dark interface themes (Ctrl+D). The reader's start page, the browser homepage and the Workspaces dashboard follow it.
 
 ![The same workspace with the tab strip collapsed](images/collapsed-tabs.png)
+
+### Accessibility
+
+- Names for screen readers: buttons that show only an icon get the name Orca, NVDA or VoiceOver reads out, taken from their tooltips, with the keyboard shortcut as their description. Every control in the reader and browser toolbars has one.
+- Reading ruler (Ctrl+Alt+L): a band over the line you're reading, with the rest of the page dimmed. It follows the mouse, and Alt+Down and Alt+Up move it a line at a time, on to the next or previous page. Two columns stay apart.
+- While a document is read aloud, the word being spoken is marked as well as its sentence. Voices that report their place set the mark; for the rest it follows the speaking speed, which Riemann learns as it reads.
+- A high-contrast dark theme (Settings > Appearance > High contrast): pure black with white text and brighter outlines, every text colour at least 7:1 on black. On an OLED screen the black pixels are switched off.
+- Settings > Accessibility turns the screen-reader names, the word highlight and the reading ruler on and off.
 
 ### Other tools
 
@@ -252,13 +260,13 @@ The other scripts (`bench_core.py`, `bench_startup.py`, `bench_memory.py`) run t
 
 | | |
 | --- | --- |
-| Python (app) | 37,100 lines in 103 files |
-| Python (tests) | 13,300 lines, 1,152 tests |
-| Rust (core and OCR worker) | 1,750 lines, 36 tests |
-| JavaScript (injected browser scripts, homepage) | 1,300 lines, plus 220 lines of tests |
+| Python (app) | 39,500 lines in 117 files |
+| Python (tests) | 16,100 lines, 1,345 tests |
+| Rust (core and OCR worker) | 2,000 lines, 36 tests |
+| JavaScript (injected browser scripts, homepage) | 1,300 lines, plus 240 lines of tests |
 | Benchmarks | 850 lines of Python |
-| Test coverage | 73% of 23,521 statements |
-| History | over 260 commits since January 2026 |
+| Test coverage | 75% of 24,701 statements |
+| History | over 330 commits since January 2026 |
 
 ## Keyboard shortcuts
 
@@ -303,6 +311,7 @@ In a reader tab:
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo an annotation |
 | Ctrl+Alt+N | Notes panel |
 | Ctrl+Shift+U | Read aloud |
+| Ctrl+Alt+L, Alt+Down / Alt+Up | Reading ruler on or off, move it a line |
 | Shift+F5 | Presentation mode |
 | Ctrl+S | Save a copy, with annotations |
 | Ctrl+Shift+S | Save a password-protected copy, or remove the password |
