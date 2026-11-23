@@ -51,6 +51,7 @@ OCR_LANGUAGES_KEY = "ocr/languages"
 
 DARK_MODE_KEY = "darkMode"
 AUTO_OPEN_DOWNLOADS_KEY = "browser/auto_open_pdf"
+HOMEPAGE_LINKS_KEY = "homepage_links"
 UI_SCALE_KEY = "app/ui_scale"
 DEFAULT_UI_SCALE = 100
 DEFAULT_DIR_KEY = "app/default_dir"

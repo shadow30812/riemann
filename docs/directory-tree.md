@@ -115,7 +115,7 @@ riemann/
 │   │   │   ├── tables.py
 │   │   │   └── window_snap.py
 │   │   ├── ui/
-│   │   │   ├── browser.py
+│   │   │   ├── browser/
 │   │   │   ├── browser_handlers.py
 │   │   │   ├── command_palette.py
 │   │   │   ├── components.py

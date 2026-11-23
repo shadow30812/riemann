@@ -260,14 +260,14 @@ def test_request_interceptor_whatsapp():
     info.setHttpHeader.assert_called_with(b"User-Agent", interceptor.spoofed_ua)
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_browser_tab_init(mock_injector, qtbot, webengine):
     tab = webengine.tab(start_url="https://example.com")
     qtbot.addWidget(tab)
     assert tab.txt_url.placeholderText() == "Enter URL or Search..."
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_browser_tab_incognito_init(mock_injector, qtbot, webengine):
     tab = webengine.tab(incognito=True)
     qtbot.addWidget(tab)
@@ -275,7 +275,7 @@ def test_browser_tab_incognito_init(mock_injector, qtbot, webengine):
     assert tab.incognito is True
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_browser_tab_focus_in(mock_injector, qtbot, webengine):
     tab = webengine.tab()
     qtbot.addWidget(tab)
@@ -289,7 +289,7 @@ def test_browser_tab_focus_in(mock_injector, qtbot, webengine):
         mock_set_focus.assert_called()
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 @patch("os.getlogin", return_value="TestUser")
 def test_browser_tab_homepage_load(mock_login, mock_injector, qtbot, webengine):
     tab = webengine.tab()
@@ -315,7 +315,7 @@ def _fake_permission(kind, origin="https://meet.example"):
     return perm
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_permission_requests_follow_site_settings(mock_injector, qtbot, webengine, tmp_path):
     from riemann.core.permissions import ALLOW, BLOCK, SitePermissions
 
@@ -342,7 +342,7 @@ def test_permission_requests_follow_site_settings(mock_injector, qtbot, webengin
     unknown.deny.assert_called_once()
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_clipboard_read_asks_and_remembers(mock_injector, qtbot, webengine, tmp_path):
     from riemann.core.permissions import ALLOW, SitePermissions
 
@@ -396,7 +396,7 @@ def test_content_settings_follow_the_site(qapp, tmp_path):
     del profile
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_browser_tab_devtools(mock_injector, qtbot, webengine):
     tab = webengine.tab()
     qtbot.addWidget(tab)
@@ -405,7 +405,7 @@ def test_browser_tab_devtools(mock_injector, qtbot, webengine):
     assert tab._devtools_window.isVisible()
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_browser_tab_zoom(mock_injector, qtbot, webengine):
     tab = webengine.tab()
     qtbot.addWidget(tab)
@@ -421,7 +421,7 @@ def test_browser_tab_zoom(mock_injector, qtbot, webengine):
     assert tab.btn_zoom.text() == "100%"
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_browser_tab_search_toggle(mock_injector, qtbot, webengine):
     tab = webengine.tab()
     qtbot.addWidget(tab)
@@ -430,7 +430,7 @@ def test_browser_tab_search_toggle(mock_injector, qtbot, webengine):
     assert tab.search_bar.isHidden() is False
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_browser_tab_navigate(mock_injector, qtbot, webengine):
     tab = webengine.tab()
     qtbot.addWidget(tab)
@@ -441,7 +441,7 @@ def test_browser_tab_navigate(mock_injector, qtbot, webengine):
     tab.web.load.assert_called_with(QUrl("https://example.com"))
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_browser_tab_toast(mock_injector, qtbot, webengine):
     tab = webengine.tab()
     qtbot.addWidget(tab)
@@ -450,7 +450,7 @@ def test_browser_tab_toast(mock_injector, qtbot, webengine):
     assert tab.lbl_toast.text() == "Hello World"
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_browser_tab_bookmark_toggle(mock_injector, qtbot, webengine):
     main_win = MagicMock()
     main_win.bookmarks_manager.is_bookmarked.return_value = False
@@ -462,7 +462,7 @@ def test_browser_tab_bookmark_toggle(mock_injector, qtbot, webengine):
         main_win.bookmarks_manager.add.assert_called_once()
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 @patch("builtins.open", new_callable=mock_open, read_data="console.log('audio');")
 @patch("os.path.exists", return_value=True)
 def test_browser_tab_music_mode(mock_exists, mock_file, mock_injector, qtbot, webengine):
@@ -536,15 +536,15 @@ def _download(webengine, qtbot, tmp_path, url, tabs=1):
         dialogs.append(args)
         return str(target), ""
 
-    with patch("riemann.ui.browser.QFileDialog.getSaveFileName", side_effect=save_dialog), patch(
-        "riemann.ui.browser.save_last_directory"
+    with patch("riemann.ui.browser.downloads.QFileDialog.getSaveFileName", side_effect=save_dialog), patch(
+        "riemann.ui.browser.downloads.save_last_directory"
     ):
         made[0].web.setUrl(QUrl(url))
         assert _wait_until(lambda: "Download complete!" in toasts or "Download failed." in toasts)
     return target, opened, toasts, dialogs
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_download_completes_and_opens_the_pdf(mock_injector, qtbot, webengine, tmp_path, download_server):
     target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/report.pdf")
     assert "Download complete!" in toasts
@@ -552,14 +552,14 @@ def test_download_completes_and_opens_the_pdf(mock_injector, qtbot, webengine, t
     assert opened == [str(target)]
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_one_download_asks_once_with_several_tabs_open(mock_injector, qtbot, webengine, tmp_path, download_server):
     target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/report.pdf", tabs=3)
     assert len(dialogs) == 1
     assert toasts.count("Download complete!") == 1
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_finished_download_that_is_not_a_pdf_is_not_opened(mock_injector, qtbot, webengine, tmp_path, download_server):
     target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/bundle.zip")
     assert "Download complete!" in toasts
@@ -567,7 +567,7 @@ def test_finished_download_that_is_not_a_pdf_is_not_opened(mock_injector, qtbot,
     assert opened == []
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_a_downloaded_ebook_opens_and_source_code_does_not(mock_injector, qtbot, webengine, tmp_path, download_server):
     target, opened, toasts, dialogs = _download(webengine, qtbot, tmp_path, download_server + "/book.epub")
     assert opened == [str(target)]
@@ -575,7 +575,7 @@ def test_a_downloaded_ebook_opens_and_source_code_does_not(mock_injector, qtbot,
     assert target.exists() and opened == []
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_downloads_stay_closed_when_the_setting_is_off(mock_injector, qtbot, webengine, tmp_path, download_server):
     app_settings().setValue(AUTO_OPEN_DOWNLOADS_KEY, False)
     try:
@@ -585,7 +585,7 @@ def test_downloads_stay_closed_when_the_setting_is_off(mock_injector, qtbot, web
     assert "Download complete!" in toasts and opened == []
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_print_to_pdf_reports_success_and_failure_once(mock_injector, qtbot, webengine, tmp_path):
     tab = webengine.tab()
     qtbot.addWidget(tab)
@@ -593,23 +593,23 @@ def test_print_to_pdf_reports_success_and_failure_once(mock_injector, qtbot, web
     tab.show_toast = toasts.append
     page = tab.web.page()
     target = tmp_path / "page.pdf"
-    with patch("riemann.ui.browser.QFileDialog.getSaveFileName", return_value=(str(target), "")), patch(
-        "riemann.ui.browser.save_last_directory"
+    with patch("riemann.ui.browser.downloads.QFileDialog.getSaveFileName", return_value=(str(target), "")), patch(
+        "riemann.ui.browser.downloads.save_last_directory"
     ), patch.object(page, "printToPdf", lambda path: page.pdfPrintingFinished.emit(path, True)):
         tab.print_to_pdf()
     assert toasts[-1] == "PDF saved successfully!"
     toasts.clear()
-    with patch("riemann.ui.browser.QFileDialog.getSaveFileName", return_value=(str(target), "")), patch(
-        "riemann.ui.browser.save_last_directory"
+    with patch("riemann.ui.browser.downloads.QFileDialog.getSaveFileName", return_value=(str(target), "")), patch(
+        "riemann.ui.browser.downloads.save_last_directory"
     ), patch.object(page, "printToPdf", lambda path: page.pdfPrintingFinished.emit(path, False)):
         tab.print_to_pdf()
     assert toasts[-1] == "Failed to render PDF."
 
 
-@patch("riemann.ui.browser.YtDlpSettingsDialog")
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.downloads.YtDlpSettingsDialog")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 @patch("PySide6.QtWidgets.QFileDialog.getExistingDirectory", return_value="/fake/dir")
-@patch("riemann.ui.browser.YtDlpWorker")
+@patch("riemann.ui.browser.downloads.YtDlpWorker")
 def test_browser_tab_download_video(mock_worker, mock_dialog, mock_injector, mock_settings_dlg, qtbot, webengine):
     mock_settings_dlg.return_value.exec.return_value = 1
     mock_settings_dlg.return_value.get_options.return_value = {}
@@ -621,7 +621,7 @@ def test_browser_tab_download_video(mock_worker, mock_dialog, mock_injector, moc
         mock_worker.return_value.start.assert_called_once()
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_browser_tab_cancel_video(mock_injector, qtbot, webengine):
     tab = webengine.tab()
     qtbot.addWidget(tab)
@@ -631,7 +631,7 @@ def test_browser_tab_cancel_video(mock_injector, qtbot, webengine):
     tab.dl_worker.stop.assert_called_once()
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_browser_tab_download_finished(mock_injector, qtbot, webengine):
     tab = webengine.tab()
     qtbot.addWidget(tab)
@@ -781,7 +781,7 @@ def test_blocked_requests_are_counted_without_touching_settings(qapp):
     info = MagicMock(spec=QWebEngineUrlRequestInfo)
     info.requestUrl.return_value = QUrl("https://doubleclick.net/ad")
     info.firstPartyUrl.return_value = QUrl("https://news.example/")
-    with patch("riemann.ui.browser.app_settings") as settings:
+    with patch("riemann.ui.browser.interceptor.app_settings") as settings:
         for _ in range(3):
             interceptor.interceptRequest(info)
         settings.assert_not_called()
@@ -810,7 +810,7 @@ def _run_js(page, script, world):
     return out[0]
 
 
-@patch("riemann.ui.browser.ScriptInjector")
+@patch("riemann.ui.browser.tab.ScriptInjector")
 def test_captions_token_is_hidden_from_page_scripts(mock_injector, qtbot, webengine, download_server):
     from PySide6.QtWebEngineCore import QWebEngineScript
 
@@ -836,15 +836,15 @@ def test_captions_token_is_hidden_from_page_scripts(mock_injector, qtbot, webeng
 def test_yt_dlp_runs_the_pinned_deno_from_the_venv(tmp_path, monkeypatch):
     import os
 
-    from riemann.ui import browser
+    from riemann.ui.browser import ytdlp
 
     python = tmp_path / "bin" / "python"
     python.parent.mkdir()
     python.write_text("")
-    monkeypatch.setattr(browser, "venv_python", lambda: str(python))
-    assert browser.js_runtimes() == {"deno": {}}
+    monkeypatch.setattr(ytdlp, "venv_python", lambda: str(python))
+    assert ytdlp.js_runtimes() == {"deno": {}}
     deno = tmp_path / "bin" / ("deno.exe" if os.name == "nt" else "deno")
     deno.write_text("")
-    assert browser.js_runtimes() == {"deno": {"path": str(deno)}}
-    monkeypatch.setattr(browser, "venv_python", lambda: "")
-    assert browser.js_runtimes() == {"deno": {}}
+    assert ytdlp.js_runtimes() == {"deno": {"path": str(deno)}}
+    monkeypatch.setattr(ytdlp, "venv_python", lambda: "")
+    assert ytdlp.js_runtimes() == {"deno": {}}

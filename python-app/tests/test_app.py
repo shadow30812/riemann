@@ -906,9 +906,9 @@ def test_venv_lookups_skip_the_interpreter_once_cached(tmp_path):
 
 
 def test_greeting_name_falls_back_without_pwd():
-    from riemann.ui import browser
+    from riemann.ui.browser import tab
 
-    name = browser._os_display_name()
+    name = tab._os_display_name()
     assert isinstance(name, str) and name
 
 

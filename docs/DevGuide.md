@@ -820,9 +820,9 @@ Avoid invalidating the cache unnecessarily.
 
 # 7. Browser Architecture
 
-## `ui/browser.py`
+## `ui/browser/`
 
-This file contains the primary Chromium integration layer.
+This package contains the primary Chromium integration layer. `tab.py` is `BrowserTab`; its behaviour is split into mixins: `chrome.py` (toolbar, find bar, shortcuts, theme, zoom, bookmarks), `media.py` (captions, music and video modes, mute), `stream.py` (outside players and the built-in player) and `downloads.py`. `interceptor.py` decides what pages may load, `page.py` is the `WebPage`, `ytdlp.py` holds the yt-dlp workers and `preview.py` the `PreviewTextTab`.
 
 Responsibilities:
 
@@ -895,11 +895,11 @@ Do not mix both systems carelessly.
 
 ## yt-dlp Video & Playlist Architecture
 
-The yt-dlp integration in `ui/browser.py` manages asynchronous video and playlist retrieval:
+The yt-dlp integration in `ui/browser/ytdlp.py` manages asynchronous video and playlist retrieval:
 
 * **Challenge Execution & Deno Environment**:
-  * Configures `"remote_components": ["ejs:github"]` within `ydl_opts` for both `YtDlpWorker` and `YtDlpStreamWorker`.
-  * Checks and appends `~/.deno/bin` to `os.environ["PATH"]` if present to resolve JavaScript extraction challenges without external intervention.
+  * YouTube's challenges are solved by the pinned `yt-dlp-ejs` package in the pinned Deno (`js_runtimes`); yt-dlp is never given `remote_components`.
+  * Checks and appends `~/.deno/bin` to `os.environ["PATH"]` if present, for a Deno installed outside the optional packages.
 * **Automatic Playlist Detection**:
   * In `BrowserTab.download_video()`, checks if the target URL contains `list=` or `/playlist`.
   * If detected, passes `is_playlist=True` to `YtDlpSettingsDialog`, auto-checking the "Download playlist" option.
@@ -1589,7 +1589,7 @@ Likely required:
 
 Primary files:
 
-* `browser.py`
+* `ui/browser/`
 * `browser_handlers.py`
 * `assets/injections/`
 

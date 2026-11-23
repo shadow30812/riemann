@@ -113,7 +113,7 @@ UNTRACKED_WORKERS = {
     "core/captions_server.py": {"self.worker_thread"},
     "core/dependencies.py": {"self.worker"},
     "core/features.py": {"self.worker", "worker"},
-    "ui/browser.py": {"self.dl_worker"},
+    "ui/browser/downloads.py": {"self.dl_worker"},
     "ui/reader/mixins/ai.py": {"self.loader_thread", "self.inst_thread", "self.downloader", "self.inference_thread"},
     "ui/reader/mixins/document.py": {"self._render_worker"},
 }

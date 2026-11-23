@@ -369,7 +369,8 @@ python-app/riemann/
                       library), PDF writing (annotations, forms, page edits, redaction),
                       render processes, LibreOffice and the basic Office views, EPUB,
                       images, CSV, the AI engine, captions, settings
-  ui/browser.py       browser tab and the lightweight Markdown/HTML/text preview
+  ui/browser/         browser tab (tab.py and its mixins), request filtering, yt-dlp,
+                      and the lightweight Markdown/HTML/text preview
   ui/reader/          the reader: tab.py, toolbar layouts, render worker, Replace text,
                       and mixins/ for rendering, annotations, pages, search, signatures,
                       forms, read aloud, citations, notes and AI search
