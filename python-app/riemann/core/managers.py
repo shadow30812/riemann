@@ -4,6 +4,13 @@ Core data managers for the Riemann application.
 Provides persistent data handling for the library metadata, bookmarks,
 browsing history, and active/historical downloads. Uses SQLite for
 complex metadata querying and JSON for lightweight list persistence.
+
+DownloadProgressBar draws its percentage itself, in two colours: accent_text
+over the filled part and text over the empty part. A style sheet gives a
+progress bar one text colour, and no colour reads well on both the accent fill
+and the empty bar. The yt-dlp window takes its theme from the main window's
+dark_mode (the theme is the window's style sheet, not the application palette)
+and is restyled by apply_theme when the interface theme changes.
 """
 
 import hashlib
@@ -14,13 +21,13 @@ import sqlite3
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QRect, Qt, QUrl
 
 from .annotation_store import pdf_identifier
 from .settings import DEFAULT_POPULAR_SITES, POPULAR_SITES_KEY, string_list
 from .storage import app_data_dir, write_json_atomic
 from .log import log
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QColor, QDesktopServices, QPainter
 from PySide6.QtWebEngineCore import QWebEngineDownloadRequest
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -638,6 +645,44 @@ class PasswordDialog(QDialog):
         return self.txt_password.text()
 
 
+class DownloadProgressBar(QProgressBar):
+    def __init__(self, dark: bool, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setTextVisible(False)
+        self.set_dark(dark)
+
+    def set_dark(self, dark: bool) -> None:
+        self._tokens = tokens(dark)
+        t = self._tokens
+        self.setStyleSheet(
+            f"QProgressBar {{ border: 1px solid {t['border_strong']}; border-radius: 3px;"
+            f" background-color: {t['raised']}; }}"
+            f"QProgressBar::chunk {{ background-color: {t['accent']}; }}"
+        )
+        self.update()
+
+    def paintEvent(self, event: Any) -> None:
+        super().paintEvent(event)
+        span = self.maximum() - self.minimum()
+        done = (self.value() - self.minimum()) / span if span > 0 else 0.0
+        rect = self.rect()
+        split = rect.left() + round(rect.width() * max(0.0, min(1.0, done)))
+        painter = QPainter(self)
+        font = painter.font()
+        font.setPixelSize(10)
+        font.setBold(True)
+        painter.setFont(font)
+        text = f"{self.value()}%"
+        for clip, colour in (
+            (QRect(rect.left(), rect.top(), split - rect.left(), rect.height()), self._tokens["accent_text"]),
+            (QRect(split, rect.top(), rect.right() - split + 1, rect.height()), self._tokens["text"]),
+        ):
+            painter.setClipRect(clip)
+            painter.setPen(QColor(colour))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        painter.end()
+
+
 class YtDlpDownloadManager(QDialog):
     """
     A dedicated dialog for managing yt-dlp downloads.
@@ -709,16 +754,14 @@ class YtDlpDownloadManager(QDialog):
         return f"{m:02d}:{s:02d}"
 
     def _create_progress_bar(self, height=14) -> QProgressBar:
-        pb = QProgressBar()
+        pb = DownloadProgressBar(getattr(self.parentWidget(), "dark_mode", app_is_dark()))
         pb.setValue(0)
         pb.setFixedHeight(height)
-        t = tokens(app_is_dark())
-        pb.setStyleSheet(
-            f"QProgressBar {{ border: 1px solid {t['border_strong']}; border-radius: 3px; text-align: center;"
-            f" color: {t['text']}; font-size: 10px; }}"
-            f"QProgressBar::chunk {{ background-color: {t['accent']}; }}"
-        )
         return pb
+
+    def apply_theme(self, dark: bool) -> None:
+        for bar in self.findChildren(DownloadProgressBar):
+            bar.set_dark(dark)
 
     def add_download(
         self, worker, title: str, dest_dir: str, is_playlist: bool

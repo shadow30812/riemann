@@ -196,6 +196,8 @@ class ChromeMixin:
 
         self.sidecar_panel.update_theme(self.dark_mode)
         self._refresh_split_style()
+        if hasattr(self, "ytdlp_manager_dialog"):
+            self.ytdlp_manager_dialog.apply_theme(self.dark_mode)
 
         if hasattr(self, "_update_global_metrics"):
             self._update_global_metrics()

@@ -288,3 +288,66 @@ def test_ytdlp_cancel_shows_at_once_and_stops_the_worker(qapp):
     assert task["is_finished"]
     mgr.close()
     mgr.deleteLater()
+
+
+def _contrast(a, b):
+    def lum(c):
+        def ch(v):
+            v /= 255
+            return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+        return 0.2126 * ch(c.red()) + 0.7152 * ch(c.green()) + 0.0722 * ch(c.blue())
+
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _percentage_contrast(bar, value, background_x):
+    bar.setValue(value)
+    QApplication.processEvents()
+    img = bar.grab().toImage()
+    background = img.pixelColor(background_x(img.width()), img.height() // 2)
+    return max(
+        _contrast(img.pixelColor(x, y), background)
+        for x in range(img.width() // 2 - 15, img.width() // 2 + 15)
+        for y in range(2, img.height() - 2)
+    )
+
+
+def _themed_manager(dark, window_dark=None):
+    from PySide6.QtWidgets import QWidget
+
+    from riemann.core.assets import asset_path
+
+    window_dark = dark if window_dark is None else window_dark
+    with open(asset_path("theme", "modern_dark.css" if window_dark else "modern_light.css"), encoding="utf-8") as f:
+        sheet = f.read()
+    host = QWidget()
+    host.dark_mode = dark
+    host.setStyleSheet(sheet)
+    mgr = YtDlpDownloadManager(host)
+    bar = mgr._create_progress_bar(16)
+    bar.setParent(mgr)
+    bar.resize(150, 16)
+    mgr.show()
+    return host, mgr, bar
+
+
+@pytest.mark.parametrize("dark", [False, True])
+def test_ytdlp_progress_percentage_is_readable_on_the_empty_and_the_filled_bar(qapp, dark):
+    """At a few percent the text sits on the empty bar, past half on the accent fill."""
+    host, mgr, bar = _themed_manager(dark)
+    assert _percentage_contrast(bar, 3, lambda w: w - 20) >= 4.5
+    assert _percentage_contrast(bar, 90, lambda w: 20) >= 4.5
+    mgr.close()
+    host.deleteLater()
+
+
+def test_ytdlp_progress_bars_follow_a_change_of_interface_theme(qapp):
+    host, mgr, bar = _themed_manager(False, window_dark=True)
+    host.dark_mode = True
+    mgr.apply_theme(True)
+    assert _percentage_contrast(bar, 3, lambda w: w - 20) >= 4.5
+    assert _percentage_contrast(bar, 90, lambda w: 20) >= 4.5
+    mgr.close()
+    host.deleteLater()
