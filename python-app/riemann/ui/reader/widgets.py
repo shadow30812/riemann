@@ -133,6 +133,12 @@ class PageWidget(QLabel):
             self.spoken_rects = rects
             self.update()
 
+    def set_word_rects(self, rects: List[QRect]) -> None:
+        """Marks the word read aloud right now, over the sentence (empty to clear)."""
+        if rects or getattr(self, "word_rects", None):
+            self.word_rects = rects
+            self.update()
+
     def set_temp_stroke(
         self, points: List[QPoint], color_str: str, thickness: int, is_highlight: bool
     ) -> None:
@@ -210,6 +216,13 @@ class PageWidget(QLabel):
             painter.setBrush(qcolor(CONTENT["spoken"], 70))
             for rect in self.spoken_rects:
                 painter.drawRect(rect)
+
+        if getattr(self, "word_rects", None):
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(qcolor(CONTENT["spoken"], 150))
+            for rect in self.word_rects:
+                painter.drawRect(rect)
+                painter.fillRect(rect.left(), rect.bottom() - 1, rect.width(), 3, qcolor(CONTENT["spoken"]))
 
         if hasattr(self, "selected_text_rects") and self.selected_text_rects:
             painter.setPen(Qt.PenStyle.NoPen)

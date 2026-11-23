@@ -51,6 +51,7 @@ OCR_LANGUAGES_KEY = "ocr/languages"
 
 DARK_MODE_KEY = "darkMode"
 HIGH_CONTRAST_KEY = "app/high_contrast"
+READ_WORDS_KEY = "accessibility/read_aloud_words"
 AUTO_OPEN_DOWNLOADS_KEY = "browser/auto_open_pdf"
 HOMEPAGE_LINKS_KEY = "homepage_links"
 UI_SCALE_KEY = "app/ui_scale"

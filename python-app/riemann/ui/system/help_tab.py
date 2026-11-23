@@ -123,7 +123,7 @@ TOPICS = [
                 "Other ways to read",
                 [
                     "Read aloud (Ctrl+Shift+U) speaks the document with your computer's voice and "
-                    "highlights each sentence as it goes. Esc stops it.",
+                    "highlights each sentence as it goes, and the word being spoken inside it. Esc stops it.",
                     "Presentation mode (Shift+F5) shows one page at a time on black. L turns the pointer "
                     "into a laser dot, B and W blank the screen, and Esc leaves.",
                     "Notes (Ctrl+Alt+N) opens a notes panel for the document. The notes are kept in a "
