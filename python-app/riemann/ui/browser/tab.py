@@ -1,11 +1,13 @@
 """
 BrowserTab: one web page in a tab, with Riemann's toolbar around it.
 
-Its behaviour is split by subject into mixins in this package: chrome
-(toolbar, find bar, shortcuts, theme, zoom, bookmarks), media (captions,
-music and video modes, mute), stream (outside players) and downloads. The
+The toolbar, find bar, shortcuts, theme, zoom and bookmarks come from the
+chrome mixin; stream (outside players) and downloads are mixins too. The
 attributes they share (web, profile, toolbar buttons, progress, lbl_toast,
-captions_server, dark_mode, incognito) are made in __init__.
+dark_mode, incognito) are made in __init__. Captions, music and video modes
+and mute are MediaControls (media.py), a part the tab owns: it gets the web
+view and the captions server, and the tab turns its buttons into calls and
+its signals into toasts and the tab bar's speaker mark.
 
 Notes:
 
@@ -84,7 +86,7 @@ from .interceptor import (
     is_local_homepage,
     sanitize_homepage_links,
 )
-from .media import MediaMixin
+from .media import MediaControls
 from .page import LEAVE_WAIT_MS, PermissionBar, WebPage
 from .stream import StreamMixin
 
@@ -144,7 +146,7 @@ def homepage_icon_tones(links_json: str, cached_icons: dict) -> dict:
     return tones
 
 
-class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
+class BrowserTab(ChromeMixin, StreamMixin, DownloadsMixin, QWidget):
     def __init__(
         self,
         start_url: str = "",
@@ -165,10 +167,6 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
             self.profile = QWebEngineProfile(self)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-
-        self._audio_timer = QTimer(self)
-        self._audio_timer.setSingleShot(True)
-        self._audio_timer.timeout.connect(self._clear_audio_state)
 
         self.request_interceptor = self.profile.findChild(RequestInterceptor)
         if self.request_interceptor is None:
@@ -259,7 +257,6 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
         self.web.titleChanged.connect(self._update_tab_title)
 
         self.web.loadFinished.connect(lambda: self.progress.setValue(0))
-        self.web.loadFinished.connect(self._restore_music_mode)
         self.web.loadFinished.connect(self._on_homepage_load_finished)
 
         self._create_shortcuts()
@@ -296,13 +293,42 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
         app = QApplication.instance()
         if not hasattr(app, "captions_server"):
             app.captions_server = CaptionsServer()
-        self.captions_server = app.captions_server
+        self.media = MediaControls(self.web, app.captions_server, self)
+        self.media.toast.connect(self.show_toast)
+        self.media.playing_changed.connect(self._set_tab_playing_state)
 
         self.link_tooltip = QLabel(self)
         self.link_tooltip.setStyleSheet(link_tip_style(tokens(self.dark_mode)))
         self.link_tooltip.hide()
         self.web.page().linkHovered.connect(self._on_link_hovered)
-        self.web.page().recentlyAudibleChanged.connect(self._on_audio_state_changed)
+
+    def toggle_captions(self) -> None:
+        on = self.btn_captions.isChecked()
+        self.btn_captions.setIcon(self._get_icon("captions.svg" if on else "captions-off.svg"))
+        self.media.set_captions(on)
+
+    def toggle_music_mode(self) -> None:
+        self.btn_music.setChecked(self.media.set_music_mode(self.btn_music.isChecked()))
+
+    def toggle_video_mode(self) -> None:
+        self.btn_video_speed.setChecked(self.media.set_video_mode(self.btn_video_speed.isChecked()))
+
+    def toggle_mute(self) -> None:
+        muted = self.btn_mute.isChecked()
+        self.media.set_muted(muted)
+        self.btn_mute.setIcon(self._get_icon("volume-x.svg" if muted else "volume-on.svg"))
+
+    def _set_tab_playing_state(self, state: str | None) -> None:
+        """Shows on the tab bar whether this tab is playing sound."""
+        parent = self.parent()
+        while parent:
+            if isinstance(parent, QTabWidget):
+                idx = parent.indexOf(self)
+                if idx != -1:
+                    parent.tabBar().setTabData(idx, state)
+                    parent.tabBar().update()
+                break
+            parent = parent.parent()
 
     def focusInEvent(self, event: Any) -> None:
         """

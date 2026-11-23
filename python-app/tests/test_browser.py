@@ -34,6 +34,7 @@ from riemann.ui.browser import (
     YtDlpStreamWorker,
     YtDlpWorker,
 )
+from riemann.ui.browser.media import MediaControls
 
 
 @pytest.fixture
@@ -479,6 +480,48 @@ def test_browser_tab_music_mode(mock_exists, mock_file, mock_injector, qtbot, we
     )
 
 
+def _bare_view(webengine):
+    """A web view on its own profile, with no BrowserTab around it."""
+    view = webengine.add(QWebEngineView())
+    view.setPage(WebPage(webengine.profile(), view))
+    return view
+
+
+def test_media_controls_work_without_a_browser_tab(qtbot, webengine):
+    view = _bare_view(webengine)
+    media = MediaControls(view, parent=view)
+    toasts, playing, scripts = [], [], []
+    media.toast.connect(toasts.append)
+    media.playing_changed.connect(playing.append)
+    view.page().runJavaScript = lambda script, *args: scripts.append(script)
+
+    assert media.set_music_mode(True) is True
+    assert "window.RiemannAudio.enable();" in scripts[-1]
+    assert toasts[-1] == "Music Mode ON"
+    view.loadFinished.emit(True)
+    assert _wait_until(lambda: len(scripts) == 2, 3000)
+    assert media.set_music_mode(False) is False
+    assert "window.RiemannAudio.disable();" in scripts[-1]
+    view.loadFinished.emit(True)
+    assert not _wait_until(lambda: len(scripts) > 3, 1500)
+
+    view.page().recentlyAudibleChanged.emit(True)
+    assert playing == ["playing"]
+    view.page().recentlyAudibleChanged.emit(False)
+    assert _wait_until(lambda: playing[-1:] == [None], 3000)
+
+
+def test_a_missing_engine_script_leaves_the_mode_off(qtbot, webengine, monkeypatch, tmp_path):
+    view = _bare_view(webengine)
+    media = MediaControls(view, parent=view)
+    toasts = []
+    media.toast.connect(toasts.append)
+    monkeypatch.setattr("riemann.ui.browser.media.asset_path", lambda name: str(tmp_path / name))
+    assert media.set_video_mode(True) is False
+    assert not media.video_on
+    assert toasts == ["Error: Missing video_engine.js"]
+
+
 def _wait_until(predicate, timeout_ms=15000):
     deadline = time.monotonic() + timeout_ms / 1000
     while time.monotonic() < deadline:
@@ -829,7 +872,7 @@ def test_captions_token_is_hidden_from_page_scripts(mock_injector, qtbot, webeng
     tab.web.page().loadFinished.connect(loaded.append)
     tab.web.setHtml("<html><body><p>page</p></body></html>", QUrl(download_server + "/"))
     assert _wait_until(lambda: loaded)
-    tab.captions_server = MagicMock(port=4321, token="secret-token")
+    tab.media.captions_server = MagicMock(port=4321, token="secret-token")
     tab.btn_captions.setChecked(True)
     tab.toggle_captions()
     main = QWebEngineScript.ScriptWorldId.MainWorld
