@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from ..widgets import PageWidget
     from .citations import CitationHover
     from .forms import FormSaver
+    from .metadata import DocumentMetadata
     from .read_aloud import ReadAloud
     from .ruler import ReadingRuler
 
@@ -75,7 +76,6 @@ class ReaderHost(Protocol):
     _virtual_range: tuple[int, int]
     rotation: int
     web: Any | None
-    metadata_worker: Any | None
     edit_scratch: str | None
     text_document: bool
     converted_pdf: str | None
@@ -105,6 +105,7 @@ class ReaderHost(Protocol):
     read_aloud: "ReadAloud"
     citations: "CitationHover"
     forms: "FormSaver"
+    metadata: "DocumentMetadata"
     link_tooltip: QLabel
     sidebar_nav: QWidget
     notes_panel: QWidget
@@ -137,8 +138,6 @@ class ReaderHost(Protocol):
     def resolve_page_edits(self) -> bool: ...
 
     def _render_text_page(self) -> None: ...
-
-    def _live_metadata_worker(self) -> Any | None: ...
 
 
 

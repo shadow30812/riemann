@@ -54,7 +54,7 @@ from .mixins.citations import CitationHover
 from .mixins.document import DocumentMixin
 from .mixins.forms import FormSaver
 from .mixins.input import InputMixin
-from .mixins.metadata import MetadataMixin
+from .mixins.metadata import DocumentMetadata
 from .mixins.navigation import NavigationMixin
 from .mixins.pages import PagesMixin
 from .mixins.read_aloud import ReadAloud
@@ -64,6 +64,7 @@ from .mixins.search import SearchMixin
 from .mixins.selection import SelectionMixin
 from .mixins.signatures import SignaturesMixin
 from .mixins.toolbar import ToolbarMixin
+from .notes import notes_path_for
 from .render_worker import PageRenderWorker
 from .widgets import PageWidget
 
@@ -88,7 +89,6 @@ class ReaderTab(
     AiMixin,
     SearchMixin,
     SignaturesMixin,
-    MetadataMixin,
 ):
     """
     The PDF and Markdown reader tab: a QWidget whose behaviour comes from the mixins in
@@ -175,6 +175,12 @@ class ReaderTab(
         self.forms = FormSaver(self.pdf_path, lambda: self.form_values_cache, self)
         self.forms.saved.connect(self._on_forms_saved)
         self.forms.toast.connect(self.show_toast)
+        self.metadata = DocumentMetadata(
+            lambda: getattr(self.window(), "library_manager", None), lambda: self.current_path, self
+        )
+        self.metadata.toast.connect(self.show_toast)
+        self.metadata.renaming.connect(lambda _old: self._get_annotation_path())
+        self.metadata.renamed.connect(self._on_renamed)
 
         self._init_backend()
         self.setup_ui()
@@ -315,6 +321,30 @@ class ReaderTab(
                 self._loaded_mtime = os.path.getmtime(path)
             except OSError:
                 pass
+
+    @property
+    def document_metadata(self) -> dict | None:
+        return self.metadata.data
+
+    def extract_document_metadata(self) -> None:
+        if not self.current_path or not self.current_doc or self.converted_pdf:
+            return
+        self.metadata.extract(lambda: self.current_doc.get_page_text(0))
+
+    def _on_renamed(self, old_path: str, new_path: str) -> None:
+        self.current_path = new_path
+        notes = self.notes_panel
+        if notes is not None:
+            notes.save()
+            old_notes = notes_path_for(old_path)
+            if os.path.exists(old_notes):
+                try:
+                    os.replace(old_notes, notes_path_for(new_path))
+                except OSError as e:
+                    print(f"[Warning] Could not move notes for {new_path}: {e}")
+            notes.path = notes_path_for(new_path)
+        self._anno_json_cache = None
+        self._update_tab_title(os.path.basename(new_path))
 
     def _setup_citation_card(self) -> None:
         self.citations = CitationHover(lambda: self.current_doc, self, self._home_dark)

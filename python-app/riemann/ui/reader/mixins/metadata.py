@@ -1,21 +1,30 @@
 """
-Metadata Extraction and Renaming Mixin.
+A document's bibliographic details: finding them, renaming the file after
+them, and copying the BibTeX citation.
 
-This module provides functionality to extract, store, and utilize metadata
-from PDF documents, including automated file renaming and citation copying.
+DocumentMetadata is given library(), the library manager or None, which
+caches details per file, and path(), the document's file; its parent is the
+widget its error dialog opens over and the extraction worker belongs to.
+extract reads the first page's text on a worker (MetadataExtractionWorker)
+unless the library already knows the file; data is None until then. rename
+moves the file to "[year] - author - title.pdf" beside it, with Riemann's
+annotation copy and the library record: renaming(old) comes just before the
+move, so the reader can settle what belongs to the old name, and
+renamed(old, new) once it is done. Messages go out through toast.
 """
 
 import os
 import re
+from collections.abc import Callable
+from typing import Any
 
 import shiboken6
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
 from ....core import annotation_store
 from ...threads import track
-from ..notes import notes_path_for
 from ..workers import MetadataExtractionWorker
-from .host import ReaderHostBase
 
 
 def _filename_part(value, limit: int) -> str:
@@ -25,138 +34,97 @@ def _filename_part(value, limit: int) -> str:
     return text[:limit].rstrip(" .")
 
 
-class MetadataMixin(ReaderHostBase):
-    """
-    Provides methods for background metadata extraction and document management operations.
-    Expected to be mixed into a class providing document context (e.g., ReaderTab).
-    """
-    document_metadata = None
-    metadata_worker = None
+def renamed_filename(data: dict) -> str:
+    """The file name a document with these details is renamed to."""
+    year = _filename_part(data.get("year"), 4) or "UnknownYear"
+    authors = str(data.get("authors") or "").split(",")[0]
+    author = _filename_part(authors, 20) or "UnknownAuthor"
+    title = _filename_part(data.get("title"), 50) or "UnknownTitle"
+    return f"[{year}] - {author} - {title}.pdf"
 
-    def _live_metadata_worker(self):
-        """The metadata worker, or None once it has finished and deleted itself."""
-        if self.metadata_worker is not None and not shiboken6.isValid(self.metadata_worker):
-            self.metadata_worker = None
-        return self.metadata_worker
 
-    def extract_document_metadata(self) -> None:
-        """
-        Initiates the extraction of document metadata.
-        Checks the local library database first for cached metadata. If not found,
-        spins up a background worker to extract metadata from the first page's text.
-        """
-        if not self.current_path or not self.current_doc or self.converted_pdf:
-            return
+class DocumentMetadata(QObject):
+    toast = Signal(str)
+    renaming = Signal(str)
+    renamed = Signal(str, str)
 
-        worker = self._live_metadata_worker()
+    def __init__(self, library: Callable[[], Any], path: Callable[[], str | None], parent: QWidget) -> None:
+        super().__init__(parent)
+        self.library = library
+        self.path = path
+        self._widget = parent
+        self.data: dict | None = None
+        self.worker: MetadataExtractionWorker | None = None
+
+    def live_worker(self) -> MetadataExtractionWorker | None:
+        """The extraction worker, or None once it has finished and deleted itself."""
+        if self.worker is not None and not shiboken6.isValid(self.worker):
+            self.worker = None
+        return self.worker
+
+    def extract(self, first_page_text: Callable[[], str]) -> None:
+        """Finds the document's details, from the library or from first_page_text()."""
+        worker = self.live_worker()
         if worker is not None and worker.isRunning():
             return
-
-        self.document_metadata = {}
-
-        if hasattr(self.window(), "library_manager"):
-            cached_data = self.window().library_manager.get_metadata(self.current_path)
-            if cached_data and cached_data.get("title"):
-                self.document_metadata = cached_data
-                self._update_tab_title_with_metadata()
+        self.data = {}
+        library = self.library()
+        if library is not None:
+            cached = library.get_metadata(self.path())
+            if cached and cached.get("title"):
+                self.data = cached
                 return
-
         try:
-            first_page_text = self.current_doc.get_page_text(0)
-            if not first_page_text.strip():
+            text = first_page_text()
+            if not text.strip():
                 return
-
-            self.metadata_worker = MetadataExtractionWorker(
-                first_page_text[:3000], parent=self
-            )
-            self.metadata_worker.finished_extraction.connect(
-                self._on_metadata_extracted
-            )
-            self.metadata_worker.finished.connect(self.metadata_worker.deleteLater)
-            track(self.metadata_worker).start()
+            self.worker = MetadataExtractionWorker(text[:3000], parent=self._widget)
+            self.worker.finished_extraction.connect(self._on_extracted)
+            self.worker.finished.connect(self.worker.deleteLater)
+            track(self.worker).start()
         except Exception as e:
             print(f"Failed to start metadata extraction: {e}")
 
-    def _on_metadata_extracted(self, data: dict) -> None:
-        """Saves extracted metadata to the library and updates the title."""
+    def _on_extracted(self, data: dict) -> None:
         if not data:
             return
+        self.data = data
+        library = self.library()
+        if library is not None:
+            library.save_metadata(self.path(), data)
 
-        self.document_metadata = data
-
-        if hasattr(self.window(), "library_manager"):
-            self.window().library_manager.save_metadata(self.current_path, data)
-
-        self._update_tab_title_with_metadata()
-
-    def _update_tab_title_with_metadata(self) -> None:
-        """
-        Updates the UI tab title using the extracted metadata.
-        Currently implemented as a no-op placeholder for extended subclasses.
-        Behavior inferred from implementation.
-        """
-        pass
-
-    def rename_current_pdf(self) -> None:
-        """
-        Renames the active PDF file on the filesystem using the extracted document metadata.
-        Constructs a sanitized filename and moves the path state, Riemann's annotation
-        copy and the library record along with the file.
-        """
-        if not self.current_path or not self.document_metadata:
+    def rename(self) -> None:
+        """Renames the document's file after its details."""
+        path = self.path()
+        if not path or not self.data:
             return
-
-        year = _filename_part(self.document_metadata.get("year"), 4) or "UnknownYear"
-        authors = str(self.document_metadata.get("authors") or "").split(",")[0]
-        safe_author = _filename_part(authors, 20) or "UnknownAuthor"
-        safe_title = _filename_part(self.document_metadata.get("title"), 50) or "UnknownTitle"
-
-        new_filename = f"[{year}] - {safe_author} - {safe_title}.pdf"
-        new_path = os.path.join(os.path.dirname(self.current_path), new_filename)
-
-        if new_path == self.current_path:
+        new_filename = renamed_filename(self.data)
+        new_path = os.path.join(os.path.dirname(path), new_filename)
+        if new_path == path:
             return
         if os.path.exists(new_path):
-            self.show_toast(f"Not renamed: {new_filename} already exists.")
+            self.toast.emit(f"Not renamed: {new_filename} already exists.")
             return
 
-        old_path = self.current_path
-        self._get_annotation_path()
+        self.renaming.emit(path)
         try:
-            os.rename(old_path, new_path)
+            os.rename(path, new_path)
         except Exception as e:
-            QMessageBox.critical(self, "Rename Failed", f"Could not rename file:\n{e}")
+            QMessageBox.critical(self._widget, "Rename Failed", f"Could not rename file:\n{e}")
             return
 
-        self.current_path = new_path
-        notes = self.notes_panel
-        if notes is not None:
-            notes.save()
-            old_notes = notes_path_for(old_path)
-            if os.path.exists(old_notes):
-                try:
-                    os.replace(old_notes, notes_path_for(new_path))
-                except OSError as e:
-                    print(f"[Warning] Could not move notes for {new_path}: {e}")
-            notes.path = notes_path_for(new_path)
-        annotation_store.shared().moved(old_path, new_path)
-        self._anno_json_cache = None
-
-        if hasattr(self.window(), "library_manager"):
-            self.window().library_manager.save_metadata(new_path, self.document_metadata)
-
-        self._update_tab_title(new_filename)
-        self.show_toast(f"Renamed to: {new_filename}")
-        self._update_tab_title_with_metadata()
+        annotation_store.shared().moved(path, new_path)
+        self.renamed.emit(path, new_path)
+        library = self.library()
+        if library is not None:
+            library.save_metadata(new_path, self.data)
+        self.toast.emit(f"Renamed to: {new_filename}")
 
     def copy_citation(self) -> None:
-        """
-        Extracts the BibTeX citation format from the document metadata and copies it to the system clipboard.
-        Displays a UI toast notification indicating success or failure.
-        """
-        bibtex = (self.document_metadata or {}).get("bibtex")
+        """Copies the BibTeX citation to the clipboard."""
+        bibtex = (self.data or {}).get("bibtex")
         if bibtex:
             QApplication.clipboard().setText(bibtex)
-            self.show_toast("BibTeX copied to clipboard! 📋")
+            self.toast.emit("BibTeX copied to clipboard! 📋")
         else:
-            self.show_toast("Citation data not available.")
+            self.toast.emit("Citation data not available.")

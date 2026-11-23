@@ -70,8 +70,8 @@ def test_closing_a_reader_while_metadata_is_fetched_does_not_abort():
         with patch("requests.Session.get", slow_get):
             tab = ReaderTab()
             from riemann.ui.reader.workers import MetadataExtractionWorker
-            tab.metadata_worker = MetadataExtractionWorker("doi 10.1234/abcd.efgh", parent=tab)
-            tab.metadata_worker.start()
+            tab.metadata.worker = MetadataExtractionWorker("doi 10.1234/abcd.efgh", parent=tab)
+            tab.metadata.worker.start()
             started.wait(10)
             close(tab)
         """

@@ -195,7 +195,7 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_rename.setIcon(self._get_icon("rename.svg"))
         self.btn_rename.setIconSize(icon_size)
         self.btn_rename.setToolTip("Auto-Rename File using Metadata")
-        self.btn_rename.clicked.connect(self.rename_current_pdf)
+        self.btn_rename.clicked.connect(self.metadata.rename)
 
         self.btn_export = QPushButton()
         self.btn_export.setIcon(self._get_icon("file-output.svg"))
@@ -221,7 +221,7 @@ class ToolbarMixin(ReaderHostBase):
         self.btn_cite.setIcon(self._get_icon("text-quote.svg"))
         self.btn_cite.setIconSize(icon_size)
         self.btn_cite.setToolTip("Copy BibTeX Citation")
-        self.btn_cite.clicked.connect(self.copy_citation)
+        self.btn_cite.clicked.connect(self.metadata.copy_citation)
 
         self.btn_rotate = QPushButton()
         self.btn_rotate.setIcon(self._get_icon("rotate-cw.svg"))

@@ -1177,10 +1177,10 @@ class DocumentMixin(ReaderHostBase):
             self.load_worker.engine = None
             release(self.load_worker, self.load_worker.loaded, self.load_worker.error)
             self.load_worker = None
-        worker = self._live_metadata_worker()
+        worker = self.metadata.live_worker()
         if worker is not None:
             release(worker, worker.finished_extraction)
-        self.metadata_worker = None
+        self.metadata.worker = None
         if self.sig_worker is not None:
             release(self.sig_worker, self.sig_worker.finished_validation)
             self.sig_worker = None
