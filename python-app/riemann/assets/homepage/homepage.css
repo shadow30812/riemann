@@ -1,8 +1,9 @@
 /*
 Component: Theme tokens
 Purpose: Colours shared with the Qt home pages (riemann/ui/palette.py). The page
-starts in the theme named by ?theme= in its URL, and the host switches it later
-with window.setTheme(). Inter comes from the bundled assets/fonts copy, since a
+starts in the theme named by ?theme= in its URL (light, dark or contrast, the
+high-contrast palette's CONTRAST tokens), and the host switches it later with
+window.setTheme(). Inter comes from the bundled assets/fonts copy, since a
 web page cannot see fonts registered with Qt.
 */
 @font-face {
@@ -30,6 +31,26 @@ web page cannot see fonts registered with Qt.
     --grid: rgba(255, 255, 255, 0.028);
     --glow: rgba(107, 155, 255, 0.07);
     --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    color-scheme: dark;
+}
+
+:root[data-theme="contrast"] {
+    --canvas: #000000;
+    --surface: #000000;
+    --raised: #141418;
+    --border: #5C5F6A;
+    --border-strong: #9EA2AE;
+    --text: #FFFFFF;
+    --muted: #D6D8DE;
+    --faint: #AEB2BC;
+    --accent: #5FC3FF;
+    --accent-hover: #8DD5FF;
+    --accent-text: #000000;
+    --accent-soft: rgba(95, 195, 255, 0.24);
+    --danger: #FF7B7B;
+    --grid: rgba(255, 255, 255, 0.05);
+    --glow: rgba(95, 195, 255, 0.08);
+    --shadow: none;
     color-scheme: dark;
 }
 

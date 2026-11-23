@@ -3,6 +3,22 @@
 The same values live in assets/theme/modern_*.css and assets/homepage/homepage.css;
 change all three together.
 
+CONTRAST is the high-contrast variant of the dark theme, for the "High
+contrast" setting: pure black surfaces (an OLED screen leaves those pixels
+off), white text, borders light enough to separate panels that the dark theme
+separates by shade, and a brighter accent. Every text colour in it is at least
+7:1 on black and on raised, and borders at least 3:1. set_high_contrast
+switches it on; while it is on, tokens(True) returns it, so everything that
+follows the dark theme follows it too.
+
+"system" is the teal accent of System tabs (Settings, History, Downloads...),
+kept apart from the blue accent so those tabs read as part of Riemann, not
+documents or web pages. "private" is the purple of incognito address bars, which
+are always dark, so only DARK["private"] is used. "success" and "warning" (with
+"danger" and "accent") colour status banners such as the signature check; the
+light values keep 4.5:1 contrast under white text, the dark ones under
+accent_text. The CSS files use none of these three.
+
 toast_style, link_tip_style, incognito_url_style, banner_style,
 overlay_style and scrollbar_style are the small stylesheets several widgets
 share. overlay_style
@@ -101,6 +117,32 @@ LIGHT = {
     "glow": "rgba(47, 111, 235, 0.05)",
 }
 
+CONTRAST = {
+    "canvas": "#000000",
+    "surface": "#000000",
+    "raised": "#141418",
+    "border": "#5C5F6A",
+    "border_strong": "#9EA2AE",
+    "text": "#FFFFFF",
+    "muted": "#D6D8DE",
+    "faint": "#AEB2BC",
+    "accent": "#5FC3FF",
+    "accent_hover": "#8DD5FF",
+    "accent_text": "#000000",
+    "accent_soft": "rgba(95, 195, 255, 0.24)",
+    "danger": "#FF7B7B",
+    "danger_soft": "rgba(255, 123, 123, 0.18)",
+    "success": "#4BE39A",
+    "warning": "#FFC247",
+    "system": "#4FF0E0",
+    "system_soft": "rgba(79, 240, 224, 0.18)",
+    "private": "#C08CFF",
+    "grid": "rgba(255, 255, 255, 0.05)",
+    "glow": "rgba(95, 195, 255, 0.08)",
+}
+
+_high_contrast = False
+
 CONTENT = {
     "stage": "#000000",
     "paper": "#FFFFFF",
@@ -135,9 +177,27 @@ def app_is_dark() -> bool:
     return app is not None and app.palette().window().color().lightness() < 128
 
 
+def set_high_contrast(on: bool) -> None:
+    global _high_contrast
+    _high_contrast = bool(on)
+
+
+def high_contrast() -> bool:
+    return _high_contrast
+
+
+def page_theme(dark: bool) -> str:
+    """The start page's theme name: "light", "dark" or "contrast"."""
+    if not dark:
+        return "light"
+    return "contrast" if _high_contrast else "dark"
+
+
 def tokens(dark: bool) -> dict:
-    """Returns the colour tokens for the dark or light theme."""
-    return DARK if dark else LIGHT
+    """Returns the colour tokens for the dark or light theme (CONTRAST for dark while high contrast is on)."""
+    if not dark:
+        return LIGHT
+    return CONTRAST if _high_contrast else DARK
 
 
 def scrollbar_style(t: dict) -> str:

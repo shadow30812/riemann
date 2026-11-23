@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PySide6.QtWidgets import QApplication
 from riemann.ui.explorer import FolderHomeTab
-from riemann.ui.palette import DARK, LIGHT, short_folder, tinted_pixmap
+from riemann.ui.palette import CONTRAST, DARK, LIGHT, short_folder, tinted_pixmap
 
 
 @pytest.fixture(scope="session")
@@ -17,7 +17,7 @@ def qapp():
 
 
 def test_both_palettes_define_the_same_tokens():
-    assert DARK.keys() == LIGHT.keys()
+    assert DARK.keys() == LIGHT.keys() == CONTRAST.keys()
 
 
 def test_short_folder_abbreviates_home_and_long_paths():
@@ -91,7 +91,7 @@ def _luminance(hex_colour):
     return 0.2126 * channel(c.red()) + 0.7152 * channel(c.green()) + 0.0722 * channel(c.blue())
 
 
-@pytest.mark.parametrize("theme", [DARK, LIGHT])
+@pytest.mark.parametrize("theme", [DARK, LIGHT, CONTRAST])
 @pytest.mark.parametrize("kind", ["success", "warning", "danger", "accent"])
 def test_status_banner_text_is_readable(theme, kind):
     a, b = _luminance(theme[kind]), _luminance(theme["accent_text"])
@@ -138,6 +138,42 @@ def test_signature_banner_follows_the_reader_theme(qapp, qtbot):
     finally:
         tab.cleanup()
         tab.deleteLater()
+
+
+def _ratio(a, b):
+    x, y = _luminance(a), _luminance(b)
+    return (max(x, y) + 0.05) / (min(x, y) + 0.05)
+
+
+@pytest.mark.parametrize("background", ["canvas", "raised"])
+def test_high_contrast_text_is_7_to_1_and_borders_3_to_1(background):
+    for kind in ("text", "muted", "faint", "accent", "accent_hover", "danger", "success", "warning", "system", "private"):
+        assert _ratio(CONTRAST[kind], CONTRAST[background]) >= 7, kind
+    for kind in ("border", "border_strong"):
+        assert _ratio(CONTRAST[kind], CONTRAST["canvas"]) >= 3, kind
+    assert CONTRAST["canvas"] == CONTRAST["surface"] == "#000000"
+
+
+def test_tokens_follow_the_high_contrast_switch():
+    from riemann.ui import palette
+
+    try:
+        palette.set_high_contrast(True)
+        assert palette.tokens(True) is CONTRAST and palette.tokens(False) is LIGHT
+    finally:
+        palette.set_high_contrast(False)
+    assert palette.tokens(True) is DARK
+
+
+def test_high_contrast_style_sheet_is_the_one_the_script_writes():
+    import importlib.util
+
+    script = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "make_contrast_theme.py")
+    spec = importlib.util.spec_from_file_location("make_contrast_theme", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with open(os.path.join(module.THEME, "modern_contrast.css"), encoding="utf-8") as f:
+        assert f.read() == module.render(), "run python scripts/make_contrast_theme.py"
 
 
 def _glyph_icon(colour):

@@ -90,7 +90,7 @@ from .ui.components import (
     SplitPaneBadge,
 )
 from .ui.explorer import FileExplorerPanel
-from .ui.palette import UI_FONT
+from .ui.palette import UI_FONT, set_high_contrast
 from .ui.reader.render_worker import stop_all_render_workers
 from .ui.shortcuts import share_keys
 from .ui.reader.tab import ReaderTab
@@ -122,6 +122,7 @@ from .window.tabs import TabsMixin
 from .core.settings import (
     CLEAN_EXIT_KEY,
     DARK_MODE_KEY,
+    HIGH_CONTRAST_KEY,
     DEFAULT_UI_SCALE,
     TABS_COLLAPSED_KEY,
     UI_SCALE_KEY,
@@ -195,6 +196,7 @@ class RiemannWindow(
         self.resize(1200, 900)
         self.settings = app_settings()
         self.dark_mode: bool = self.settings.value(DARK_MODE_KEY, False, type=bool)
+        set_high_contrast(self.settings.value(HIGH_CONTRAST_KEY, False, type=bool))
         self._was_unclean_exit: bool = not self.settings.value(
             CLEAN_EXIT_KEY, True, type=bool
         )

@@ -208,12 +208,12 @@ function renderGrid(links) {
 }
 
 /**
- * Switches the page between the light and dark palettes.
+ * Switches the page between the light, dark and high-contrast palettes.
  *
- * @param {string} theme - 'light' or 'dark'.
+ * @param {string} theme - 'light', 'dark' or 'contrast'.
  */
 window.setTheme = function (theme) {
-    document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = theme === 'light' || theme === 'contrast' ? theme : 'dark';
 };
 
 /**

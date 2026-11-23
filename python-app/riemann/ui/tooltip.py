@@ -22,7 +22,8 @@ text tooltips are shown as they are.
 On Wayland a tooltip must have a transient parent window, so TipWindow uses
 the window of the widget it describes.
 
-Colours follow set_dark, which the main window calls when the theme changes.
+Colours follow set_dark, which the main window calls when the theme changes,
+and the high-contrast setting (palette.high_contrast) while dark.
 """
 
 import re
@@ -33,7 +34,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter
 from PySide6.QtGui import Qt as GuiQt
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from .palette import load_ui_font, ui_font
+from .palette import high_contrast, load_ui_font, ui_font
 
 SHORTCUT = re.compile(r"\s*\(((?:Ctrl|Alt|Shift|Meta|Cmd|Esc|F\d{1,2})(?:\+[^()]+)?)\)\s*$")
 
@@ -58,7 +59,21 @@ COLOURS = {
         "key_border": "#CBCBC4",
         "key_text": "#3A3C40",
     },
+    "contrast": {
+        "bg": "#000000",
+        "border": "#9EA2AE",
+        "text": "#FFFFFF",
+        "muted": "#D6D8DE",
+        "shadow": 0,
+        "key_bg": "#141418",
+        "key_border": "#9EA2AE",
+        "key_text": "#FFFFFF",
+    },
 }
+
+
+def _scheme():
+    return "contrast" if _dark and high_contrast() else _dark
 
 MAX_TEXT_WIDTH = 300
 SHADOW = 12
@@ -141,15 +156,15 @@ class TipWindow(QWidget):
         return self._text
 
     def set_text(self, text: str) -> None:
-        if text == self._text and self._dark == _dark:
+        if text == self._text and self._dark == _scheme():
             return
         self._text = text
-        self._dark = _dark
+        self._dark = _scheme()
         if self._content is not None:
             self._layout.removeWidget(self._content)
             self._content.hide()
             self._content.deleteLater()
-        self._content = self._build(text, COLOURS[_dark])
+        self._content = self._build(text, COLOURS[_scheme()])
         self._layout.addWidget(self._content)
         self._content.show()
         self._layout.activate()
@@ -230,7 +245,7 @@ class TipWindow(QWidget):
             handle.setTransientParent(parent_window)
 
     def paintEvent(self, event) -> None:
-        c = COLOURS[_dark]
+        c = COLOURS[_scheme()]
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = self.panel_rect()

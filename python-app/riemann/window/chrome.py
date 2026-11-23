@@ -24,11 +24,11 @@ from ..ui.browser import BrowserTab
 from ..ui.reader.tab import ReaderTab
 from ..ui.viewers import VIEWER_TABS
 from ..ui import tooltip
-from ..ui.palette import toast_style, tokens
+from ..ui.palette import high_contrast, set_high_contrast, toast_style, tokens
 from ..ui.toast import Toast
 from ..core.log import log
 from ..core.assets import asset_path, icon_path
-from ..core.settings import DARK_MODE_KEY
+from ..core.settings import DARK_MODE_KEY, HIGH_CONTRAST_KEY
 
 
 class ChromeMixin:
@@ -186,6 +186,24 @@ class ChromeMixin:
         """
         self.dark_mode = not self.dark_mode
         self.settings.setValue(DARK_MODE_KEY, self.dark_mode)
+        self.restyle_ui()
+
+    def set_high_contrast(self, on: bool) -> None:
+        """Turns the high-contrast dark theme on or off; turning it on also turns dark mode on."""
+        set_high_contrast(on)
+        self.settings.setValue(HIGH_CONTRAST_KEY, bool(on))
+        if on and not self.dark_mode:
+            self.dark_mode = True
+            self.settings.setValue(DARK_MODE_KEY, True)
+        self.restyle_ui()
+        for tab_widget in (self.tabs_main, self.tabs_side):
+            for i in range(tab_widget.count()):
+                w = tab_widget.widget(i)
+                if isinstance(w, (ReaderTab, BrowserTab)):
+                    w.apply_theme()
+
+    def restyle_ui(self) -> None:
+        """Applies the interface theme (dark_mode and high contrast) to the window and its tabs."""
         self.enforce_global_stylesheet()
         self._update_floating_btn_style()
         self._style_menu_corner()
@@ -276,9 +294,10 @@ class ChromeMixin:
         Forces the application to read and apply the appropriate QSS file,
         preventing Qt from reverting to native generic tab styles.
         """
+        dark = getattr(self, "dark_mode", False)
         css_file = (
-            "modern_dark.css"
-            if getattr(self, "dark_mode", False)
+            ("modern_contrast.css" if high_contrast() else "modern_dark.css")
+            if dark
             else "modern_light.css"
         )
 

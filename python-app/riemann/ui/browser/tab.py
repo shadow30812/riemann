@@ -59,7 +59,7 @@ from PySide6.QtWidgets import (
 from ...core import permissions
 from ...core.captions_server import CaptionsServer
 from ..browser_handlers import ScriptInjector
-from ..palette import incognito_url_style, legible_icon, link_tip_style, tokens
+from ..palette import incognito_url_style, legible_icon, link_tip_style, page_theme, tokens
 from ..toast import Toast
 from ...core.log import log
 from ...core.settings import (
@@ -250,7 +250,7 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
 
             if os.path.exists(homepage_path):
                 home_url = QUrl.fromLocalFile(homepage_path)
-                home_url.setQuery("theme=" + ("dark" if self.dark_mode else "light"))
+                home_url.setQuery("theme=" + page_theme(self.dark_mode))
                 self.web.load(home_url)
             else:
                 engine = urllib.parse.urlsplit(search_template())
@@ -304,7 +304,7 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
                 cached_icons[key] = fav_settings.value(key, "", type=str)
             icons_json = json.dumps(cached_icons)
 
-            theme = "dark" if self.dark_mode else "light"
+            theme = page_theme(self.dark_mode)
             js_code = (
                 f"window.setTheme && window.setTheme('{theme}'); "
                 f"window.cachedIcons = {icons_json}; window.searchTemplate = {json.dumps(search_template())}; "

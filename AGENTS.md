@@ -15,7 +15,7 @@ A desktop document reader and web browser in one window, written in Python (PySi
 | System tabs | `python-app/riemann/ui/system/` | Settings, history, bookmarks, downloads, library and help open as tabs (`window/system.py`). Help (`help_tab.py`, F1) is plain-words text for new users plus every keyboard shortcut. |
 | Browser tab | `python-app/riemann/ui/browser/` | Qt WebEngine. `tab.py` (`BrowserTab`) with its behaviour split into mixins by subject (`chrome.py` toolbar, find bar, shortcuts, theme, zoom; `media.py`; `stream.py`; `downloads.py`); `interceptor.py` (what pages may load, ad blocker), `page.py` (`WebPage`, permissions, leaving a page), `ytdlp.py` (video downloads), `preview.py` (`PreviewTextTab`). Start page is a local file in `assets/homepage/`. |
 | Core services | `python-app/riemann/core/` | `ai_engine.py` (shared sidecar), `storage.py` (atomic JSON), `managers.py` (history, bookmarks, downloads, library), `doctypes.py` (what kind of document a file is), `convert_process.py` (EPUB and Office readers in a child process with a time limit: `epub.py`, `office_basic.py`, cleaned by `html_clean.py`), `office.py` (LibreOffice: finding it, converting in a locked-down profile, the cache), `office_install.py` (install commands), `tables.py` (CSV reading and saving), `images.py` (decoding pictures), `pdf_annotations.py` (writes annotations into PDFs), `page_edit.py` (page edits, passwords), `redaction.py` (applies redaction marks), `captions_server.py`. |
-| Theme | `python-app/riemann/ui/palette.py`, `assets/theme/modern_dark.css`, `modern_light.css`, `assets/homepage/homepage.css` | Colour tokens are duplicated in all of these. Change them together. |
+| Theme | `python-app/riemann/ui/palette.py`, `assets/theme/modern_dark.css`, `modern_light.css`, `modern_contrast.css`, `assets/homepage/homepage.css` | Colour tokens are duplicated in all of these. Change them together. `modern_contrast.css` (the high-contrast dark theme, `CONTRAST` tokens) is written by `scripts/make_contrast_theme.py` from `modern_dark.css`; rerun it after changing either. |
 | Rust core | `rust-core/` | PyO3 0.30 module `riemann_core` on PDFium (pdfium-render 0.9, bindings for chromium/7543). Page indices are `u32` from Python. Typed in `python-app/riemann/riemann_core.pyi`. |
 | OCR worker | `rust-ocr-worker/` | Separate crate. `recognize_pngs` reads many pages with one Tesseract run. |
 | AI engine | `python-app/riemann/core/ai_server.py` | FastAPI on a random localhost port, per-run token, run as a child of the app (`python -m riemann.core.ai_server`, or the frozen exe with `--riemann-ai-sidecar`). ONNX MiniLM on onnxruntime; the model is downloaded on first use, pinned by commit and SHA-256. It never opens PDFs: the app sends page text. Client side: `core/ai_engine.py`. |
@@ -49,6 +49,12 @@ Set the app's version in every file that states it (`pyproject.toml`, `riemann/_
 
 ```bash
 just version 7.2.0
+```
+
+Rewrite the high-contrast stylesheet after changing `modern_dark.css` or `CONTRAST` in `ui/palette.py` (`tests/test_palette.py` fails until it matches):
+
+```bash
+env -u LD_LIBRARY_PATH ./riemann/bin/python scripts/make_contrast_theme.py
 ```
 
 After changing a dependency's version in `pyproject.toml` (needs uv and network; CI fails until the locks match):

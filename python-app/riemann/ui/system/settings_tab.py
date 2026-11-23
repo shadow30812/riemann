@@ -44,6 +44,7 @@ from ...core.settings import (
     DEFAULT_DIR_KEY,
     DEFAULT_POPULAR_SITES,
     DEFAULT_UI_SCALE,
+    HIGH_CONTRAST_KEY,
     HOMEPAGE_NAME_KEY,
     OCR_LANGUAGES_KEY,
     OFFICE_ASK_KEY,
@@ -104,6 +105,14 @@ class SettingsTab(SectionedSystemTab):
         c = card(layout, "Look")
         self.cb_dark = self._check(getattr(win, "dark_mode", False), self._set_dark)
         setting_row(c, "Dark mode", self.cb_dark)
+        self.cb_high_contrast = self._check(self._bool(HIGH_CONTRAST_KEY, False), self._set_high_contrast)
+        setting_row(
+            c,
+            "High contrast",
+            self.cb_high_contrast,
+            "Pure black with white text and brighter outlines, for the dark theme. On an OLED screen "
+            "the black pixels are switched off. Turning it on turns on dark mode.",
+        )
         self.cb_vertical_tabs = self._check(self._bool(VERTICAL_TABS_KEY, False), self._set_vertical_tabs)
         setting_row(c, "Vertical tabs", self.cb_vertical_tabs, "Tabs in a column on the left, like a browser's side bar.")
         self.cb_floating_fs = self._check(
@@ -435,6 +444,16 @@ class SettingsTab(SectionedSystemTab):
         win = self.window_ref
         if hasattr(win, "toggle_ui_theme") and bool(checked) != bool(getattr(win, "dark_mode", False)):
             win.toggle_ui_theme()
+
+    def _set_high_contrast(self, checked: bool) -> None:
+        win = self.window_ref
+        if hasattr(win, "set_high_contrast"):
+            win.set_high_contrast(bool(checked))
+            self.cb_dark.blockSignals(True)
+            self.cb_dark.setChecked(bool(getattr(win, "dark_mode", False)))
+            self.cb_dark.blockSignals(False)
+        else:
+            self._set_value(HIGH_CONTRAST_KEY, bool(checked))
 
     def _set_vertical_tabs(self, checked: bool) -> None:
         win = self.window_ref

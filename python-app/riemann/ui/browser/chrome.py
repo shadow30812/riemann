@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..palette import incognito_url_style, link_tip_style, menu_style, toast_style, tokens
+from ..palette import incognito_url_style, link_tip_style, menu_style, page_theme, toast_style, tokens
 from ..shortcuts import share_keys
 from ...core.settings import DARK_MODE_KEY, browser_settings
 from .interceptor import is_local_homepage
@@ -402,7 +402,7 @@ class ChromeMixin:
         self.web.page().setBackgroundColor(QColor(t["canvas"] if self.dark_mode else t["surface"]))
 
         if is_local_homepage(self.web.url()):
-            theme = "dark" if self.dark_mode else "light"
+            theme = page_theme(self.dark_mode)
             self.web.page().runJavaScript(f"window.setTheme && window.setTheme('{theme}');")
         self.script_injector.inject_smart_dark_mode(self.web.page(), self.dark_mode)
         style = (
