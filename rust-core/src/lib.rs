@@ -189,12 +189,12 @@ fn value_err(e: impl ToString) -> PyErr {
 /// keeping hue and saturation.
 fn convert_pixels(buffer: &mut [u8], theme_mode: u8) {
     match theme_mode {
-        1 => buffer.chunks_exact_mut(4).for_each(|pixel| {
+        1 => buffer.as_chunks_mut::<4>().0.iter_mut().for_each(|pixel| {
             pixel[0] = 255 - pixel[0];
             pixel[1] = 255 - pixel[1];
             pixel[2] = 255 - pixel[2];
         }),
-        2 => buffer.chunks_exact_mut(4).for_each(|pixel| {
+        2 => buffer.as_chunks_mut::<4>().0.iter_mut().for_each(|pixel| {
             let (c0, c1, c2) = smart_dark(pixel[2], pixel[1], pixel[0]);
             pixel[0] = c0;
             pixel[1] = c1;
@@ -703,7 +703,9 @@ impl RiemannDocument {
                 )
             };
             buffer
-                .chunks_exact_mut(4)
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
                 .for_each(|pixel| pixel.swap(0, 2));
 
             let engine = OcrEngine::new();
@@ -743,7 +745,9 @@ impl RiemannDocument {
                     )
                 };
                 buffer
-                    .chunks_exact_mut(4)
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
                     .for_each(|pixel| pixel.swap(0, 2));
                 pngs.push(
                     riemann_ocr_worker::encode_png(width, height, &buffer).map_err(runtime_err)?,
