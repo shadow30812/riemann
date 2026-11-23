@@ -900,6 +900,9 @@ The yt-dlp integration in `ui/browser/ytdlp.py` manages asynchronous video and p
 * **Challenge Execution & Deno Environment**:
   * YouTube's challenges are solved by the pinned `yt-dlp-ejs` package in the pinned Deno (`js_runtimes`); yt-dlp is never given `remote_components`.
   * Checks and appends `~/.deno/bin` to `os.environ["PATH"]` if present, for a Deno installed outside the optional packages.
+* **Errors and Cancelling**:
+  * `YtDlpWorker` is yt-dlp's logger. With `ignoreerrors` a failed video is only logged, so the worker keeps the errors and reports the last one instead of "Download complete!".
+  * Stop is checked on every log line as well as on every progress tick, so it works during extraction and retries too.
 * **Automatic Playlist Detection**:
   * In `BrowserTab.download_video()`, checks if the target URL contains `list=` or `/playlist`.
   * If detected, passes `is_playlist=True` to `YtDlpSettingsDialog`, auto-checking the "Download playlist" option.

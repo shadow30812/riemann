@@ -259,3 +259,32 @@ def test_unused_path_never_overwrites(tmp_path):
     assert unused_path(str(target)) == str(tmp_path / "talk (2).srt")
     (tmp_path / "talk (2).srt").write_text("y")
     assert unused_path(str(target)) == str(tmp_path / "talk (3).srt")
+
+
+def test_ytdlp_cancel_shows_at_once_and_stops_the_worker(qapp):
+    from PySide6.QtCore import QObject, Signal
+    from PySide6.QtWidgets import QPushButton
+
+    class Worker(QObject):
+        progress_details = Signal(dict)
+        finished = Signal(bool, str)
+        is_cancelled = False
+
+        def stop(self):
+            self.is_cancelled = True
+
+    mgr = YtDlpDownloadManager()
+    worker = Worker()
+    mgr.add_download(worker, "Talk", "/tmp", False)
+    task = mgr.tasks[0]
+    button = mgr.tree.itemWidget(task["root_item"], 5).findChild(QPushButton)
+    button.click()
+    assert worker.is_cancelled
+    assert task["root_item"].text(4) == "Cancelling…"
+    assert not button.isEnabled()
+    mgr.update_progress(worker, {"status": "downloading", "percentage": 50, "video_id": "v", "filename": "v.mp4"})
+    assert task["videos"] == {}
+    worker.finished.emit(False, "Download cancelled.")
+    assert task["is_finished"]
+    mgr.close()
+    mgr.deleteLater()

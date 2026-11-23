@@ -737,7 +737,7 @@ class YtDlpDownloadManager(QDialog):
         h_layout = QHBoxLayout(ctrl_widget)
         h_layout.setContentsMargins(2, 2, 2, 2)
         btn_cancel = QPushButton("⏹ Cancel")
-        btn_cancel.clicked.connect(lambda: worker.stop())
+        btn_cancel.clicked.connect(lambda: self.cancel(worker))
         h_layout.addWidget(btn_cancel)
         self.tree.setItemWidget(root_item, 5, ctrl_widget)
 
@@ -761,9 +761,20 @@ class YtDlpDownloadManager(QDialog):
         self.show()
         self.raise_()
 
+    def cancel(self, worker) -> None:
+        """Stops a download and shows at once that it is stopping; the worker ends at yt-dlp's next step."""
+        worker.stop()
+        task = next((t for t in self.tasks if t["worker"] == worker), None)
+        if not task or task["is_finished"]:
+            return
+        task["root_item"].setText(4, "Cancelling…")
+        ctrl_widget = self.tree.itemWidget(task["root_item"], 5)
+        for btn in ctrl_widget.findChildren(QPushButton) if ctrl_widget else []:
+            btn.setEnabled(False)
+
     def update_progress(self, worker, data: dict) -> None:
         task = next((t for t in self.tasks if t["worker"] == worker), None)
-        if not task:
+        if not task or getattr(worker, "is_cancelled", False):
             return
 
         vid_id = data.get("video_id", "unknown_id")

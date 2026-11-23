@@ -6,6 +6,9 @@ request is claimed once (DOWNLOAD_CLAIMED, a dynamic property on the request)
 and answered by the tab whose page started it; a pop-up's download goes to the
 first tab that sees it. Only documents (opens_after_download) are opened in a
 tab when they finish.
+
+cancel_download goes through the yt-dlp downloads window when there is one,
+so its row shows the download stopping too.
 """
 
 import os
@@ -150,7 +153,11 @@ class DownloadsMixin:
     def cancel_download(self) -> None:
         if hasattr(self, "dl_worker") and self.dl_worker.isRunning():
             self.show_toast("Cancelling download...")
-            self.dl_worker.stop()
+            manager = getattr(self.window(), "ytdlp_manager_dialog", None)
+            if manager is not None:
+                manager.cancel(self.dl_worker)
+            else:
+                self.dl_worker.stop()
             self.progress.setValue(0)
 
     def print_to_pdf(self) -> None:

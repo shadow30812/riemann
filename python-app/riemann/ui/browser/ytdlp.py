@@ -4,6 +4,20 @@ yt-dlp: downloading a page's video, and finding a stream URL for an outside play
 yt-dlp comes from the optional packages (core/dependencies.py) with its pinned
 YouTube solver (yt-dlp-ejs), which runs in Deno; js_runtimes points yt-dlp at
 the pinned Deno, and yt-dlp is never given remote_components.
+
+YtDlpWorker is yt-dlp's logger (debug, info, warning, error). With
+ignoreerrors on, a failed video (a 403 from the site, a format that is
+gone) is only reported to the logger and download returns normally, so the
+worker keeps the errors and reports the last one instead of "Download
+complete!". Without ignoreerrors, one subtitle track that answers 429 Too Many
+Requests stops the whole download. yt-dlp logs a line at every step
+(extraction, the challenge solver, each retry), not only while bytes arrive,
+so stop is checked on every log line as well as in progress_hook: either raises
+KeyboardInterrupt, which yt-dlp lets through.
+
+SUBTITLE_LANGS takes English and its regional variants. "en.*" also matched
+every machine translation into English (en-de, en-fr, ...), one request each,
+and YouTube answered the burst with 429s.
 """
 
 import os
@@ -90,6 +104,9 @@ class YtDlpStreamWorker(QThread):
             self.error.emit(str(e))
 
 
+SUBTITLE_LANGS = ["en", "en-[A-Z]{2}", "en-orig"]
+
+
 class YtDlpWorker(QThread):
     """
     Background worker thread for executing yt-dlp media downloads via the Python API.
@@ -108,6 +125,25 @@ class YtDlpWorker(QThread):
         self.is_cancelled = False
         self._last_emit_time = 0.0
         self._files: set = set()
+        self.errors: list = []
+
+    def debug(self, msg: str) -> None:
+        if self.is_cancelled:
+            raise KeyboardInterrupt("Download aborted by user.")
+        log.debug("yt-dlp: %s", msg)
+
+    info = debug
+
+    def warning(self, msg: str) -> None:
+        log.info("yt-dlp: %s", msg)
+        self.debug("")
+
+    def error(self, msg: str) -> None:
+        log.warning("yt-dlp: %s", msg)
+        text = re.sub(r"\x1b\[[0-9;]*m", "", str(msg)).strip()
+        text = re.sub(r"^ERROR:\s*", "", text)
+        if text and not text.startswith("Traceback"):
+            self.errors.append(text)
 
     def run(self) -> None:
         """Runs the yt-dlp download with the options the user chose."""
@@ -115,6 +151,7 @@ class YtDlpWorker(QThread):
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
+            "logger": self,
             "progress_hooks": [self.progress_hook],
             "ignoreerrors": True,
             "js_runtimes": js_runtimes(),
@@ -157,7 +194,7 @@ class YtDlpWorker(QThread):
         if self.dl_opts.get("subtitles") and not self.dl_opts.get("audio_only"):
             ydl_opts["writesubtitles"] = True
             ydl_opts["writeautomaticsub"] = True
-            ydl_opts["subtitleslangs"] = ["en.*"]
+            ydl_opts["subtitleslangs"] = SUBTITLE_LANGS
             ydl_opts["compat_opts"] = ["no-keep-subs"]
             postprocessors.append({"key": "FFmpegEmbedSubtitle"})
 
@@ -173,6 +210,8 @@ class YtDlpWorker(QThread):
             if self.is_cancelled:
                 self.cleanup_remnants()
                 self.finished.emit(False, "Download cancelled.")
+            elif self.errors:
+                self.finished.emit(False, self.failure_message())
             else:
                 self.finished.emit(True, "Download complete!")
 
@@ -255,9 +294,15 @@ class YtDlpWorker(QThread):
             self.progress_details.emit(data)
             self.progress.emit(pct_val)
 
+    def failure_message(self) -> str:
+        if len(self.errors) == 1:
+            return f"Download failed: {self.errors[0]}"
+        return f"{len(self.errors)} downloads failed. Last error: {self.errors[-1]}"
+
     def stop(self) -> None:
         """
-        Flags the thread for cancellation. The progress_hook will catch this on the next tick.
+        Flags the thread for cancellation. The next progress tick or log line from
+        yt-dlp raises KeyboardInterrupt, which ends the download.
         """
         self.is_cancelled = True
 

@@ -865,3 +865,72 @@ def test_yt_dlp_runs_deno_from_the_packages_folder_of_a_packaged_build(tmp_path,
     deno = scripts / ("deno.exe" if os.name == "nt" else "deno")
     deno.write_text("")
     assert ytdlp.js_runtimes() == {"deno": {"path": str(deno)}}
+
+
+class _FakeYoutubeDL:
+    """Stands in for yt_dlp.YoutubeDL; script(params) plays what yt-dlp would do."""
+
+    script = None
+
+    def __init__(self, params):
+        self.params = params
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def download(self, urls):
+        type(self).script(self.params)
+        return 0
+
+
+def _run_with_fake_ytdlp(worker, script):
+    _FakeYoutubeDL.script = staticmethod(script)
+    results = []
+    worker.finished.connect(lambda ok, msg: results.append((ok, msg)))
+    with patch("yt_dlp.YoutubeDL", _FakeYoutubeDL):
+        worker.run()
+    return results
+
+
+def test_ytdlp_failed_video_is_reported_not_called_complete(qapp):
+    """With ignoreerrors, yt-dlp reports a failed video to the logger and returns 0."""
+
+    def script(params):
+        params["logger"].debug("[info] Writing video subtitles to: Talk.en.vtt")
+        params["logger"].error("\x1b[0;31mERROR:\x1b[0m unable to download video data: HTTP Error 403: Forbidden")
+
+    worker = YtDlpWorker("https://example.org/v", "/tmp")
+    assert _run_with_fake_ytdlp(worker, script) == [
+        (False, "Download failed: unable to download video data: HTTP Error 403: Forbidden")
+    ]
+
+
+def test_ytdlp_stop_ends_a_download_that_has_not_reached_progress(qapp):
+    """Stop works while yt-dlp extracts or retries, when no progress hook runs."""
+    lines = []
+
+    def script(params):
+        for i in range(50):
+            params["logger"].debug(f"[youtube] step {i}")
+            lines.append(i)
+            if i == 2:
+                worker.stop()
+
+    worker = YtDlpWorker("https://example.org/v", "/tmp")
+    assert _run_with_fake_ytdlp(worker, script) == [(False, "Download cancelled.")]
+    assert len(lines) == 3
+
+
+def test_ytdlp_subtitles_skip_machine_translations():
+    import re as _re
+
+    from riemann.ui.browser.ytdlp import SUBTITLE_LANGS
+
+    def wanted(code):
+        return any(_re.match(lang + "$", code) for lang in SUBTITLE_LANGS)
+
+    assert all(wanted(c) for c in ("en", "en-US", "en-GB", "en-orig"))
+    assert not any(wanted(c) for c in ("en-de", "en-fr", "de", "fr-en"))
