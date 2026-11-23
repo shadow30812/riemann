@@ -90,7 +90,11 @@ pub fn split_pages(output: &str, pages: usize) -> Result<Vec<String>> {
         parts.pop();
     }
     if parts.len() != pages {
-        anyhow::bail!("Tesseract returned {} pages for {} images", parts.len(), pages);
+        anyhow::bail!(
+            "Tesseract returned {} pages for {} images",
+            parts.len(),
+            pages
+        );
     }
     Ok(parts)
 }
@@ -117,7 +121,13 @@ impl OcrEngine {
     }
 
     /// Like `recognize_text`, in the given Tesseract languages (`eng+deu`).
-    pub fn recognize_text_in(&self, width: u32, height: u32, data: &[u8], languages: &str) -> Result<String> {
+    pub fn recognize_text_in(
+        &self,
+        width: u32,
+        height: u32,
+        data: &[u8],
+        languages: &str,
+    ) -> Result<String> {
         if !valid_languages(languages) {
             anyhow::bail!("Invalid OCR language list: {languages:?}");
         }
@@ -134,9 +144,10 @@ impl OcrEngine {
             .spawn()
             .context("Tesseract process failed to start. Please ensure 'tesseract-ocr' is installed and in your PATH.")?;
 
-        let writer = child.stdin.take().map(|mut stdin| {
-            std::thread::spawn(move || stdin.write_all(&png_data))
-        });
+        let writer = child
+            .stdin
+            .take()
+            .map(|mut stdin| std::thread::spawn(move || stdin.write_all(&png_data)));
 
         let output = child
             .wait_with_output()

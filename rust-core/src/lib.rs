@@ -54,8 +54,14 @@ impl DisplayFrame {
             _ => 0,
         };
         let edges = |r: PdfRect| {
-            let (l, rr) = (r.left().value.min(r.right().value), r.left().value.max(r.right().value));
-            let (b, t) = (r.bottom().value.min(r.top().value), r.bottom().value.max(r.top().value));
+            let (l, rr) = (
+                r.left().value.min(r.right().value),
+                r.left().value.max(r.right().value),
+            );
+            let (b, t) = (
+                r.bottom().value.min(r.top().value),
+                r.bottom().value.max(r.top().value),
+            );
             (l, b, rr, t)
         };
         let boundaries = page.boundaries();
@@ -69,10 +75,20 @@ impl DisplayFrame {
             (Some(c), None) => c,
             (None, None) => {
                 let (w, h) = (page.width().value, page.height().value);
-                if rotation % 180 == 90 { (0.0, 0.0, h, w) } else { (0.0, 0.0, w, h) }
+                if rotation % 180 == 90 {
+                    (0.0, 0.0, h, w)
+                } else {
+                    (0.0, 0.0, w, h)
+                }
             }
         };
-        DisplayFrame { rotation, left, bottom, right, top }
+        DisplayFrame {
+            rotation,
+            left,
+            bottom,
+            right,
+            top,
+        }
     }
 
     fn point(&self, x: f32, y: f32) -> (f32, f32) {
@@ -86,12 +102,20 @@ impl DisplayFrame {
 
     /// Width of the page as displayed, in points.
     fn width(&self) -> f32 {
-        if self.rotation % 180 == 90 { self.top - self.bottom } else { self.right - self.left }
+        if self.rotation % 180 == 90 {
+            self.top - self.bottom
+        } else {
+            self.right - self.left
+        }
     }
 
     /// Height of the page as displayed, in points.
     fn height(&self) -> f32 {
-        if self.rotation % 180 == 90 { self.right - self.left } else { self.top - self.bottom }
+        if self.rotation % 180 == 90 {
+            self.right - self.left
+        } else {
+            self.top - self.bottom
+        }
     }
 
     /// Converts a (left, top, right, bottom) box.
@@ -147,7 +171,8 @@ fn lock_doc(inner: &Mutex<DocumentWrapper>) -> MutexGuard<'_, DocumentWrapper> {
 
 /// Converts a page index from Python to PDFium's type, rejecting ones it can't hold.
 fn page_at(index: u32) -> PyResult<PdfPageIndex> {
-    PdfPageIndex::try_from(index).map_err(|_| value_err(format!("page index {index} is out of range")))
+    PdfPageIndex::try_from(index)
+        .map_err(|_| value_err(format!("page index {index} is out of range")))
 }
 
 fn runtime_err(e: impl ToString) -> PyErr {
@@ -253,14 +278,14 @@ fn smart_dark(b_raw: u8, g_raw: u8, r_raw: u8) -> (u8, u8, u8) {
 fn bookmark_page(bookmark: &PdfBookmark) -> i32 {
     if let Some(dest) = bookmark.destination() {
         if let Ok(idx) = dest.page_index() {
-            return idx as i32;
+            return idx;
         }
     }
     if let Some(action) = bookmark.action() {
         if let Some(local) = action.as_local_destination_action() {
             if let Ok(dest) = local.destination() {
                 if let Ok(idx) = dest.page_index() {
-                    return idx as i32;
+                    return idx;
                 }
             }
         }
@@ -347,7 +372,10 @@ fn get_pdfium(extra_dirs: &[std::path::PathBuf]) -> PyResult<&'static Pdfium> {
         .get_or_try_init(|| {
             let env_dir = std::env::var_os("RIEMANN_PDFIUM_DIR").map(std::path::PathBuf::from);
             let mut search: Vec<std::path::PathBuf> = extra_dirs.to_vec();
-            if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
+            if let Some(exe_dir) = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            {
                 search.push(exe_dir);
             }
 
@@ -367,7 +395,11 @@ fn get_pdfium(extra_dirs: &[std::path::PathBuf]) -> PyResult<&'static Pdfium> {
                         .iter()
                         .find_map(|d| try_dir(d).or_else(|| try_dir(&d.join("libs"))))
                 })
-                .or_else(|| ["./", "libs/", "../libs/"].iter().find_map(|d| try_dir(std::path::Path::new(d))));
+                .or_else(|| {
+                    ["./", "libs/", "../libs/"]
+                        .iter()
+                        .find_map(|d| try_dir(std::path::Path::new(d)))
+                });
 
             match bindings {
                 Some(b) => Ok(PdfiumWrapper(Pdfium::new(b))),
@@ -415,7 +447,17 @@ type CharBox = (String, (f32, f32, f32, f32));
 /// Type definition for the look of one character, used to match new text to it.
 /// Tuple structure: `(character, loose_bounds_tuple, font_size, font_name,
 /// serif, fixed_pitch, bold, italic, fill_colour_hex)`.
-type CharStyle = (String, (f32, f32, f32, f32), f32, String, bool, bool, bool, bool, String);
+type CharStyle = (
+    String,
+    (f32, f32, f32, f32),
+    f32,
+    String,
+    bool,
+    bool,
+    bool,
+    bool,
+    String,
+);
 
 /// Type definition for one outline (bookmark) entry, flattened depth-first.
 /// Tuple structure: `(depth, title, page_index)`, with -1 when the entry has no
@@ -429,6 +471,10 @@ type Link = (String, (f32, f32, f32, f32));
 /// Type definition for a comment made in another application.
 /// Tuple structure: `(subtype, contents, author, date, bounds_tuple)`.
 type Comment = (String, String, String, String, (f32, f32, f32, f32));
+
+/// Type definition for a page's comments.
+/// Tuple structure: `(page_box, comments)`.
+type PageComments = ((f32, f32, f32, f32), Vec<Comment>);
 
 /// Prefix of the `/NM` (annotation name) Riemann gives the annotations it
 /// writes into PDF files. Riemann draws those itself, so they are hidden from
@@ -491,7 +537,6 @@ struct RiemannDocument {
     page_count: usize,
 }
 
-
 #[pymethods]
 impl RiemannDocument {
     /// Renders a page to BGRA pixels. `theme_mode` is 0 (light), 1 (inverted)
@@ -510,7 +555,11 @@ impl RiemannDocument {
         let (page_w, page_h) = py.detach(|| -> PyResult<(f32, f32)> {
             let _guard = pdfium_guard();
             let doc_guard = lock_doc(inner);
-            let size = doc_guard.0.pages().page_size(page_at(page_index)?).map_err(value_err)?;
+            let size = doc_guard
+                .0
+                .pages()
+                .page_size(page_at(page_index)?)
+                .map_err(value_err)?;
             Ok((size.width().value, size.height().value))
         })?;
         let mut scale = scale;
@@ -520,7 +569,9 @@ impl RiemannDocument {
         }
         let (width, height) = ((page_w * scale) as i32, (page_h * scale) as i32);
         if width <= 0 || height <= 0 {
-            return Err(value_err(format!("page {page_index} renders to an empty image")));
+            return Err(value_err(format!(
+                "page {page_index} renders to an empty image"
+            )));
         }
         let len = width as usize * height as usize * 4;
 
@@ -532,7 +583,9 @@ impl RiemannDocument {
             if ptr.is_null() {
                 return Err(PyErr::fetch(py));
             }
-            Bound::from_owned_ptr(py, ptr).cast_into_unchecked::<PyBytes>().unbind()
+            Bound::from_owned_ptr(py, ptr)
+                .cast_into_unchecked::<PyBytes>()
+                .unbind()
         };
         let addr = unsafe { pyo3::ffi::PyBytes_AsString(data.as_ptr()) } as usize;
 
@@ -541,14 +594,19 @@ impl RiemannDocument {
             {
                 let _guard = pdfium_guard();
                 let doc_guard = lock_doc(inner);
-                let mut page = doc_guard.0.pages().get(page_at(page_index)?).map_err(value_err)?;
+                let mut page = doc_guard
+                    .0
+                    .pages()
+                    .get(page_at(page_index)?)
+                    .map_err(value_err)?;
                 for mut annotation in page.annotations_mut().iter() {
                     if is_riemann_annotation(&annotation) && !annotation.is_hidden() {
                         let _ = annotation.set_is_hidden(true);
                     }
                 }
-                let mut bitmap = PdfBitmap::from_bytes(width, height, PdfBitmapFormat::BGRA, &mut buffer[..])
-                    .map_err(runtime_err)?;
+                let mut bitmap =
+                    PdfBitmap::from_bytes(width, height, PdfBitmapFormat::BGRA, &mut buffer[..])
+                        .map_err(runtime_err)?;
                 page.render_into_bitmap_with_config(&mut bitmap, &render_config(width, height))
                     .map_err(runtime_err)?;
             }
@@ -581,7 +639,11 @@ impl RiemannDocument {
         py.detach(|| {
             let _guard = pdfium_guard();
             let doc_guard = lock_doc(inner);
-            let rect = doc_guard.0.pages().page_size(page_at(page_index)?).map_err(value_err)?;
+            let rect = doc_guard
+                .0
+                .pages()
+                .page_size(page_at(page_index)?)
+                .map_err(value_err)?;
             Ok((rect.width().value, rect.height().value))
         })
     }
@@ -616,13 +678,23 @@ impl RiemannDocument {
     /// A scale of 2.0 or more reads small text better. `languages` are Tesseract
     /// names joined by `+`.
     #[pyo3(signature = (page_index, scale, languages = "eng".to_string()))]
-    fn ocr_page(&self, py: Python, page_index: u32, scale: f32, languages: String) -> PyResult<String> {
+    fn ocr_page(
+        &self,
+        py: Python,
+        page_index: u32,
+        scale: f32,
+        languages: String,
+    ) -> PyResult<String> {
         let inner = &self.inner;
         py.detach(|| {
             let (mut buffer, width, height) = {
                 let _guard = pdfium_guard();
                 let doc_guard = lock_doc(inner);
-                let page = doc_guard.0.pages().get(page_at(page_index)?).map_err(value_err)?;
+                let page = doc_guard
+                    .0
+                    .pages()
+                    .get(page_at(page_index)?)
+                    .map_err(value_err)?;
                 let bitmap = generate_bitmap(&page, scale)?;
                 (
                     bitmap.as_raw_bytes(),
@@ -630,7 +702,9 @@ impl RiemannDocument {
                     bitmap.height() as u32,
                 )
             };
-            buffer.chunks_exact_mut(4).for_each(|pixel| pixel.swap(0, 2));
+            buffer
+                .chunks_exact_mut(4)
+                .for_each(|pixel| pixel.swap(0, 2));
 
             let engine = OcrEngine::new();
             engine
@@ -656,7 +730,11 @@ impl RiemannDocument {
                 let (mut buffer, width, height) = {
                     let _guard = pdfium_guard();
                     let doc_guard = lock_doc(inner);
-                    let page = doc_guard.0.pages().get(page_at(page_index)?).map_err(value_err)?;
+                    let page = doc_guard
+                        .0
+                        .pages()
+                        .get(page_at(page_index)?)
+                        .map_err(value_err)?;
                     let bitmap = generate_bitmap(&page, scale)?;
                     (
                         bitmap.as_raw_bytes(),
@@ -664,7 +742,9 @@ impl RiemannDocument {
                         bitmap.height() as u32,
                     )
                 };
-                buffer.chunks_exact_mut(4).for_each(|pixel| pixel.swap(0, 2));
+                buffer
+                    .chunks_exact_mut(4)
+                    .for_each(|pixel| pixel.swap(0, 2));
                 pngs.push(
                     riemann_ocr_worker::encode_png(width, height, &buffer).map_err(runtime_err)?,
                 );
@@ -761,7 +841,9 @@ impl RiemannDocument {
             let frame = DisplayFrame::of(&page);
             let mut boxes = Vec::new();
             for ch in text_accessor.chars().iter() {
-                let Some(s) = ch.unicode_string() else { continue };
+                let Some(s) = ch.unicode_string() else {
+                    continue;
+                };
                 let rect = match ch.loose_bounds() {
                     Ok(r) => r,
                     Err(_) => continue,
@@ -796,7 +878,9 @@ impl RiemannDocument {
             let frame = DisplayFrame::of(&page);
             let mut styles = Vec::new();
             for ch in text_accessor.chars().iter() {
-                let Some(s) = ch.unicode_string() else { continue };
+                let Some(s) = ch.unicode_string() else {
+                    continue;
+                };
                 let rect = match ch.loose_bounds() {
                     Ok(r) => r,
                     Err(_) => continue,
@@ -809,7 +893,10 @@ impl RiemannDocument {
                     Some(PdfFontWeight::Custom(w)) => w >= 600,
                     _ => ch.font_is_bold_reenforced(),
                 };
-                let colour = ch.fill_color().map(|c| format!("#{}", c.to_hex())).unwrap_or_default();
+                let colour = ch
+                    .fill_color()
+                    .map(|c| format!("#{}", c.to_hex()))
+                    .unwrap_or_default();
                 styles.push((
                     s,
                     frame.rect(&rect),
@@ -876,13 +963,7 @@ impl RiemannDocument {
                         false
                     };
 
-                    widgets.push((
-                        idx,
-                        frame.rect(&rect),
-                        f_type,
-                        value,
-                        checked,
-                    ));
+                    widgets.push((idx, frame.rect(&rect), f_type, value, checked));
                 }
             }
             Ok(widgets)
@@ -898,11 +979,7 @@ impl RiemannDocument {
     /// right, bottom))` with each box mapped through `DisplayFrame`, like every
     /// other box this module returns, so comments on rotated pages line up.
     /// Dates are the raw PDF date strings (`D:YYYYMMDDHHmmSS...`).
-    fn get_comments(
-        &self,
-        py: Python,
-        page_index: u32,
-    ) -> PyResult<((f32, f32, f32, f32), Vec<Comment>)> {
+    fn get_comments(&self, py: Python, page_index: u32) -> PyResult<PageComments> {
         let inner = &self.inner;
         py.detach(|| {
             let _guard = pdfium_guard();
@@ -944,7 +1021,13 @@ impl RiemannDocument {
                     .bounds()
                     .map(|r| frame.rect(&r))
                     .unwrap_or((0.0, 0.0, 0.0, 0.0));
-                comments.push((annotation_subtype_name(kind), contents, author, date, bounds));
+                comments.push((
+                    annotation_subtype_name(kind),
+                    contents,
+                    author,
+                    date,
+                    bounds,
+                ));
             }
             Ok((crop, comments))
         })
@@ -1091,16 +1174,29 @@ mod tests {
             out.extend(format!("{offset:010} 00000 n \n").as_bytes());
         }
         out.extend(
-            format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes(),
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
         );
         let n = NEXT_FILE.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!("riemann-core-{}-{n}-{name}.pdf", std::process::id()));
-        std::fs::File::create(&path).unwrap().write_all(&out).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "riemann-core-{}-{n}-{name}.pdf",
+            std::process::id()
+        ));
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(&out)
+            .unwrap();
         TempPdf(path.to_string_lossy().into_owned())
     }
 
     fn stream(content: &str) -> String {
-        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len())
+        format!(
+            "<< /Length {} >>\nstream\n{content}\nendstream",
+            content.len()
+        )
     }
 
     /// Two pages. Page 1 (612 x 792) has "Hello Riemann" in red Helvetica 24 at
@@ -1187,25 +1283,45 @@ mod tests {
         convert_pixels(&mut buffer, 2);
         let [b, g, r, a] = [buffer[0], buffer[1], buffer[2], buffer[3]];
         assert_eq!(a, 255);
-        assert!(b > g && g > r, "dark blue should stay blue, got BGR {b} {g} {r}");
-        assert!(b as u32 + g as u32 + r as u32 > 120 + 30 + 20, "dark blue should get lighter");
+        assert!(
+            b > g && g > r,
+            "dark blue should stay blue, got BGR {b} {g} {r}"
+        );
+        assert!(
+            b as u32 + g as u32 + r as u32 > 120 + 30 + 20,
+            "dark blue should get lighter"
+        );
     }
 
     #[test]
     fn smart_dark_matches_inverting_hsl_lightness() {
-        for &(r, g, b) in &[(255u8, 0u8, 0u8), (30, 200, 90), (250, 240, 200), (12, 12, 40)] {
+        for &(r, g, b) in &[
+            (255u8, 0u8, 0u8),
+            (30, 200, 90),
+            (250, 240, 200),
+            (12, 12, 40),
+        ] {
             let (rf, gf, bf) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
             let (max, min) = (rf.max(gf).max(bf), rf.min(gf).min(bf));
             let lightness = (max + min) / 2.0;
             let (nb, ng, nr) = smart_dark(r, g, b);
             let (nr, ng, nb) = (nr as f32 / 255.0, ng as f32 / 255.0, nb as f32 / 255.0);
             let new_lightness = (nr.max(ng).max(nb) + nr.min(ng).min(nb)) / 2.0;
-            assert!((new_lightness - (1.0 - lightness)).abs() < 0.01, "({r}, {g}, {b})");
+            assert!(
+                (new_lightness - (1.0 - lightness)).abs() < 0.01,
+                "({r}, {g}, {b})"
+            );
         }
     }
 
     fn frame(rotation: u16) -> DisplayFrame {
-        DisplayFrame { rotation, left: 0.0, bottom: 0.0, right: 612.0, top: 792.0 }
+        DisplayFrame {
+            rotation,
+            left: 0.0,
+            bottom: 0.0,
+            right: 612.0,
+            top: 792.0,
+        }
     }
 
     #[test]
@@ -1226,7 +1342,13 @@ mod tests {
 
     #[test]
     fn display_frame_measures_from_a_cropped_origin() {
-        let cropped = DisplayFrame { rotation: 0, left: 50.0, bottom: 100.0, right: 562.0, top: 692.0 };
+        let cropped = DisplayFrame {
+            rotation: 0,
+            left: 50.0,
+            bottom: 100.0,
+            right: 562.0,
+            top: 692.0,
+        };
         assert_eq!(cropped.point(50.0, 100.0), (0.0, 0.0));
         assert_eq!((cropped.width(), cropped.height()), (512.0, 592.0));
     }
@@ -1238,8 +1360,14 @@ mod tests {
             let f = frame(rotation);
             let (l, t, r, b) = f.rect(&user);
             assert!(l < r && t > b, "rotation {rotation}: {:?}", (l, t, r, b));
-            assert!(l >= 0.0 && r <= f.width() && b >= 0.0 && t <= f.height(), "rotation {rotation}");
-            assert!(((r - l) * (t - b) - 100.0 * 100.0).abs() < 0.01, "rotation {rotation}");
+            assert!(
+                l >= 0.0 && r <= f.width() && b >= 0.0 && t <= f.height(),
+                "rotation {rotation}"
+            );
+            assert!(
+                ((r - l) * (t - b) - 100.0 * 100.0).abs() < 0.01,
+                "rotation {rotation}"
+            );
         }
     }
 
@@ -1266,7 +1394,9 @@ mod tests {
     fn a_missing_file_is_an_io_error() {
         Python::initialize();
         Python::attach(|py| {
-            let err = open(py, "/nonexistent/riemann.pdf", None).err().expect("loading should fail");
+            let err = open(py, "/nonexistent/riemann.pdf", None)
+                .err()
+                .expect("loading should fail");
             assert!(err.is_instance_of::<pyo3::exceptions::PyIOError>(py));
         });
     }
@@ -1276,7 +1406,9 @@ mod tests {
         Python::initialize();
         Python::attach(|py| {
             let file = sample();
-            let err = open(py, &file.0, Some("a\0b")).err().expect("loading should fail");
+            let err = open(py, &file.0, Some("a\0b"))
+                .err()
+                .expect("loading should fail");
             assert!(err.is_instance_of::<pyo3::exceptions::PyValueError>(py));
         });
     }
@@ -1288,10 +1420,12 @@ mod tests {
             assert_eq!((result.width, result.height, result.scale), (306, 396, 0.5));
             assert_eq!(result.data.bind(py).as_bytes().len(), 306 * 396 * 4);
             assert_eq!(pixel(&result, py, 150, 10), [255, 255, 255, 255]);
-            let ink = (0..result.width).flat_map(|x| (40..56).map(move |y| (x, y))).any(|(x, y)| {
-                let [b, g, r, _] = pixel(&result, py, x, y);
-                r > 150 && g < 100 && b < 100
-            });
+            let ink = (0..result.width)
+                .flat_map(|x| (40..56).map(move |y| (x, y)))
+                .any(|(x, y)| {
+                    let [b, g, r, _] = pixel(&result, py, x, y);
+                    r > 150 && g < 100 && b < 100
+                });
             assert!(ink, "the red text should be drawn near the top");
         });
     }
@@ -1310,8 +1444,16 @@ mod tests {
     fn rendering_hides_riemanns_own_annotations_but_not_others() {
         with_sample(|py, doc| {
             let result = doc.render_page(py, 0, 1.0, 0).unwrap();
-            assert_eq!(pixel(&result, py, 100, 692), [255, 255, 255, 255], "Riemann draws its own");
-            assert_eq!(pixel(&result, py, 500, 692), [0, 0, 0, 255], "another app's square is rendered");
+            assert_eq!(
+                pixel(&result, py, 100, 692),
+                [255, 255, 255, 255],
+                "Riemann draws its own"
+            );
+            assert_eq!(
+                pixel(&result, py, 500, 692),
+                [0, 0, 0, 255],
+                "another app's square is rendered"
+            );
         });
     }
 
@@ -1331,7 +1473,11 @@ mod tests {
             let result = doc.render_page(py, 0, 4.0, 0).unwrap();
             assert!(result.scale < 4.0);
             assert!((result.width as f64) * (result.height as f64) <= MAX_RENDER_PIXELS);
-            assert!(result.width > 7_900, "scaled to fit, not further: {}", result.width);
+            assert!(
+                result.width > 7_900,
+                "scaled to fit, not further: {}",
+                result.width
+            );
         });
     }
 
@@ -1343,7 +1489,11 @@ mod tests {
             let hits = doc.search_page(py, 0, "Riemann".into()).unwrap();
             assert_eq!(hits.len(), 1);
             let (l, t, r, b) = hits[0];
-            assert!(l > 72.0 && r < 300.0 && b > 690.0 && t < 730.0, "{:?}", hits[0]);
+            assert!(
+                l > 72.0 && r < 300.0 && b > 690.0 && t < 730.0,
+                "{:?}",
+                hits[0]
+            );
             assert!(doc.search_page(py, 0, "absent".into()).unwrap().is_empty());
         });
     }
@@ -1351,11 +1501,18 @@ mod tests {
     #[test]
     fn char_boxes_run_left_to_right_along_the_line() {
         with_sample(|py, doc| {
-            let boxes: Vec<_> = doc.get_char_boxes(py, 0).unwrap().into_iter().filter(|(c, _)| c.trim() != "").collect();
+            let boxes: Vec<_> = doc
+                .get_char_boxes(py, 0)
+                .unwrap()
+                .into_iter()
+                .filter(|(c, _)| c.trim() != "")
+                .collect();
             let text: String = boxes.iter().map(|(c, _)| c.as_str()).collect();
             assert_eq!(text, "HelloRiemann");
             assert!(boxes.windows(2).all(|w| w[0].1 .0 < w[1].1 .0));
-            assert!(boxes.iter().all(|(_, (_, t, _, b))| *b < 710.0 && *t > 700.0));
+            assert!(boxes
+                .iter()
+                .all(|(_, (_, t, _, b))| *b < 710.0 && *t > 700.0));
         });
     }
 
@@ -1365,7 +1522,11 @@ mod tests {
             let boxes = doc.get_char_boxes(py, 1).unwrap();
             assert!(!boxes.is_empty());
             for (c, (l, t, r, b)) in boxes {
-                assert!(l >= 0.0 && r <= 792.0 && b >= 0.0 && t <= 612.0, "{c}: {:?}", (l, t, r, b));
+                assert!(
+                    l >= 0.0 && r <= 792.0 && b >= 0.0 && t <= 612.0,
+                    "{c}: {:?}",
+                    (l, t, r, b)
+                );
             }
         });
     }
@@ -1386,16 +1547,30 @@ mod tests {
     #[test]
     fn links_report_web_addresses_and_pages() {
         with_sample(|py, doc| {
-            let mut targets: Vec<String> = doc.get_links(py, 0).unwrap().into_iter().map(|(t, _)| t).collect();
+            let mut targets: Vec<String> = doc
+                .get_links(py, 0)
+                .unwrap()
+                .into_iter()
+                .map(|(t, _)| t)
+                .collect();
             targets.sort();
-            assert_eq!(targets, vec!["#page=2&top=500.00".to_string(), "https://example.org/paper".to_string()]);
+            assert_eq!(
+                targets,
+                vec![
+                    "#page=2&top=500.00".to_string(),
+                    "https://example.org/paper".to_string()
+                ]
+            );
         });
     }
 
     #[test]
     fn the_outline_is_flattened_with_page_indices() {
         with_sample(|py, doc| {
-            assert_eq!(doc.get_outline(py).unwrap(), vec![(0, "Second page".to_string(), 1)]);
+            assert_eq!(
+                doc.get_outline(py).unwrap(),
+                vec![(0, "Second page".to_string(), 1)]
+            );
         });
     }
 
@@ -1406,7 +1581,10 @@ mod tests {
             assert_eq!(page, (0.0, 0.0, 612.0, 792.0));
             assert_eq!(comments.len(), 1, "{comments:?}");
             let (kind, contents, author, date, _) = &comments[0];
-            assert_eq!((kind.as_str(), contents.as_str(), author.as_str()), ("Text", "Looks good", "Ana"));
+            assert_eq!(
+                (kind.as_str(), contents.as_str(), author.as_str()),
+                ("Text", "Looks good", "Ana")
+            );
             assert!(date.starts_with("D:2026"));
         });
     }
@@ -1421,8 +1599,17 @@ mod tests {
 
     #[test]
     fn subtype_names_follow_the_pdf_spelling() {
-        assert_eq!(annotation_subtype_name(PdfPageAnnotationType::Strikeout), "StrikeOut");
-        assert_eq!(annotation_subtype_name(PdfPageAnnotationType::Redacted), "Redact");
-        assert_eq!(annotation_subtype_name(PdfPageAnnotationType::Highlight), "Highlight");
+        assert_eq!(
+            annotation_subtype_name(PdfPageAnnotationType::Strikeout),
+            "StrikeOut"
+        );
+        assert_eq!(
+            annotation_subtype_name(PdfPageAnnotationType::Redacted),
+            "Redact"
+        );
+        assert_eq!(
+            annotation_subtype_name(PdfPageAnnotationType::Highlight),
+            "Highlight"
+        );
     }
 }

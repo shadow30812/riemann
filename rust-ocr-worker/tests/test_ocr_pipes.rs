@@ -21,7 +21,11 @@ fn chatty_tesseract_does_not_deadlock() {
     )
     .unwrap();
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap_or_default());
+    let path = format!(
+        "{}:{}",
+        dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     unsafe { std::env::set_var("PATH", path) };
 
     let (width, height) = (600u32, 600u32);
