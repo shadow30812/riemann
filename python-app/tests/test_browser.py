@@ -34,6 +34,7 @@ from riemann.ui.browser import (
     YtDlpStreamWorker,
     YtDlpWorker,
 )
+from riemann.ui.browser.downloads import Downloads
 from riemann.ui.browser.media import MediaControls
 from riemann.ui.browser.stream import BUILT_IN_PLAYER, StreamLauncher, VideoPlayer, format_time
 
@@ -512,6 +513,26 @@ def test_media_controls_work_without_a_browser_tab(qtbot, webengine):
     assert _wait_until(lambda: playing[-1:] == [None], 3000)
 
 
+def test_downloads_work_without_a_browser_tab(qtbot, webengine, tmp_path):
+    view = _bare_view(webengine)
+    owner = QWidget()
+    qtbot.addWidget(owner)
+    downloads = Downloads(view, owner)
+    toasts, saved = [], []
+    downloads.toast.connect(toasts.append)
+    downloads.pdf_saved.connect(saved.append)
+    downloads.download_video()
+    assert toasts == ["Invalid URL for download."]
+    page = view.page()
+    target = tmp_path / "page.pdf"
+    with patch("riemann.ui.browser.downloads.QFileDialog.getSaveFileName", return_value=(str(target), "")), patch(
+        "riemann.ui.browser.downloads.save_last_directory"
+    ), patch.object(page, "printToPdf", lambda path: page.pdfPrintingFinished.emit(path, True)):
+        downloads.print_to_pdf()
+    assert toasts[-2:] == ["Rendering PDF...", "PDF saved successfully!"]
+    assert saved == [str(target)]
+
+
 def test_a_missing_engine_script_leaves_the_mode_off(qtbot, webengine, monkeypatch, tmp_path):
     view = _bare_view(webengine)
     media = MediaControls(view, parent=view)
@@ -575,9 +596,9 @@ def _download(webengine, qtbot, tmp_path, url, tabs=1):
     for _ in range(tabs):
         tab = webengine.tab(profile=profile)
         qtbot.addWidget(tab)
-        tab.show_toast = toasts.append
+        tab.downloads.toast.connect(toasts.append)
         made.append(tab)
-    made[0]._on_document_downloaded = opened.append
+    made[0].downloads.document_downloaded.connect(opened.append)
     target = tmp_path / url.rsplit("/", 1)[1]
 
     def save_dialog(*args, **kwargs):
@@ -638,7 +659,7 @@ def test_print_to_pdf_reports_success_and_failure_once(mock_injector, qtbot, web
     tab = webengine.tab()
     qtbot.addWidget(tab)
     toasts = []
-    tab.show_toast = toasts.append
+    tab.downloads.toast.connect(toasts.append)
     page = tab.web.page()
     target = tmp_path / "page.pdf"
     with patch("riemann.ui.browser.downloads.QFileDialog.getSaveFileName", return_value=(str(target), "")), patch(
@@ -664,28 +685,33 @@ def test_browser_tab_download_video(mock_worker, mock_dialog, mock_injector, moc
     tab = webengine.tab()
     qtbot.addWidget(tab)
     with patch.object(tab.web, "url", return_value=QUrl("http://youtube.com")):
-        tab.download_video()
+        tab.btn_download.click()
         mock_worker.assert_called_once()
         mock_worker.return_value.start.assert_called_once()
+    assert tab.btn_download.toolTip() == "Cancel Download"
 
 
 @patch("riemann.ui.browser.tab.ScriptInjector")
 def test_browser_tab_cancel_video(mock_injector, qtbot, webengine):
     tab = webengine.tab()
     qtbot.addWidget(tab)
-    tab.dl_worker = MagicMock()
-    tab.dl_worker.isRunning.return_value = True
-    tab.cancel_download()
-    tab.dl_worker.stop.assert_called_once()
+    tab.downloads.dl_worker = MagicMock()
+    tab.downloads.dl_worker.isRunning.return_value = True
+    tab.downloads.video_active = True
+    tab.btn_download.click()
+    tab.downloads.dl_worker.stop.assert_called_once()
 
 
 @patch("riemann.ui.browser.tab.ScriptInjector")
 def test_browser_tab_download_finished(mock_injector, qtbot, webengine):
     tab = webengine.tab()
     qtbot.addWidget(tab)
-    tab._on_download_finished(True, "Done")
+    tab.downloads.video_active = True
+    tab._show_video_download_running(True)
+    tab.downloads._on_video_finished(True, "Done")
     assert tab.progress.value() == 100
     assert tab.btn_download.toolTip() == "Download Video via yt-dlp"
+    assert not tab.downloads.video_active
 
 
 def test_ytdlp_worker_downloads_no_solver_code_and_single_video():

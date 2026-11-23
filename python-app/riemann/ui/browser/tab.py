@@ -2,13 +2,15 @@
 BrowserTab: one web page in a tab, with Riemann's toolbar around it.
 
 The toolbar, find bar, shortcuts, theme, zoom and bookmarks come from the
-chrome mixin; downloads is a mixin too. The attributes they share (web,
-profile, toolbar buttons, progress, lbl_toast, dark_mode, incognito) are made
-in __init__. Captions, music and video modes and mute are MediaControls
-(media.py), and streaming to a player is StreamLauncher (stream.py): parts
-the tab owns, given only what they work on (the web view, the captions
-server, the widget their dialogs open over). The tab turns its buttons into
-calls on them and their signals into toasts and the tab bar's speaker mark.
+chrome mixin, which uses the attributes made in __init__ (web, profile,
+toolbar buttons, progress, lbl_toast, dark_mode, incognito). The rest are
+parts the tab owns, each given only what it works on (the web view, the
+captions server, the widget its dialogs open over): MediaControls (media.py:
+captions, music and video modes, mute), StreamLauncher (stream.py: outside
+players and the built-in one) and Downloads (downloads.py: files, videos,
+saving a page as PDF). The tab turns its buttons into calls on them and their
+signals into toasts, the loading line, the tab bar's speaker mark and calls
+on the window (opening a document, the downloads windows).
 
 Notes:
 
@@ -80,7 +82,7 @@ from ..browser_handlers import ScriptInjector
 from ..palette import icon_tone, incognito_url_style, legible_icon, link_tip_style, page_theme, tokens
 from ..toast import Toast
 from .chrome import ChromeMixin
-from .downloads import DownloadsMixin
+from .downloads import Downloads
 from .interceptor import (
     HOMEPAGE_PATH,
     RequestInterceptor,
@@ -147,7 +149,7 @@ def homepage_icon_tones(links_json: str, cached_icons: dict) -> dict:
     return tones
 
 
-class BrowserTab(ChromeMixin, DownloadsMixin, QWidget):
+class BrowserTab(ChromeMixin, QWidget):
     def __init__(
         self,
         start_url: str = "",
@@ -173,7 +175,6 @@ class BrowserTab(ChromeMixin, DownloadsMixin, QWidget):
         if self.request_interceptor is None:
             self.request_interceptor = RequestInterceptor(self.profile)
         self.profile.setUrlRequestInterceptor(self.request_interceptor)
-        self.profile.downloadRequested.connect(self._handle_download)
 
         self.script_injector = ScriptInjector(self.profile)
         self.script_injector.inject_ad_skipper()
@@ -248,6 +249,17 @@ class BrowserTab(ChromeMixin, DownloadsMixin, QWidget):
         self.web.setPage(page)
         layout.addWidget(self.web)
 
+        self.downloads = Downloads(self.web, self)
+        self.downloads.toast.connect(self.show_toast)
+        self.downloads.progress.connect(self.progress.setValue)
+        self.downloads.document_downloaded.connect(self._open_downloaded_document)
+        self.downloads.pdf_saved.connect(self._open_saved_pdf)
+        self.downloads.download_added.connect(self._list_download)
+        self.downloads.video_download_added.connect(self._list_video_download)
+        self.downloads.video_cancelling.connect(self._show_video_cancelling)
+        self.downloads.video_running.connect(self._show_video_download_running)
+        self.profile.downloadRequested.connect(self.downloads.handle_download)
+
         self.btn_back.clicked.connect(self.web.back)
         self.btn_fwd.clicked.connect(self.web.forward)
         self.btn_reload.clicked.connect(self.web.reload)
@@ -320,6 +332,52 @@ class BrowserTab(ChromeMixin, DownloadsMixin, QWidget):
         muted = self.btn_mute.isChecked()
         self.media.set_muted(muted)
         self.btn_mute.setIcon(self._get_icon("volume-x.svg" if muted else "volume-on.svg"))
+
+    def _window_part(self, name: str) -> Any:
+        """The window's attribute name (a method or a downloads window), or None outside a Riemann window."""
+        window = self.window()
+        return getattr(window, name, None) if window is not None and window is not self else None
+
+    def _open_downloaded_document(self, path: str) -> None:
+        opener = self._window_part("open_pdf_in_new_tab")
+        if opener is not None:
+            opener(path)
+
+    def _open_saved_pdf(self, path: str) -> None:
+        opener = self._window_part("new_pdf_tab")
+        if opener is not None:
+            opener(path)
+
+    def _list_download(self, item: Any) -> None:
+        manager = self._window_part("download_manager_dialog")
+        if manager is not None:
+            manager.add_download(item)
+
+    def _list_video_download(self, worker: Any, title: str, folder: str, playlist: bool) -> None:
+        manager = self._window_part("ytdlp_manager_dialog")
+        if manager is not None:
+            try:
+                manager.add_download(worker, title, folder, playlist)
+            except Exception as e:
+                print(f"[Warning] Could not link to yt-dlp Download Manager: {e}")
+
+    def _show_video_cancelling(self, worker: Any) -> None:
+        manager = self._window_part("ytdlp_manager_dialog")
+        if manager is not None:
+            manager.cancel(worker)
+
+    def _show_video_download_running(self, running: bool) -> None:
+        self.btn_download.setIcon(self._get_icon("circle-stop.svg" if running else "download.svg"))
+        self.btn_download.setToolTip("Cancel Download" if running else "Download Video via yt-dlp")
+
+    def _on_download_clicked(self) -> None:
+        if self.downloads.video_active:
+            self.downloads.cancel_video_download()
+        else:
+            self.downloads.download_video()
+
+    def print_to_pdf(self) -> None:
+        self.downloads.print_to_pdf()
 
     def stream_video(self) -> None:
         self.streamer.stream(self.web.url().toString())

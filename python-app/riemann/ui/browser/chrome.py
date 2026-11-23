@@ -198,7 +198,7 @@ class ChromeMixin:
         self.btn_download.setIconSize(icon_size)
         self.btn_download.setFixedWidth(30)
         self.btn_download.setToolTip("Download Video via yt-dlp")
-        self.btn_download.clicked.connect(self.download_video)
+        self.btn_download.clicked.connect(self._on_download_clicked)
 
         self.btn_print_pdf = QPushButton()
         self.btn_print_pdf.setIcon(
@@ -570,11 +570,8 @@ class ChromeMixin:
         self.btn_video_speed.setIcon(self._get_icon("gauge.svg"))
 
         self.btn_stream.setIcon(self._get_icon("airplay.svg"))
-        dl_icon = (
-            "circle-stop.svg"
-            if getattr(self, "dl_worker", None) and self.dl_worker.isRunning()
-            else "download.svg"
-        )
+        downloads = getattr(self, "downloads", None)
+        dl_icon = "circle-stop.svg" if downloads is not None and downloads.video_download_running() else "download.svg"
         self.btn_download.setIcon(self._get_icon(dl_icon))
         self.btn_print_pdf.setIcon(self._get_icon("printer.svg"))
 
