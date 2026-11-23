@@ -12,6 +12,10 @@ Notes:
 _os_display_name: EXTENDED_NAME_FORMAT 3 = NameDisplay ("Ada Lovelace") Unix
 only; importing it at module level broke Windows.
 
+progress: the page-loading line above the toolbar, LOAD_BAR_HEIGHT pixels.
+Its own style sheet sets the height too, since the theme style sheets give
+every progress bar min-height: 8px, which outranked setFixedHeight.
+
 eventFilter: The tab is closing: its view is gone but children still report
 events.
 """
@@ -78,6 +82,9 @@ from .chrome import ChromeMixin
 from .media import MediaMixin
 from .stream import StreamMixin
 from .downloads import DownloadsMixin
+
+
+LOAD_BAR_HEIGHT = 2
 
 
 def _os_display_name() -> str:
@@ -153,18 +160,21 @@ class BrowserTab(ChromeMixin, MediaMixin, StreamMixin, DownloadsMixin, QWidget):
         self._build_search_bar(layout)
 
         self.progress = QProgressBar()
-        self.progress.setFixedHeight(4)
+        self.progress.setFixedHeight(LOAD_BAR_HEIGHT)
         self.progress.setTextVisible(False)
         self.progress.setStyleSheet("""
             QProgressBar {
                 border: none;
+                border-radius: 0px;
                 background-color: transparent;
+                min-height: %dpx;
+                max-height: %dpx;
             }
             QProgressBar::chunk {
                 background-color: %s;
-                border-radius: 2px;
+                border-radius: 1px;
             }
-        """ % tokens(self.dark_mode)["accent"])
+        """ % (LOAD_BAR_HEIGHT, LOAD_BAR_HEIGHT, tokens(self.dark_mode)["accent"]))
         layout.insertWidget(0, self.progress)
 
         self.lbl_toast = Toast(self)

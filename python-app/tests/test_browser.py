@@ -934,3 +934,19 @@ def test_ytdlp_subtitles_skip_machine_translations():
 
     assert all(wanted(c) for c in ("en", "en-US", "en-GB", "en-orig"))
     assert not any(wanted(c) for c in ("en-de", "en-fr", "de", "fr-en"))
+
+
+@patch("riemann.ui.browser.tab.ScriptInjector")
+def test_page_loading_line_stays_thin_under_the_theme_style_sheets(mock_injector, qtbot, webengine):
+    """The themes give progress bars min-height: 8px, which made the 4px loading line 8px tall."""
+    from riemann.core.assets import asset_path
+
+    host = QWidget()
+    qtbot.addWidget(host)
+    with open(asset_path("theme", "modern_dark.css"), encoding="utf-8") as f:
+        host.setStyleSheet(f.read())
+    tab = webengine.tab()
+    tab.setParent(host)
+    host.show()
+    QCoreApplication.processEvents()
+    assert tab.progress.height() == 2
