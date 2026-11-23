@@ -128,7 +128,7 @@ Semantic search runs in a separate FastAPI process started by the app (`core/ai_
 * `chrome.py`: full screen and the auto-hiding bars.
 * `folders.py`: workspaces and the file explorer.
 
-Helpers with no window state live beside them: `instance.py` (single-instance handoff), `desktop.py` (Linux desktop integration), `dialogs.py`, `common.py` (`get_resource_path`, `window_class()`). `app.py` re-exports the old names in `__all__`, so `from riemann.app import ...` keeps working.
+Helpers with no window state live beside them: `instance.py` (single-instance handoff), `desktop.py` (Linux desktop integration), `dialogs.py`, `common.py` (`window_class()`). `app.py` re-exports the old names in `__all__`, so `from riemann.app import ...` keeps working.
 
 **Collapse Tabs.** `set_tabs_collapsed()` hides both tab bars (the main strip, or the column with vertical tabs, and the side pane's strip) and saves the state under `app/tabs_collapsed`. The View menu action, the `btn_collapse_tabs` button in the menu corner (icon `list-collapse`, `list-collapse-white` in dark mode) and Ctrl+Shift+B all route through it and are kept in sync with signals blocked. Fullscreen hides the tab bars on its own; on the way out, `_restore_tab_bars()` respects the collapsed state.
 
@@ -175,8 +175,8 @@ If an independent window instance is explicitly required, passing `--new-window`
 
 To ensure seamless desktop integration on Linux distributions (GNOME, KDE, Ubuntu Dock, Cinnamon):
 
-* `RiemannWindow` registers `StartupWMClass=Riemann` on the top-level window.
-* On startup, `install_desktop_file()` automatically generates and writes `~/.local/share/applications/Riemann.desktop` if absent.
+* `run()` sets the desktop file name to `Riemann`, and the entry it belongs to carries `StartupWMClass=Riemann`.
+* On startup, packaged Linux builds (PyInstaller or Nuitka) run `install_linux_integration()` (`window/desktop.py`), which writes `~/.local/share/applications/Riemann.desktop`, the icon and the MIME associations if they aren't there yet. Running from source registers nothing, since the entry would point at a `.py` file.
 * This ensures running instances are properly associated with the application launcher and dock icons rather than appearing as a generic executable or duplicate launcher icon.
 
 ---
@@ -186,11 +186,11 @@ To ensure seamless desktop integration on Linux distributions (GNOME, KDE, Ubunt
 `RiemannWindow` tracks all open non-incognito window instances globally via `_all_open_windows`:
 
 * **Instance Tracking**: When a non-incognito `RiemannWindow` is instantiated, it registers itself into `RiemannWindow._all_open_windows`. On `closeEvent()`, it unregisters cleanly.
-* **Multi-Window Session Serialization (`_save_all_windows_session()`)**: Iterates through all open windows in `_all_open_windows`, capturing window geometry, main tab paths/types, side tab paths/types, active tab indices, and split-view orientation states into a list serialized under the `sessions/multi_window` key in `QSettings`.
-* **Sequential Close Grace Window**: When multiple windows are open, closing one window sets a 20-second timestamp threshold (`_multi_window_save_time`). Subsequent windows closed within this window avoid overwriting the multi-window session with a single-window state, protecting session restoration if the user closes windows sequentially prior to exiting.
+* **Multi-Window Session Serialization (`_save_all_windows_session()`)**: Iterates through all open windows in `_all_open_windows`, capturing window geometry, main tab paths/types, side tab paths/types, active tab indices, and split-view orientation states into a list serialized under the `session/windows` key in `QSettings`.
+* **Sequential Close Grace Window**: When a window with tabs or a folder closes while other windows stay open, its state goes into `_recently_closed_windows` with the time. When the last window closes, the states from the last 15 seconds are saved with it, so closing windows one by one before quitting still restores all of them.
 * **Asking Before Closing (`confirm_close()`)**: Before a window closes, each reader with page edits waiting for Save asks what to do, and each browser tab lets its page ask about unsaved changes (`BrowserTab.confirm_leave`, see Leaving Web Pages). Cancelling either keeps the window open.
 * **Clean Application Exit (`exit_application()`)**: Runs `confirm_close()` in every window, then serializes all of them and issues `QApplication.quit()`. In Qt 6, `quit()` sends each window a close event, so `exit_application` sets `close_confirmed` on every window first and `closeEvent` doesn't ask a second time.
-* **Multi-Window Restoration**: On startup with `restore_session=True`, if `sessions/multi_window` exists and contains multiple window records, the primary window restores its own layout and dynamically spawns subsequent `RiemannWindow(restore_session=False)` instances, populating their tabs and geometries.
+* **Multi-Window Restoration**: On startup with `restore_session=True`, if `session/windows` exists and contains multiple window records, the primary window restores its own layout and dynamically spawns subsequent `RiemannWindow(restore_session=False)` instances, populating their tabs and geometries.
 
 ---
 
@@ -198,11 +198,11 @@ To ensure seamless desktop integration on Linux distributions (GNOME, KDE, Ubunt
 
 Fullscreen mode in `RiemannWindow` integrates auto-hiding controls to maximize reading canvas while keeping navigation accessible:
 
-* **Trigger Threshold**: Moving the mouse within the top 4 pixels of the display reveals both the main menu bar and the primary navigation bar using smooth property animations.
-* **Dual-Corner Exit Fullscreen Toggle (`_track_mouse_for_fs`)**: Moving the mouse cursor within 150×100px of either the **top-right** (`x > width - 150, y < 100`) or **top-left** (`x < 150, y < 100`) corner triggers the floating exit fullscreen button (`btn_exit_fs`). The button dynamically repositions adjacent to the active hover corner (`(20, 20)` for top-left, `(width - 56, 20)` for top-right).
-* **Auto-Hide Delay**: When the mouse leaves the top control zone, a 1.5-second single-shot timer triggers an auto-hide transition unless a menu or combo-box dropdown is currently open.
+* **Trigger Threshold**: `_track_mouse_for_fs` polls the pointer every 100 ms. Within the top 40 pixels of the window it reveals the menu bar, the tab strips and the current tabs' own bars.
+* **Dual-Corner Exit Fullscreen Toggle (`_track_mouse_for_fs`)**: Moving the mouse cursor within 150×100px of either the **top-right** (`x > width - 150, y < 100`) or **top-left** (`x < 150, y < 100`) corner shows the floating exit fullscreen button (`floating_fs_btn`, when Settings allows it), placed 20 px from the corner the pointer is in. It hides again 2 seconds after the pointer leaves.
+* **Auto-Hide Delay**: When the pointer leaves the revealed bars, a 500 ms single-shot timer (`hover_timer`) hides them, unless the pointer is back over one of them by then (`_pointer_over_controls`).
 * **Tab Strip Restore (`_restore_tab_bars()`)**: Revealing the controls and leaving fullscreen both go through `_restore_tab_bars()`, which shows the main and side tab bars only when tabs are not collapsed.
-* **System Clock Widget**: A live `SystemClockWidget` (`QLabel` updated via `QTimer`) is integrated directly into the navbar to maintain time awareness during distraction-free fullscreen research sessions.
+* **Clock and system figures**: `metrics_label`, in the menu bar's corner, shows the time, memory, uptime, network and battery, refreshed by a timer (`_update_global_metrics`).
 
 ---
 
@@ -794,7 +794,7 @@ Qt then converts these into viewport-space overlays.
 
 ## Links and Background Rendering
 
-**Links.** `RiemannDocument.get_links(page)` (Rust) resolves every link annotation on a page. Internal links, whether explicit destinations, named destinations or GoTo actions, come back as `#page=N`, plus `&top=Y` when the destination names a vertical position (PDF points, origin at the page bottom). External links come back as their URI. `RenderingMixin._render_links` caches the raw tuples per page in `_raw_links_cache` and scales them to widget coordinates with a couple of pixels of slack. `ReaderTab._parse_internal_link` decodes the target, and `jump_to_page(idx, top_pts)` scrolls so that the destination sits at the top of the viewport. A press that lands on a link tolerates 14 px of jitter before it turns into a text selection.
+**Links.** `RiemannDocument.get_links(page)` (Rust) resolves every link annotation on a page. Internal links, whether explicit destinations, named destinations or GoTo actions, come back as `#page=N`, plus `&top=Y` when the destination names a vertical position (PDF points, origin at the page bottom). External links come back as their URI. `RenderingMixin._render_links` caches the raw tuples per page in `_raw_links_cache` and scales them to widget coordinates with a couple of pixels of slack. `parse_internal_link` (`mixins/navigation.py`) decodes the target, and `jump_to_page(idx, top_pts)` scrolls so that the destination sits at the top of the viewport. A press that lands on a link tolerates 14 px of jitter before it turns into a text selection.
 
 **Rendering.** Pages are rasterised off the UI thread by `PageRenderWorker` (`ui/reader/render_worker.py`):
 
@@ -1210,7 +1210,7 @@ Features:
 
 * **Timestamps**: entries are stored as `{"path": ..., "timestamp": ISO 8601}`; bare paths from older versions load with an empty time. `get_list()` returns paths, `get_entries()` the full entries, which the History dialog shows with names, locations and times.
 * **Immediate Persistence**: History entries are written immediately upon opening a document or web page, rather than deferring writes until application exit. This guarantees that recently opened documents are preserved even if the application is killed abruptly.
-* **Crash Recovery State**: Tracks session exit state using a `_session_cleanly_closed` flag. If an unclean shutdown is detected on startup (e.g. system power outage or crash), the application prompts the user with a recovery dialog to restore all previously open tabs.
+* **Crash Recovery State**: The window sets the `session/clean_exit` setting (`CLEAN_EXIT_KEY`) to false when it starts and back to true when the session is saved on a clean exit; finding it false at startup sets `_was_unclean_exit`. After an unclean shutdown (a crash or a power cut), the app asks whether to restore the last opened tabs.
 * **Autocomplete Engine**: Powers address bar and file path suggestions across all viewports.
 * **Format Migration**: Automatically upgrades legacy JSON history formats.
 * **Document classes**: PDFs, Markdown, code and text files are all stored under the `pdf` key (installs have it on disk). The History tab's Documents list shows a Type column and a filter by class, from `core.doctypes.document_class` (PDF, Markdown, Code, Text), which goes by name and reads only a file whose name says nothing. HTML files are web history.
@@ -1424,8 +1424,8 @@ The application persists:
 * browser state
 * zoom levels
 * active documents
-* clean shutdown flag (`_session_cleanly_closed`)
-* multi-window layout schemas (`sessions/multi_window`)
+* clean shutdown flag (`session/clean_exit`)
+* multi-window layout schemas (`session/windows`)
 
 ### Immediate History & Crash Recovery Flow
 * **Immediate Persistence**: Opened documents and web pages are recorded into `HistoryManager` as soon as they are launched rather than waiting for `closeEvent()`.
@@ -1438,22 +1438,24 @@ The application persists:
 
 Riemann provides seamless restoration across multiple concurrent desktop windows:
 
-* **Session Schema (`sessions/multi_window`)**:
+* **Session Schema (`session/windows`)**:
   A serialized list of window dictionaries, each containing:
   * `geometry`: Window dimensions and position on screen.
+  * `state`: The window's dock and toolbar state (`saveState`).
   * `main_tabs`: List of tab serialization dicts (`{"type": "pdf"|"web", "data": path|url}`) for `tabs_main`.
   * `side_tabs`: List of tab serialization dicts for `tabs_side`.
-  * `active_main_idx`: Active tab index in the main pane.
-  * `active_side_idx`: Active tab index in the side pane.
-  * `is_split`: Boolean indicating if split-view was visible.
+  * `main_active_idx`: Active tab index in the main pane.
+  * `side_active_idx`: Active tab index in the side pane.
+  * `active_folder`: The folder open in the explorer, or empty.
+  The first window's values are also stored under their own `session/` keys, and the splitter's position under `splitter/state`.
 * **Sequential Close Coordination**:
   * Users frequently close windows one by one before fully quitting the application.
-  * When any window closes with multiple windows remaining, `_save_all_windows_session()` records the current time into `_multi_window_save_time`.
-  * If the final window closes within 20 seconds, it refrains from overwriting the multi-window snapshot, allowing the full multi-window layout to be restored on the next startup.
+  * When a window closes while others remain, its state is kept in `_recently_closed_windows` with the time.
+  * When the final window closes, `_save_all_windows_session()` adds the states kept in the last 15 seconds, so the full multi-window layout is restored on the next startup.
 * **Restoration Lifecycle**:
-  * On application boot, `RiemannWindow.__init__(restore_session=True)` checks for `sessions/multi_window`.
+  * On application boot, `RiemannWindow.__init__(restore_session=True)` checks for `session/windows`.
   * If found, the current window restores entry 0.
-  * For entries `1..N`, the application instantiates new `RiemannWindow(restore_session=False)` objects, populating their tabs and geometries, and displays them on screen.
+  * For entries `1..N`, the application instantiates new `RiemannWindow(restore_session=False, is_secondary_restoration=True)` objects, populating their tabs and geometries, and displays them on screen.
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "tool": "pytest-cov (coverage.py 7.17.0)",
-  "tests_passed": 1349,
+  "tests_passed": 1350,
   "statements": 24703,
   "covered": 18565,
   "percent": 75.2,

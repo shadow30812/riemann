@@ -74,6 +74,7 @@ riemann/
 │   │   │   ├── requirements/
 │   │   │   │   └── (hashed lock files for the optional dependency groups)
 │   │   │   └── theme/
+│   │   │       ├── modern_contrast.css
 │   │   │       ├── modern_dark.css
 │   │   │       ├── modern_light.css
 │   │   │       ├── x-white.svg
@@ -84,6 +85,7 @@ riemann/
 │   │   │   ├── annotation_store.py
 │   │   │   ├── assets.py
 │   │   │   ├── bibliography.py
+│   │   │   ├── binary.py
 │   │   │   ├── captions.py
 │   │   │   ├── captions_server.py
 │   │   │   ├── citations.py
@@ -115,12 +117,13 @@ riemann/
 │   │   │   ├── tables.py
 │   │   │   └── window_snap.py
 │   │   ├── ui/
-│   │   │   ├── browser/
+│   │   │   ├── accessibility.py
 │   │   │   ├── browser_handlers.py
 │   │   │   ├── command_palette.py
 │   │   │   ├── components.py
 │   │   │   ├── explorer.py
 │   │   │   ├── favourites.py
+│   │   │   ├── file_icons.py
 │   │   │   ├── office_install.py
 │   │   │   ├── palette.py
 │   │   │   ├── shortcuts.py
@@ -128,6 +131,17 @@ riemann/
 │   │   │   ├── threads.py
 │   │   │   ├── toast.py
 │   │   │   ├── tooltip.py
+│   │   │   ├── browser/
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── chrome.py
+│   │   │   │   ├── downloads.py
+│   │   │   │   ├── interceptor.py
+│   │   │   │   ├── media.py
+│   │   │   │   ├── page.py
+│   │   │   │   ├── preview.py
+│   │   │   │   ├── stream.py
+│   │   │   │   ├── tab.py
+│   │   │   │   └── ytdlp.py
 │   │   │   ├── reader/
 │   │   │   │   ├── __init__.py
 │   │   │   │   ├── citation_card.py
@@ -155,6 +169,7 @@ riemann/
 │   │   │   │       ├── pages.py
 │   │   │   │       ├── read_aloud.py
 │   │   │   │       ├── rendering.py
+│   │   │   │       ├── ruler.py
 │   │   │   │       ├── search.py
 │   │   │   │       ├── selection.py
 │   │   │   │       ├── signatures.py
@@ -168,6 +183,7 @@ riemann/
 │   │   │   │   └── widgets.py
 │   │   │   └── viewers/
 │   │   │       ├── __init__.py
+│   │   │       ├── hex_tab.py
 │   │   │       ├── image_tab.py
 │   │   │       ├── spreadsheet_tab.py
 │   │   │       └── table_tab.py
@@ -188,6 +204,8 @@ riemann/
 │   └── tests/
 │       ├── conftest.py
 │       ├── form_fixtures.py
+│       ├── nuitka_session.py
+│       ├── test_accessibility.py
 │       ├── test_ai.py
 │       ├── test_ai_server.py
 │       ├── test_annotation_store.py
@@ -207,9 +225,12 @@ riemann/
 │       ├── test_core_bindings.py
 │       ├── test_dependency_lists.py
 │       ├── test_desktop.py
+│       ├── test_dialog_icons.py
+│       ├── test_document_menus.py
 │       ├── test_ebooks.py
 │       ├── test_endpoints.py
 │       ├── test_help.py
+│       ├── test_hex_view.py
 │       ├── test_images.py
 │       ├── test_imports.py
 │       ├── test_managers.py
@@ -239,6 +260,7 @@ riemann/
 │       ├── test_sidecar.py
 │       ├── test_signature_appearance.py
 │       ├── test_signatures.py
+│       ├── test_source_rules.py
 │       ├── test_storage.py
 │       ├── test_tab.py
 │       ├── test_table_edits.py
@@ -249,6 +271,7 @@ riemann/
 │       ├── test_tooltip.py
 │       ├── test_user_sessions.py
 │       ├── test_utils.py
+│       ├── test_version.py
 │       ├── test_widgets.py
 │       ├── test_window_snap.py
 │       ├── test_workers.py
@@ -257,6 +280,7 @@ riemann/
 ├── requirements/
 │   ├── optional-all.txt
 │   ├── requirements.sh
+│   ├── wreqs.txt
 │   └── xreqs.txt
 ├── rust-core/
 │   ├── Cargo.lock
@@ -275,15 +299,18 @@ riemann/
 │       └── test_ocr_pipes.rs
 └── scripts/
     ├── build-excludes.txt
+    ├── build-requirements.txt
     ├── build.sh
     ├── create_model_pack.sh
     ├── fetch_pdfium.py
     ├── generate_white_icons.py
     ├── install_icon.sh
     ├── lock_optional.py
+    ├── make_contrast_theme.py
     ├── nbuild.ps1
     ├── nbuild.sh
     ├── replace_exec.sh
+    ├── set_version.py
     ├── take_screenshots.py
     └── test_runner.sh
 ```
