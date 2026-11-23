@@ -836,15 +836,32 @@ def test_captions_token_is_hidden_from_page_scripts(mock_injector, qtbot, webeng
 def test_yt_dlp_runs_the_pinned_deno_from_the_venv(tmp_path, monkeypatch):
     import os
 
+    from riemann.core import dependencies
     from riemann.ui.browser import ytdlp
 
     python = tmp_path / "bin" / "python"
     python.parent.mkdir()
     python.write_text("")
-    monkeypatch.setattr(ytdlp, "venv_python", lambda: str(python))
+    monkeypatch.setattr(dependencies, "venv_python", lambda: str(python))
     assert ytdlp.js_runtimes() == {"deno": {}}
     deno = tmp_path / "bin" / ("deno.exe" if os.name == "nt" else "deno")
     deno.write_text("")
     assert ytdlp.js_runtimes() == {"deno": {"path": str(deno)}}
-    monkeypatch.setattr(ytdlp, "venv_python", lambda: "")
+    monkeypatch.setattr(dependencies, "venv_python", lambda: "")
     assert ytdlp.js_runtimes() == {"deno": {}}
+
+
+def test_yt_dlp_runs_deno_from_the_packages_folder_of_a_packaged_build(tmp_path, monkeypatch):
+    import os
+
+    from riemann.core import dependencies
+    from riemann.ui.browser import ytdlp
+
+    monkeypatch.setattr(dependencies, "venv_python", lambda: "")
+    monkeypatch.setattr(dependencies, "_is_frozen", lambda: True)
+    monkeypatch.setattr(dependencies, "packages_dir", lambda: str(tmp_path))
+    scripts = tmp_path / ("Scripts" if os.name == "nt" else "bin")
+    scripts.mkdir()
+    deno = scripts / ("deno.exe" if os.name == "nt" else "deno")
+    deno.write_text("")
+    assert ytdlp.js_runtimes() == {"deno": {"path": str(deno)}}

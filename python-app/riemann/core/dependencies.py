@@ -20,12 +20,26 @@ Notes:
 _venv_site_paths: Interrogate site-packages only; NEVER inject standard library
 directories into sys.path.
 
-setup_and_get_venv: If the venv exists, ensure its Python major/minor matches
-the current interpreter. It may look for an installed Python and create the
-venv, which takes seconds, so only the installers call it, on their worker
-threads. Startup calls mount_existing_venv, which only adds the site-packages
-of a venv that is already there (from a cached list) and never starts a
-process for a missing one.
+Packaged builds: sys.executable is Riemann itself, which cannot run pip or
+"-m venv", and the packages must suit the bundled interpreter's version, not
+whichever Python the computer has. So a packaged build installs into a plain
+folder (packages_dir, one per bundled Python version) with any installed
+Python 3 that has pip: pip install --target with --python-version, which picks
+the wheels built for the bundled version. pip evaluates the locks' environment
+markers (python_full_version < '3.12') against the Python running it, not
+against --python-version, so target_lock first writes a copy of the lock that
+keeps only the lines meant for the bundled version, judged by pip's own
+packaging module in that Python (LOCK_FILTER). pip cannot uninstall from a
+--target folder; _remove_from_folder deletes the files the package's RECORD
+lists. A venv from an earlier version, made with a matching Python, is still
+mounted.
+
+setup_and_get_venv: From source, the venv's Python major/minor must match the
+current interpreter. It may look for an installed Python and create the venv,
+which takes seconds, so only the installers call it, on their worker threads.
+Startup calls mount_existing_venv, which only adds the site-packages of a venv
+or packages folder that is already there (from a cached list) and never starts
+a process for a missing one.
 """
 
 import importlib
@@ -66,41 +80,45 @@ def _is_frozen() -> bool:
 
 def _find_base_python() -> str:
     """
-    Returns a Python interpreter that can create the venv.
+    Returns a Python interpreter that can run pip for the installers.
 
     From source that is the running interpreter. In a packaged build
     sys.executable is the Riemann binary, which Nuitka refuses to run with
-    "-m venv" (it exits with "the program tried to call itself with '-m'"), so
-    the venv was never created there. So look for an installed Python with the
-    same major.minor version, since packages installed into the venv must be
-    importable by the bundled interpreter.
+    "-m" (it exits with "the program tried to call itself with '-m'"), so look
+    for any installed Python 3 that has pip; pip_install_command makes it
+    install wheels for the bundled version.
     """
     if not _is_frozen():
         return sys.executable
-    want = f"{sys.version_info[0]}.{sys.version_info[1]}"
-    candidates = []
     if os.name == "nt":
-        candidates += [["py", f"-{want}"], ["python"], ["python3"]]
+        candidates = [["py", "-3"], ["python"], ["python3"]]
     else:
-        candidates += [[f"python{want}"], ["python3"], ["python"]]
+        candidates = [["python3"], ["python"]]
     for cmd in candidates:
         exe = shutil.which(cmd[0])
         if not exe:
             continue
         try:
             out = subprocess.check_output(
-                [exe, *cmd[1:], "-c", "import sys; print(sys.executable); print(f'{sys.version_info[0]}.{sys.version_info[1]}')"],
+                [exe, *cmd[1:], "-c", "import sys, pip; print(sys.version_info[0]); print(sys.executable)"],
                 text=True,
+                stderr=subprocess.DEVNULL,
                 timeout=PYTHON_PROBE_TIMEOUT,
                 **_NO_WINDOW,
-            ).split()
+            ).splitlines()
         except Exception:
             continue
-        if len(out) >= 2 and out[-1] == want:
-            return out[0]
+        if len(out) >= 2 and out[0].strip() == "3":
+            return out[1].strip()
     raise RuntimeError(
-        f"Optional dependencies need Python {want} installed on this computer; none was found."
+        "Installing optional packages needs Python 3 with pip on this computer; none was found. "
+        "Install Python 3 (any version) and try again."
     )
+
+
+def _bundled_version(full: bool = False) -> str:
+    v = sys.version_info
+    return f"{v[0]}.{v[1]}.{v[2]}" if full else f"{v[0]}.{v[1]}"
 
 
 def _venv_version(venv_dir: str, python_exe: str) -> str:
@@ -175,6 +193,18 @@ def _venv_paths() -> tuple:
     return data_dir, venv_dir, os.path.join(venv_dir, "bin", "python")
 
 
+def packages_dir() -> str:
+    """The folder a packaged build installs optional packages into, one per bundled Python version."""
+    data_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
+    return os.path.join(data_dir, "packages", "py" + _bundled_version().replace(".", ""))
+
+
+def _mount_folder(folder: str) -> None:
+    if folder not in sys.path:
+        site.addsitedir(folder)
+    importlib.invalidate_caches()
+
+
 def _mount(venv_dir: str, python_exe: str) -> None:
     for sp in _venv_site_paths(venv_dir, python_exe):
         if os.path.exists(sp) and sp not in sys.path:
@@ -188,32 +218,107 @@ def venv_python() -> str:
     return python_exe if os.path.exists(python_exe) else ""
 
 
+def script_dirs() -> list:
+    """Folders that hold the programs optional packages install (Deno), venv first."""
+    dirs = []
+    python = venv_python()
+    if python:
+        dirs.append(os.path.dirname(python))
+    if _is_frozen():
+        dirs.append(os.path.join(packages_dir(), "Scripts" if os.name == "nt" else "bin"))
+    return dirs
+
+
 def mount_existing_venv() -> bool:
-    """Adds an existing venv's packages to sys.path; True when there was one for this Python to mount."""
+    """Adds an existing venv's or packages folder's packages to sys.path; True when there was one to mount."""
+    mounted = False
+    if _is_frozen() and os.path.isdir(packages_dir()):
+        _mount_folder(packages_dir())
+        mounted = True
     _, venv_dir, python_exe = _venv_paths()
     if not os.path.exists(python_exe):
-        return False
+        return mounted
     try:
-        if _venv_version(venv_dir, python_exe) != f"{sys.version_info[0]}.{sys.version_info[1]}":
-            return False
+        if _venv_version(venv_dir, python_exe) != _bundled_version():
+            return mounted
         _mount(venv_dir, python_exe)
     except Exception as e:
         print(f"[Riemann Warning] Failed to mount local virtual environment: {e}")
-        return False
+        return mounted
     return True
+
+
+def installed_names() -> set:
+    """Normalised names of the optional packages installed in the venv or packages folder."""
+    from importlib import metadata
+
+    paths = []
+    if _is_frozen() and os.path.isdir(packages_dir()):
+        paths.append(packages_dir())
+    _, venv_dir, python_exe = _venv_paths()
+    if os.path.exists(python_exe):
+        try:
+            paths += [p for p in _venv_site_paths(venv_dir, python_exe) if os.path.isdir(p)]
+        except Exception:
+            log.debug("installed_names failed", exc_info=True)
+    if not paths:
+        return set()
+    return {_normalise(d.metadata["Name"] or "") for d in metadata.distributions(path=paths)}
+
+
+def _normalise(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", re.split(r"[\[<>=! ]", name, 1)[0]).lower()
+
+
+def _remove_from_folder(folder: str, pip_name: str) -> bool:
+    """Deletes an installed package's files (its RECORD) from a --target folder; False when it is not there."""
+    from importlib import metadata
+
+    want = _normalise(pip_name)
+    for dist in metadata.distributions(path=[folder]):
+        if _normalise(dist.metadata["Name"] or "") != want:
+            continue
+        root = os.path.realpath(folder)
+        touched = set()
+        for f in dist.files or []:
+            path = os.path.realpath(os.path.join(folder, str(f)))
+            if os.path.commonpath([root, path]) != root:
+                continue
+            try:
+                os.remove(path)
+            except OSError:
+                continue
+            touched.add(os.path.dirname(path))
+        for d in sorted(touched, key=len, reverse=True):
+            while d != root and os.path.commonpath([root, d]) == root:
+                try:
+                    os.rmdir(d)
+                except OSError:
+                    break
+                d = os.path.dirname(d)
+        importlib.invalidate_caches()
+        return True
+    return False
 
 
 def setup_and_get_venv() -> str:
     """
     Creates (or, after a Python upgrade, recreates) the optional-packages venv in the
     app data folder, adds its site-packages to sys.path, and returns its Python.
+    A packaged build makes packages_dir instead and returns the Python that runs pip.
     """
+    if _is_frozen():
+        sys_py = _find_base_python()
+        os.makedirs(packages_dir(), exist_ok=True)
+        _mount_folder(packages_dir())
+        return sys_py
+
     data_dir, venv_dir, python_exe = _venv_paths()
 
     if os.path.exists(python_exe):
         try:
             ver = _venv_version(venv_dir, python_exe)
-            curr_ver = f"{sys.version_info[0]}.{sys.version_info[1]}"
+            curr_ver = _bundled_version()
             if ver != curr_ver:
                 print(f"[Riemann] Python version mismatch in venv ({ver} vs current {curr_ver}). Recreating...")
                 shutil.rmtree(venv_dir, ignore_errors=True)
@@ -271,9 +376,52 @@ def lock_file(pip_name: str) -> str:
     return asset_path("requirements", f"{name}.txt")
 
 
+LOCK_FILTER = r"""
+import sys
+from pip._vendor.packaging.markers import Marker
+src, out, full = sys.argv[1:4]
+env = {"python_full_version": full, "python_version": ".".join(full.split(".")[:2])}
+lines, entry = [], ""
+for raw in open(src, encoding="utf-8").read().splitlines():
+    line = raw.strip()
+    if line.endswith("\\"):
+        entry += line[:-1].strip() + " "
+        continue
+    entry += line
+    req, sep, rest = entry.partition(" ; ")
+    marker = rest.split(" --hash", 1)[0].strip()
+    if not sep or not marker or Marker(marker).evaluate(env):
+        lines.append(entry)
+    entry = ""
+with open(out, "w", encoding="utf-8") as f:
+    f.write("\n".join(lines) + "\n")
+"""
+
+
+def target_lock(python: str, pip_name: str) -> str:
+    """A copy of pip_name's lock with only the lines whose markers hold for the bundled Python."""
+    folder = os.path.join(os.path.dirname(packages_dir()), "locks")
+    os.makedirs(folder, exist_ok=True)
+    out = os.path.join(folder, os.path.basename(lock_file(pip_name)))
+    subprocess.check_call(
+        [python, "-c", LOCK_FILTER, lock_file(pip_name), out, _bundled_version(full=True)], **_NO_WINDOW
+    )
+    return out
+
+
 def pip_install_command(python: str, pip_name: str) -> list:
-    """Installs exactly what the lock lists, refusing any file whose hash differs."""
-    return [python, "-m", "pip", "install", "--require-hashes", "--no-deps", "-r", lock_file(pip_name)]
+    """
+    Installs exactly what the lock lists, refusing any file whose hash differs.
+    A packaged build installs into packages_dir, wheels for the bundled Python.
+    """
+    if not _is_frozen():
+        return [python, "-m", "pip", "install", "--require-hashes", "--no-deps", "-r", lock_file(pip_name)]
+    return [
+        python, "-m", "pip", "install", "--require-hashes", "--no-deps",
+        "--prefer-binary", "--upgrade", "--no-warn-script-location",
+        "--target", packages_dir(), "--python-version", _bundled_version(),
+        "-r", target_lock(python, pip_name),
+    ]
 
 
 class DependencyWorker(QThread):
@@ -290,6 +438,12 @@ class DependencyWorker(QThread):
 
     def run(self):
         try:
+            if self.action != "install" and _is_frozen():
+                if _remove_from_folder(packages_dir(), self.pip_name):
+                    self.finished_task.emit(self.pip_name, self.action, True)
+                else:
+                    self.error_occurred.emit(self.pip_name, self.action, "It is not installed.")
+                return
             cmd = (
                 pip_install_command(setup_and_get_venv(), self.pip_name)
                 if self.action == "install"
@@ -367,12 +521,13 @@ class DependenciesDialog(QDialog):
 
     def populate_table(self):
         self.table.setRowCount(0)
+        installed = installed_names()
         for display_name, pip_name in self.DEPENDENCIES.items():
             row = self.table.rowCount()
             self.table.insertRow(row)
             self.table.setItem(row, 0, QTableWidgetItem(display_name))
 
-            is_installed = self._check_pip_installed(pip_name)
+            is_installed = _normalise(pip_name) in installed
             status_item = QTableWidgetItem("Installed" if is_installed else "Missing")
             t = tokens(app_is_dark())
             status_item.setForeground(QColor(t["success"] if is_installed else t["danger"]))
@@ -387,22 +542,6 @@ class DependenciesDialog(QDialog):
                 inst=is_installed: self.handle_action(p, r, not inst)
             )
             self.table.setCellWidget(row, 2, btn)
-
-    def _check_pip_installed(self, pip_name: str) -> bool:
-        """Safely checks if a pip package is installed via subprocess."""
-        base_pkg = pip_name.split("[")[0]
-        python_exe = venv_python()
-        if not python_exe:
-            return False
-        try:
-            subprocess.check_output(
-                [python_exe, "-m", "pip", "show", base_pkg],
-                stderr=subprocess.DEVNULL,
-                **_NO_WINDOW,
-            )
-            return True
-        except (subprocess.CalledProcessError, FileNotFoundError, RuntimeError):
-            return False
 
     def handle_action(self, pip_name: str, row: int, install: bool):
         action = "install" if install else "uninstall"

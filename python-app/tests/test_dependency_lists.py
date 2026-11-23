@@ -146,3 +146,61 @@ def test_app_startup_mounts_only_an_existing_venv():
         source = f.read()
     assert "mount_existing_venv()" in source
     assert "setup_and_get_venv" not in source
+
+
+def _frozen_at(monkeypatch, tmp_path, version="3.11.9"):
+    from riemann.core import dependencies
+
+    monkeypatch.setattr(dependencies, "_is_frozen", lambda: True)
+    monkeypatch.setattr(dependencies, "packages_dir", lambda: str(tmp_path / "packages" / "py311"))
+    monkeypatch.setattr(dependencies, "_bundled_version", lambda full=False: version if full else version.rsplit(".", 1)[0])
+    return dependencies
+
+
+def test_packaged_build_installs_wheels_for_its_own_python_with_any_python(tmp_path, monkeypatch):
+    """A Python 3.12 installs the 3.11 build's packages: --target and the 3.11 lines of the lock."""
+    dependencies = _frozen_at(monkeypatch, tmp_path)
+    command = dependencies.pip_install_command(sys.executable, "faster-whisper")
+    assert command[:4] == [sys.executable, "-m", "pip", "install"]
+    assert "--require-hashes" in command and "--no-deps" in command
+    assert command[command.index("--target") + 1] == str(tmp_path / "packages" / "py311")
+    assert command[command.index("--python-version") + 1] == "3.11"
+    with open(command[-1], encoding="utf-8") as f:
+        lock = f.read()
+    assert re.search(r"^av==18\.1\.0 ; python_full_version < '3\.12' --hash=sha256:[0-9a-f]{64}", lock, re.M)
+    assert "av==19.0.2" not in lock
+    assert "faster-whisper==" in lock
+
+
+def test_packaged_build_finds_a_python_of_another_version(monkeypatch):
+    from riemann.core import dependencies
+
+    monkeypatch.setattr(dependencies, "_is_frozen", lambda: True)
+    monkeypatch.setattr(dependencies.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(dependencies.subprocess, "check_output", lambda *a, **k: "3\n/usr/bin/python3.12\n")
+    assert dependencies._find_base_python() == "/usr/bin/python3.12"
+
+
+def test_packaged_build_uninstalls_only_the_files_its_package_recorded(tmp_path, monkeypatch):
+    dependencies = _frozen_at(monkeypatch, tmp_path)
+    folder = tmp_path / "packages" / "py311"
+    (folder / "yt_dlp").mkdir(parents=True)
+    (folder / "yt_dlp" / "__init__.py").write_text("")
+    (folder / "bin").mkdir()
+    (folder / "bin" / "yt-dlp").write_text("")
+    (folder / "deno").mkdir()
+    (folder / "deno" / "__init__.py").write_text("")
+    info = folder / "yt_dlp-2026.10.26.dist-info"
+    info.mkdir()
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: yt-dlp\nVersion: 2026.10.26\n")
+    (info / "RECORD").write_text(
+        "yt_dlp/__init__.py,,\nbin/yt-dlp,,\nyt_dlp-2026.10.26.dist-info/METADATA,,\n"
+        "yt_dlp-2026.10.26.dist-info/RECORD,,\n../outside.txt,,\n"
+    )
+    (tmp_path / "packages" / "outside.txt").write_text("keep")
+    assert dependencies.installed_names() >= {"yt-dlp"}
+    assert dependencies._remove_from_folder(str(folder), "yt-dlp")
+    assert sorted(p.name for p in folder.iterdir()) == ["deno"]
+    assert (tmp_path / "packages" / "outside.txt").exists()
+    assert "yt-dlp" not in dependencies.installed_names()
+    assert not dependencies._remove_from_folder(str(folder), "yt-dlp")

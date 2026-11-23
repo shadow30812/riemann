@@ -10,7 +10,7 @@ import os
 import re
 import time
 from typing import Any, Optional
-from ...core.dependencies import venv_python
+from ...core.dependencies import script_dirs
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -36,11 +36,11 @@ if os.path.isdir(_deno_dir) and _deno_dir not in os.environ.get("PATH", ""):
 def js_runtimes() -> dict:
     """
     yt-dlp's js_runtimes option: the Deno that the pinned deno package put
-    next to the optional-packages venv's Python, else Deno on PATH.
+    next to the optional-packages venv's Python (or in the packages folder's
+    scripts), else Deno on PATH.
     """
-    python = venv_python()
-    if python:
-        path = os.path.join(os.path.dirname(python), "deno" + (".exe" if os.name == "nt" else ""))
+    for folder in script_dirs():
+        path = os.path.join(folder, "deno" + (".exe" if os.name == "nt" else ""))
         if os.path.isfile(path):
             return {"deno": {"path": path}}
     return {"deno": {}}
