@@ -33,6 +33,7 @@ from PySide6.QtGui import (
     QKeySequence,
     QShortcut,
 )
+from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QLabel,
@@ -60,7 +61,7 @@ from .mixins.pages import PagesMixin
 from .mixins.read_aloud import ReadAloud
 from .mixins.rendering import RenderingMixin
 from .mixins.ruler import ReadingRuler
-from .mixins.search import SearchMixin
+from .mixins.search import PageSearch
 from .mixins.selection import SelectionMixin
 from .mixins.signatures import SignaturesMixin
 from .mixins.toolbar import ToolbarMixin
@@ -87,7 +88,6 @@ class ReaderTab(
     RenderingMixin,
     AnnotationsMixin,
     AiMixin,
-    SearchMixin,
     SignaturesMixin,
 ):
     """
@@ -175,6 +175,7 @@ class ReaderTab(
         self.forms = FormSaver(self.pdf_path, lambda: self.form_values_cache, self)
         self.forms.saved.connect(self._on_forms_saved)
         self.forms.toast.connect(self.show_toast)
+        self.search = PageSearch(lambda: self.current_doc, lambda: self.annotations)
         self.metadata = DocumentMetadata(
             lambda: getattr(self.window(), "library_manager", None), lambda: self.current_path, self
         )
@@ -321,6 +322,60 @@ class ReaderTab(
                 self._loaded_mtime = os.path.getmtime(path)
             except OSError:
                 pass
+
+    def toggle_search_bar(self) -> None:
+        """
+        Toggles the visibility of the search interface.
+        When hiding the interface, clears any active search results and forces a re-render.
+        """
+        vis = not self.search_bar.isVisible()
+        self.search_bar.setVisible(vis)
+        self.btn_search.setChecked(vis)
+        if vis:
+            self.txt_search.setFocus()
+            self.txt_search.selectAll()
+        else:
+            self.search_result = None
+            self.rendered_pages.clear()
+            self.update_view()
+
+    def find_next(self) -> None:
+        if self.view_mode == ViewMode.REFLOW:
+            self.web.findText(self.txt_search.text())
+        else:
+            self._find_text(1)
+
+    def find_prev(self) -> None:
+        if self.view_mode == ViewMode.REFLOW:
+            self.web.findText(self.txt_search.text(), QWebEngineView.FindFlag.FindBackward)
+        else:
+            self._find_text(-1)
+
+    def _find_text(self, direction: int) -> None:
+        """Shows the next (direction 1) or previous (-1) match in the pages and annotations."""
+        if not self.current_doc:
+            return
+        term = self.txt_search.text().strip().lower()
+        if not term:
+            return
+        for idx, rects in self.search.matches(self.txt_search.text(), self.current_page_index + direction, direction):
+            try:
+                self.current_page_index = idx
+                self.search_result = (idx, rects) if rects is not None else None
+                if idx in self.rendered_pages:
+                    self.rendered_pages.remove(idx)
+                if not self.continuous_scroll or (
+                    self.continuous_scroll
+                    and self._virtual_enabled
+                    and (idx < self._virtual_range[0] or idx >= self._virtual_range[1])
+                ):
+                    self.rebuild_layout()
+                self.update_view()
+                self.ensure_visible(idx)
+                return
+            except Exception:
+                continue
+        self.show_toast(f"No matches for '{term}'")
 
     @property
     def document_metadata(self) -> dict | None:

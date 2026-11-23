@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from .metadata import DocumentMetadata
     from .read_aloud import ReadAloud
     from .ruler import ReadingRuler
+    from .search import PageSearch
 
 
 class ReaderHost(Protocol):
@@ -106,6 +107,7 @@ class ReaderHost(Protocol):
     citations: "CitationHover"
     forms: "FormSaver"
     metadata: "DocumentMetadata"
+    search: "PageSearch"
     link_tooltip: QLabel
     sidebar_nav: QWidget
     notes_panel: QWidget
