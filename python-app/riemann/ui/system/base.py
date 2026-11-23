@@ -7,23 +7,69 @@ System tabs use the palette's teal "system" accent instead of the blue one, so
 they are told apart from documents and web pages at a glance; the window also
 tints their tab in the tab bar. Colours come from riemann.ui.palette and follow
 apply_ui_theme, which the window calls when the theme changes.
+
+WheelGuard keeps the scroll wheel from changing settings by accident. A
+drop-down, number box or slider used to take every wheel turn over it, so
+scrolling down Settings changed whatever passed under the pointer (the
+reader toolbar layout switched to Custom that way). Now such a control takes
+the wheel only once it has focus (clicked or tabbed to); otherwise the turn
+scrolls the page or list it sits in. It is installed on the page's widgets and
+reaches rows added later through ChildPolished, as TooltipSkin does.
 """
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QSize, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QAbstractScrollArea,
+    QAbstractSlider,
+    QAbstractSpinBox,
+    QApplication,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QScrollArea,
+    QScrollBar,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from ..palette import tinted_icon, tinted_pixmap, tokens, ui_font
+
+
+WHEEL_CONTROLS = (QComboBox, QAbstractSpinBox, QAbstractSlider)
+
+
+class WheelGuard(QObject):
+    def attach(self, widget) -> None:
+        widget.installEventFilter(self)
+        if self._guarded(widget) and widget.focusPolicy() == Qt.FocusPolicy.WheelFocus:
+            widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        for child in widget.findChildren(QWidget, options=Qt.FindChildOption.FindDirectChildrenOnly):
+            self.attach(child)
+
+    @staticmethod
+    def _guarded(widget) -> bool:
+        return isinstance(widget, WHEEL_CONTROLS) and not isinstance(widget, QScrollBar)
+
+    def eventFilter(self, obj, event) -> bool:
+        kind = event.type()
+        if kind == QEvent.Type.ChildPolished:
+            child = event.child()
+            if child is not None and child.isWidgetType():
+                self.attach(child)
+            return False
+        if kind != QEvent.Type.Wheel or not self._guarded(obj) or obj.hasFocus():
+            return False
+        parent = obj.parentWidget()
+        while parent is not None and not isinstance(parent, QAbstractScrollArea):
+            parent = parent.parentWidget()
+        if parent is not None:
+            QApplication.sendEvent(parent.verticalScrollBar(), event)
+        return True
 
 
 class SystemTab(QWidget):
@@ -75,6 +121,8 @@ class SystemTab(QWidget):
         outer.addWidget(self.body, 1)
         self.build(self.body)
         self.apply_ui_theme(self._dark)
+        self.wheel_guard = WheelGuard(self)
+        self.wheel_guard.attach(self)
 
     @property
     def window_ref(self):

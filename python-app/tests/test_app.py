@@ -1263,3 +1263,36 @@ def test_menu_bar_corner_refits_when_its_contents_grow(qtbot):
     label = window.metrics_label
     assert label.geometry().right() < corner.width()
 
+
+def test_scroll_wheel_over_a_settings_drop_down_scrolls_the_page(qtbot):
+    """Scrolling down Settings switched the reader toolbar layout to Custom."""
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QScrollArea
+
+    from riemann.ui.system.settings_tab import SettingsTab
+
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    settings = SettingsTab(window)
+    qtbot.addWidget(settings)
+    settings.resize(900, 500)
+    settings.show()
+    QApplication.instance().processEvents()
+    combo = settings.toolbar_editor.combo
+    area = combo.parentWidget()
+    while not isinstance(area, QScrollArea):
+        area = area.parentWidget()
+    bar = area.verticalScrollBar()
+    before_index, before_scroll = combo.currentIndex(), bar.value()
+
+    def wheel():
+        event = QWheelEvent(
+            QPointF(5, 5), QPointF(combo.mapToGlobal(QPoint(5, 5))), QPoint(), QPoint(0, -120),
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False,
+        )
+        QApplication.sendEvent(combo, event)
+
+    wheel()
+    assert combo.currentIndex() == before_index
+    assert bar.value() > before_scroll
