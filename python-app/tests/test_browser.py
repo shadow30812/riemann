@@ -18,6 +18,7 @@ import pytest
 import shiboken6
 from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QObject, QUrl, Signal
 from PySide6.QtGui import QFocusEvent
+from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWebEngineCore import (
     QWebEnginePage,
     QWebEngineProfile,
@@ -848,6 +849,13 @@ def test_video_player_shows_the_time(qtbot):
     player = VideoPlayer("")
     qtbot.addWidget(player)
     assert player.time_label.text() == "00:00 / 00:00"
+    assert player.btn_rewind.toolTip() == "Back 10 seconds"
+    assert player.btn_forward.toolTip() == "Forward 10 seconds"
+    assert player.btn_play_pause.toolTip() == "Pause"
+    player._on_playback_state_changed(QMediaPlayer.PlaybackState.PausedState)
+    assert player.btn_play_pause.toolTip() == "Play"
+    player._on_playback_state_changed(QMediaPlayer.PlaybackState.PlayingState)
+    assert player.btn_play_pause.toolTip() == "Pause"
     assert format_time(61_000) == "01:01" and format_time(3_723_000) == "1:02:03"
 
 

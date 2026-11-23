@@ -83,9 +83,10 @@ class VideoPlayer(QDialog):
         controls_layout = QHBoxLayout()
         controls_layout.setContentsMargins(10, 5, 10, 10)
         controls_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.btn_rewind = self._button(QStyle.StandardPixmap.SP_MediaSeekBackward)
-        self.btn_play_pause = self._button(QStyle.StandardPixmap.SP_MediaPause)
-        self.btn_forward = self._button(QStyle.StandardPixmap.SP_MediaSeekForward)
+        seconds = SEEK_MS // 1000
+        self.btn_rewind = self._button(QStyle.StandardPixmap.SP_MediaSeekBackward, f"Back {seconds} seconds")
+        self.btn_play_pause = self._button(QStyle.StandardPixmap.SP_MediaPause, "Pause")
+        self.btn_forward = self._button(QStyle.StandardPixmap.SP_MediaSeekForward, f"Forward {seconds} seconds")
         for btn in (self.btn_rewind, self.btn_play_pause, self.btn_forward):
             controls_layout.addWidget(btn)
         layout.addLayout(controls_layout)
@@ -105,9 +106,10 @@ class VideoPlayer(QDialog):
         self.player.durationChanged.connect(self._update_duration)
         self.player.setSource(QUrl(direct_url))
 
-    def _button(self, pixmap: QStyle.StandardPixmap) -> QPushButton:
+    def _button(self, pixmap: QStyle.StandardPixmap, tip: str) -> QPushButton:
         btn = QPushButton()
         btn.setIcon(self.style().standardIcon(pixmap))
+        btn.setToolTip(tip)
         btn.setFixedSize(40, 40)
         return btn
 
@@ -129,6 +131,7 @@ class VideoPlayer(QDialog):
         playing = state == QMediaPlayer.PlaybackState.PlayingState
         pixmap = QStyle.StandardPixmap.SP_MediaPause if playing else QStyle.StandardPixmap.SP_MediaPlay
         self.btn_play_pause.setIcon(self.style().standardIcon(pixmap))
+        self.btn_play_pause.setToolTip("Pause" if playing else "Play")
 
     def _on_media_status_changed(self, status: QMediaPlayer.MediaStatus) -> None:
         if status == QMediaPlayer.MediaStatus.BufferingMedia:
