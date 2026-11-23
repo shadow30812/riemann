@@ -1,6 +1,6 @@
 [package]
 name = "riemann_ocr_worker"
-version = "7.3.0"
+version = "7.4.20"
 edition = "2024"
 
 [lib]

@@ -1,6 +1,6 @@
 [package]
 name = "riemann_core"
-version = "7.3.0"
+version = "7.4.20"
 edition = "2021"
 
 [lib]
