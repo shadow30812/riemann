@@ -1296,3 +1296,19 @@ def test_scroll_wheel_over_a_settings_drop_down_scrolls_the_page(qtbot):
     wheel()
     assert combo.currentIndex() == before_index
     assert bar.value() > before_scroll
+
+
+def test_snapping_setting_warns_of_blurry_text_on_wayland(qtbot, monkeypatch):
+    """Snapping on Wayland runs through XWayland, which a scaled display blurs; the row said only 'restart'."""
+    from PySide6.QtWidgets import QLabel
+
+    from riemann.ui.system import settings_tab
+
+    monkeypatch.setattr(settings_tab, "is_wayland_session", lambda: True)
+    window = RiemannWindow(incognito=False, restore_session=False)
+    qtbot.addWidget(window)
+    settings = settings_tab.SettingsTab(window)
+    qtbot.addWidget(settings)
+    row = settings.cb_window_snap.parentWidget()
+    texts = " ".join(label.text() for label in row.findChildren(QLabel))
+    assert "blurry" in texts

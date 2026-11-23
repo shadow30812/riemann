@@ -81,6 +81,12 @@ class _OfficeBridge(QObject):
     found = Signal(str, bool)
 
 
+SNAP_HINT_WAYLAND = (
+    "Drag the window to an edge to tile it. On Wayland this runs Riemann through "
+    "XWayland, which makes text look blurry on a scaled display (125%, 150%...)."
+)
+
+
 class SettingsTab(SectionedSystemTab):
     page = "settings"
     title = "Settings"
@@ -185,10 +191,10 @@ class SettingsTab(SectionedSystemTab):
             c,
             "Snap the window to screen edges",
             self.cb_window_snap,
-            "Drag the window to an edge to tile it.",
+            SNAP_HINT_WAYLAND if is_wayland_session() else "Drag the window to an edge to tile it.",
         )
         self.snap_note = QLabel(
-            "Takes effect after a restart: on Wayland, snapping runs Riemann through XWayland."
+            "Takes effect after a restart."
         )
         self.snap_note.setObjectName("restartNote")
         self.snap_note.setWordWrap(True)
