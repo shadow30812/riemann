@@ -8,7 +8,10 @@ complex metadata querying and JSON for lightweight list persistence.
 DownloadProgressBar draws its percentage itself, in two colours: accent_text
 over the filled part and text over the empty part. A style sheet gives a
 progress bar one text colour, and no colour reads well on both the accent fill
-and the empty bar. The yt-dlp window takes its theme from the main window's
+and the empty bar. The fill is accent_hover, the stronger accent shade (darker
+in the light theme, lighter in the dark one): white on the light accent is
+only 4.6:1, so antialiased 10px text dropped below 4.5:1 on some machines.
+The yt-dlp window takes its theme from the main window's
 dark_mode (the theme is the window's style sheet, not the application palette)
 and is restyled by apply_theme when the interface theme changes.
 """
@@ -657,7 +660,7 @@ class DownloadProgressBar(QProgressBar):
         self.setStyleSheet(
             f"QProgressBar {{ border: 1px solid {t['border_strong']}; border-radius: 3px;"
             f" background-color: {t['raised']}; }}"
-            f"QProgressBar::chunk {{ background-color: {t['accent']}; }}"
+            f"QProgressBar::chunk {{ background-color: {t['accent_hover']}; }}"
         )
         self.update()
 
