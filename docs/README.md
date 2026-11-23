@@ -261,11 +261,11 @@ The other scripts (`bench_core.py`, `bench_startup.py`, `bench_memory.py`) run t
 | | |
 | --- | --- |
 | Python (app) | 39,500 lines in 117 files |
-| Python (tests) | 16,100 lines, 1,345 tests |
+| Python (tests) | 16,200 lines, 1,351 tests |
 | Rust (core and OCR worker) | 2,000 lines, 36 tests |
 | JavaScript (injected browser scripts, homepage) | 1,300 lines, plus 240 lines of tests |
 | Benchmarks | 850 lines of Python |
-| Test coverage | 75% of 24,701 statements |
+| Test coverage | 75% of 24,703 statements |
 | History | over 330 commits since January 2026 |
 
 ## Keyboard shortcuts
@@ -366,7 +366,13 @@ just test
 just test-rust
 ```
 
-`just test` runs the Python tests offscreen, each session with its own throwaway home and XDG folders. Some of them start the whole app as a person would and use it through keystrokes, clicks, menus and dialogs (`python-app/tests/test_user_sessions.py`), then check the files on disk and the history. `just test-rust` runs the Rust core's own tests, which build small PDFs and check rendering, page themes, text, links, comments and signatures. `.github/workflows/tests.yml` runs the Python, Rust and JavaScript tests on GitHub for every push and pull request. It installs LibreOffice and keeps the AI model in the Actions cache, so those tests run there too. Locally they run when LibreOffice is installed and when `RIEMANN_TEST_AI_MODELS` names a folder for the model (the tests download it there). `scripts/take_screenshots.py` remakes the screenshots in `docs/images/` from the running app, with throwaway settings. For coverage, point pytest-cov at the source folder (`--cov=python-app/riemann`); `--cov=riemann` matches the virtual environment folder of the same name instead.
+`just test` runs the Python tests offscreen, each session with its own throwaway home and XDG folders. Some of them start the whole app as a person would and use it through keystrokes, clicks, menus and dialogs (`python-app/tests/test_user_sessions.py`), then check the files on disk and the history. `just test-rust` runs the Rust core's own tests, which build small PDFs and check rendering, page themes, text, links, comments and signatures. `.github/workflows/tests.yml` runs the Python, Rust and JavaScript tests on GitHub for every push and pull request. It installs LibreOffice and keeps the AI model in the Actions cache, so those tests run there too. Locally they run when LibreOffice is installed and when `RIEMANN_TEST_AI_MODELS` names a folder for the model (the tests download it there). `scripts/take_screenshots.py` remakes the screenshots in `docs/images/` from the running app, with throwaway settings.
+
+For coverage, run pytest-cov from `python-app`, as CI does. There `riemann` is the source folder; from the repository root it names the virtual environment folder instead, and `--cov=python-app/riemann` doesn't find the code either:
+
+```bash
+cd python-app && QT_QPA_PLATFORM=offscreen ../riemann/bin/python -m pytest tests --cov=riemann
+```
 
 ## Project layout
 

@@ -92,7 +92,7 @@ env -u LD_LIBRARY_PATH QT_QPA_PLATFORM=offscreen ./riemann/bin/python -m pytest 
 - The repository sits on NTFS; `sed -i` warns about permissions. Edit with the editor tool or Python.
 - `pytest --timeout` is not installed.
 - Offscreen runs that start QtWebEngine need `QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu`, or the GPU process crashes now and then.
-- Node 22 is in `~/.local/opt`, linked from `~/.local/bin`, not from the system packages. Run the JavaScript tests in `assets/__tests__/` with `npm ci`, then `npx jest python-app/riemann/assets/__tests__`, as `tests.yml` does on GitHub.
+- Node comes from the system packages (dnf). Run the JavaScript tests in `assets/__tests__/` with `npm ci`, then `npx jest python-app/riemann/assets/__tests__`, as `tests.yml` does on GitHub.
 
 ## Rules
 
