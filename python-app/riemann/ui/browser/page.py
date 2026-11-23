@@ -15,12 +15,13 @@ WebPage, leave_refused (Stay). A page whose renderer never answers is let go
 after LEAVE_WAIT_MS. Chromium asks only on pages the person has interacted
 with, as in other browsers.
 
-owning_tab imports BrowserTab when called: tab.py imports this module.
+owning_tab imports BrowserTab when called, and type checkers import it under
+TYPE_CHECKING: tab.py imports this module.
 """
 
 import urllib.parse
 from html import escape as html_escape
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import QCoreApplication, QObject, Qt, QUrl, Signal
 from PySide6.QtWebEngineCore import (
@@ -47,6 +48,9 @@ from ...core import permissions
 from ...core.doctypes import document_kind
 from ...core.settings import HOMEPAGE_LINKS_KEY, app_settings
 from .interceptor import is_local_homepage, sanitize_homepage_links
+
+if TYPE_CHECKING:
+    from .tab import BrowserTab
 
 
 DOWNLOAD_CLAIMED = "riemannDownloadClaimed"
