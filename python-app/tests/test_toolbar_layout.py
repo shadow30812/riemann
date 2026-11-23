@@ -227,17 +227,38 @@ def test_settings_editor_lists_every_command_and_seeds_custom(qapp, store, monke
     editor = ToolbarLayoutEditor()
     assert set(editor.place_combos) == {c.key for c in tl.COMMANDS}
     assert editor.layout_name() == "D"
-    assert editor.custom.isHidden()
+    assert not editor.custom.isHidden()
     seen = []
     tl.notifier().changed.connect(lambda: seen.append(1))
     editor.combo.setCurrentIndex(editor.combo.findData("custom"))
-    assert not editor.custom.isHidden()
     assert store.value(tl.LAYOUT_KEY) == "custom"
     assert editor.places()["page"] == tl.PILL
     assert seen
     combo = editor.place_combos["notes"]
     combo.setCurrentIndex(combo.findData(tl.HIDDEN))
     assert tl.custom_layout()["places"]["notes"] == tl.HIDDEN
+    editor.deleteLater()
+
+
+def test_settings_editor_shows_a_presets_placements_and_an_edit_makes_it_custom(qapp, store, monkeypatch):
+    """The floating-controls switch and the table were hidden until Custom was chosen."""
+    from riemann.ui.system.widgets import ToolbarLayoutEditor
+
+    monkeypatch.setattr("riemann.core.settings.app_settings", lambda: store)
+    store.setValue(tl.LAYOUT_KEY, "default")
+    editor = ToolbarLayoutEditor()
+    assert not editor.custom.isHidden()
+    assert editor.cb_fullscreen_pill.isChecked()
+    assert editor.places() == tl.resolve("default")["places"]
+    editor.combo.setCurrentIndex(editor.combo.findData("A"))
+    assert not editor.cb_fullscreen_pill.isChecked()
+    assert editor.places() == tl.resolve("A")["places"]
+    combo = editor.place_combos["notes"]
+    combo.setCurrentIndex(combo.findData(tl.HIDDEN))
+    assert editor.layout_name() == "custom"
+    assert store.value(tl.LAYOUT_KEY) == "custom"
+    expected = dict(tl.resolve("A")["places"], notes=tl.HIDDEN)
+    assert tl.custom_layout()["places"] == expected
     editor.deleteLater()
 
 

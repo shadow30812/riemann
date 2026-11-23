@@ -5,9 +5,13 @@ riemann.core.permissions), the read-aloud voice picker, and the reader
 toolbar layout picker.
 
 ToolbarLayoutEditor applies a choice at once to every open reader (through
-riemann.ui.reader.toolbar_layout). Choosing Custom for the first time starts
-from the layout that was active, so the table opens on something familiar;
-every change in the table is saved and applied straight away.
+riemann.ui.reader.toolbar_layout). The floating-controls switch and the table
+of commands are always shown, filled in with what the chosen layout does
+(they were hidden until Custom was chosen, so nobody knew they were there).
+Changing one while a preset is chosen saves that preset, with the change, as
+Custom and switches to it. Choosing Custom shows the saved custom layout, or
+the active one the first time; every change is saved and applied straight
+away.
 
 VoicePicker lists the speech engine's voices only when it is first opened:
 starting the engine can take a moment (speech-dispatcher on Linux), and most
@@ -309,7 +313,12 @@ class ToolbarLayoutEditor(QWidget):
         custom_layout.setContentsMargins(0, 0, 0, 0)
         self.cb_fullscreen_pill = QCheckBox()
         self.cb_fullscreen_pill.toggled.connect(self._custom_changed)
-        setting_row(custom_layout, "Floating page controls in full screen", self.cb_fullscreen_pill)
+        setting_row(
+            custom_layout,
+            "Floating page controls in full screen",
+            self.cb_fullscreen_pill,
+            "Changing this or a row below makes your own layout (Custom).",
+        )
         self.table = QTableWidget(len(tl.COMMANDS), 2)
         self.table.setHorizontalHeaderLabels(["Command", "Shown in"])
         self.table.verticalHeader().setVisible(False)
@@ -329,18 +338,17 @@ class ToolbarLayoutEditor(QWidget):
         self.table.setMinimumHeight(320)
         custom_layout.addWidget(self.table)
         layout.addWidget(self.custom)
-        self._load_custom()
-        self.custom.setVisible(self.layout_name() == "custom")
+        self._show_layout(self.layout_name())
 
     def layout_name(self) -> str:
         return str(self.combo.currentData() or "default")
 
-    def _load_custom(self) -> None:
-        spec = self.tl.custom_layout()
+    def _show_layout(self, name: str) -> None:
+        spec = self.tl.custom_layout() if name == "custom" else self.tl.resolve(name)
         self._loading = True
         for key, combo in self.place_combos.items():
-            combo.setCurrentIndex(max(0, combo.findData(spec["places"][key])))
-        self.cb_fullscreen_pill.setChecked(spec["fullscreen_pill"])
+            combo.setCurrentIndex(max(0, combo.findData(spec["places"].get(key))))
+        self.cb_fullscreen_pill.setChecked(bool(spec.get("fullscreen_pill", False)))
         self._loading = False
 
     def _layout_chosen(self) -> None:
@@ -348,8 +356,7 @@ class ToolbarLayoutEditor(QWidget):
         if name == "custom" and not self.settings.value(self.tl.CUSTOM_KEY, ""):
             previous = self.tl.resolve(self.tl.current_layout_name())
             self.tl.save_custom_layout(previous["places"], previous.get("fullscreen_pill", False))
-            self._load_custom()
-        self.custom.setVisible(name == "custom")
+        self._show_layout(name)
         self.tl.set_layout(name)
 
     def places(self) -> dict:
@@ -359,8 +366,11 @@ class ToolbarLayoutEditor(QWidget):
         if getattr(self, "_loading", False):
             return
         self.tl.save_custom_layout(self.places(), self.cb_fullscreen_pill.isChecked())
-        if self.layout_name() == "custom":
-            self.tl.set_layout("custom")
+        if self.layout_name() != "custom":
+            self.combo.blockSignals(True)
+            self.combo.setCurrentIndex(self.combo.findData("custom"))
+            self.combo.blockSignals(False)
+        self.tl.set_layout("custom")
 
     def _rail_toggled(self, on: bool) -> None:
         self.settings.setValue(self.tl.RAIL_HIDDEN_KEY, not on)
