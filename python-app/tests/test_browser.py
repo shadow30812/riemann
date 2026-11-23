@@ -34,6 +34,7 @@ from riemann.ui.browser import (
     YtDlpSettingsDialog,
     YtDlpStreamWorker,
     YtDlpWorker,
+    js_runtimes,
 )
 from riemann.ui.browser.downloads import Downloads
 from riemann.ui.browser.media import MediaControls
@@ -759,6 +760,7 @@ def test_ytdlp_stream_worker_reads_a_cookie_file():
         worker.run()
     opts = mock_ydl.call_args[0][0]
     assert opts["cookiefile"] == "/tmp/cookies.txt"
+    assert opts["js_runtimes"] == js_runtimes()
     assert "remote_components" not in opts
 
 

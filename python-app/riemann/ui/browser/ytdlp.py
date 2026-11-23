@@ -89,7 +89,7 @@ class YtDlpStreamWorker(QThread):
             "js_runtimes": js_runtimes(),
         }
         if self.cookie_file:
-            ydl_opts = {"format": "best[ext=mp4]", "quiet": True, "noplaylist": True, "cookiefile": self.cookie_file}
+            ydl_opts["cookiefile"] = self.cookie_file
         elif self.cookies_browser:
             ydl_opts["cookiesfrombrowser"] = (self.cookies_browser,)
 
