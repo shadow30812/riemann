@@ -36,7 +36,7 @@ from PySide6.QtGui import (
     QKeySequence,
     QShortcut,
 )
-from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QLabel,
@@ -350,7 +350,7 @@ class ReaderTab(
 
     def find_prev(self) -> None:
         if self.view_mode == ViewMode.REFLOW:
-            self.web.findText(self.txt_search.text(), QWebEngineView.FindFlag.FindBackward)
+            self.web.findText(self.txt_search.text(), QWebEnginePage.FindFlag.FindBackward)
         else:
             self._find_text(-1)
 

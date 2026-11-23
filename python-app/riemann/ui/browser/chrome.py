@@ -19,8 +19,7 @@ from PySide6.QtGui import (
     QPixmap,
     QShortcut,
 )
-from PySide6.QtWebEngineCore import QWebEngineDownloadRequest, QWebEngineSettings
-from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineCore import QWebEngineDownloadRequest, QWebEnginePage, QWebEngineSettings
 from PySide6.QtWidgets import (
     QApplication,
     QCompleter,
@@ -487,7 +486,7 @@ class ChromeMixin:
         """
         Executes a backwards search matching string constants against rendered documents.
         """
-        self.web.findText(self.txt_find.text(), QWebEngineView.FindFlag.FindBackward)
+        self.web.findText(self.txt_find.text(), QWebEnginePage.FindFlag.FindBackward)
 
     def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)

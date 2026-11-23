@@ -11,6 +11,7 @@ import json
 import threading
 import time
 import urllib.parse
+from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
@@ -830,6 +831,12 @@ def test_video_player_shows_the_time(qtbot):
     qtbot.addWidget(player)
     assert player.time_label.text() == "00:00 / 00:00"
     assert format_time(61_000) == "01:01" and format_time(3_723_000) == "1:02:03"
+
+
+def test_find_previous_in_a_browser_tab_searches_backwards():
+    host = SimpleNamespace(web=MagicMock(), txt_find=SimpleNamespace(text=lambda: "query"))
+    BrowserTab.find_prev(host)
+    host.web.findText.assert_called_with("query", QWebEnginePage.FindFlag.FindBackward)
 
 
 def test_ytdlp_settings_dialog_playlist_autodetection(qapp):

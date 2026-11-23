@@ -1,19 +1,10 @@
-"""
-QWebEngineView has no FindFlag (it is QWebEnginePage's), so find_prev in the
-reflowed view would raise; as before, the class is given one here so the
-call can be checked.
-"""
-
 from unittest.mock import MagicMock
 
 import pytest
 from PySide6.QtWebEngineCore import QWebEnginePage
-from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from riemann.core.constants import ViewMode
 from riemann.ui.reader.mixins.search import PageSearch
-
-QWebEngineView.FindFlag = QWebEnginePage.FindFlag
 
 
 def _doc(texts):
